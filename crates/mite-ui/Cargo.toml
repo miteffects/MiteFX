@@ -21,7 +21,7 @@ softbuffer = "0.4.8"
 vello.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = "0.13"
+x11rb = { version = "0.13", features = ["randr"] }
 
 [dev-dependencies]
 png = "0.18"

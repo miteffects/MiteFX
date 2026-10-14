@@ -163,12 +163,17 @@ impl Presenter {
     pub fn new(mode: PresentMode, cx: &mut RenderContext, window: PlatformHandle, w: u32, h: u32) -> Result<(Self, usize), String> {
         match mode {
             PresentMode::Gpu => {
-                // FIFO (vsync) with a one-frame queue: the display paces rendering, exactly one
-                // frame per refresh. Measured on screen (tools/onscreen_fps.py): pacing frames
-                // with our own timer instead beat against the refresh and showed 16/24/33 ms gaps.
-                // Mailbox and immediate don't pace at all.
+                // Immediate, one-frame queue: the frame goes to the compositor as soon as it is
+                // rendered and the compositor shows the newest at the next refresh, as with
+                // plugins that blit with XPutImage. It cannot tear under a compositor. Measured
+                // with xtask drag_probe: FIFO added a wait for the next vblank (~8 ms average)
+                // before the frame even reached the compositor.
                 let mut surface = pollster::block_on(cx.create_surface(window, w, h, wgpu::PresentMode::Fifo))
                     .map_err(|e| e.to_string())?;
+                let caps = surface.surface.get_capabilities(cx.devices[surface.dev_id].adapter());
+                if caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                    surface.config.present_mode = wgpu::PresentMode::Immediate;
+                }
                 surface.config.desired_maximum_frame_latency = 1;
                 cx.configure_surface(&surface);
                 let dev_id = surface.dev_id;

@@ -155,6 +155,9 @@ pub struct EqView {
     pre: Vec<f64>,
     post: Vec<f64>,
     last_spectrum: Instant,
+    last_analysis: Instant,
+    pre_target: Vec<f32>,
+    post_target: Vec<f32>,
     responses: Vec<Option<(BandSettings, Vec<f64>)>>,
     signature: Vec<f32>,
     last_signature_check: Instant,
@@ -186,6 +189,9 @@ impl EqView {
             pre: vec![-150.0; POINTS],
             post: vec![-150.0; POINTS],
             last_spectrum: Instant::now(),
+            last_analysis: Instant::now(),
+            pre_target: vec![-150.0; POINTS],
+            post_target: vec![-150.0; POINTS],
             responses: (0..BANDS).map(|_| None).collect(),
             signature: Vec::new(),
             last_signature_check: Instant::now(),
@@ -289,38 +295,43 @@ impl EqView {
         self.spectrum_rate = fs;
     }
 
+    /// Called on every animation frame (~2× the display refresh). The FFT runs at most once
+    /// per display refresh; every call advances the ballistics towards the latest analysis, so
+    /// in-between frames still move smoothly.
     fn update_spectrum(&mut self) -> bool {
-        // The display shows at most ~60 frames/s, so analysing more often is wasted CPU.
-        let dt = self.last_spectrum.elapsed().as_secs_f64();
-        if dt < 0.0160 {
-            return false;
-        }
-        let dt = dt.min(0.1);
+        let dt = self.last_spectrum.elapsed().as_secs_f64().min(0.1);
         self.last_spectrum = Instant::now();
         let fs = self.sample_rate();
         if fs != self.spectrum_rate {
             self.rebuild_spectrum_map(fs);
         }
+        if self.last_analysis.elapsed().as_secs_f64() >= 0.0155 {
+            self.last_analysis = Instant::now();
+            for which in 0..2 {
+                let tap = if which == 0 { &self.shared.pre } else { &self.shared.post };
+                tap.read_latest(&mut self.samples);
+                self.analyzer.analyze_power(&self.samples, &mut self.power);
+                let target = if which == 0 { &mut self.pre_target } else { &mut self.post_target };
+                for (t, m) in target.iter_mut().zip(&self.spectrum_map) {
+                    let power = if m.average {
+                        let span = &self.power[m.first..=m.last];
+                        span.iter().sum::<f32>() / span.len() as f32
+                    } else {
+                        self.power[m.first] * (1.0 - m.frac) + self.power[m.last] * m.frac
+                    };
+                    *t = 10.0 * (power * m.tilt).max(1e-15).log10();
+                }
+            }
+        }
         let rise = (1.0 - (-dt / 0.03).exp()) as f32;
         let fall = (60.0 * dt) as f32;
         let mut changed = false;
-        for which in 0..2 {
-            let tap = if which == 0 { &self.shared.pre } else { &self.shared.post };
-            tap.read_latest(&mut self.samples);
-            self.analyzer.analyze_power(&self.samples, &mut self.power);
-            let curve = if which == 0 { &mut self.pre } else { &mut self.post };
-            for (value, m) in curve.iter_mut().zip(&self.spectrum_map) {
-                let power = if m.average {
-                    let span = &self.power[m.first..=m.last];
-                    span.iter().sum::<f32>() / span.len() as f32
-                } else {
-                    self.power[m.first] * (1.0 - m.frac) + self.power[m.last] * m.frac
-                };
-                let db = 10.0 * (power * m.tilt).max(1e-15).log10();
+        for (curve, target) in [(&mut self.pre, &self.pre_target), (&mut self.post, &self.post_target)] {
+            for (value, &db) in curve.iter_mut().zip(target.iter()) {
                 // Ballistics: ~30 ms rise, 60 dB/s fall.
                 let current = *value as f32;
                 let next = if db > current { current + (db - current) * rise } else { db.max(current - fall) };
-                if (next - current).abs() > 0.05 {
+                if (next - current).abs() > 0.02 {
                     changed = true;
                 }
                 *value = f64::from(next);

@@ -64,6 +64,10 @@ for (t0, a), (t1, b) in zip(frames, frames[1:]):
     if a.shape != b.shape or np.any(a != b):
         changed.append(t1)
 gaps = np.diff(changed) * 1000 if len(changed) > 2 else np.array([0.0])
+import os
+if os.environ.get("CHANGES_OUT"):
+    with open(os.environ["CHANGES_OUT"], "w") as f:
+        f.write("\n".join(f"{t:.6f}" for t in changed))
 print(f"delivered {len(frames)} frames, {len(changed)} distinct in {seconds:.1f} s "
       f"-> {len(changed) / seconds:.1f} visible updates/s; gap median {np.median(gaps):.1f} ms, "
       f"p95 {np.percentile(gaps, 95):.1f} ms, max {gaps.max():.1f} ms")

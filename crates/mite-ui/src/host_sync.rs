@@ -77,3 +77,26 @@ impl HostSync {
         self.conn.send_event(false, self.target, EventMask::EXPOSURE, event).is_ok() && self.conn.flush().is_ok()
     }
 }
+
+/// Refresh rate of the fastest active display, from XRandR. `None` if unavailable.
+pub(crate) fn display_refresh_hz() -> Option<f64> {
+    use x11rb::protocol::randr::ConnectionExt as _;
+    let (conn, screen) = x11rb::connect(None).ok()?;
+    let root = conn.setup().roots[screen].root;
+    let res = conn.randr_get_screen_resources_current(root).ok()?.reply().ok()?;
+    let mut best: Option<f64> = None;
+    for crtc in &res.crtcs {
+        let info = conn.randr_get_crtc_info(*crtc, res.config_timestamp).ok()?.reply().ok()?;
+        if info.mode == 0 {
+            continue;
+        }
+        if let Some(mode) = res.modes.iter().find(|m| m.id == info.mode) {
+            let total = f64::from(mode.htotal) * f64::from(mode.vtotal);
+            if total > 0.0 {
+                let hz = f64::from(mode.dot_clock) / total;
+                best = Some(best.map_or(hz, |b: f64| b.max(hz)));
+            }
+        }
+    }
+    best.filter(|hz| (24.0..=500.0).contains(hz))
+}

@@ -23,11 +23,11 @@ use crate::text::Typesetter;
 use crate::tokens::{Theme, ThemeKind};
 use crate::view::{DrawCx, Modifiers, MouseButton, UiEvent, View};
 
-/// UI tick (~120 Hz): input-driven changes render on the next tick.
-const TICK: Duration = Duration::from_millis(8);
-/// Animation-driven redraws (meters, spectrum) are capped at ~60 Hz: more is wasted CPU on a
-/// 60 Hz display, and a smooth analyzer at 60 Hz costs a few percent of one core.
-const ANIMATION_FRAME: Duration = Duration::from_micros(16_400);
+/// UI tick. Cheap when nothing is due; it only decides whether an animation frame is due, so
+/// animation frames land within one tick of the display's rhythm. Input renders immediately.
+const TICK: Duration = Duration::from_millis(4);
+/// Animation period when the display refresh rate is unknown (60 Hz).
+const DEFAULT_FRAME: Duration = Duration::from_micros(16_667);
 const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(400);
 const DOUBLE_CLICK_SLOP: f64 = 4.0;
 /// Pixels per wheel "line" when the platform reports pixel deltas.
@@ -116,11 +116,10 @@ struct UiWindow {
     /// baseview paces redraws with Present-extension vblank notifications, and inside Reaper
     /// under XWayland those never arrive for an embedded window, so it never drew at all.
     dirty: Cell<bool>,
-    /// Presentation waits for vblank (GPU path), so it paces animation by itself.
-    vsynced: bool,
-    /// Telemetry (tick) changed something; rendered at most every [`ANIMATION_FRAME`].
-    animation_dirty: Cell<bool>,
-    last_frame: Cell<Instant>,
+    /// Animation (meters, spectrum) runs once per display refresh: `frame_period` apart,
+    /// scheduled on absolute times so frames don't drift or bunch up.
+    frame_period: Duration,
+    next_animation: Cell<Instant>,
     _timer: Option<TimerHandle>,
 }
 
@@ -187,9 +186,8 @@ impl UiWindow {
             gpu: RefCell::new(Gpu { cx, presenter, frame, renderer }),
             state: RefCell::new(state),
             dirty: Cell::new(true),
-            vsynced: mode == PresentMode::Gpu,
-            animation_dirty: Cell::new(false),
-            last_frame: Cell::new(Instant::now()),
+            frame_period: animation_period(),
+            next_animation: Cell::new(Instant::now()),
             _timer: timer,
         })
     }
@@ -197,8 +195,14 @@ impl UiWindow {
     fn dispatch(&self, event: UiEvent) -> EventStatus {
         let mut st = self.state.borrow_mut();
         let State { view, host, .. } = &mut *st;
-        if view.event(&event, host.as_ref()) {
+        let changed = view.event(&event, host.as_ref());
+        drop(st);
+        // Input renders right away instead of waiting for the next tick (~4 ms average).
+        if changed {
             self.dirty.set(true);
+            if let Err(e) = self.render() {
+                trace(&format!("render failed: {e}"));
+            }
         }
         EventStatus::Captured
     }
@@ -238,7 +242,8 @@ impl UiWindow {
         let t_gpu = t0.elapsed();
         let shown = presenter.present(cx, frame).map_err(message_error)?;
         trace(&format!(
-            "frame scene {:.2} ms, render {:.2} ms, present {:.2} ms",
+            "t={:.6} frame scene {:.2} ms, render {:.2} ms, present {:.2} ms",
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs_f64(),
             t_scene.as_secs_f64() * 1e3,
             (t_gpu - t_scene).as_secs_f64() * 1e3,
             (t0.elapsed() - t_gpu).as_secs_f64() * 1e3
@@ -276,6 +281,9 @@ impl WindowHandler for UiWindow {
 
     fn on_event(&self, event: Event) -> EventStatus {
         let Event::Mouse(mouse) = event else { return EventStatus::Ignored };
+        if tracing() {
+            trace(&format!("t={:.6} event {:?}", wall_clock(), std::mem::discriminant(&mouse)));
+        }
         let scale = {
             let st = self.state.borrow();
             st.scale * st.view.zoom()
@@ -326,19 +334,23 @@ impl WindowHandler for UiWindow {
     }
 
     fn on_timer(&self, _timer: &TimerHandle) {
-        let mut st = self.state.borrow_mut();
-        let State { view, host, .. } = &mut *st;
-        if view.tick(host.as_ref()) {
-            self.animation_dirty.set(true);
+        if tracing() {
+            trace(&format!("t={:.6} tick dirty={}", wall_clock(), self.dirty.get()));
         }
-        drop(st);
-        // With vsync presentation the display paces frames; the time cap only applies to the CPU
-        // presenter, which has no vsync.
-        let cap = if self.vsynced { Duration::ZERO } else { ANIMATION_FRAME };
-        let animation_due = self.animation_dirty.get() && self.last_frame.get().elapsed() >= cap;
-        if self.dirty.get() || animation_due {
-            self.animation_dirty.set(false);
-            self.last_frame.set(Instant::now());
+        let now = Instant::now();
+        let mut animate = false;
+        if now >= self.next_animation.get() {
+            // Next slot on the display's rhythm; if we fell far behind, resynchronise.
+            let mut next = self.next_animation.get() + self.frame_period;
+            if next <= now {
+                next = now + self.frame_period;
+            }
+            self.next_animation.set(next);
+            let mut st = self.state.borrow_mut();
+            let State { view, host, .. } = &mut *st;
+            animate = view.tick(host.as_ref());
+        }
+        if self.dirty.get() || animate {
             if let Err(e) = self.render() {
                 trace(&format!("render failed: {e}"));
             }
@@ -403,6 +415,23 @@ fn mods(m: keyboard_types::Modifiers) -> Modifiers {
 pub(crate) fn tracing() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("MITE_UI_TRACE").is_some())
+}
+
+/// Half a display refresh (XRandR on Linux, otherwise 60 Hz). Rendering animation at twice the
+/// refresh guarantees a fresh frame in every refresh interval whatever the phase between our
+/// timer and the display; at exactly the refresh rate, timer jitter made some intervals get two
+/// frames and the next none (measured on screen: 27 ms median gaps instead of 17).
+fn animation_period() -> Duration {
+    #[cfg(target_os = "linux")]
+    if let Some(hz) = crate::host_sync::display_refresh_hz() {
+        trace(&format!("display refresh {hz:.2} Hz"));
+        return Duration::from_secs_f64(0.5 / hz);
+    }
+    DEFAULT_FRAME / 2
+}
+
+fn wall_clock() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs_f64()
 }
 
 fn trace(msg: &str) {
