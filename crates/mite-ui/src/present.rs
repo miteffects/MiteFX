@@ -4,8 +4,8 @@
 //! presenters:
 //!
 //! - **Gpu** (default): a wgpu surface on the window plus a `TextureBlitter`. Zero-copy and
-//!   synced to the display (mailbox where available, so it never blocks the UI thread). Verified
-//!   inside Reaper on Linux/XWayland, 2026-10-14. (An earlier "Vulkan shows nothing" diagnosis
+//!   vsynced (FIFO): one frame per display refresh. Verified inside Reaper on Linux/XWayland,
+//!   2026-10-14. (An earlier "Vulkan shows nothing" diagnosis
 //!   was wrong: the window was never shown and baseview never redrew it.)
 //! - **Cpu** (fallback when no GPU surface can be created): copy the frame into the window with
 //!   softbuffer (XPutImage/SHM on X11, GDI on Windows, CoreGraphics on macOS).
@@ -163,14 +163,12 @@ impl Presenter {
     pub fn new(mode: PresentMode, cx: &mut RenderContext, window: PlatformHandle, w: u32, h: u32) -> Result<(Self, usize), String> {
         match mode {
             PresentMode::Gpu => {
-                let mut surface = pollster::block_on(cx.create_surface(window, w, h, wgpu::PresentMode::Fifo))
+                // FIFO (vsync): one frame per display refresh, paced by the display itself. Mailbox
+                // was tried and rendered 114 fps in Reaper while the screen updated unevenly: under
+                // XWayland its image recycling depends on Present completion events that are
+                // unreliable for embedded windows. FIFO measured a steady refresh-rate cadence.
+                let surface = pollster::block_on(cx.create_surface(window, w, h, wgpu::PresentMode::Fifo))
                     .map_err(|e| e.to_string())?;
-                // Mailbox: tear-free and synced to the display like FIFO, but presenting never
-                // blocks the UI thread waiting for vblank (FIFO did, ~8 ms per frame at 60 Hz).
-                let caps = surface.surface.get_capabilities(cx.devices[surface.dev_id].adapter());
-                if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
-                    cx.set_present_mode(&mut surface, wgpu::PresentMode::Mailbox);
-                }
                 let dev_id = surface.dev_id;
                 Ok((Self::Gpu(Box::new(surface)), dev_id))
             }
