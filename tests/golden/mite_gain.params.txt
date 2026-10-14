@@ -1,0 +1,1 @@
+gain | dB | -48 | 24 | 0 | Linear

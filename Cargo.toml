@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "plugins/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ansabic/MiteFX"
+authors = ["MiteFX contributors"]
+
+[workspace.dependencies]
+mite-dsp = { path = "crates/mite-dsp" }
+mite-core = { path = "crates/mite-core" }
+mite-ui = { path = "crates/mite-ui" }
+mite-plugin = { path = "crates/mite-plugin" }
+
+# nih-plug has no crates.io releases. We pin our fork's `mitefx` branch: upstream de42101 plus
+# two CLAP state fixes (untrusted length prefix; value rescan after state load). See
+# https://github.com/ansabic/nih-plug/commits/mitefx. Only `crates/mite-plugin` and `plugins/*`
+# may use it.
+nih_plug = { git = "https://github.com/ansabic/nih-plug", rev = "a9cca13a4026d39599918bc6247439275e0243e2", features = ["assert_process_allocs"] }
+nih_plug_xtask = { git = "https://github.com/ansabic/nih-plug", rev = "a9cca13a4026d39599918bc6247439275e0243e2" }
+
+baseview = "0.4.1"
+keyboard-types = "0.8.3"
+parley = "0.12"
+pollster = "0.4"
+raw-window-handle = "0.6.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+vello = "0.11"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"

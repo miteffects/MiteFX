@@ -1,0 +1,3 @@
+# Bundle metadata for `cargo xtask bundle <package>` (nih_plug_xtask).
+[mite_gain]
+name = "Mite Gain"

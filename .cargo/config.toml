@@ -1,0 +1,4 @@
+[alias]
+# The xtask runs in release mode so serde and friends are shared with release plugin builds.
+xtask = "run --package xtask --release --"
+xtask-debug = "run --package xtask --"

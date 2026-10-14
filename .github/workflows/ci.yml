@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+  bundle:
+    name: Bundle + validate (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            pluginval: pluginval_Linux.zip
+          - os: windows-latest
+            pluginval: pluginval_Windows.zip
+          - os: macos-latest
+            pluginval: pluginval_macOS.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Bundle (macOS universal)
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          cargo xtask bundle-universal mite_gain --release
+      - name: Bundle
+        if: runner.os != 'macOS'
+        run: cargo xtask bundle mite_gain --release
+
+      - name: Install clap-validator
+        run: cargo install --git https://github.com/free-audio/clap-validator --locked clap-validator
+      - name: clap-validator
+        run: clap-validator validate "target/bundled/Mite Gain.clap"
+
+      - name: Install pluginval
+        shell: bash
+        run: |
+          curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/${{ matrix.pluginval }}"
+          7z x -opluginval pluginval.zip > /dev/null
+      - name: pluginval (strictness 10)
+        shell: bash
+        # GUI tests need a GPU; hosted runners have none. Editor coverage runs locally for now.
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   PV=pluginval/pluginval.app/Contents/MacOS/pluginval ;;
+            Windows) PV=pluginval/pluginval.exe ;;
+            *)       PV=pluginval/pluginval ;;
+          esac
+          chmod +x "$PV" || true
+          "$PV" --strictness-level 10 --skip-gui-tests --validate-in-process --validate "target/bundled/Mite Gain.vst3"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mite-gain-${{ matrix.os }}
+          path: target/bundled/

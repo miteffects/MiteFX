@@ -1,0 +1,17 @@
+[package]
+name = "mite-plugin"
+description = "The only MiteFX crate that touches the plugin framework: nih-plug ↔ mite-core/mite-ui glue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mite-core.workspace = true
+mite-ui.workspace = true
+
+baseview.workspace = true
+nih_plug.workspace = true
+raw-window-handle.workspace = true

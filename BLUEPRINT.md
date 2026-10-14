@@ -514,6 +514,32 @@ Mode switches are click-free. Dynamic bands in linear-phase mode use the Pro-Q a
 - The plugin loads in Reaper and Bitwig on all three OSes.
 - `assert_no_alloc` is active in debug and CI builds.
 
+**Status (2026-10-14):**
+
+Done and verified on Linux:
+- **Workspace:** the workspace and its crates; Mite Gain with a golden parameter manifest; `cargo xtask bundle|install|validate`.
+- **Validators:** clap-validator passes every applicable test (34 of 34), and pluginval passes at strictness 10, in both debug and release builds.
+- **Real host:** the editor opens and draws inside Reaper (checked by capturing its window).
+- **Fixes along the way:**
+  - **Windows were never shown.** Fixed by calling `show()` after creating them.
+  - **Vulkan child-window presentation shows nothing under XWayland.** On Linux, frames now go to the window through the CPU presenter (softbuffer); `MITE_UI_PRESENT=gpu` brings back the GPU path.
+  - **baseview's Present-extension redraw pacing never fires inside Reaper.** Frames are now driven by our own 60 Hz UI timer.
+- **nih-plug fork:** we pin the fork `ansabic/nih-plug`, branch `mitefx`, which fixes two CLAP state bugs:
+  - the untrusted state length could abort the host;
+  - parameter values were not rescanned after a state load.
+- **Design:** third-pass tokens (`mitefx-tokens/3`) and `docs/design/interaction.md` are wired in.
+
+Written but not yet run:
+- The CI workflow for Windows, macOS and Linux, with no validator exclusions.
+
+Open:
+- AU via clap-wrapper.
+- Bitwig and Ableton, and macOS and Windows hosts.
+- The WGSL bloom pass.
+- Exact log parameter ranges.
+- Zero-copy GPU presentation on Linux, by fixing baseview or presenting through our own X11 child window.
+- Offering the two nih-plug fixes upstream.
+
 ### Phase 1: Mite EQ (MVP)
 
 Ordered steps:

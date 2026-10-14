@@ -7,14 +7,29 @@ the same change.
 Stack: Rust workspace · nih-plug (CLAP/VST3, isolated in `crates/mite-plugin`) ·
 clap-wrapper (AU) · baseview + wgpu + Vello UI · GPL-3.0-or-later.
 
-## Build (from Phase 0 onward)
+## Build
+
+Package names use underscores (`mite_gain`); bundle names come from `bundler.toml`.
 
 ```bash
-cargo test --workspace                 # DSP + core tests
-cargo xtask bundle <plugin> --release  # CLAP / VST3 / AU bundles into target/bundled
-cargo xtask install <plugin>           # copy to user plugin folders
-cargo xtask validate <plugin>          # clap-validator + pluginval (+ auval on macOS)
+cargo test --workspace                          # DSP, core, UI and plugin tests
+cargo clippy --workspace --all-targets
+cargo xtask bundle mite_gain --release          # CLAP + VST3 into target/bundled/
+cargo xtask bundle mite_gain                    # debug build: allocations in process() abort
+cargo xtask install mite_gain                   # copy bundles to ~/.clap, ~/.vst3 (or OS equivalent)
+cargo xtask validate mite_gain                  # clap-validator + pluginval, if on PATH
+cargo run -p mite_gain --example preview        # editor in a standalone window, fake meter
+cargo run -p mite_gain --example snapshot -- out.png 2   # editor → PNG (GPU, no window)
 ```
+
+## Layout
+
+- `crates/mite-dsp`: DSP primitives (smoother, meter, dB).
+- `crates/mite-core`: `ParamSpec`, telemetry atomics, golden manifest.
+- `crates/mite-ui`: tokens (from `docs/design/tokens.json`), text (embedded Manrope), widgets, window, offscreen render.
+- `crates/mite-plugin`: the only nih-plug glue.
+- `plugins/<name>`: the plugin crates.
+- `tests/golden/`: frozen parameter manifests.
 
 ## Hard rules (full list: BLUEPRINT.md §5)
 
