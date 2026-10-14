@@ -44,11 +44,11 @@ const PX_PER_DB: f64 = 264.0 / 18.0;
 const POINTS: usize = 301;
 
 const NODE_HIT: f64 = 16.0;
-const PANEL_W: f64 = 600.0;
+const PANEL_W: f64 = 620.0;
 const PANEL_H: f64 = 104.0;
 /// Panel dials: diameter, and the x of their group's centre relative to the panel.
 const PANEL_DIAL: f64 = 56.0;
-const PANEL_DIALS_X: f64 = 440.0;
+const PANEL_DIALS_X: f64 = 450.0;
 const MENU_ITEM_H: f64 = 28.0;
 /// The band panel is docked at the bottom centre of the plot, like FabFilter's, so it never
 /// covers the area around the node being edited.
@@ -147,17 +147,82 @@ fn grid_x(i: usize) -> f64 {
     i as f64 * PLOT_W / (POINTS - 1) as f64
 }
 
-/// A band's response in dB at `f`. Up to Nyquist it is the digital filter's; above (the plot runs
-/// to 30 kHz) the analog shape continues, offset so the curve joins the digital one at Nyquist
-/// without a step.
+/// A band's response in dB at `f`, as drawn. Up to half Nyquist it is the digital filter's.
+/// From there it blends smoothly into the analog shape, which continues above Nyquist (the plot
+/// runs to 30 kHz), as FabFilter draws it. A digital response always flattens at Nyquist, so
+/// splicing the analog curve on there kinked the line; the matched filters track the analog shape
+/// closely, so the blend moves the line only slightly.
 fn band_db(sections: &Sections, s: &BandSettings, f: f64, fs: f64) -> f64 {
+    let floor = |db: f64| if db.is_nan() { -300.0 } else { db.max(-300.0) };
     let nyquist = 0.5 * fs;
-    if f <= nyquist {
+    let start = 0.5 * nyquist;
+    if f <= start {
         return sections.response_db(2.0 * std::f64::consts::PI * f / fs);
     }
-    let floor = |db: f64| if db.is_nan() { -300.0 } else { db.max(-300.0) };
-    let join = floor(sections.response_db(std::f64::consts::PI)) - floor(analog_response_db(s, nyquist));
-    floor(analog_response_db(s, f)) + join
+    let analog = floor(analog_response_db(s, f));
+    if f >= nyquist {
+        return analog;
+    }
+    let digital = floor(sections.response_db(2.0 * std::f64::consts::PI * f / fs));
+    // Smoothstep over the octave in log frequency: no step and no kink at either end.
+    let t = (f / start).log2();
+    let t = t * t * (3.0 - 2.0 * t);
+    digital + t * (analog - digital)
+}
+
+/// Draws a band type's response shape as a 22 × 12 icon with its top-left at `at`.
+fn draw_type_icon(scene: &mut mite_ui::vello::Scene, kind: BandType, at: Point, color: Color) {
+    let mut p = BezPath::new();
+    let pt = |x: f64, y: f64| (at.x + x, at.y + y);
+    match kind {
+        BandType::Bell => {
+            p.move_to(pt(0.0, 9.0));
+            p.line_to(pt(5.0, 9.0));
+            p.curve_to(pt(8.0, 9.0), pt(9.0, 2.0), pt(11.0, 2.0));
+            p.curve_to(pt(13.0, 2.0), pt(14.0, 9.0), pt(17.0, 9.0));
+            p.line_to(pt(22.0, 9.0));
+        }
+        BandType::LowShelf => {
+            p.move_to(pt(0.0, 3.0));
+            p.line_to(pt(6.0, 3.0));
+            p.curve_to(pt(10.0, 3.0), pt(12.0, 9.0), pt(16.0, 9.0));
+            p.line_to(pt(22.0, 9.0));
+        }
+        BandType::HighShelf => {
+            p.move_to(pt(0.0, 9.0));
+            p.line_to(pt(6.0, 9.0));
+            p.curve_to(pt(10.0, 9.0), pt(12.0, 3.0), pt(16.0, 3.0));
+            p.line_to(pt(22.0, 3.0));
+        }
+        BandType::LowCut => {
+            p.move_to(pt(2.0, 12.0));
+            p.curve_to(pt(5.0, 4.0), pt(7.0, 3.0), pt(12.0, 3.0));
+            p.line_to(pt(22.0, 3.0));
+        }
+        BandType::HighCut => {
+            p.move_to(pt(0.0, 3.0));
+            p.line_to(pt(10.0, 3.0));
+            p.curve_to(pt(15.0, 3.0), pt(17.0, 4.0), pt(20.0, 12.0));
+        }
+        BandType::Notch => {
+            p.move_to(pt(0.0, 3.0));
+            p.line_to(pt(7.0, 3.0));
+            p.curve_to(pt(10.0, 3.0), pt(10.5, 12.0), pt(11.0, 12.0));
+            p.curve_to(pt(11.5, 12.0), pt(12.0, 3.0), pt(15.0, 3.0));
+            p.line_to(pt(22.0, 3.0));
+        }
+        BandType::BandPass => {
+            p.move_to(pt(1.0, 12.0));
+            p.curve_to(pt(6.0, 12.0), pt(8.0, 2.0), pt(11.0, 2.0));
+            p.curve_to(pt(14.0, 2.0), pt(16.0, 12.0), pt(21.0, 12.0));
+        }
+        BandType::TiltShelf => {
+            p.move_to(pt(0.0, 10.0));
+            p.curve_to(pt(9.0, 10.0), pt(13.0, 2.0), pt(22.0, 2.0));
+        }
+    }
+    let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+    scene.stroke(&stroke, Affine::IDENTITY, color, None, &p);
 }
 
 /// Which band setting an open dropdown chooses.
@@ -182,7 +247,7 @@ impl Menu {
     /// Item rectangles: below the button when they fit inside the display, otherwise above.
     fn item_rects(&self) -> Vec<Rect> {
         let n = self.items.len() as f64;
-        let w = self.anchor.width().max(150.0);
+        let w = self.anchor.width().max(if self.kind == MenuKind::Type { 180.0 } else { 150.0 });
         let h = n * MENU_ITEM_H + 8.0;
         let top = if self.anchor.y1 + 4.0 + h <= HELP_TOP { self.anchor.y1 + 4.0 } else { self.anchor.y0 - 4.0 - h };
         (0..self.items.len())
@@ -697,11 +762,18 @@ impl EqView {
 
         let row_y = origin.y + 54.0;
         let open = self.menu.as_ref().map(|m| m.kind);
-        let dropdown = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str, active: bool| -> Rect {
+        let dropdown = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str, icon: Option<BandType>, active: bool| -> Rect {
             let r = Rect::new(x, row_y, x + w, row_y + 32.0);
             let border = if active { color } else { cx.theme.panel_control_border };
             raised(cx.scene, RoundedRect::from_rect(r, 6.0), cx.theme.panel_control, border, cx.theme.shadows);
-            cx.text.draw(cx.scene, text, x + 12.0, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Left);
+            let text_x = match icon {
+                Some(kind) => {
+                    draw_type_icon(cx.scene, kind, Point::new(x + 10.0, row_y + 10.0), color);
+                    x + 40.0
+                }
+                None => x + 12.0,
+            };
+            cx.text.draw(cx.scene, text, text_x, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Left);
             let mut chevron = BezPath::new();
             let (cxr, cy) = (r.x1 - 14.0, r.center().y);
             chevron.move_to((cxr - 4.0, cy - 2.0));
@@ -712,14 +784,14 @@ impl EqView {
             r
         };
         let mut x = origin.x + 14.0;
-        let kind = dropdown(cx, x, 116.0, BandType::NAMES[s.kind as usize], open == Some(MenuKind::Type));
-        x += 124.0;
+        let kind = dropdown(cx, x, 140.0, BandType::NAMES[s.kind as usize], Some(s.kind), open == Some(MenuKind::Type));
+        x += 148.0;
         let slope = s.kind.has_slope().then(|| {
-            let r = dropdown(cx, x, 108.0, SLOPE.choices[s.slope.min(SLOPE.choices.len() - 1)], open == Some(MenuKind::Slope));
+            let r = dropdown(cx, x, 108.0, SLOPE.choices[s.slope.min(SLOPE.choices.len() - 1)], None, open == Some(MenuKind::Slope));
             x += 116.0;
             r
         });
-        let stereo = dropdown(cx, x, 90.0, Placement::NAMES[s.placement as usize], open == Some(MenuKind::Stereo));
+        let stereo = dropdown(cx, x, 90.0, Placement::NAMES[s.placement as usize], None, open == Some(MenuKind::Stereo));
 
         // Right: bypass over close.
         let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
@@ -767,7 +839,14 @@ impl EqView {
             let current = i == menu.current;
             let color = if current { theme.text_strong } else { theme.text_hi };
             let style = TextStyle::BODY.weighted(if current { 700.0 } else { 500.0 });
-            cx.text.draw(cx.scene, item, r.x0 + 24.0, r.y0 + 7.0, style, color, Align::Left);
+            let text_x = if menu.kind == MenuKind::Type {
+                let icon = if current { theme.text_strong } else { theme.text_mid };
+                draw_type_icon(cx.scene, BandType::from_index(i), Point::new(r.x0 + 24.0, r.y0 + 8.0), icon);
+                r.x0 + 56.0
+            } else {
+                r.x0 + 24.0
+            };
+            cx.text.draw(cx.scene, item, text_x, r.y0 + 7.0, style, color, Align::Left);
             if current {
                 let mut tick = BezPath::new();
                 let (tx, ty) = (r.x0 + 11.0, r.center().y);

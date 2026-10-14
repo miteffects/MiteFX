@@ -1262,7 +1262,7 @@ dependencies = [
 [[package]]
 name = "nih_plug"
 version = "0.0.0"
-source = "git+https://github.com/ansabic/nih-plug?rev=a9cca13a4026d39599918bc6247439275e0243e2#a9cca13a4026d39599918bc6247439275e0243e2"
+source = "git+https://github.com/ansabic/nih-plug?rev=3ab623858735e86298aca8c93be17ef6597a21d1#3ab623858735e86298aca8c93be17ef6597a21d1"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -1293,7 +1293,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_derive"
 version = "0.1.0"
-source = "git+https://github.com/ansabic/nih-plug?rev=a9cca13a4026d39599918bc6247439275e0243e2#a9cca13a4026d39599918bc6247439275e0243e2"
+source = "git+https://github.com/ansabic/nih-plug?rev=3ab623858735e86298aca8c93be17ef6597a21d1#3ab623858735e86298aca8c93be17ef6597a21d1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1303,7 +1303,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_xtask"
 version = "0.1.0"
-source = "git+https://github.com/ansabic/nih-plug?rev=a9cca13a4026d39599918bc6247439275e0243e2#a9cca13a4026d39599918bc6247439275e0243e2"
+source = "git+https://github.com/ansabic/nih-plug?rev=3ab623858735e86298aca8c93be17ef6597a21d1#3ab623858735e86298aca8c93be17ef6597a21d1"
 dependencies = [
  "anyhow",
  "cargo_metadata",

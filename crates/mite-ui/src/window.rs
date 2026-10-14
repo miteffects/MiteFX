@@ -43,6 +43,15 @@ pub const MAX_ZOOM: f64 = 4.0;
 /// is resized only if it did.
 pub type ResizeRequest = Arc<dyn Fn(u32, u32) -> bool + Send + Sync>;
 
+/// A size the host gave the editor (it resized its window), packed as `width << 32 | height` in
+/// logical px; 0 = none pending. The window applies it on its next tick, on its own thread.
+pub type HostResize = Arc<std::sync::atomic::AtomicU64>;
+
+/// Packs a size for [`HostResize`].
+pub fn pack_size(width: u32, height: u32) -> u64 {
+    (u64::from(width) << 32) | u64::from(height)
+}
+
 #[derive(Clone)]
 pub struct WindowOptions {
     pub title: String,
@@ -55,6 +64,8 @@ pub struct WindowOptions {
     /// Embedded editors: how to ask the host for a new size. `None` (standalone windows)
     /// resizes directly.
     pub on_resize: Option<ResizeRequest>,
+    /// Embedded editors: where the host's resizes arrive.
+    pub host_resize: Option<HostResize>,
 }
 
 /// Opens the view as a child of a host-provided parent window.
@@ -66,8 +77,8 @@ pub fn open_parented(
 ) -> Result<Window, baseview::Error> {
     let settings = settings(&options).with_parent(parent);
     let theme = Theme::load(options.theme, options.accent);
-    let on_resize = options.on_resize.clone();
-    let window = Window::create(settings, move |ctx| UiWindow::new(ctx, view, host, theme, on_resize))?;
+    let (on_resize, host_resize) = (options.on_resize.clone(), options.host_resize.clone());
+    let window = Window::create(settings, move |ctx| UiWindow::new(ctx, view, host, theme, on_resize, host_resize))?;
     trace("created parented");
     // baseview creates windows unmapped; nothing draws until it is shown.
     window.show()?;
@@ -82,8 +93,8 @@ pub fn run_standalone(
     host: Box<dyn ParamHost + Send>,
 ) -> Result<(), baseview::Error> {
     let theme = Theme::load(options.theme, options.accent);
-    let on_resize = options.on_resize.clone();
-    let window = Window::create(settings(&options), move |ctx| UiWindow::new(ctx, view, host, theme, on_resize))?;
+    let (on_resize, host_resize) = (options.on_resize.clone(), options.host_resize.clone());
+    let window = Window::create(settings(&options), move |ctx| UiWindow::new(ctx, view, host, theme, on_resize, host_resize))?;
     window.show()?;
     window.run_until_closed()
 }
@@ -138,6 +149,7 @@ struct UiWindow {
     _timer: Option<TimerHandle>,
     ctx: WindowContext,
     on_resize: Option<ResizeRequest>,
+    host_resize: Option<HostResize>,
     /// The view's design size; the window keeps its aspect ratio and the zoom is window width
     /// over design width.
     design: (f64, f64),
@@ -146,6 +158,8 @@ struct UiWindow {
     /// Last size asked for, so a drag doesn't repeat requests for the same pixel size.
     requested: Cell<(u32, u32)>,
     over_grip: Cell<bool>,
+    /// Last pointer position in window logical px.
+    pointer: Cell<Point>,
 }
 
 fn handler_error(e: impl std::error::Error + 'static) -> HandlerError {
@@ -163,6 +177,7 @@ impl UiWindow {
         host: Box<dyn ParamHost + Send>,
         theme: Theme,
         on_resize: Option<ResizeRequest>,
+        host_resize: Option<HostResize>,
     ) -> Result<Self, HandlerError> {
         let design = view.logical_size();
         let size = ctx.size();
@@ -219,9 +234,11 @@ impl UiWindow {
             requested: Cell::new((size.logical.width.round() as u32, size.logical.height.round() as u32)),
             ctx,
             on_resize,
+            host_resize,
             design,
             resize_drag: Cell::new(None),
             over_grip: Cell::new(false),
+            pointer: Cell::new(Point::ZERO),
         })
     }
 
@@ -263,16 +280,14 @@ impl UiWindow {
                     self.dirty.set(true);
                 }
                 if over {
-                    // Keep the cursor position current for when the pointer leaves the grip.
-                    self.state.borrow_mut().cursor = Point::new(p.x * self.design.0 / window.0, p.y * self.design.0 / window.0);
                     return Some(EventStatus::Captured);
                 }
                 None
             }
             MouseEvent::ButtonPressed { button: baseview::MouseButton::Left, .. } if self.over_grip.get() => {
-                let c = self.state.borrow().cursor;
-                let start = Point::new(c.x * window.0 / self.design.0, c.y * window.0 / self.design.0);
-                self.resize_drag.set(Some((start, window.0)));
+                // Start from the content's width (the window may be letterboxed).
+                let (zoom, _) = self.layout(window);
+                self.resize_drag.set(Some((self.pointer.get(), self.design.0 * zoom)));
                 Some(EventStatus::Captured)
             }
             MouseEvent::ButtonReleased { button: baseview::MouseButton::Left, .. } if self.resize_drag.get().is_some() => {
@@ -284,6 +299,18 @@ impl UiWindow {
         }
     }
 
+    /// How the design is placed in a window of `window` logical px: the largest zoom that fits
+    /// (within 50–400 %), centred. The host may give us any size (it can keep growing the window
+    /// past 400 % during a drag), so the content letterboxes rather than the window refusing.
+    fn layout(&self, window: (f64, f64)) -> (f64, Point) {
+        let zoom = (window.0 / self.design.0).min(window.1 / self.design.1).clamp(MIN_ZOOM, MAX_ZOOM);
+        let offset = Point::new(
+            ((window.0 - self.design.0 * zoom) / 2.0).max(0.0).round(),
+            ((window.1 - self.design.1 * zoom) / 2.0).max(0.0).round(),
+        );
+        (zoom, offset)
+    }
+
     /// Resizes the window to `zoom` × the design size, asking the host first when embedded.
     fn resize_to(&self, zoom: f64) {
         let size = ((self.design.0 * zoom).round() as u32, (self.design.1 * zoom).round() as u32);
@@ -293,17 +320,22 @@ impl UiWindow {
         let accepted = self.on_resize.as_ref().is_none_or(|ask| ask(size.0, size.1));
         trace(&format!("resize to {}x{} ({:.0} %): host {}", size.0, size.1, zoom * 100.0, if accepted { "agreed" } else { "refused" }));
         if accepted {
-            self.requested.set(size);
-            let logical = LogicalSize::new(f64::from(size.0), f64::from(size.1));
-            if self.ctx.resize(logical).is_ok() {
-                // baseview reports only resizes it didn't initiate, so apply our own here.
-                let scale = self.state.borrow().scale;
-                if let Err(e) = self.apply_size(WindowSize::from_logical(logical, scale)) {
-                    trace(&format!("resize failed: {e}"));
-                }
-                if let Err(e) = self.render() {
-                    trace(&format!("render failed: {e}"));
-                }
+            self.set_window_size(size);
+        }
+    }
+
+    /// Resizes our window to `size` (logical px) and re-lays out at once.
+    fn set_window_size(&self, size: (u32, u32)) {
+        self.requested.set(size);
+        let logical = LogicalSize::new(f64::from(size.0), f64::from(size.1));
+        if self.ctx.resize(logical).is_ok() {
+            // baseview reports only resizes it didn't initiate, so apply our own here.
+            let scale = self.state.borrow().scale;
+            if let Err(e) = self.apply_size(WindowSize::from_logical(logical, scale)) {
+                trace(&format!("resize failed: {e}"));
+            }
+            if let Err(e) = self.render() {
+                trace(&format!("render failed: {e}"));
             }
         }
     }
@@ -330,10 +362,10 @@ impl UiWindow {
         let mut st = self.state.borrow_mut();
         let State { view, host, theme, text, logical, scene, scale, logical_size, .. } = &mut *st;
         logical.reset();
-        let zoom = logical_size.0 / self.design.0;
+        let (zoom, offset) = self.layout(*logical_size);
         view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: self.design });
         scene.reset();
-        scene.append(logical, Some(Affine::scale(*scale * zoom)));
+        scene.append(logical, Some(Affine::scale(*scale) * Affine::translate(offset.to_vec2()) * Affine::scale(zoom)));
         // Resize grip: three short diagonals in the bottom-right corner, in window logical px.
         let (w, h) = *logical_size;
         let mut grip = BezPath::new();
@@ -400,9 +432,14 @@ impl WindowHandler for UiWindow {
             let st = self.state.borrow();
             (st.scale, st.logical_size)
         };
-        let scale = dpi * window.0 / self.design.0;
+        let (zoom, offset) = self.layout(window);
         // Events reach the view in design units.
-        let to_logical = |p: baseview::dpi::PhysicalPosition<f64>| Point::new(p.x / scale, p.y / scale);
+        let to_logical = |p: baseview::dpi::PhysicalPosition<f64>| {
+            Point::new((p.x / dpi - offset.x) / zoom, (p.y / dpi - offset.y) / zoom)
+        };
+        if let MouseEvent::CursorMoved { position, .. } = mouse {
+            self.pointer.set(Point::new(position.x / dpi, position.y / dpi));
+        }
         if let Some(status) = self.grip_event(&mouse, dpi, window) {
             return status;
         }
@@ -450,6 +487,13 @@ impl WindowHandler for UiWindow {
     }
 
     fn on_timer(&self, _timer: &TimerHandle) {
+        if let Some(packed) = self.host_resize.as_ref().map(|r| r.swap(0, std::sync::atomic::Ordering::AcqRel)) {
+            if packed != 0 {
+                let size = ((packed >> 32) as u32, packed as u32);
+                trace(&format!("host resized to {}x{}", size.0, size.1));
+                self.set_window_size(size);
+            }
+        }
         if tracing() {
             trace(&format!("t={:.6} tick dirty={}", wall_clock(), self.dirty.get()));
         }

@@ -22,7 +22,7 @@ pub use host::{MemoryParamHost, ParamHost};
 pub use text::{Align, TextStyle, Typesetter};
 pub use tokens::{Theme, ThemeKind};
 pub use view::{DrawCx, Modifiers, MouseButton, UiEvent, View};
-pub use window::{open_parented, run_standalone, ResizeRequest, WindowOptions, MAX_ZOOM, MIN_ZOOM};
+pub use window::{open_parented, pack_size, run_standalone, HostResize, ResizeRequest, WindowOptions, MAX_ZOOM, MIN_ZOOM};
 
 pub use vello;
 pub use vello::kurbo;

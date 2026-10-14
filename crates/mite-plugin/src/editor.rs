@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
 use mite_core::AtomicF32;
-use mite_ui::{open_parented, ParamHost, ResizeRequest, ThemeKind, View, WindowOptions};
+use mite_ui::{open_parented, pack_size, HostResize, ParamHost, ResizeRequest, ThemeKind, View, WindowOptions, MAX_ZOOM, MIN_ZOOM};
 use nih_plug::prelude::{Editor, GuiContext, ParamPtr, Params, ParentWindowHandle};
 use nih_plug::{nih_error, nih_log};
 use raw_window_handle::{
@@ -30,13 +30,15 @@ where
     F: Fn() -> V + Send + Sync + 'static,
 {
     let probe = make_view();
-    let (w, h) = probe.logical_size();
-    let (w, h) = (w * probe.zoom(), h * probe.zoom());
+    let design = probe.logical_size();
+    let (w, h) = (design.0 * probe.zoom(), design.1 * probe.zoom());
     Some(Box::new(MiteEditor {
         params,
         title,
         accent,
         logical_size: Arc::new(Mutex::new((w.round() as u32, h.round() as u32))),
+        design,
+        host_resize: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         make_view: Arc::new(move || Box::new(make_view()) as Box<dyn View>),
         scale: AtomicF32::new(0.0),
     }))
@@ -49,6 +51,10 @@ struct MiteEditor {
     /// Current editor size in logical px. The resize grip changes it; it outlives editor windows,
     /// so reopening keeps the size.
     logical_size: Arc<Mutex<(u32, u32)>>,
+    /// The view's design size: the editor keeps its aspect ratio.
+    design: (f64, f64),
+    /// Sizes the host resized us to, for the window to apply.
+    host_resize: HostResize,
     make_view: Arc<ViewFactory>,
     /// Host-provided DPI scale, 0 until the host sets one.
     scale: AtomicF32,
@@ -78,6 +84,7 @@ impl Editor for MiteEditor {
             theme: ThemeKind::Dark,
             accent: self.accent,
             on_resize: Some(on_resize),
+            host_resize: Some(self.host_resize.clone()),
         };
         match open_parented(&HostParent(parent), options, (self.make_view)(), Box::new(host)) {
             Ok(window) => Box::new(EditorHandle { _window: window }),
@@ -90,6 +97,31 @@ impl Editor for MiteEditor {
 
     fn size(&self) -> (u32, u32) {
         *self.logical_size.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn can_resize(&self) -> bool {
+        true
+    }
+
+    fn aspect_ratio(&self) -> Option<(u32, u32)> {
+        Some((self.design.0.round() as u32, self.design.1.round() as u32))
+    }
+
+    fn constrain_size(&self, width: u32, height: u32) -> (u32, u32) {
+        // Follow whichever dimension the host changed more, keeping the aspect ratio and the
+        // 50–400 % range.
+        let (cw, ch) = self.size();
+        let (dw, dh) = self.design;
+        let by_width = (f64::from(width) - f64::from(cw)).abs() / dw >= (f64::from(height) - f64::from(ch)).abs() / dh;
+        let zoom = if by_width { f64::from(width) / dw } else { f64::from(height) / dh };
+        let zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        ((dw * zoom).round() as u32, (dh * zoom).round() as u32)
+    }
+
+    fn set_size(&self, width: u32, height: u32) -> bool {
+        *self.logical_size.lock().unwrap_or_else(|e| e.into_inner()) = (width, height);
+        self.host_resize.store(pack_size(width, height), std::sync::atomic::Ordering::Release);
+        true
     }
 
     fn set_scale_factor(&self, factor: f32) -> bool {

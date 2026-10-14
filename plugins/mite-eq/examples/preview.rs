@@ -106,6 +106,7 @@ fn main() -> Result<(), String> {
         theme: ThemeKind::Dark,
         accent: ACCENT,
         on_resize: None,
+        host_resize: None,
     };
     run_standalone(options, Box::new(view), Box::new(host)).map_err(|e| format!("{e:?}"))
 }

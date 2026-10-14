@@ -21,7 +21,7 @@ fn main() -> Result<(), String> {
             std::thread::sleep(Duration::from_millis(10));
         }
     });
-    let options = WindowOptions { title: "Mite Gain — preview".into(), logical_size: (WIDTH, HEIGHT), fallback_scale: None, theme: ThemeKind::Dark, accent: "utility", on_resize: None };
+    let options = WindowOptions { title: "Mite Gain — preview".into(), logical_size: (WIDTH, HEIGHT), fallback_scale: None, theme: ThemeKind::Dark, accent: "utility", on_resize: None, host_resize: None };
     run_standalone(options, Box::new(GainView::new(meter)), Box::new(MemoryParamHost::new().with(GAIN)))
         .map_err(|e| format!("{e:?}"))
 }
