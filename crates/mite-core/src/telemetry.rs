@@ -47,9 +47,61 @@ impl StereoMeter {
     }
 }
 
+/// Lock-free ring of the most recent audio samples (mono), written by the audio thread and read
+/// by the analyzer on the UI thread. A torn read across the write position only smears one
+/// analysis frame, which the analyzer's ballistics hide.
+pub struct SpectrumTap {
+    ring: Box<[AtomicF32]>,
+    write: std::sync::atomic::AtomicUsize,
+}
+
+impl SpectrumTap {
+    /// `capacity` is rounded up to a power of two. Allocates; call off the audio thread.
+    pub fn new(capacity: usize) -> Self {
+        let cap = capacity.next_power_of_two();
+        Self { ring: (0..cap).map(|_| AtomicF32::new(0.0)).collect(), write: std::sync::atomic::AtomicUsize::new(0) }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.ring.len()
+    }
+
+    /// Audio thread: appends samples. Allocation- and lock-free.
+    #[inline]
+    pub fn push(&self, samples: impl Iterator<Item = f32>) {
+        let mask = self.ring.len() - 1;
+        let mut w = self.write.load(Ordering::Relaxed);
+        for s in samples {
+            self.ring[w & mask].store(s);
+            w = w.wrapping_add(1);
+        }
+        self.write.store(w, Ordering::Release);
+    }
+
+    /// UI thread: copies the newest `out.len()` samples, oldest first.
+    pub fn read_latest(&self, out: &mut [f32]) {
+        let mask = self.ring.len() - 1;
+        let end = self.write.load(Ordering::Acquire);
+        let n = out.len().min(self.ring.len());
+        let start = end.wrapping_sub(n);
+        for (i, o) in out.iter_mut().take(n).enumerate() {
+            *o = self.ring[start.wrapping_add(i) & mask].load();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tap_returns_newest_samples_in_order() {
+        let tap = SpectrumTap::new(8);
+        tap.push((0..13).map(|i| i as f32));
+        let mut out = [0.0; 4];
+        tap.read_latest(&mut out);
+        assert_eq!(out, [9.0, 10.0, 11.0, 12.0]);
+    }
 
     #[test]
     fn stores_exact_bits() {

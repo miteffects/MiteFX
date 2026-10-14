@@ -1,31 +1,38 @@
 //! Getting a rendered frame onto the screen.
 //!
-//! Vello always renders into an offscreen storage texture. From there, two presenters:
+//! Vello always renders into an offscreen storage texture ([`Offscreen`]). From there, two
+//! presenters:
 //!
-//! - **Gpu**: a wgpu surface on the window plus a `TextureBlitter`. Zero-copy, but it relies on
-//!   the platform's Vulkan/Metal/DX12 window-system integration for *child* windows.
-//! - **Cpu**: read the frame back and copy it into the window with softbuffer
-//!   (XPutImage/SHM on X11, GDI on Windows, CoreGraphics on macOS). Costs one readback per
-//!   frame (~1.7 MB at 720×600) but works in every host. On Linux this is the default: Vulkan
-//!   presentation into a host's ARGB child window under XWayland shows nothing (found in Reaper,
-//!   2026-10-14).
+//! - **Gpu** (default): a wgpu surface on the window plus a `TextureBlitter`. Zero-copy and
+//!   synced to the display (mailbox where available, so it never blocks the UI thread). Verified
+//!   inside Reaper on Linux/XWayland, 2026-10-14. (An earlier "Vulkan shows nothing" diagnosis
+//!   was wrong: the window was never shown and baseview never redrew it.)
+//! - **Cpu** (fallback when no GPU surface can be created): copy the frame into the window with
+//!   softbuffer (XPutImage/SHM on X11, GDI on Windows, CoreGraphics on macOS).
 //!
-//! `MITE_UI_PRESENT=gpu|cpu` overrides the default.
+//! The Cpu path is pipelined so the UI thread never waits for the GPU: frame N is rendered,
+//! swizzled to the window's native BGRA layout on the GPU and copied into one of two staging
+//! buffers while frame N−1 (already finished) is memcpy'd to the window. Cost: one frame of
+//! display latency. Measured at 2560×1520: a blocking readback took ~7 ms per frame (4.8 ms GPU
+//! wait + 2.2 ms per-pixel conversion), which capped the UI near 60 fps (lower inside hosts).
+//!
+//! `MITE_UI_PRESENT=gpu|cpu` forces one or the other.
 
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use baseview::PlatformHandle;
 use vello::util::{RenderContext, RenderSurface};
-use vello::wgpu::{self, CurrentSurfaceTexture};
+use vello::wgpu::{self, util::TextureBlitter, CurrentSurfaceTexture};
 
-/// A storage texture Vello can render into, plus a buffer to read it back.
+/// A storage texture Vello can render into.
 pub(crate) struct Offscreen {
-    pub texture: wgpu::Texture,
+    /// Kept alive alongside its view.
+    _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
-    buffer: wgpu::Buffer,
     pub width: u32,
     pub height: u32,
-    padded_row: u32,
 }
 
 impl Offscreen {
@@ -43,58 +50,33 @@ impl Offscreen {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let padded_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mite-ui readback"),
-            size: u64::from(padded_row * height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        Self { texture, view, buffer, width, height, padded_row }
+        Self { _texture: texture, view, width, height }
     }
 
-    /// Copies the texture back and hands each RGBA row to `row(y, bytes)`. Blocks until the GPU
-    /// is done.
-    pub fn read_rows(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        mut row: impl FnMut(u32, &[u8]),
-    ) -> Result<(), String> {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &self.buffer,
-                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(self.padded_row), rows_per_image: None },
-            },
-            wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
-        );
-        queue.submit([encoder.finish()]);
+}
 
-        let slice = self.buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
-        {
-            let mapped = slice.get_mapped_range().map_err(|e| e.to_string())?;
-            let row_bytes = (self.width * 4) as usize;
-            for y in 0..self.height {
-                let start = (y * self.padded_row) as usize;
-                row(y, &mapped[start..start + row_bytes]);
-            }
-        }
-        self.buffer.unmap();
-        Ok(())
-    }
+fn padded_row_bytes(width: u32) -> u32 {
+    (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+fn staging_buffer(device: &wgpu::Device, padded_row: u32, height: u32) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mite-ui staging"),
+        size: u64::from(padded_row * height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    })
+}
+
+fn copy_to_buffer(encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture, buffer: &wgpu::Buffer, padded_row: u32, w: u32, h: u32) {
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo {
+            buffer,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded_row), rows_per_image: None },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,10 +88,63 @@ pub(crate) enum PresentMode {
 impl PresentMode {
     pub fn from_env_or_default() -> Self {
         match std::env::var("MITE_UI_PRESENT").as_deref() {
-            Ok("gpu") => Self::Gpu,
             Ok("cpu") => Self::Cpu,
-            _ if cfg!(target_os = "linux") => Self::Cpu,
             _ => Self::Gpu,
+        }
+    }
+}
+
+/// One staging slot of the CPU pipeline.
+struct Slot {
+    buffer: wgpu::Buffer,
+    mapped: Arc<AtomicBool>,
+    in_flight: bool,
+    /// The submission that fills this slot; waiting is scoped to it, never to newer work.
+    submission: Option<wgpu::SubmissionIndex>,
+}
+
+/// GPU-side swizzle target plus two staging buffers.
+pub(crate) struct Pipeline {
+    bgra: wgpu::Texture,
+    bgra_view: wgpu::TextureView,
+    swizzle: TextureBlitter,
+    slots: [Slot; 2],
+    /// Slot the next frame goes into.
+    next: usize,
+    width: u32,
+    height: u32,
+    padded_row: u32,
+}
+
+impl Pipeline {
+    fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let bgra = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mite-ui bgra"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let bgra_view = bgra.create_view(&wgpu::TextureViewDescriptor::default());
+        let padded_row = padded_row_bytes(width);
+        let slot = || Slot {
+            buffer: staging_buffer(device, padded_row, height),
+            mapped: Arc::new(AtomicBool::new(false)),
+            in_flight: false,
+            submission: None,
+        };
+        Self {
+            bgra,
+            bgra_view,
+            swizzle: TextureBlitter::new(device, wgpu::TextureFormat::Bgra8Unorm),
+            slots: [slot(), slot()],
+            next: 0,
+            width,
+            height,
+            padded_row,
         }
     }
 }
@@ -119,6 +154,7 @@ pub(crate) enum Presenter {
     Cpu {
         dev_id: usize,
         surface: softbuffer::Surface<PlatformHandle, PlatformHandle>,
+        pipeline: Box<Pipeline>,
     },
 }
 
@@ -127,8 +163,14 @@ impl Presenter {
     pub fn new(mode: PresentMode, cx: &mut RenderContext, window: PlatformHandle, w: u32, h: u32) -> Result<(Self, usize), String> {
         match mode {
             PresentMode::Gpu => {
-                let surface = pollster::block_on(cx.create_surface(window, w, h, wgpu::PresentMode::AutoVsync))
+                let mut surface = pollster::block_on(cx.create_surface(window, w, h, wgpu::PresentMode::Fifo))
                     .map_err(|e| e.to_string())?;
+                // Mailbox: tear-free and synced to the display like FIFO, but presenting never
+                // blocks the UI thread waiting for vblank (FIFO did, ~8 ms per frame at 60 Hz).
+                let caps = surface.surface.get_capabilities(cx.devices[surface.dev_id].adapter());
+                if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                    cx.set_present_mode(&mut surface, wgpu::PresentMode::Mailbox);
+                }
                 let dev_id = surface.dev_id;
                 Ok((Self::Gpu(Box::new(surface)), dev_id))
             }
@@ -137,7 +179,8 @@ impl Presenter {
                 let context = softbuffer::Context::new(window.clone()).map_err(|e| e.to_string())?;
                 let mut surface = softbuffer::Surface::new(&context, window).map_err(|e| e.to_string())?;
                 resize_soft(&mut surface, w, h)?;
-                Ok((Self::Cpu { dev_id, surface }, dev_id))
+                let pipeline = Box::new(Pipeline::new(&cx.devices[dev_id].device, w, h));
+                Ok((Self::Cpu { dev_id, surface, pipeline }, dev_id))
             }
         }
     }
@@ -148,11 +191,15 @@ impl Presenter {
                 cx.resize_surface(surface, w, h);
                 Ok(())
             }
-            Self::Cpu { surface, .. } => resize_soft(surface, w, h),
+            Self::Cpu { dev_id, surface, pipeline } => {
+                **pipeline = Pipeline::new(&cx.devices[*dev_id].device, w, h);
+                resize_soft(surface, w, h)
+            }
         }
     }
 
-    /// Puts `frame` on screen. Returns `false` if the frame was skipped and should be retried.
+    /// Puts `frame` on screen (Cpu: queues it and shows the previous one). Returns `false` if
+    /// nothing could be shown and the caller should retry.
     pub fn present(&mut self, cx: &RenderContext, frame: &Offscreen) -> Result<bool, String> {
         match self {
             Self::Gpu(surface) => {
@@ -173,21 +220,120 @@ impl Presenter {
                 handle.queue.present(texture);
                 Ok(true)
             }
-            Self::Cpu { dev_id, surface } => {
+            Self::Cpu { dev_id, surface, pipeline } => {
                 let handle = &cx.devices[*dev_id];
-                let mut buffer = surface.buffer_mut().map_err(|e| e.to_string())?;
-                let width = frame.width as usize;
-                frame.read_rows(&handle.device, &handle.queue, |y, rgba| {
-                    let out = &mut buffer[y as usize * width..(y as usize + 1) * width];
-                    for (px, src) in out.iter_mut().zip(rgba.chunks_exact(4)) {
-                        // softbuffer wants 0xAARRGGBB; the alpha byte matters on ARGB visuals.
-                        *px = 0xFF00_0000 | u32::from(src[0]) << 16 | u32::from(src[1]) << 8 | u32::from(src[2]);
+                let p = &mut **pipeline;
+                if frame.width != p.width || frame.height != p.height {
+                    return Ok(false);
+                }
+                // Queue this frame: swizzle to BGRA and copy into the free staging slot.
+                let t0 = std::time::Instant::now();
+                let slot_index = p.next;
+                let mut encoder = handle.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("mite-ui readback") });
+                p.swizzle.copy(&handle.device, &mut encoder, &frame.view, &p.bgra_view);
+                copy_to_buffer(&mut encoder, &p.bgra, &p.slots[slot_index].buffer, p.padded_row, p.width, p.height);
+                let submission = handle.queue.submit([encoder.finish()]);
+                let slot = &mut p.slots[slot_index];
+                slot.submission = Some(submission);
+                slot.mapped.store(false, Ordering::Release);
+                let flag = slot.mapped.clone();
+                slot.buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                    if r.is_ok() {
+                        flag.store(true, Ordering::Release);
                     }
-                })?;
-                buffer.present().map_err(|e| e.to_string())?;
+                });
+                slot.in_flight = true;
+                p.next = 1 - slot_index;
+                // Drive map callbacks without blocking.
+                let _ = handle.device.poll(wgpu::PollType::Poll);
+
+                // Show the previous frame if it is still queued (it was submitted a tick ago, so
+                // the GPU is done with it). Never show the frame just queued: waiting for it is
+                // exactly the stall this pipeline exists to avoid. It appears on the next tick,
+                // via the next present or `flush`.
+                let previous = 1 - slot_index;
+                if p.slots[previous].in_flight {
+                    Self::show_slot(handle, surface, p, previous)?;
+                }
+                if crate::window::tracing() {
+                    eprintln!("[mite-ui] queue {:.2} ms", t0.elapsed().as_secs_f64() * 1e3);
+                }
                 Ok(true)
             }
         }
+    }
+
+    /// Shows the newest queued frame (Cpu path) once the GPU has finished it, without waiting.
+    /// Called on ticks with nothing new to draw, so the last frame always reaches the screen.
+    pub fn flush(&mut self, cx: &RenderContext) -> Result<(), String> {
+        if let Self::Cpu { dev_id, surface, pipeline } = self {
+            let handle = &cx.devices[*dev_id];
+            let p = &mut **pipeline;
+            let newest = 1 - p.next;
+            let _ = handle.device.poll(wgpu::PollType::Poll);
+            if p.slots[newest].in_flight && p.slots[newest].mapped.load(Ordering::Acquire) {
+                Self::show_slot(handle, surface, p, newest)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A frame has been queued but not shown yet (Cpu path).
+    pub fn has_pending(&self) -> bool {
+        matches!(self, Self::Cpu { pipeline, .. } if pipeline.slots.iter().any(|s| s.in_flight))
+    }
+
+    fn show_slot(
+        handle: &vello::util::DeviceHandle,
+        surface: &mut softbuffer::Surface<PlatformHandle, PlatformHandle>,
+        p: &mut Pipeline,
+        index: usize,
+    ) -> Result<(), String> {
+        let trace = crate::window::tracing();
+        let t0 = std::time::Instant::now();
+        let slot = &mut p.slots[index];
+        let _ = handle.device.poll(wgpu::PollType::Poll);
+        let was_ready = slot.mapped.load(Ordering::Acquire);
+        if !slot.mapped.load(Ordering::Acquire) {
+            // Wait for this slot's own submission only, not for frames queued after it.
+            let submission_index = slot.submission.clone();
+            handle
+                .device
+                .poll(wgpu::PollType::Wait { submission_index, timeout: None })
+                .map_err(|e| e.to_string())?;
+        }
+        if !slot.mapped.load(Ordering::Acquire) {
+            return Err("staging buffer failed to map".into());
+        }
+        let t_wait = t0.elapsed();
+        {
+            let mut buffer = surface.buffer_mut().map_err(|e| e.to_string())?;
+            let t_buf = t0.elapsed();
+            let mapped = slot.buffer.slice(..).get_mapped_range().map_err(|e| e.to_string())?;
+            let row_px = p.width as usize;
+            // BGRA8 bytes in little-endian u32s are exactly softbuffer's 0xAARRGGBB, and Vello's
+            // output is opaque, so each row is a straight memcpy.
+            for y in 0..p.height as usize {
+                let src = &mapped[y * p.padded_row as usize..][..row_px * 4];
+                let dst = &mut buffer[y * row_px..][..row_px];
+                copy_bgra_row(src, dst);
+            }
+            drop(mapped);
+            let t_copy = t0.elapsed();
+            buffer.present().map_err(|e| e.to_string())?;
+            if trace {
+                eprintln!(
+                    "[mite-ui] show ready={was_ready} wait {:.2} buffer {:.2} copy {:.2} put {:.2} ms",
+                    t_wait.as_secs_f64() * 1e3,
+                    (t_buf - t_wait).as_secs_f64() * 1e3,
+                    (t_copy - t_buf).as_secs_f64() * 1e3,
+                    (t0.elapsed() - t_copy).as_secs_f64() * 1e3
+                );
+            }
+        }
+        slot.buffer.unmap();
+        slot.in_flight = false;
+        Ok(())
     }
 
     pub fn dev_id(&self) -> usize {
@@ -195,6 +341,21 @@ impl Presenter {
             Self::Gpu(surface) => surface.dev_id,
             Self::Cpu { dev_id, .. } => *dev_id,
         }
+    }
+}
+
+#[cfg(target_endian = "little")]
+fn copy_bgra_row(src: &[u8], dst: &mut [u32]) {
+    // SAFETY: viewing `dst` (src.len() / 4 u32s) as bytes is always valid: u8 has no alignment
+    // or validity requirements, and the lengths match.
+    let bytes = unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr().cast::<u8>(), dst.len() * 4) };
+    bytes.copy_from_slice(src);
+}
+
+#[cfg(target_endian = "big")]
+fn copy_bgra_row(src: &[u8], dst: &mut [u32]) {
+    for (px, b) in dst.iter_mut().zip(src.chunks_exact(4)) {
+        *px = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
     }
 }
 

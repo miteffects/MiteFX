@@ -32,6 +32,10 @@ pub enum KnobKind {
 #[derive(Debug)]
 pub struct Knob {
     pub spec: ParamSpec,
+    /// Host parameter id. Defaults to `spec.id`; per-band dials use e.g. `b03_freq`.
+    pub id: String,
+    /// Draw the value and unit inside the disc (standard dials). Small dials show them beside.
+    pub value_inside: bool,
     pub label: &'static str,
     pub kind: KnobKind,
     pub center: Point,
@@ -50,7 +54,24 @@ struct Drag {
 
 impl Knob {
     pub fn new(spec: ParamSpec, label: &'static str, kind: KnobKind, center: Point, diameter: f64) -> Self {
-        Self { spec, label, kind, center, diameter, color: None, hover: false, drag: None }
+        Self {
+            spec,
+            id: spec.id.to_owned(),
+            value_inside: true,
+            label,
+            kind,
+            center,
+            diameter,
+            color: None,
+            hover: false,
+            drag: None,
+        }
+    }
+
+    /// Same dial bound to another host parameter id.
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
     }
 
     fn scale(&self) -> f64 {
@@ -78,7 +99,7 @@ impl Knob {
         let s = self.scale();
         let theme = cx.theme;
         let color = self.color.unwrap_or(theme.accent);
-        let norm = cx.host.normalized(self.spec.id);
+        let norm = cx.host.normalized(&self.id);
         let to_deg = |n: f32| -SWEEP_DEG / 2.0 + SWEEP_DEG * f64::from(n);
         let value_deg = to_deg(norm);
         // Bipolar dials light from the zero point, which is not the middle of an asymmetric
@@ -125,9 +146,11 @@ impl Knob {
         glow_stroke(cx.scene, &pointer, 2.5 * s, theme.needle, color, 2.2 * s);
 
         // Value + unit inside the disc.
-        let plain = cx.host.plain(self.spec.id, norm);
-        let value = self.spec.format_number(plain);
-        let unit = self.spec.unit;
+        let plain = cx.host.plain(&self.id, norm);
+        let (value, unit) = self.spec.format_parts(plain);
+        if !self.value_inside {
+            return;
+        }
         let value_style = TextStyle::READOUT_DIAL.sized((12.0 * s) as f32);
         let unit_style = TextStyle::UNIT_DIAL.sized((9.0 * s) as f32);
         let block = if unit.is_empty() { 12.0 * s } else { 12.0 * s + 2.0 * s + 9.0 * s };
@@ -151,7 +174,7 @@ impl Knob {
 
     /// Handles input. Returns `true` when the knob needs a redraw.
     pub fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
-        let id = self.spec.id;
+        let id = self.id.as_str();
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 if let Some(drag) = &mut self.drag {
@@ -184,9 +207,8 @@ impl Knob {
                 true
             }
             UiEvent::Wheel { pos, lines, mods } if self.bounds().contains(pos) => {
-                let step = if mods.fine() { self.spec.wheel_step_fine } else { self.spec.wheel_step };
-                let plain = host.plain(id, host.normalized(id)) + lines * step;
-                let value = self.spec.normalize(plain.clamp(self.spec.min, self.spec.max));
+                let plain = self.spec.wheel(host.plain(id, host.normalized(id)), lines, mods.fine());
+                let value = host.normalize(id, plain);
                 host.begin_gesture(id);
                 host.set_normalized(id, value);
                 host.end_gesture(id);
@@ -203,7 +225,7 @@ mod tests {
     use super::*;
     use crate::host::{MemoryParamHost, ParamHost};
     use crate::view::Modifiers;
-    use mite_core::ParamScale;
+    use mite_core::{ParamDisplay, ParamScale};
 
     const SPEC: ParamSpec = ParamSpec {
         id: "gain",
@@ -217,6 +239,7 @@ mod tests {
         decimals: 1,
         wheel_step: 0.5,
         wheel_step_fine: 0.1,
+        display: ParamDisplay::Number,
     };
 
     fn knob() -> Knob {

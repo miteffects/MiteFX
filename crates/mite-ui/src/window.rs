@@ -132,8 +132,18 @@ impl UiWindow {
         let (w, h) = (size.physical.width.max(1), size.physical.height.max(1));
         trace("init start");
         let mut cx = RenderContext::new();
-        let mode = PresentMode::from_env_or_default();
-        let (presenter, dev_id) = Presenter::new(mode, &mut cx, ctx.platform_handle(), w, h).map_err(message_error)?;
+        let mut mode = PresentMode::from_env_or_default();
+        let (presenter, dev_id) = match Presenter::new(mode, &mut cx, ctx.platform_handle(), w, h) {
+            Ok(p) => p,
+            Err(e) if mode == PresentMode::Gpu => {
+                // No usable GPU surface for this window (driver, remote desktop, …): copy frames
+                // through the CPU instead of showing nothing.
+                trace(&format!("gpu surface failed ({e}), falling back to cpu presentation"));
+                mode = PresentMode::Cpu;
+                Presenter::new(mode, &mut cx, ctx.platform_handle(), w, h).map_err(message_error)?
+            }
+            Err(e) => return Err(message_error(e)),
+        };
         let device = &cx.devices[dev_id].device;
         let frame = Offscreen::new(device, w, h);
         let renderer = Renderer::new(
@@ -185,9 +195,11 @@ impl UiWindow {
         let mut st = self.state.borrow_mut();
         let State { view, host, theme, text, logical, scene, scale, logical_size, .. } = &mut *st;
         logical.reset();
-        view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: *logical_size });
+        let zoom = view.zoom();
+        let design = (logical_size.0 / zoom, logical_size.1 / zoom);
+        view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: design });
         scene.reset();
-        scene.append(logical, Some(Affine::scale(*scale)));
+        scene.append(logical, Some(Affine::scale(*scale * zoom)));
         let t_scene = t0.elapsed();
 
         let mut gpu = self.gpu.borrow_mut();
@@ -244,7 +256,11 @@ impl WindowHandler for UiWindow {
 
     fn on_event(&self, event: Event) -> EventStatus {
         let Event::Mouse(mouse) = event else { return EventStatus::Ignored };
-        let scale = self.state.borrow().scale;
+        let scale = {
+            let st = self.state.borrow();
+            st.scale * st.view.zoom()
+        };
+        // Events reach the view in design units.
         let to_logical = |p: baseview::dpi::PhysicalPosition<f64>| Point::new(p.x / scale, p.y / scale);
         match mouse {
             MouseEvent::CursorMoved { position, modifiers } => {
@@ -300,6 +316,15 @@ impl WindowHandler for UiWindow {
             if let Err(e) = self.render() {
                 trace(&format!("render failed: {e}"));
             }
+        } else {
+            // The CPU presenter shows frames one tick late; once nothing changes, show the last.
+            let mut gpu = self.gpu.borrow_mut();
+            let Gpu { cx, presenter, .. } = &mut *gpu;
+            if presenter.has_pending() {
+                if let Err(e) = presenter.flush(cx) {
+                    trace(&format!("flush failed: {e}"));
+                }
+            }
         }
     }
 }
@@ -318,9 +343,14 @@ fn mods(m: keyboard_types::Modifiers) -> Modifiers {
     Modifiers { shift: m.contains(K::SHIFT), alt: m.contains(K::ALT), ctrl: m.contains(K::CONTROL), meta: m.contains(K::META) }
 }
 
-/// Temporary diagnostics: set MITE_UI_TRACE=1.
+/// Frame-timing diagnostics, enabled with `MITE_UI_TRACE=1` (read once per process).
+pub(crate) fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("MITE_UI_TRACE").is_some())
+}
+
 fn trace(msg: &str) {
-    if std::env::var_os("MITE_UI_TRACE").is_some() {
+    if tracing() {
         eprintln!("[mite-ui] {msg}");
     }
 }

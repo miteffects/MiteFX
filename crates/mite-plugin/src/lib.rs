@@ -9,4 +9,4 @@ mod editor;
 mod params;
 
 pub use editor::create_editor;
-pub use params::float_param;
+pub use params::{bool_param, choice_param, float_param, float_param_named};

@@ -522,7 +522,7 @@ Done and verified on Linux:
 - **Real host:** the editor opens and draws inside Reaper (checked by capturing its window).
 - **Fixes along the way:**
   - **Windows were never shown.** Fixed by calling `show()` after creating them.
-  - **Vulkan child-window presentation shows nothing under XWayland.** On Linux, frames now go to the window through the CPU presenter (softbuffer); `MITE_UI_PRESENT=gpu` brings back the GPU path.
+  - **Presentation:** frames go straight from the GPU to the window (wgpu surface, mailbox mode, synced to the display without blocking). Measured inside Reaper: 0.8 ms per frame for the full EQ at 2560×1520. A softbuffer CPU path remains only as a fallback when no GPU surface can be created. An earlier diagnosis that Vulkan could not present into host child windows under XWayland was wrong: the windows were simply never shown or redrawn.
   - **baseview's Present-extension redraw pacing never fires inside Reaper.** Frames are now driven by our own 60 Hz UI timer.
 - **nih-plug fork:** we pin the fork `ansabic/nih-plug`, branch `mitefx`, which fixes two CLAP state bugs:
   - the untrusted state length could abort the host;
@@ -537,10 +537,36 @@ Open:
 - Bitwig and Ableton, and macOS and Windows hosts.
 - The WGSL bloom pass.
 - Exact log parameter ranges.
-- Zero-copy GPU presentation on Linux, by fixing baseview or presenting through our own X11 child window.
 - Offering the two nih-plug fixes upstream.
 
 ### Phase 1: Mite EQ (MVP)
+
+**Status (2026-10-14), slice 1 done:**
+- **Filters and engine:**
+  - Zero-latency matched filters (`mite-dsp::filter`, `mite-dsp::eq`): Bell, Low/High Shelf, Low/High Cut at 6–96 dB/oct, Notch, Band Pass and Tilt.
+  - Cuts are designed as inverted boosts, so boost and cut are exact mirror images.
+  - 24 bands with click-free smoothing; type, slope and on/off changes crossfade; disabled bands are bit-exact.
+- **Analyzer:** `realfft`, 1/12-octave smoothing, 4.5 dB/oct tilt.
+- **Parameters:** 145 frozen IDs (`b01_freq` …) checked against a golden manifest.
+- **Editor**, per the mockup:
+  - spectrum, curves and nodes;
+  - glass band panel;
+  - add, drag, Shift-fine, Alt or wheel for Q, reset and delete.
+- **Validation:** clap-validator and pluginval (strictness 10) pass, debug and release. Draws in Reaper.
+
+**Measured accuracy** of the analog match:
+- Bells up to the mid range: within 0.01–0.1 dB.
+- Cuts: exact slopes.
+- Bands near Nyquist (above about 4 kHz at 44.1 kHz): within about 1 dB. **Open:** the §8.6 target of 0.1 dB up to 20 kHz still needs oversampling or a higher-order correction near Nyquist.
+
+**Next slices:**
+1. Dynamic EQ.
+2. Natural phase and linear phase (partitioned FFT convolution).
+3. Spectral and resonance bands.
+4. Collision view and EQ Match.
+5. Snapshots, morph and presets.
+6. Stereo placement (M/S/L/R).
+7. WGSL bloom and glass blur.
 
 Ordered steps:
 1. `mite-dsp` filters (SVF, matched designs, cascades), the FFT wrapper, partitioned convolution and oversampling.

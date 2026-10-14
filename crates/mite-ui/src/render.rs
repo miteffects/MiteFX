@@ -25,6 +25,8 @@ pub struct Image {
 /// Renders one frame of `view` at `scale` × its logical size.
 pub fn render_view(view: &mut dyn View, host: &dyn ParamHost, theme: &Theme, scale: f64) -> Result<Image, String> {
     let (lw, lh) = view.logical_size();
+    let zoom = view.zoom();
+    let scale = scale * zoom;
     let (width, height) = ((lw * scale).round() as u32, (lh * scale).round() as u32);
 
     let mut logical = Scene::new();

@@ -31,6 +31,7 @@ where
 {
     let probe = make_view();
     let (w, h) = probe.logical_size();
+    let (w, h) = (w * probe.zoom(), h * probe.zoom());
     Some(Box::new(MiteEditor {
         params,
         title,
@@ -151,6 +152,10 @@ impl ParamHost for NihParamHost {
 
     fn plain(&self, id: &str, normalized: f32) -> f32 {
         self.ptr(id).map_or(0.0, |p| unsafe { p.preview_plain(normalized) })
+    }
+
+    fn normalize(&self, id: &str, plain: f32) -> f32 {
+        self.ptr(id).map_or(0.0, |p| unsafe { p.preview_normalized(plain) })
     }
 
     fn default_normalized(&self, id: &str) -> f32 {

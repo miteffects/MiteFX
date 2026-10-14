@@ -54,8 +54,14 @@ pub struct DrawCx<'a> {
 
 /// A plugin editor's root. Drawn every frame the window asks for.
 pub trait View: Send + 'static {
-    /// Size the editor wants, in logical pixels.
+    /// Size the editor is laid out in (design units). The window is this × [`View::zoom`].
     fn logical_size(&self) -> (f64, f64);
+
+    /// Display zoom applied on top of the platform's DPI scale (UI scale setting). Views draw
+    /// and receive events in design units regardless.
+    fn zoom(&self) -> f64 {
+        1.0
+    }
 
     fn draw(&mut self, cx: &mut DrawCx<'_>);
 

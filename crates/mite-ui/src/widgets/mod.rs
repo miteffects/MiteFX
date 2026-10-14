@@ -1,5 +1,6 @@
 //! Widgets from the component sheet (`docs/design/mockups/components.dc.html`).
 
+pub mod brand;
 pub mod knob;
 pub mod meter;
 

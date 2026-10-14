@@ -14,6 +14,8 @@ pub trait ParamHost {
     fn normalized(&self, id: &str) -> f32;
     /// Plain value for a normalised value, using the host parameter's own mapping.
     fn plain(&self, id: &str, normalized: f32) -> f32;
+    /// Normalised value for a plain value, using the host parameter's own mapping.
+    fn normalize(&self, id: &str, plain: f32) -> f32;
     fn default_normalized(&self, id: &str) -> f32;
     fn begin_gesture(&self, id: &str);
     fn set_normalized(&self, id: &str, normalized: f32);
@@ -38,6 +40,12 @@ impl MemoryParamHost {
         self
     }
 
+    /// Adds a parameter under a different id (e.g. a per-band `b03_freq` from a `freq` spec).
+    pub fn with_id(self, id: &'static str, spec: ParamSpec) -> Self {
+        let spec = ParamSpec { id, ..spec };
+        self.with(spec)
+    }
+
     /// Sets a plain value, e.g. to stage a snapshot.
     pub fn set_plain(&self, id: &str, plain: f32) {
         if let Some((spec, v)) = self.values.borrow_mut().get_mut(id) {
@@ -53,6 +61,10 @@ impl ParamHost for MemoryParamHost {
 
     fn plain(&self, id: &str, normalized: f32) -> f32 {
         self.values.borrow().get(id).map_or(0.0, |v| v.0.denormalize(normalized))
+    }
+
+    fn normalize(&self, id: &str, plain: f32) -> f32 {
+        self.values.borrow().get(id).map_or(0.0, |v| v.0.normalize(plain))
     }
 
     fn default_normalized(&self, id: &str) -> f32 {

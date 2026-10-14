@@ -1,6 +1,6 @@
 //! Mite Gain parameters. IDs are frozen once released (see `tests/golden/mite_gain.params.txt`).
 
-use mite_core::{ParamScale, ParamSpec};
+use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_plugin::float_param;
 use nih_plug::prelude::*;
 
@@ -16,6 +16,7 @@ pub const GAIN: ParamSpec = ParamSpec {
     decimals: 1,
     wheel_step: 0.5,
     wheel_step_fine: 0.1,
+    display: ParamDisplay::Number,
 };
 
 /// Every parameter, in host order.

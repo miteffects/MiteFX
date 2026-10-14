@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use mite_core::StereoMeter;
-use mite_ui::kurbo::{Affine, BezPath, Line, Point, Rect, Stroke};
-use mite_ui::paint::glow_stroke;
+use mite_ui::kurbo::{Affine, Line, Point, Rect, Stroke};
 use mite_ui::peniko::Fill;
+use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, ParamHost, TextStyle, UiEvent, View};
 
@@ -42,28 +42,8 @@ impl GainView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, 0.0, WIDTH, HEADER));
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HEADER - 0.5), (WIDTH, HEADER - 0.5)));
 
-        // The miteFX mark (tokens board, "LOGO DIRECTION"): a mite seen from above, carrying the
-        // plugin's signal glyph. Drawn from the mockup's 32-unit paths.
-        let to_header = Affine::translate((14.0, 11.0)) * Affine::scale(26.0 / 32.0);
-        let path = |d: &str| {
-            let mut p = BezPath::from_svg(d).expect("valid mark path");
-            p.apply_affine(to_header);
-            p
-        };
-        let s = 26.0 / 32.0;
-        let legs = path("M10.5 15 L5 12 M10 19 L4 19 M10.5 23 L5 26 M21.5 15 L27 12 M22 19 L28 19 M21.5 23 L27 26");
-        let body = path("M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z");
-        let head = path("M18.6 7.4 A2.6 2.6 0 1 1 13.4 7.4 A2.6 2.6 0 1 1 18.6 7.4 Z");
-        let signal = path("M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21");
-        let round = |w: f64| Stroke::new(w * s).with_caps(mite_ui::kurbo::Cap::Round);
-        cx.scene.stroke(&round(1.4), Affine::IDENTITY, theme.text_lo, None, &legs);
-        cx.scene.stroke(&round(1.6), Affine::IDENTITY, theme.text_hi, None, &body);
-        cx.scene.stroke(&round(1.6), Affine::IDENTITY, theme.text_hi, None, &head);
-        glow_stroke(cx.scene, &signal, 1.8 * s, theme.accent, theme.accent, 3.0 * s);
-
-        let x = 48.0;
-        let w = cx.text.draw(cx.scene, "Mite", x, 14.0, TextStyle::TITLE.weighted(800.0), theme.text_hi, Align::Left);
-        cx.text.draw(cx.scene, " Gain", x + f64::from(w), 14.0, TextStyle::TITLE.weighted(500.0), theme.text_mid, Align::Left);
+        draw_mark(cx, 14.0, 11.0, 26.0);
+        draw_title(cx, 48.0, 14.0, "Gain");
     }
 
     fn draw_help(&self, cx: &mut DrawCx<'_>) {
