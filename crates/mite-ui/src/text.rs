@@ -1,5 +1,6 @@
 //! Text: Manrope (embedded, OFL) shaped by parley and drawn as Vello glyph runs.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parley::{
@@ -7,7 +8,7 @@ use parley::{
     PositionedLayoutItem, StyleProperty,
 };
 use vello::kurbo::Affine;
-use vello::peniko::{Blob, Color, Fill};
+use vello::peniko::{Blob, Color, Fill, FontData};
 use vello::{Glyph, Scene};
 
 const MANROPE: &[u8] = include_bytes!("../fonts/Manrope-Variable.ttf");
@@ -47,11 +48,38 @@ impl TextStyle {
     }
 }
 
-/// Shapes and draws text. One per window.
+/// One shaped glyph run, ready to draw.
+struct ShapedRun {
+    font: FontData,
+    font_size: f32,
+    coords: Vec<i16>,
+    glyphs: Vec<Glyph>,
+}
+
+struct Shaped {
+    width: f32,
+    runs: Vec<ShapedRun>,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ShapeKey {
+    text: String,
+    size: u32,
+    weight: u32,
+    tracking: u32,
+    tabular: bool,
+}
+
+/// Shapes and draws text. One per window. Shaped text is cached: UI labels and readouts repeat
+/// every frame, and shaping them each time was ~10 % of the editor's CPU.
 pub struct Typesetter {
     fonts: FontContext,
     layouts: LayoutContext<()>,
+    cache: HashMap<ShapeKey, Shaped>,
 }
+
+/// Distinct strings kept before the cache is cleared (readouts churn while dragging).
+const CACHE_LIMIT: usize = 1024;
 
 impl Default for Typesetter {
     fn default() -> Self {
@@ -63,7 +91,7 @@ impl Typesetter {
     pub fn new() -> Self {
         let mut fonts = FontContext::new();
         fonts.collection.register_fonts(Blob::new(Arc::new(MANROPE)), None);
-        Self { fonts, layouts: LayoutContext::new() }
+        Self { fonts, layouts: LayoutContext::new(), cache: HashMap::new() }
     }
 
     /// Draws `text` with its baseline-box top-left (or top-centre / top-right) at `(x, y)` in
@@ -79,6 +107,41 @@ impl Typesetter {
         color: Color,
         align: Align,
     ) -> f32 {
+        let key = ShapeKey {
+            text: text.to_owned(),
+            size: style.size.to_bits(),
+            weight: style.weight.to_bits(),
+            tracking: style.tracking.to_bits(),
+            tabular: style.tabular,
+        };
+        if !self.cache.contains_key(&key) {
+            if self.cache.len() >= CACHE_LIMIT {
+                self.cache.clear();
+            }
+            let shaped = self.shape(text, style);
+            self.cache.insert(key.clone(), shaped);
+        }
+        let shaped = &self.cache[&key];
+        let dx = match align {
+            Align::Left => 0.0,
+            Align::Center => -f64::from(shaped.width) / 2.0,
+            Align::Right => -f64::from(shaped.width),
+        };
+        let origin = Affine::translate((x + dx, y));
+        for run in &shaped.runs {
+            scene
+                .draw_glyphs(&run.font)
+                .font_size(run.font_size)
+                .normalized_coords(&run.coords)
+                .transform(origin)
+                .brush(color)
+                .hint(false)
+                .draw(Fill::NonZero, run.glyphs.iter().copied());
+        }
+        shaped.width
+    }
+
+    fn shape(&mut self, text: &str, style: TextStyle) -> Shaped {
         let mut builder = self.layouts.ranged_builder(&mut self.fonts, text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(FontFamily::Source("Manrope".into())));
         builder.push_default(StyleProperty::FontSize(style.size));
@@ -92,31 +155,19 @@ impl Typesetter {
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
         layout.align(Alignment::Start, AlignmentOptions::default());
-        let width = layout.width();
-        let dx = match align {
-            Align::Left => 0.0,
-            Align::Center => -(width as f64) / 2.0,
-            Align::Right => -(width as f64),
-        };
-        let origin = Affine::translate((x + dx, y));
+        let mut runs = Vec::new();
         for line in layout.lines() {
             for item in line.items() {
                 let PositionedLayoutItem::GlyphRun(glyph_run) = item else { continue };
                 let run = glyph_run.run();
-                let coords: Vec<i16> = run.normalized_coords().iter().map(|c| c.to_bits()).collect();
-                scene
-                    .draw_glyphs(run.font())
-                    .font_size(run.font_size())
-                    .normalized_coords(&coords)
-                    .transform(origin)
-                    .brush(color)
-                    .hint(false)
-                    .draw(
-                        Fill::NonZero,
-                        glyph_run.positioned_glyphs().map(|g| Glyph { id: g.id, x: g.x, y: g.y }),
-                    );
+                runs.push(ShapedRun {
+                    font: run.font().clone(),
+                    font_size: run.font_size(),
+                    coords: run.normalized_coords().iter().map(|c| c.to_bits()).collect(),
+                    glyphs: glyph_run.positioned_glyphs().map(|g| Glyph { id: g.id, x: g.x, y: g.y }).collect(),
+                });
             }
         }
-        width
+        Shaped { width: layout.width(), runs }
     }
 }

@@ -116,6 +116,16 @@ struct NodeDrag {
     log_q: f64,
 }
 
+/// How one display point reads the FFT: average bins `first..=last`, or interpolate between
+/// `first` and `last` by `frac`.
+struct SpectrumPoint {
+    first: usize,
+    last: usize,
+    frac: f32,
+    tilt: f32,
+    average: bool,
+}
+
 /// Clickable rectangles of the open band panel, set while drawing.
 #[derive(Default, Clone, Copy)]
 struct PanelHits {
@@ -139,20 +149,22 @@ pub struct EqView {
     meter: LevelMeter,
     analyzer: Analyzer,
     samples: Vec<f32>,
-    bins: Vec<f32>,
     power: Vec<f32>,
+    spectrum_map: Vec<SpectrumPoint>,
+    spectrum_rate: f64,
     pre: Vec<f64>,
     post: Vec<f64>,
     last_spectrum: Instant,
     responses: Vec<Option<(BandSettings, Vec<f64>)>>,
     signature: Vec<f32>,
+    last_signature_check: Instant,
     ticks: u32,
 }
 
 impl EqView {
     pub fn new(shared: Arc<EqShared>) -> Self {
         let analyzer = Analyzer::new(ANALYZER_SIZE);
-        let bins = vec![-150.0; analyzer.bins()];
+        let bins = analyzer.bins();
         let mut out_knob = Knob::new(OUT_GAIN, "", KnobKind::Bipolar, Point::new(1196.0, FOOTER_TOP + 28.0), 34.0);
         out_knob.value_inside = false;
         Self {
@@ -168,13 +180,15 @@ impl EqView {
             meter: LevelMeter::new(Rect::new(1233.5, DISPLAY_TOP + 19.5, 1266.5, DISPLAY_TOP + 592.5)),
             analyzer,
             samples: vec![0.0; ANALYZER_SIZE],
-            power: vec![0.0; bins.len()],
-            bins,
+            power: vec![0.0; bins],
+            spectrum_map: Vec::new(),
+            spectrum_rate: 0.0,
             pre: vec![-150.0; POINTS],
             post: vec![-150.0; POINTS],
             last_spectrum: Instant::now(),
             responses: (0..BANDS).map(|_| None).collect(),
             signature: Vec::new(),
+            last_signature_check: Instant::now(),
             ticks: 0,
         }
     }
@@ -250,47 +264,66 @@ impl EqView {
         &self.responses[b].as_ref().expect("just filled").1
     }
 
+    /// Per display point: the FFT bins it averages (or the bin pair it interpolates) and its
+    /// tilt gain. Depends only on the sample rate, so it is rebuilt only when that changes.
+    fn rebuild_spectrum_map(&mut self, fs: f64) {
+        let size = self.analyzer.size() as f64;
+        let last = self.power.len() - 1;
+        self.spectrum_map = (0..POINTS)
+            .map(|i| {
+                let f = xf(i as f64 * PLOT_W / (POINTS - 1) as f64);
+                // 1/12-octave smoothing: ±1/24 octave around the point.
+                let (lo, hi) = (f * 2f64.powf(-1.0 / 24.0) * size / fs, f * 2f64.powf(1.0 / 24.0) * size / fs);
+                // 4.5 dB/oct tilt around 1 kHz (settings default), as a power factor.
+                let tilt = 10f64.powf(0.45 * (f / 1000.0).log2()) as f32;
+                if hi.floor() - lo.ceil() < 1.0 {
+                    let k = f * size / fs;
+                    let k0 = (k.floor() as usize).min(last - 1);
+                    SpectrumPoint { first: k0, last: k0 + 1, frac: (k - k0 as f64) as f32, tilt, average: false }
+                } else {
+                    let (a, b) = (lo.ceil() as usize, (hi.floor() as usize).min(last));
+                    SpectrumPoint { first: a.min(b), last: b, frac: 0.0, tilt, average: true }
+                }
+            })
+            .collect();
+        self.spectrum_rate = fs;
+    }
+
     fn update_spectrum(&mut self) -> bool {
-        let dt = self.last_spectrum.elapsed().as_secs_f64().min(0.1);
+        // The display shows at most ~60 frames/s, so analysing more often is wasted CPU.
+        let dt = self.last_spectrum.elapsed().as_secs_f64();
+        if dt < 0.0160 {
+            return false;
+        }
+        let dt = dt.min(0.1);
         self.last_spectrum = Instant::now();
         let fs = self.sample_rate();
-        let size = self.analyzer.size() as f64;
+        if fs != self.spectrum_rate {
+            self.rebuild_spectrum_map(fs);
+        }
+        let rise = (1.0 - (-dt / 0.03).exp()) as f32;
+        let fall = (60.0 * dt) as f32;
         let mut changed = false;
         for which in 0..2 {
             let tap = if which == 0 { &self.shared.pre } else { &self.shared.post };
             tap.read_latest(&mut self.samples);
-            self.analyzer.analyze(&self.samples, &mut self.bins);
+            self.analyzer.analyze_power(&self.samples, &mut self.power);
             let curve = if which == 0 { &mut self.pre } else { &mut self.post };
-            // Work in power so averaging is energy-correct.
-            for (p, &db) in self.power.iter_mut().zip(&self.bins) {
-                *p = 10f32.powf(db * 0.1);
-            }
-            let rise = 1.0 - (-dt / 0.03).exp();
-            for (i, value) in curve.iter_mut().enumerate() {
-                let x = i as f64 * PLOT_W / (POINTS - 1) as f64;
-                let f = xf(x);
-                // 1/12-octave smoothing: average the power of every bin within ±1/24 octave, or
-                // interpolate where bins are sparser than that (low frequencies).
-                let (lo, hi) = (f * 2f64.powf(-1.0 / 24.0) * size / fs, f * 2f64.powf(1.0 / 24.0) * size / fs);
-                let power = if hi.floor() - lo.ceil() < 1.0 {
-                    let k = f * size / fs;
-                    let k0 = (k.floor() as usize).min(self.power.len() - 2);
-                    let t = (k - k0 as f64) as f32;
-                    f64::from(self.power[k0] * (1.0 - t) + self.power[k0 + 1] * t)
+            for (value, m) in curve.iter_mut().zip(&self.spectrum_map) {
+                let power = if m.average {
+                    let span = &self.power[m.first..=m.last];
+                    span.iter().sum::<f32>() / span.len() as f32
                 } else {
-                    let (a, b) = (lo.ceil() as usize, (hi.floor() as usize).min(self.power.len() - 1));
-                    let span = &self.power[a.min(b)..=b];
-                    f64::from(span.iter().sum::<f32>() / span.len() as f32)
+                    self.power[m.first] * (1.0 - m.frac) + self.power[m.last] * m.frac
                 };
-                let db = 10.0 * power.max(1e-15).log10();
-                // 4.5 dB/oct tilt around 1 kHz (settings default), so pink noise reads flat.
-                let tilted = db + 4.5 * (f / 1000.0).log2();
+                let db = 10.0 * (power * m.tilt).max(1e-15).log10();
                 // Ballistics: ~30 ms rise, 60 dB/s fall.
-                let next = if tilted > *value { *value + (tilted - *value) * rise } else { tilted.max(*value - 60.0 * dt) };
-                if (next - *value).abs() > 0.05 {
+                let current = *value as f32;
+                let next = if db > current { current + (db - current) * rise } else { db.max(current - fall) };
+                if (next - current).abs() > 0.05 {
                     changed = true;
                 }
-                *value = next;
+                *value = f64::from(next);
             }
         }
         changed
@@ -851,7 +884,12 @@ impl View for EqView {
         let mut dirty = self.meter.set_levels(l, r);
         // The analyzer updates every UI tick so motion is as smooth as the display allows.
         dirty |= self.update_spectrum();
-        // Host-side changes (automation, presets, undo) since the last frame.
+        // Host-side changes (automation, presets, undo) since the last frame, checked at frame
+        // rate rather than every tick.
+        if self.last_signature_check.elapsed() < std::time::Duration::from_millis(16) {
+            return dirty;
+        }
+        self.last_signature_check = Instant::now();
         let mut signature = Vec::with_capacity(1 + BANDS * 6);
         signature.push(host.normalized(OUT_GAIN.id));
         for ids in &self.ids {

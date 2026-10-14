@@ -120,17 +120,29 @@ impl HasWindowHandle for HostParent {
 }
 
 /// `ParamHost` over nih-plug's parameter pointers and GUI context.
+///
+/// Values the editor sets are shown immediately. nih-plug applies a GUI change only when the
+/// event is handed to the host — at the end of the next audio block, or on a host flush when
+/// audio is stopped — so reading the parameter back right after setting it returns the old
+/// value. Drawing that made every drag follow the host's processing cadence instead of the mouse
+/// (stepped, laggy, only inside a host). `pending` holds what the editor set until the host's
+/// value catches up.
 struct NihParamHost {
     /// Keeps the parameter objects that the `ParamPtr`s point into alive.
     _params: Arc<dyn Params>,
     ptrs: HashMap<String, ParamPtr>,
     context: Arc<dyn GuiContext>,
+    pending: std::cell::RefCell<HashMap<String, (f32, std::time::Instant)>>,
 }
+
+/// How long a set value overrides the host's value if the host never confirms it (e.g. the
+/// host rejected it or automation took over).
+const PENDING_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl NihParamHost {
     fn new(params: Arc<dyn Params>, context: Arc<dyn GuiContext>) -> Self {
         let ptrs = params.param_map().into_iter().map(|(id, ptr, _group)| (id, ptr)).collect();
-        Self { _params: params, ptrs, context }
+        Self { _params: params, ptrs, context, pending: std::cell::RefCell::new(HashMap::new()) }
     }
 
     fn ptr(&self, id: &str) -> Option<ParamPtr> {
@@ -147,7 +159,19 @@ impl NihParamHost {
 // from the editor with such pointers.
 impl ParamHost for NihParamHost {
     fn normalized(&self, id: &str) -> f32 {
-        self.ptr(id).map_or(0.0, |p| unsafe { p.unmodulated_normalized_value() })
+        let host = self.ptr(id).map_or(0.0, |p| unsafe { p.unmodulated_normalized_value() });
+        let mut pending = self.pending.borrow_mut();
+        match pending.get(id) {
+            Some(&(value, at)) => {
+                if (value - host).abs() < 1e-6 || at.elapsed() > PENDING_TIMEOUT {
+                    pending.remove(id);
+                    host
+                } else {
+                    value
+                }
+            }
+            None => host,
+        }
     }
 
     fn plain(&self, id: &str, normalized: f32) -> f32 {
@@ -170,6 +194,10 @@ impl ParamHost for NihParamHost {
 
     fn set_normalized(&self, id: &str, normalized: f32) {
         if let Some(p) = self.ptr(id) {
+            // Snap through the parameter's own mapping (steps, ranges) so the shown value is
+            // exactly what the host will end up with.
+            let normalized = unsafe { p.preview_normalized(p.preview_plain(normalized)) };
+            self.pending.borrow_mut().insert(id.to_owned(), (normalized, std::time::Instant::now()));
             unsafe { self.context.raw_set_parameter_normalized(p, normalized) }
         }
     }

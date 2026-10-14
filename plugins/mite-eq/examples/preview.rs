@@ -66,7 +66,7 @@ fn main() -> Result<(), String> {
     let shared = Arc::new(EqShared::new());
     shared.sample_rate.store(48_000.0);
     let audio = shared.clone();
-    std::thread::spawn(move || {
+    let _audio_thread = std::thread::Builder::new().name("fake-audio".into()).spawn(move || {
         let mut engine = EqEngine::new(48_000.0, &settings, 0.0);
         let mut seed = 0x2545_F491_u32;
         let (mut b0, mut b1, mut b2) = (0.0_f32, 0.0_f32, 0.0_f32);

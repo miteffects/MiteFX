@@ -23,9 +23,11 @@ use crate::text::Typesetter;
 use crate::tokens::{Theme, ThemeKind};
 use crate::view::{DrawCx, Modifiers, MouseButton, UiEvent, View};
 
-/// UI frame clock (~120 Hz). Each tick polls telemetry and renders only if something changed, so
-/// idle cost stays near zero while drags and meters keep up with high-refresh displays.
+/// UI tick (~120 Hz): input-driven changes render on the next tick.
 const TICK: Duration = Duration::from_millis(8);
+/// Animation-driven redraws (meters, spectrum) are capped at ~60 Hz: more is wasted CPU on a
+/// 60 Hz display, and a smooth analyzer at 60 Hz costs a few percent of one core.
+const ANIMATION_FRAME: Duration = Duration::from_micros(16_400);
 const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(400);
 const DOUBLE_CLICK_SLOP: f64 = 4.0;
 /// Pixels per wheel "line" when the platform reports pixel deltas.
@@ -104,12 +106,21 @@ struct State {
 struct UiWindow {
     gpu: RefCell<Gpu>,
     state: RefCell<State>,
+    /// GTK host window to nudge after each frame (Linux; see host_sync.rs). The host sets its
+    /// frame-sync property only once its window is mapped, so the lookup retries for a while.
+    #[cfg(target_os = "linux")]
+    host_sync: RefCell<HostSyncLookup>,
     /// Something changed since the last presented frame.
     ///
     /// Frames are rendered from our own UI timer, not from baseview's redraw requests: on X11
     /// baseview paces redraws with Present-extension vblank notifications, and inside Reaper
     /// under XWayland those never arrive for an embedded window, so it never drew at all.
     dirty: Cell<bool>,
+    /// Presentation waits for vblank (GPU path), so it paces animation by itself.
+    vsynced: bool,
+    /// Telemetry (tick) changed something; rendered at most every [`ANIMATION_FRAME`].
+    animation_dirty: Cell<bool>,
+    last_frame: Cell<Instant>,
     _timer: Option<TimerHandle>,
 }
 
@@ -171,9 +182,14 @@ impl UiWindow {
             cursor: Point::ZERO,
         };
         Ok(Self {
+            #[cfg(target_os = "linux")]
+            host_sync: RefCell::new(HostSyncLookup { found: None, handle: ctx.platform_handle(), attempts: 0, last: None }),
             gpu: RefCell::new(Gpu { cx, presenter, frame, renderer }),
             state: RefCell::new(state),
             dirty: Cell::new(true),
+            vsynced: mode == PresentMode::Gpu,
+            animation_dirty: Cell::new(false),
+            last_frame: Cell::new(Instant::now()),
             _timer: timer,
         })
     }
@@ -228,6 +244,10 @@ impl UiWindow {
             (t0.elapsed() - t_gpu).as_secs_f64() * 1e3
         ));
         self.dirty.set(!shown);
+        #[cfg(target_os = "linux")]
+        if shown {
+            self.host_sync.borrow_mut().nudge();
+        }
         Ok(())
     }
 }
@@ -309,10 +329,16 @@ impl WindowHandler for UiWindow {
         let mut st = self.state.borrow_mut();
         let State { view, host, .. } = &mut *st;
         if view.tick(host.as_ref()) {
-            self.dirty.set(true);
+            self.animation_dirty.set(true);
         }
         drop(st);
-        if self.dirty.get() {
+        // With vsync presentation the display paces frames; the time cap only applies to the CPU
+        // presenter, which has no vsync.
+        let cap = if self.vsynced { Duration::ZERO } else { ANIMATION_FRAME };
+        let animation_due = self.animation_dirty.get() && self.last_frame.get().elapsed() >= cap;
+        if self.dirty.get() || animation_due {
+            self.animation_dirty.set(false);
+            self.last_frame.set(Instant::now());
             if let Err(e) = self.render() {
                 trace(&format!("render failed: {e}"));
             }
@@ -325,6 +351,36 @@ impl WindowHandler for UiWindow {
                     trace(&format!("flush failed: {e}"));
                 }
             }
+        }
+    }
+}
+
+/// Lazily finds the host window to nudge (see host_sync.rs): every 250 ms for the first ~5 s.
+#[cfg(target_os = "linux")]
+struct HostSyncLookup {
+    found: Option<crate::host_sync::HostSync>,
+    handle: baseview::PlatformHandle,
+    attempts: u32,
+    last: Option<Instant>,
+}
+
+#[cfg(target_os = "linux")]
+impl HostSyncLookup {
+    fn nudge(&mut self) {
+        if let Some(sync) = &self.found {
+            sync.nudge();
+            return;
+        }
+        // `MITE_UI_HOST_SYNC=0` disables the nudge (diagnostics).
+        let disabled = std::env::var_os("MITE_UI_HOST_SYNC").is_some_and(|v| v == "0");
+        if disabled || self.attempts >= 20 || self.last.is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
+            return;
+        }
+        self.attempts += 1;
+        self.last = Some(Instant::now());
+        self.found = crate::host_sync::HostSync::find(&self.handle);
+        if self.found.is_some() {
+            trace(&format!("host frame sync target found after {} attempt(s)", self.attempts));
         }
     }
 }

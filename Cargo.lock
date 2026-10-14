@@ -1154,6 +1154,7 @@ dependencies = [
  "serde_json",
  "softbuffer",
  "vello",
+ "x11rb",
 ]
 
 [[package]]
@@ -3124,6 +3125,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "nih_plug_xtask",
+ "x11rb",
 ]
 
 [[package]]

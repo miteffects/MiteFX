@@ -41,14 +41,23 @@ impl Analyzer {
 
     /// Analyses the newest `size()` samples into `out_db` (`bins()` long, bin k at k·fs/size).
     pub fn analyze(&mut self, samples: &[f32], out_db: &mut [f32]) {
+        self.analyze_power(samples, out_db);
+        for o in out_db.iter_mut() {
+            *o = 10.0 * o.max(1e-18).log10();
+        }
+    }
+
+    /// Like [`Self::analyze`] but returns linear power (1.0 = full-scale sine), which is what
+    /// displays average over; it skips a log per bin.
+    pub fn analyze_power(&mut self, samples: &[f32], out_power: &mut [f32]) {
         for ((x, s), w) in self.input.iter_mut().zip(samples).zip(&self.window) {
             *x = s * w;
         }
         // The buffers are sized by the planner, so this cannot fail.
         let _ = self.fft.process_with_scratch(&mut self.input, &mut self.spectrum, &mut self.scratch);
-        for (o, c) in out_db.iter_mut().zip(&self.spectrum) {
-            let mag = c.norm() * self.scale;
-            *o = 20.0 * mag.max(1e-9).log10();
+        let scale_sq = self.scale * self.scale;
+        for (o, c) in out_power.iter_mut().zip(&self.spectrum) {
+            *o = c.norm_sqr() * scale_sq;
         }
     }
 }
