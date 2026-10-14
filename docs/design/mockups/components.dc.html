@@ -12,11 +12,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
 <style>
 body{margin:0;background:#0A0C0F}
-a{color:#5CC8FF}a:hover{color:#9FDDFF}
+a{color:{{K.accent}}}a:hover{color:{{K.accentText}}}
 button{font:inherit;color:inherit}
 </style>
 </helmet>
-<div style="width: 1440px; height: 1120px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 24px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
+<div style="width: 1440px; height: 1240px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 24px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
 
 <div style="display: flex; align-items: baseline; gap: 16px">
 <h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em">Component sheet</h1>
@@ -34,13 +34,13 @@ button{font:inherit;color:inherit}
 <svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
 <defs>
 <filter id="cg{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feGaussianBlur stdDeviation="1.8" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
-<filter id="cn{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#5CC8FF" flood-opacity="1"></feDropShadow></filter>
+<filter id="cn{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="{{K.accent}}" flood-opacity="1"></feDropShadow></filter>
 <filter id="cd{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.75"></feDropShadow></filter>
 </defs>
-<path d="{{k.mod}}" stroke="#C9A7FF" stroke-width="2.6" stroke-linecap="round" filter="url(#cg{{$index}})"></path>
+<path d="{{k.mod}}" stroke="{{K.accent}}" stroke-width="2.6" stroke-linecap="round" filter="url(#cg{{$index}})"></path>
 <path d="{{k.dim}}" stroke="#2A313C" stroke-width="{{k.sw}}" stroke-linecap="round"></path>
 <path d="{{k.ctr}}" stroke="#C9D1DC" stroke-width="{{k.sw}}" stroke-linecap="round"></path>
-<path d="{{k.lit}}" stroke="#5CC8FF" stroke-width="{{k.sw}}" stroke-linecap="round" filter="url(#cg{{$index}})"></path>
+<path d="{{k.lit}}" stroke="{{K.accent}}" stroke-width="{{k.sw}}" stroke-linecap="round" filter="url(#cg{{$index}})"></path>
 <circle cx="32" cy="32" r="{{k.disc}}" fill="#161A21" stroke="#2E3540" filter="url(#cd{{$index}})"></circle>
 <path d="{{k.ptr}}" stroke="#FFFFFF" stroke-width="{{k.pw}}" stroke-linecap="round" filter="url(#cn{{$index}})"></path>
 </svg>
@@ -86,8 +86,8 @@ button{font:inherit;color:inherit}
 <div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">WIDTH</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">140 %</span></div>
 <div style="position: relative; height: 16px">
 <div style="position: absolute; left: 0; right: 0; top: 7px; height: 3px; border-radius: 2px; background: #252B35"></div>
-<div style="position: absolute; left: 0; width: 70%; top: 7px; height: 3px; border-radius: 2px; background: #5CC8FF; box-shadow: 0 0 8px rgba(92,200,255,0.7)"></div>
-<div style="position: absolute; left: calc(70% - 7px); top: 1px; width: 14px; height: 14px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #10141A, 0 3px 8px rgba(0,0,0,0.8), 0 0 12px rgba(92,200,255,0.6)"></div>
+<div style="position: absolute; left: 0; width: 70%; top: 7px; height: 3px; border-radius: 2px; background: {{K.accent}}; box-shadow: 0 0 8px {{K.accentA.a70}}"></div>
+<div style="position: absolute; left: calc(70% - 7px); top: 1px; width: 14px; height: 14px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #10141A, 0 3px 8px rgba(0,0,0,0.8), 0 0 12px {{K.accentA.a60}}"></div>
 </div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 8px">
@@ -95,7 +95,7 @@ button{font:inherit;color:inherit}
 <div style="position: relative; height: 16px">
 <div style="position: absolute; left: 0; right: 0; top: 7px; height: 3px; border-radius: 2px; background: #252B35"></div>
 <div style="position: absolute; left: 50%; top: 3px; width: 1px; height: 11px; background: #3A4250"></div>
-<div style="position: absolute; left: 38%; width: 12%; top: 7px; height: 3px; background: #5CC8FF; box-shadow: 0 0 8px rgba(92,200,255,0.7)"></div>
+<div style="position: absolute; left: 38%; width: 12%; top: 7px; height: 3px; background: {{K.accent}}; box-shadow: 0 0 8px {{K.accentA.a70}}"></div>
 <div style="position: absolute; left: calc(38% - 7px); top: 1px; width: 14px; height: 14px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #10141A, 0 3px 8px rgba(0,0,0,0.8)"></div>
 </div>
 </div>
@@ -113,7 +113,7 @@ button{font:inherit;color:inherit}
 <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">OUT</span>
 <div style="position: relative; width: 40px; height: 176px">
 <div style="position: absolute; left: 18px; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: #252B35"></div>
-<div style="position: absolute; left: 18px; top: 62px; bottom: 0; width: 4px; border-radius: 2px; background: #5CC8FF; box-shadow: 0 0 8px rgba(92,200,255,0.7)"></div>
+<div style="position: absolute; left: 18px; top: 62px; bottom: 0; width: 4px; border-radius: 2px; background: {{K.accent}}; box-shadow: 0 0 8px {{K.accentA.a70}}"></div>
 <div style="position: absolute; left: 0; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-between"><span style="width: 8px; height: 1px; background: #3A4250"></span><span style="width: 8px; height: 1px; background: #3A4250"></span><span style="width: 12px; height: 1px; background: #7C8696"></span><span style="width: 8px; height: 1px; background: #3A4250"></span><span style="width: 8px; height: 1px; background: #3A4250"></span></div>
 <div style="position: absolute; left: 6px; top: 54px; width: 28px; height: 16px; border-radius: 4px; background: #E6EAF0; box-shadow: 0 2px 8px rgba(0,0,0,0.5)"><div style="margin: 7px 5px 0; height: 2px; background: #10141A"></div></div>
 </div>
@@ -125,22 +125,35 @@ button{font:inherit;color:inherit}
 <section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
 <h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">TOGGLE · SEGMENTED · DROPDOWN</h2>
 <div style="display: flex; gap: 20px; align-items: center">
-<div style="display: flex; align-items: center; gap: 8px"><span style="width: 32px; height: 18px; border-radius: 9px; background: #5CC8FF; position: relative; display: block; box-shadow: 0 0 10px rgba(92,200,255,0.7)"><span style="position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #0A0C0F"></span></span><span style="font-weight: 600">On</span></div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 32px; height: 18px; border-radius: 9px; background: {{K.accent}}; position: relative; display: block; box-shadow: 0 0 10px {{K.accentA.a70}}"><span style="position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #0A0C0F"></span></span><span style="font-weight: 600">On</span></div>
 <div style="display: flex; align-items: center; gap: 8px"><span style="width: 32px; height: 18px; border-radius: 9px; background: #252B35; position: relative; display: block"><span style="position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #7C8696"></span></span><span style="font-weight: 600; color: #A7B0BE">Off</span></div>
-<button style="height: 32px; padding: 0 10px; background: rgba(92,200,255,0.14); border: 1px solid rgba(92,200,255,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(92,200,255,0.35), inset 0 0 10px rgba(92,200,255,0.15); text-shadow: 0 0 8px rgba(92,200,255,0.8); font-weight: 700; color: #9FDDFF">Latched</button>
+<button style="height: 32px; padding: 0 10px; background: {{K.accentA.a14}}; border: 1px solid {{K.accentA.a60}}; border-radius: 6px; box-shadow: 0 0 14px {{K.accentA.a35}}, inset 0 0 10px {{K.accentA.a15}}; text-shadow: 0 0 8px {{K.accentA.a80}}; font-weight: 700; color: {{K.accentText}}">Latched</button>
 </div>
-<div role="group" aria-label="Channel" style="display: flex; align-self: flex-start; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
-<button style="height: 26px; padding: 0 10px; border: none; border-radius: 6px; font-weight: 700; background: #262C36; color: #F2F5F8; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 2px rgba(0,0,0,0.7), 0 3px 8px rgba(0,0,0,0.4)">Stereo</button>
-<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">L</button>
-<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">R</button>
-<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">M</button>
-<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">S</button>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 10.5px; color: #7C8696">Desktop · 32 px segments (minimum hit target)</span>
+<div role="group" aria-label="Channel, Desktop · 32 px segments (minimum hit target)" style="display: flex; align-self: flex-start; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<button aria-pressed="true" style="height: 32px; padding: 0 12px; border: none; border-radius: 6px; font-weight: 700; background: #262C36; color: #F2F5F8; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 2px rgba(0,0,0,0.7), 0 3px 8px rgba(0,0,0,0.4)">Stereo</button>
+<button aria-pressed="false" style="height: 32px; min-width: 32px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">L</button>
+<button aria-pressed="false" style="height: 32px; min-width: 32px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">R</button>
+<button aria-pressed="false" style="height: 32px; min-width: 32px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">M</button>
+<button aria-pressed="false" style="height: 32px; min-width: 32px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">S</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 10.5px; color: #7C8696">Touch / AUv3 · 44 px segments</span>
+<div role="group" aria-label="Channel, Touch / AUv3 · 44 px segments" style="display: flex; align-self: flex-start; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<button aria-pressed="true" style="height: 44px; padding: 0 12px; border: none; border-radius: 6px; font-weight: 700; background: #262C36; color: #F2F5F8; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 2px rgba(0,0,0,0.7), 0 3px 8px rgba(0,0,0,0.4)">Stereo</button>
+<button aria-pressed="false" style="height: 44px; min-width: 44px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">L</button>
+<button aria-pressed="false" style="height: 44px; min-width: 44px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">R</button>
+<button aria-pressed="false" style="height: 44px; min-width: 44px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">M</button>
+<button aria-pressed="false" style="height: 44px; min-width: 44px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #A7B0BE">S</button>
+</div>
 </div>
 <div style="display: flex; gap: 12px; align-items: flex-start">
-<button style="height: 32px; width: 136px; padding: 0 10px; display: flex; align-items: center; justify-content: space-between; background: #12161C; border: 1px solid #5CC8FF; border-radius: 6px; box-shadow: 0 0 12px rgba(92,200,255,0.35), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600">Bell<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 7.5 L6 4.5 L9 7.5" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<button style="height: 32px; width: 136px; padding: 0 10px; display: flex; align-items: center; justify-content: space-between; background: #161A21; border: 1px solid {{K.accent}}; border-radius: 6px; box-shadow: 0 0 12px {{K.accentA.a35}}, 0 4px 12px rgba(0,0,0,0.4); font-weight: 600">Bell<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 7.5 L6 4.5 L9 7.5" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
 <div role="listbox" aria-label="Band type" style="flex: 1; padding: 4px; background: rgba(24,28,35,0.92); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 1px">
 <sc-for list="{{types}}" as="o" hint-placeholder-count="6">
-<div role="option" aria-selected="{{o.on}}" style="height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; background: {{o.bg}}; color: {{o.fg}}; font-weight: 600">
+<div role="option" aria-selected="{{o.on}}" style="height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; background: {{o.bg}}; color: {{o.fg}}; font-weight: 600">
 <svg width="22" height="12" viewBox="0 0 22 12" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.gc}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>{{o.k}}</div>
 </sc-for>
 </div>
@@ -150,10 +163,10 @@ button{font:inherit;color:inherit}
 <section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
 <h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">NUMERIC FIELD — DRAG OR TYPE</h2>
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px">
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Idle</span><div style="height: 32px; display: flex; align-items: center; padding: 0 10px; background: #0C0F13; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px">2.80 kHz</div></div>
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Hover — ↕ drag cursor</span><div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: #12161C; border: 1px solid #3A4250; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px">2.80 kHz<svg width="10" height="14" viewBox="0 0 10 14" fill="none" aria-hidden="true"><path d="M2 5 L5 2 L8 5 M2 9 L5 12 L8 9" stroke="#7C8696" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></div></div>
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Dragging — Shift = fine</span><div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: rgba(92,200,255,0.08); border: 1px solid #5CC8FF; border-radius: 6px; box-shadow: 0 0 12px rgba(92,200,255,0.4), inset 0 1px 3px rgba(0,0,0,0.5); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px; color: #DDF3FF">3.14 kHz<span style="font-family: Manrope, sans-serif; font-size: 10px; font-weight: 700; color: #5CC8FF">FINE</span></div></div>
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Editing — typed entry</span><div style="height: 32px; display: flex; align-items: center; padding: 0 10px; background: #0C0F13; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); outline: 2px solid #FFFFFF; outline-offset: 2px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px"><span style="background: rgba(92,200,255,0.35)">3.5k</span><span style="width: 1px; height: 16px; background: #FFFFFF; margin-left: 1px"></span></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Idle</span><div style="height: 32px; display: flex; align-items: center; padding: 0 10px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px">2.80 kHz</div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Hover — ↕ drag cursor</span><div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: #161A21; border: 1px solid #3A4250; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px">2.80 kHz<svg width="10" height="14" viewBox="0 0 10 14" fill="none" aria-hidden="true"><path d="M2 5 L5 2 L8 5 M2 9 L5 12 L8 9" stroke="#7C8696" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Dragging — Shift = fine</span><div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: {{K.accentA.a8}}; border: 1px solid {{K.accent}}; border-radius: 6px; box-shadow: 0 0 12px {{K.accentA.a40}}, inset 0 1px 3px rgba(0,0,0,0.5); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px; color: {{K.curve}}">3.14 kHz<span style="font-family: Manrope, sans-serif; font-size: 10px; font-weight: 700; color: {{K.accent}}">FINE</span></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Editing — typed entry</span><div style="height: 32px; display: flex; align-items: center; padding: 0 10px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); outline: 2px solid #FFFFFF; outline-offset: 2px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px"><span style="background: {{K.accentA.a35}}">3.5k</span><span style="width: 1px; height: 16px; background: #FFFFFF; margin-left: 1px"></span></div></div>
 </div>
 <p style="margin: 0; font-size: 11.5px; line-height: 1.5; color: #8A94A3">Typed entry accepts units and suffixes: <span style="font-feature-settings: 'tnum' 1; font-weight: 600;color: #C9D1DC">3.5k</span>, <span style="font-feature-settings: 'tnum' 1; font-weight: 600;color: #C9D1DC">A4</span> (note), <span style="font-feature-settings: 'tnum' 1; font-weight: 600;color: #C9D1DC">-3</span>. Enter commits, Esc reverts, double-click resets.</p>
 </section>
@@ -165,16 +178,16 @@ button{font:inherit;color:inherit}
 <div style="display: flex; gap: 6px; padding: 4px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 6px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)">
 <div style="position: relative; width: 10px; height: 144px">
 <div style="position: absolute; inset: 0; background: repeating-linear-gradient(to top, #1E242D 0 2px, transparent 2px 4px)"></div>
-<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 104px; background: repeating-linear-gradient(to top, rgba(92,200,255,0.38) 0 2px, transparent 2px 4px)"></div>
-<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 84px; background: repeating-linear-gradient(to top, #5CC8FF 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(92,200,255,0.9))"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 104px; background: repeating-linear-gradient(to top, {{K.accentA.a38}} 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 84px; background: repeating-linear-gradient(to top, {{K.accent}} 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px {{K.accentA.a90}})"></div>
 <div style="position: absolute; left: 0; right: 0; bottom: 124px; height: 2px; background: #FFFFFF; box-shadow: 0 0 6px rgba(255,255,255,0.9)"></div>
 </div>
 <div style="position: relative; width: 10px; height: 144px">
 <div style="position: absolute; inset: 0; background: repeating-linear-gradient(to top, #1E242D 0 2px, transparent 2px 4px)"></div>
-<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 116px; background: repeating-linear-gradient(to top, rgba(92,200,255,0.38) 0 2px, transparent 2px 4px)"></div>
-<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 92px; background: repeating-linear-gradient(to top, #5CC8FF 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(92,200,255,0.9))"></div>
-<div style="position: absolute; left: 0; right: 0; bottom: 116px; height: 8px; background: repeating-linear-gradient(to top, #FFB547 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(255,181,71,0.9))"></div>
-<div style="position: absolute; left: 0; right: 0; bottom: 132px; height: 2px; background: #FFB547; box-shadow: 0 0 6px rgba(255,181,71,0.95)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 116px; background: repeating-linear-gradient(to top, {{K.accentA.a38}} 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 92px; background: repeating-linear-gradient(to top, {{K.accent}} 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px {{K.accentA.a90}})"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 116px; height: 8px; background: repeating-linear-gradient(to top, {{K.warn}} 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px {{K.warnA.a90}})"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 132px; height: 2px; background: {{K.warn}}; box-shadow: 0 0 6px {{K.warnA.a95}}"></div>
 </div>
 </div>
 <span style="font-size: 10.5px; color: #A7B0BE">Peak + RMS · hot above −6</span>
@@ -183,7 +196,7 @@ button{font:inherit;color:inherit}
 <div style="padding: 4px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 6px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)">
 <div style="position: relative; width: 10px; height: 144px">
 <div style="position: absolute; inset: 0; background: repeating-linear-gradient(to bottom, #1E242D 0 2px, transparent 2px 4px)"></div>
-<div style="position: absolute; left: 0; right: 0; top: 0; height: 32px; background: repeating-linear-gradient(to bottom, #FF8A3D 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(255,138,61,0.95))"></div>
+<div style="position: absolute; left: 0; right: 0; top: 0; height: 32px; background: repeating-linear-gradient(to bottom, {{K.gr}} 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px {{K.grA.a95}})"></div>
 </div>
 </div>
 <span style="font-size: 10.5px; color: #A7B0BE">Gain reduction</span>
@@ -202,14 +215,14 @@ button{font:inherit;color:inherit}
 <div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">CORRELATION</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">+0.62</span></div>
 <div style="position: relative; height: 14px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 4px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)">
 <div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #3A4250"></div>
-<div style="position: absolute; left: 50%; width: 31%; top: 4px; height: 6px; border-radius: 2px; background: #8EE07A; box-shadow: 0 0 8px rgba(142,224,122,0.7)"></div>
+<div style="position: absolute; left: 50%; width: 31%; top: 4px; height: 6px; border-radius: 2px; background: {{K.ok}}; box-shadow: 0 0 8px {{K.okA.a70}}"></div>
 <div style="position: absolute; left: 81%; top: -2px; width: 2px; height: 18px; background: #E6EAF0"></div>
 </div>
 <div style="display: flex; justify-content: space-between; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #7C8696"><span>−1</span><span>0</span><span>+1</span></div>
 </div>
 <div style="display: flex; flex-direction: column; gap: 6px">
-<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">GAIN REDUCTION · HORIZONTAL</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px; color: #FFB27A">−4.2 dB</span></div>
-<div style="padding: 3px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 5px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)"><div style="position: relative; height: 8px"><div style="position: absolute; inset: 0; background: repeating-linear-gradient(to left, #1E242D 0 2px, transparent 2px 4px)"></div><div style="position: absolute; right: 0; width: 18%; top: 0; bottom: 0; background: repeating-linear-gradient(to left, #FF8A3D 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(255,138,61,0.95))"></div></div></div>
+<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">GAIN REDUCTION · HORIZONTAL</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px; color: {{K.gr}}">−4.2 dB</span></div>
+<div style="padding: 3px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 5px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)"><div style="position: relative; height: 8px"><div style="position: absolute; inset: 0; background: repeating-linear-gradient(to left, #1E242D 0 2px, transparent 2px 4px)"></div><div style="position: absolute; right: 0; width: 18%; top: 0; bottom: 0; background: repeating-linear-gradient(to left, {{K.gr}} 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px {{K.grA.a95}})"></div></div></div>
 </div>
 </div>
 </div>
@@ -236,11 +249,13 @@ button{font:inherit;color:inherit}
 <section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
 <h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">BUTTONS · FOCUS</h2>
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Default</span><button style="height: 32px; background: #12161C; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 700; color: #C9D1DC">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Default</span><button style="height: 32px; background: #161A21; border: 1px solid #262C36; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 700; color: #C9D1DC">Delta</button></div>
 <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Hover</span><button style="height: 32px; background: #1A1F27; border: 1px solid #3A4250; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 3px rgba(0,0,0,0.7), 0 6px 16px rgba(0,0,0,0.45); font-weight: 700; color: #E6EAF0">Delta</button></div>
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">On</span><button style="height: 32px; background: rgba(92,200,255,0.14); border: 1px solid rgba(92,200,255,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(92,200,255,0.35), inset 0 0 10px rgba(92,200,255,0.15); text-shadow: 0 0 8px rgba(92,200,255,0.8); font-weight: 700; color: #9FDDFF">Delta</button></div>
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Focus-visible</span><button style="height: 32px; background: #12161C; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); outline: 2px solid #FFFFFF; outline-offset: 2px; font-weight: 700; color: #C9D1DC">Delta</button></div>
-<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Warning on</span><button style="height: 32px; background: rgba(255,94,108,0.14); border: 1px solid rgba(255,94,108,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(255,94,108,0.35), inset 0 0 10px rgba(255,94,108,0.15); text-shadow: 0 0 8px rgba(255,94,108,0.8); font-weight: 700; color: #FF9AA3">Bypassed</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">On</span><button style="height: 32px; background: {{K.accentA.a14}}; border: 1px solid {{K.accentA.a60}}; border-radius: 6px; box-shadow: 0 0 14px {{K.accentA.a35}}, inset 0 0 10px {{K.accentA.a15}}; text-shadow: 0 0 8px {{K.accentA.a80}}; font-weight: 700; color: {{K.accentText}}">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Focus-visible</span><button style="height: 32px; background: #161A21; border: 1px solid #262C36; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); outline: 2px solid #FFFFFF; outline-offset: 2px; font-weight: 700; color: #C9D1DC">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Warning on · sem.warn</span><button style="height: 32px; background: {{K.warnA.a12}}; border: 1px solid {{K.warnA.a60}}; border-radius: 6px; box-shadow: 0 0 14px {{K.warnA.a30}}, inset 0 0 10px {{K.warnA.a12}}; text-shadow: 0 0 8px {{K.warnA.a70}}; font-weight: 700; color: {{K.warn}}">Bypassed</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Danger · sem.danger</span><button style="height: 32px; background: #161A21; border: 1px solid {{K.danger}}; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 700; color: {{K.danger}}">✕ Delete band</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Masking · sem.masking hatch</span><span style="height: 32px; border-radius: 6px; border: 1.5px solid {{K.masking}}; background: repeating-linear-gradient(45deg, {{K.masking}} 0 3px, transparent 3px 8px); opacity: 0.85"></span></div>
 <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Disabled</span><button disabled style="height: 32px; background: transparent; border: 1px solid #1C2129; border-radius: 6px; font-weight: 700; color: #4A5260">Match</button></div>
 </div>
 </section>
@@ -269,22 +284,33 @@ button{font:inherit;color:inherit}
 <sc-for list="{{keys}}" as="k" hint-placeholder-count="40">
 <span style="position: absolute; left: {{k.x}}%; width: {{k.w}}%; top: 0; height: {{k.h}}px; background: {{k.c}}; box-sizing: border-box; border-right: 1px solid #0C0F13"></span>
 </sc-for>
-<span style="position: absolute; left: {{snapX}}%; top: 0; bottom: 0; width: 2px; background: #FFB547; box-shadow: 0 0 8px #FFB547"></span>
+<span style="position: absolute; left: {{snapX}}%; top: 0; bottom: 0; width: 2px; background: {{K.accent}}; box-shadow: 0 0 8px {{K.accent}}"></span>
 </div>
 <div style="position: relative; height: 16px">
 <sc-for list="{{cLabels}}" as="c" hint-placeholder-count="9">
 <span style="position: absolute; left: {{c.x}}%; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #7C8696">{{c.k}}</span>
 </sc-for>
-<span style="position: absolute; left: {{snapX}}%; transform: translateX(-50%); top: 0; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; font-weight: 600; color: #FFB547; background: #10141A; padding: 0 4px">A2 · 110 Hz</span>
+<span style="position: absolute; left: {{snapX}}%; transform: translateX(-50%); top: 0; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; font-weight: 600; color: {{K.accentText}}; background: #10141A; padding: 0 4px">A2 · 110 Hz</span>
 </div>
 </section>
 
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1120}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
 class Component extends DCLogic {
   renderVals() {
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.3.0","date":"2026-10-14","note":"Third pass. Generated from the solver output; boards render from this object. Mirror 1:1 into mite-ui::tokens."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity"},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"azure","dark":"#54B3FD","light":"#15466A","hc":"#86C5FA","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"blush","dark":"#FEBCCF","light":"#763F51","hc":"#FEBCCF","cb":"#238EA9"},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":16.9,"light":22.8,"hc":20.0,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":17.3,"light":15.6,"hc":17.3,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"}}/*END*/;
+    const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; };
+    const alphas = (h) => { const o = {}; for (let i = 1; i <= 100; i++) o['a' + i] = hexA(h, i / 100); return o; };
+    const TA = TOK.color.accent, TS = TOK.color.semantic, TR = TOK.color.ramp.dark, TN = TOK.color.neutral.dark;
+    const K = {
+      accent: TA.eq.dark, accentA: alphas(TA.eq.dark), accentText: TN.accentText, curve: TN.curve,
+      gr: TS.gr.dark, grA: alphas(TS.gr.dark), warn: TS.warn.dark, warnA: alphas(TS.warn.dark), ok: TS.ok.dark, okA: alphas(TS.ok.dark),
+      danger: TS.danger.dark, masking: TS.masking.dark, sidechain: TS.sidechain.dark,
+      delay: TA.delay.dark, delayA: alphas(TA.delay.dark), delayText: '#FFFFFF', comp: TA.comp.dark, compA: alphas(TA.comp.dark),
+      limit: TA.limit.dark, limitText: '#E6EAF0', ramp: TR, band3: TR[2]
+    };
     const r1 = (v) => Math.round(v * 10) / 10;
     const polar = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [32 + r * Math.cos(a), 32 + r * Math.sin(a)]; };
     const tk = (deg, ra, rb) => { const [x0, y0] = polar(deg, ra), [x1, y1] = polar(deg, rb); return 'M' + r1(x0) + ' ' + r1(y0) + ' L' + r1(x1) + ' ' + r1(y1) + ' '; };
@@ -306,9 +332,9 @@ class Component extends DCLogic {
       Object.assign({}, big, { n: '1.20', u: 'kHz', label: 'FREQ', kind: 'Standard' }, geo(0.63, false)),
       Object.assign({}, big, { size: 36, showVal: false, below: '100 %', n: '', u: '', label: 'MIX', kind: 'Small · 15 ticks', sw: 3.5, pw: 4, disc: 17 }, geo(1, false, 15)),
       Object.assign({}, big, { n: '+3.5', u: 'dB', label: 'GAIN', kind: 'Bipolar' }, geo(0.6, true)),
-      Object.assign({}, big, { n: '2.40', u: 'kHz', label: 'CUTOFF', kind: 'Modulated', mod: dots(-135 + 270 * 0.4, -135 + 270 * 0.8) }, geo(0.6, false))
+      Object.assign({}, big, { n: '2.40', u: 'kHz', label: 'CUTOFF', kind: 'Modulated · dots', mod: dots(-135 + 270 * 0.4, -135 + 270 * 0.8) }, geo(0.6, false))
     ];
-    const ks = (label, extra) => Object.assign({ label, n: '1.20', u: 'kHz', op: 1, scale: 1, halo: 'transparent', dimC: '#2A313C', litC: '#5CC8FF', ring: '#2E3540', ringW: 1, glow: 1.8, lift: 2.5 }, geo(0.45, false), extra);
+    const ks = (label, extra) => Object.assign({ label, n: '1.20', u: 'kHz', op: 1, scale: 1, halo: 'transparent', dimC: '#2A313C', litC: K.accent, ring: '#2E3540', ringW: 1, glow: 1.8, lift: 2.5 }, geo(0.45, false), extra);
     const kstates = [
       ks('Idle', {}),
       ks('Hover · grows 10 %', { scale: 1.1 }),
@@ -326,22 +352,22 @@ class Component extends DCLogic {
     };
     const types = Object.keys(tg).map((k) => {
       const on = k === 'Bell';
-      return { k, d: tg[k], on: on ? 'true' : 'false', bg: on ? 'rgba(92,200,255,0.14)' : 'transparent', fg: on ? '#E6EAF0' : '#C9D1DC', gc: on ? '#5CC8FF' : '#7C8696' };
+      return { k, d: tg[k], on: on ? 'true' : 'false', bg: on ? K.accentA.a14 : 'transparent', fg: on ? '#E6EAF0' : '#C9D1DC', gc: on ? K.accent : '#7C8696' };
     });
     const loud = [
       { k: 'MOMENTARY', v: '−13.6', u: 'LUFS', c: '#E6EAF0' },
       { k: 'SHORT-TERM', v: '−14.1', u: 'LUFS', c: '#E6EAF0' },
-      { k: 'INTEGRATED', v: '−14.0', u: 'LUFS', c: '#9FDDFF' },
+      { k: 'INTEGRATED', v: '−14.0', u: 'LUFS', c: K.accentText },
       { k: 'LRA', v: '5.2', u: 'LU', c: '#E6EAF0' },
-      { k: 'TRUE PEAK', v: '−1.0', u: 'dBTP', c: '#FFB547' }
+      { k: 'TRUE PEAK', v: '−1.0', u: 'dBTP', c: K.warn }
     ];
-    const c = '#FF6FA8';
+    const c = K.band3;
     const nodeStates = [
       { k: 'Idle', d: 'tinted fill', size: 14, fill: c + '33', stroke: c, borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 1, ringStyle: 'solid', ringC: 'transparent', badge: '' },
       { k: 'Hover', d: 'halo + grow', size: 16, fill: c + '55', stroke: c, borderStyle: 'solid', shadow: '0 0 0 6px ' + c + '22', op: 1, ringStyle: 'solid', ringC: 'transparent', badge: '' },
       { k: 'Selected', d: 'solid + glow', size: 18, fill: c, stroke: '#FFFFFF', borderStyle: 'solid', shadow: '0 0 0 5px ' + c + '33, 0 0 18px ' + c + 'AA', op: 1, ringStyle: 'solid', ringC: 'transparent', badge: '3' },
       { k: 'Dynamic', d: 'breathing ring', size: 14, fill: c + '33', stroke: c, borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 1, ringStyle: 'dashed', ringC: c, badge: '' },
-      { k: 'Solo', d: 'amber ring, rest dim', size: 18, fill: c, stroke: '#FFFFFF', borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 1, ringStyle: 'solid', ringC: '#FFB547', badge: 'S' },
+      { k: 'Solo', d: 'white ring + S · others dim to 35 %', size: 18, fill: c, stroke: '#FFFFFF', borderStyle: 'solid', shadow: '0 0 0 3px #0E1116, 0 0 14px rgba(255,255,255,0.55)', op: 1, ringStyle: 'solid', ringC: '#FFFFFF', badge: 'S' },
       { k: 'Bypassed', d: 'hollow, dashed', size: 14, fill: 'transparent', stroke: c, borderStyle: 'dashed', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 0.8, ringStyle: 'solid', ringC: 'transparent', badge: '' },
       { k: 'Disabled', d: 'neutral, no hit', size: 12, fill: '#2A313C', stroke: '#3A4250', borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 0.6, ringStyle: 'solid', ringC: 'transparent', badge: '' }
     ];
@@ -350,7 +376,7 @@ class Component extends DCLogic {
     const splitsF = [120, 900, 5200];
     const splits = splitsF.map((f) => ({ x: r1(px(f)), f: f < 1000 ? f + ' Hz' : (f / 1000).toFixed(1) + ' kHz' }));
     const edges = [0].concat(splits.map((s) => s.x), [100]);
-    const xc = ['#5CC8FF', '#FFB547', '#FF6FA8', '#8EE07A'];
+    const xc = [K.ramp[0], K.ramp[1], K.ramp[2], K.ramp[3]];
     const xg = ['−2.1 dB', '−0.4 dB', '−3.8 dB', '0.0 dB'];
     const xover = xc.map((col, i) => ({ k: 'Band ' + (i + 1), c: col, w: r1(edges[i + 1] - edges[i]), bg: col + '14', gr: xg[i] }));
     const keys = [], cLabels = [];
@@ -361,7 +387,7 @@ class Component extends DCLogic {
       keys.push({ x: r1(px(f)), w: r1(px(f2) - px(f)), c: black ? '#1A1E25' : '#2E3540', h: black ? 18 : 30 });
       if (m % 12 === 0) cLabels.push({ x: r1(px(f)), k: 'C' + (m / 12 - 1) });
     }
-    return { knobs, kstates, types, loud, nodeStates, xover, splits, keys, cLabels, snapX: r1(px(110)) };
+    return { K, knobs, kstates, types, loud, nodeStates, xover, splits, keys, cLabels, snapX: r1(px(110)) };
   }
 }
 </script>

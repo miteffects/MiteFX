@@ -12,63 +12,100 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
 <style>
 body{margin:0;background:#0A0C0F}
-a{color:#5CC8FF}a:hover{color:#9FDDFF}
 </style>
 </helmet>
-<div style="width: 1440px; height: 1320px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 22px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
+<div style="width: 1440px; height: 2780px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 22px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
 
 <div style="display: flex; gap: 20px">
-<section style="flex: 0 0 420px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 28px; display: flex; flex-direction: column; justify-content: space-between; gap: 24px">
+<section style="flex: 0 0 420px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 28px; display: flex; flex-direction: column; gap: 20px">
 <div style="display: flex; align-items: center; gap: 16px">
-<svg width="64" height="64" viewBox="0 0 32 32" fill="none" role="img" aria-label="MiteFX mark">
+<svg width="64" height="64" viewBox="0 0 32 32" fill="none" role="img" aria-label="MiteFX mark" style="overflow: visible">
 <path d="M10.5 15 L5 12 M10 19 L4 19 M10.5 23 L5 26 M21.5 15 L27 12 M22 19 L28 19 M21.5 23 L27 26" stroke="#7C8696" stroke-width="1.4" stroke-linecap="round"></path>
 <path d="M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z" stroke="#E6EAF0" stroke-width="1.6"></path>
 <circle cx="16" cy="7.4" r="2.6" stroke="#E6EAF0" stroke-width="1.6"></circle>
-<path d="M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21" stroke="{{accent}}" stroke-width="1.8" stroke-linecap="round"></path>
+<path d="M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21" stroke="{{eqAccent}}" stroke-width="1.8" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{eqAccent}})"></path>
 </svg>
 <div style="display: flex; flex-direction: column; gap: 2px">
-<span style="font-size: 44px; font-weight: 800; letter-spacing: -0.035em; line-height: 1">mite<span style="color: {{accent}}">FX</span></span>
-<span style="font-size: 12.5px; color: #8A94A3">Open-source studio effects · GPL-3.0</span>
+<span style="font-size: 44px; font-weight: 800; letter-spacing: -0.035em; line-height: 1">mite<span style="color: {{eqAccent}}; text-shadow: 0 0 14px {{eqAccent}}">FX</span></span>
+<span style="font-size: 12.5px; color: #A7B0BE">Tokens {{version}} · generated from tokens.json</span>
 </div>
 </div>
-<div style="display: flex; flex-direction: column; gap: 10px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">LOGO DIRECTION</h2>
-<p style="margin: 0; font-size: 13px; line-height: 1.55; color: #C9D1DC">A tiny mite seen from above, its body carrying the plugin's own signal glyph. Monoline, 1.6 px at 32 px, drawn as vector paths only. The wordmark is lower-case Manrope ExtraBold, with FX in the plugin accent.</p>
-</div>
-<div style="display: flex; flex-direction: column; gap: 10px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">ACCENT RULE</h2>
-<p style="margin: 0; font-size: 13px; line-height: 1.55; color: #C9D1DC">One hue per plugin on the shared neutral base. The accent paints the post spectrum, the total-curve glow, latched toggles and the logo. Bands always use the band ramp, never the accent. Semantic colours never change between plugins.</p>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">COLOUR RULES · THIRD PASS</h2>
+<sc-for list="{{rules}}" as="r" hint-placeholder-count="6">
+<div style="display: flex; gap: 10px"><span style="font-weight: 800; color: {{eqAccent}}; width: 92px; flex: 0 0 92px; font-size: 11px">{{r.k}}</span><span style="font-size: 12px; line-height: 1.5; color: #C9D1DC">{{r.t}}</span></div>
+</sc-for>
 </div>
 </section>
 
-<section style="flex: 1; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SUITE · PER-PLUGIN GLYPH + ACCENT</h2>
-<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
-<sc-for list="{{plugins}}" as="p" hint-placeholder-count="15">
-<div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 10px">
-<span style="width: 40px; height: 40px; flex: 0 0 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: {{p.tint}}; border: 1px solid {{p.edge}}">
-<svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="{{p.d}}" stroke="{{p.c}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-</span>
-<span style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
-<span style="font-weight: 700; font-size: 13px">{{p.k}}</span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{p.c}}</span>
-</span>
+<section style="flex: 1; min-width: 0; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; gap: 12px"><h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">PLUGIN ACCENTS · 15 × 4 THEMES</h2><span style="font-size: 11.5px; color: #A7B0BE">Number under each swatch = smallest CIEDE2000 to any band or semantic colour in that theme (target 15; colour-blind 12 under protan/deutan simulation)</span></div>
+<div role="table" aria-label="Plugin accents per theme" style="display: flex; flex-direction: column; gap: 3px">
+<div role="row" style="display: grid; grid-template-columns: 170px repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0 0 4px">
+<span role="columnheader" style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">PLUGIN</span>
+<span role="columnheader" style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">DARK</span>
+<span role="columnheader" style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">LIGHT</span>
+<span role="columnheader" style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">HIGH CONTRAST</span>
+<span role="columnheader" style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">COLOUR-BLIND</span>
+</div>
+<sc-for list="{{accents}}" as="a" hint-placeholder-count="15">
+<div role="row" style="display: grid; grid-template-columns: 170px repeat(4, minmax(0, 1fr)); gap: 8px; align-items: center">
+<span role="rowheader" style="display: flex; align-items: center; gap: 10px"><svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{a.d}}" stroke="{{a.dark}}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 3px {{a.dark}})"></path></svg><span style="display: flex; flex-direction: column"><span style="font-weight: 700">{{a.plugin}}</span><span style="font-size: 10.5px; color: #A7B0BE">{{a.name}}</span></span></span>
+<sc-for list="{{a.cells}}" as="c" hint-placeholder-count="4">
+<span role="cell" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; background: {{c.bg}}; border: 1px solid {{c.b}}"><span style="width: 18px; height: 18px; border-radius: 5px; background: {{c.c}}; box-shadow: 0 0 8px {{c.glow}}"></span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 11px; color: {{c.fg}}">{{c.c}}</span><span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 700; font-size: 11px; color: {{c.dc}}">ΔE {{c.de}}</span></span>
+</sc-for>
 </div>
 </sc-for>
 </div>
 </section>
 </div>
 
-<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
-<sc-for list="{{themes}}" as="th" hint-placeholder-count="2">
-<section style="background: {{th.bg}}; border: 1px solid {{th.border}}; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; gap: 20px">
+<section style="flex: 1; min-width: 0; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: baseline; gap: 12px"><h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">BAND RAMP · ONE RAMP FOR THE WHOLE SUITE</h2><span style="font-size: 11.5px; color: #A7B0BE">No pearl, no accent hues. Band 7+ repeats; the node number tells them apart.</span></div>
+<sc-for list="{{ramps}}" as="r" hint-placeholder-count="4">
+<div style="display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 10px; background: {{r.bg}}; border: 1px solid {{r.b}}">
+<span style="width: 132px; flex: 0 0 132px; display: flex; flex-direction: column"><span style="font-weight: 700; color: {{r.fg}}">{{r.k}}</span><span style="font-size: 10.5px; color: {{r.sub}}">min ΔE {{r.min}}</span></span>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{r.sw}}" as="s" hint-placeholder-count="6">
+<span style="display: flex; flex-direction: column; gap: 4px">
+<span style="position: relative; height: 32px; border-radius: 6px; background: {{s.c}}; display: flex; align-items: center; justify-content: center; font-weight: 800; color: {{s.ink}}">{{s.n}}</span>
+<svg width="100%" height="6" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><path d="M0 3 H100" stroke="{{s.c}}" stroke-width="2.5" stroke-dasharray="{{s.dash}}" vector-effect="non-scaling-stroke"></path></svg>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{r.sub}}">{{s.name}} {{s.c}}</span>
+</span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</section>
+</div>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; gap: 12px"><h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">SEMANTIC · RESERVED, IDENTICAL IN EVERY PLUGIN</h2><span style="font-size: 11.5px; color: #A7B0BE">clip is split into masking (always a hatch) and danger (destructive). There is no sem.mod — modulation draws in the accent.</span></div>
+<div role="row" style="display: grid; grid-template-columns: 170px repeat(4, 120px) minmax(0, 1fr); gap: 10px; padding-bottom: 4px">
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">TOKEN</span><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">DARK</span><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">LIGHT</span><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">HIGH CONTRAST</span><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">COLOUR-BLIND</span><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #A7B0BE">USE · NON-COLOUR CUE</span>
+</div>
+<sc-for list="{{semantic}}" as="s" hint-placeholder-count="7">
+<div style="display: grid; grid-template-columns: 170px repeat(4, 120px) minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 0; border-top: 1px solid #161A21">
+<span style="font-weight: 700">sem.{{s.k}}</span>
+<sc-for list="{{s.cells}}" as="c" hint-placeholder-count="4">
+<span style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; background: {{c.bg}}; border: 1px solid {{c.b}}"><span style="width: 18px; height: 18px; border-radius: 5px; background: {{c.fill}}; border: {{c.ring}}"></span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; color: {{c.fg}}">{{c.c}}</span></span>
+</sc-for>
+<span style="font-size: 11.5px; line-height: 1.45; color: #C9D1DC">{{s.use}}<span style="color: #A7B0BE"> · {{s.cue}}</span></span>
+</div>
+</sc-for>
+</section>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+<sc-for list="{{themes}}" as="th" hint-placeholder-count="3">
+<section style="background: {{th.bg}}; border: {{th.border}}; border-radius: 14px; padding: 20px 20px; display: flex; flex-direction: column; gap: 10px">
 <h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{th.label}}">{{th.k}}</h2>
-<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
-<sc-for list="{{th.sw}}" as="s" hint-placeholder-count="10">
-<div style="display: flex; flex-direction: column; gap: 6px">
-<span style="height: 44px; border-radius: 8px; background: {{s.c}}; border: 1px solid {{th.swBorder}}"></span>
-<span style="font-size: 11px; font-weight: 600; color: {{th.text}}">{{s.k}}</span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: {{th.label}}">{{s.c}}</span>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 6px">
+<sc-for list="{{th.sw}}" as="s" hint-placeholder-count="24">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+<span style="height: 26px; border-radius: 6px; background: {{s.c}}; border: 1px solid {{th.swBorder}}"></span>
+<span style="font-size: 10px; font-weight: 700; color: {{th.text}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 9.5px; color: {{th.label}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.c}}</span>
 </div>
 </sc-for>
 </div>
@@ -77,200 +114,177 @@ a{color:#5CC8FF}a:hover{color:#9FDDFF}
 </div>
 
 <div style="display: flex; gap: 20px">
-<section style="flex: 1; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">BAND RAMP · DEFAULT AND COLOUR-BLIND SAFE</h2>
-<div style="display: flex; gap: 6px">
-<sc-for list="{{ramp}}" as="r" hint-placeholder-count="8">
-<div style="flex: 1; display: flex; flex-direction: column; gap: 6px; align-items: center">
-<span style="width: 100%; height: 36px; border-radius: 6px; background: {{r.c}}; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #0E1116">{{r.n}}</span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">{{r.c}}</span>
+<section style="flex: 1; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">CONTRAST · MEASURED (WCAG 2.x)</h2>
+<sc-for list="{{contrast}}" as="c" hint-placeholder-count="8">
+<div style="display: flex; align-items: center; gap: 12px; padding: 5px 0; border-bottom: 1px solid #161A21">
+<span style="width: 120px; height: 28px; flex: 0 0 120px; border-radius: 6px; background: {{c.bg}}; display: flex; align-items: center; padding: 0 10px; box-sizing: border-box; font-weight: 600; color: {{c.fg}}; border: 1px solid #262C36">Aa 2.80 kHz</span>
+<span style="flex: 1; font-size: 12px; color: #C9D1DC">{{c.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 700; font-size: 13px; width: 56px; text-align: right">{{c.r}}</span>
+<span style="width: 92px; text-align: right; font-size: 11px; font-weight: 700; color: {{c.vc}}">{{c.v}}</span>
 </div>
 </sc-for>
-</div>
-<div style="display: flex; gap: 6px">
-<sc-for list="{{rampCb}}" as="r" hint-placeholder-count="8">
-<div style="flex: 1; display: flex; flex-direction: column; gap: 6px; align-items: center">
-<span style="width: 100%; height: 36px; border-radius: 6px; background: {{r.c}}; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #0E1116">{{r.n}}</span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">{{r.c}}</span>
-</div>
-</sc-for>
-</div>
-<span style="font-size: 11px; color: #7C8696">Band 9+ repeats the ramp; the node number disambiguates. The second row is the Okabe–Ito set used by the colour-blind theme.</span>
 </section>
-<section style="flex: 0 0 520px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SEMANTIC · SAME IN EVERY PLUGIN</h2>
-<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px">
-<sc-for list="{{semantic}}" as="s" hint-placeholder-count="8">
-<div style="display: flex; align-items: center; gap: 10px">
-<span style="width: 28px; height: 28px; flex: 0 0 28px; border-radius: 7px; background: {{s.c}}"></span>
-<span style="display: flex; flex-direction: column; gap: 1px"><span style="font-weight: 600; font-size: 12px">{{s.k}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{s.t}} · {{s.c}}</span></span>
+<section style="flex: 0 0 460px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">HIT TARGETS · AT 100 % SCALE</h2>
+<sc-for list="{{hits}}" as="h" hint-placeholder-count="4">
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="width: 56px; height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #0C0F13; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)"><span style="width: {{h.px}}px; height: {{h.px}}px; border-radius: 6px; border: 1.5px dashed {{eqAccent}}; box-sizing: border-box"></span></span>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 700">{{h.k}}</span><span style="font-size: 11.5px; line-height: 1.45; color: #A7B0BE">{{h.d}}</span></span>
 </div>
 </sc-for>
-</div>
 </section>
 </div>
 
 <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px">
-<section style="grid-column: span 2; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">TYPE · MANROPE ONLY (OFL) · TABULAR FIGURES FOR EVERY READOUT</h2>
-<sc-for list="{{type}}" as="t" hint-placeholder-count="6">
-<div style="display: flex; align-items: baseline; gap: 16px; padding: 6px 0; border-bottom: 1px solid #161A21">
-<span style="width: 132px; flex: 0 0 132px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{t.k}}</span>
-<span style="font-family: {{t.f}}; font-feature-settings: {{t.ff}}; font-size: {{t.s}}px; font-weight: {{t.w}}; letter-spacing: {{t.ls}}; color: #E6EAF0">{{t.sample}}</span>
-<span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #7C8696">{{t.spec}}</span>
+<section style="grid-column: span 2; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">TYPE · {{family}} ({{license}}) · TABULAR FIGURES FOR EVERY READOUT</h2>
+<sc-for list="{{type}}" as="t" hint-placeholder-count="7">
+<div style="display: flex; align-items: baseline; gap: 16px; padding: 5px 0; border-bottom: 1px solid #161A21">
+<span style="width: 110px; flex: 0 0 110px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; color: #A7B0BE">{{t.k}}</span>
+<span style="font-feature-settings: {{t.ff}}; font-size: {{t.s}}px; font-weight: {{t.w}}; letter-spacing: {{t.ls}}; color: #E6EAF0">{{t.sample}}</span>
+<span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; color: #A7B0BE">{{t.spec}}</span>
 </div>
 </sc-for>
 </section>
-
-<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SPACING · 4 PX BASE</h2>
-<sc-for list="{{space}}" as="s" hint-placeholder-count="8">
-<div style="display: flex; align-items: center; gap: 12px">
-<span style="width: 52px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{s.k}}</span>
-<span style="height: 10px; width: {{s.v}}px; background: {{accent}}; border-radius: 2px; opacity: 0.8"></span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #C9D1DC">{{s.v}}</span>
-</div>
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 9px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">SPACING · 4 PX BASE</h2>
+<sc-for list="{{space}}" as="s" hint-placeholder-count="9">
+<div style="display: flex; align-items: center; gap: 12px"><span style="width: 44px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; color: #A7B0BE">{{s.k}}</span><span style="height: 10px; width: {{s.v}}px; background: {{eqAccent}}; border-radius: 2px; box-shadow: 0 0 6px {{eqAccent}}"></span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; color: #C9D1DC">{{s.v}}</span></div>
 </sc-for>
 </section>
-
 <section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">RADII</h2>
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">RADII</h2>
 <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
 <sc-for list="{{radii}}" as="r" hint-placeholder-count="6">
-<div style="display: flex; flex-direction: column; gap: 6px; align-items: center">
-<span style="width: 52px; height: 40px; border: 1.5px solid #A7B0BE; border-radius: {{r.v}}px; box-sizing: border-box"></span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{r.k}} · {{r.l}}</span>
-</div>
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: center"><span style="width: 52px; height: 40px; border: 1.5px solid #A7B0BE; border-radius: {{r.v}}px; box-sizing: border-box"></span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; color: #A7B0BE">{{r.k}} · {{r.v}}</span></div>
 </sc-for>
 </div>
 </section>
 </div>
 
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
-<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">ELEVATION · GLOW · BLUR</h2>
-<div style="position: relative; height: 176px; border-radius: 10px; overflow: hidden; background: #0E1116">
-<svg width="580" height="176" viewBox="0 0 580 176" style="position: absolute; left: 0; top: 0" aria-hidden="true">
-<defs>
-<linearGradient id="tkFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{accent}}" stop-opacity="0.4"></stop><stop offset="1" stop-color="#3D6FD9" stop-opacity="0"></stop></linearGradient>
-<filter id="tkGlow" x="-5%" y="-30%" width="110%" height="160%"><feGaussianBlur stdDeviation="5" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
-</defs>
-<path d="M0 120 C40 100 70 70 110 84 C150 98 170 60 210 70 C250 80 270 40 300 52 C330 64 360 96 400 90 C440 84 470 120 520 130 L580 140 L580 176 L0 176 Z" fill="url(#tkFill)"></path>
-<path d="M0 96 C80 96 120 60 170 60 C220 60 250 100 330 100 C380 100 400 120 450 120 C500 120 540 96 580 96" stroke="#DDF3FF" stroke-width="2.2" fill="none" filter="url(#tkGlow)"></path>
-</svg>
-<div style="position: absolute; left: 24px; top: 24px; width: 150px; height: 64px; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; background: #1A1E25; border: 1px solid #262C36; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)"><span style="display: block; font-weight: 700">raised</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">every control · fields sit inset</span></div>
-<div style="position: absolute; left: 200px; top: 48px; width: 190px; height: 92px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: rgba(24,28,35,0.72); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)"><span style="display: block; font-weight: 700">glass.panel</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #A7B0BE">72 % fill · blur 18 · sat 1.2</span><span style="display: block; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #A7B0BE">shadow 0 18 48 / 55 %</span></div>
-<div style="position: absolute; right: 22px; top: 22px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end"><span style="font-weight: 700">glow.curve</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">blur 5 + source</span><span style="font-weight: 700; margin-top: 6px">glow.accent</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">every accent mark · ticks, needle, fills</span></div>
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">ELEVATION · DARK / LIGHT / HIGH CONTRAST</h2>
+<sc-for list="{{elev}}" as="e" hint-placeholder-count="3">
+<div style="display: flex; align-items: flex-start; gap: 14px; padding: 6px 0; border-bottom: 1px solid #161A21">
+<span style="width: 64px; height: 32px; flex: 0 0 64px; border-radius: 6px; background: #161A21; border: 1px solid #262C36; box-shadow: {{e.sh}}"></span>
+<span style="width: 70px; font-weight: 700">{{e.k}}</span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 3px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10.5px; line-height: 1.4; color: #A7B0BE"><span>dark · {{e.d}}</span><span>light · {{e.l}}</span><span>hc · {{e.h}}</span></span>
 </div>
+</sc-for>
 </section>
-
 <section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">MOTION · DURATIONS + EASINGS</h2>
-<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
-<sc-for list="{{eases}}" as="e" hint-placeholder-count="4">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">MOTION</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{durs}}" as="d" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 10px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 8px"><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 16px">{{d.v}} ms</span><span style="font-weight: 700; font-size: 11px">{{d.k}}</span></div>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{eases}}" as="e" hint-placeholder-count="3">
 <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 8px">
-<svg width="100%" height="64" viewBox="0 0 100 64" preserveAspectRatio="none" aria-hidden="true"><path d="M0 63.5 H100 M0.5 0 V64" stroke="#262C36" stroke-width="1" fill="none"></path><path d="{{e.d}}" stroke="{{accent}}" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"></path></svg>
-<span style="font-weight: 700; font-size: 12px">{{e.k}}</span>
-<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">{{e.v}}</span>
+<svg width="100%" height="56" viewBox="0 0 100 64" preserveAspectRatio="none" aria-hidden="true"><path d="M0 63.5 H100 M0.5 0 V64" stroke="#262C36" stroke-width="1" fill="none"></path><path d="{{e.d}}" stroke="{{eqAccent}}" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"></path></svg>
+<span style="font-weight: 700; font-size: 12px">{{e.k}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: #A7B0BE">{{e.v}}</span>
 </div>
 </sc-for>
 </div>
-<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
-<sc-for list="{{durs}}" as="d" hint-placeholder-count="5">
-<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 16px; font-weight: 500">{{d.v}}</span><span style="font-weight: 700; font-size: 11px">{{d.k}}</span><span style="font-size: 10.5px; color: #7C8696">{{d.u}}</span></div>
-</sc-for>
-</div>
+<span style="font-size: 11.5px; line-height: 1.5; color: #A7B0BE">{{reduce}}</span>
 </section>
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5CC8FF","options":["#5CC8FF","#FF9F43","#B98BFF","#3FD6B5"]},"$preview":{"width":1440,"height":1320}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2780}}'>
 class Component extends DCLogic {
   renderVals() {
-    const accent = this.props.accent ?? '#5CC8FF';
-    const P = [
-      ['EQ', '#5CC8FF', 'M3 20 C10 20 12 8 16 8 C20 8 22 20 29 20'],
-      ['Comp', '#FF9F43', 'M4 28 L15 17 Q17 15 20 14 L28 11'],
-      ['Limit', '#FF5E6C', 'M4 28 L15 11 Q17 9 19 9 H28 M4 5 H28'],
-      ['Multiband', '#B98BFF', 'M3 22 Q7.5 9 12 22 Q16 9 20 22 Q24.5 9 29 22'],
-      ['Verb', '#6F8CFF', 'M5 7 V26 M11 11 V26 M17 15 V26 M23 19 V26 M29 22 V26'],
-      ['Delay', '#3FD6B5', 'M6 16 H6.1 M13 16 H13.1 M20 16 H20.1 M27 16 H27.1'],
-      ['Sat', '#FF7A45', 'M4 25 C10 25 12 8 18 8 H28'],
-      ['DeEss', '#F7D154', 'M4 11 H16 Q19 25 22 11 H28'],
-      ['Gate', '#9BE15D', 'M4 24 H10 V8 H22 V24 H28'],
-      ['Shape', '#FF6FB5', 'M4 24 H9 L12 6 L16 18 Q22 22 28 24'],
-      ['Soothe', '#7FE3C0', 'M4 20 L8 12 H11 L15 20 L19 12 H22 L26 20 H28'],
-      ['Filter', '#FFC15C', 'M4 13 H16 Q21 13 22 7 Q23 4 28 27'],
-      ['Mod', '#E07BFF', 'M4 16 Q8 5 12 16 T20 16 T28 16'],
-      ['Meter', '#D6DCE4', 'M7 28 V18 M13 28 V10 M19 28 V14 M25 28 V6'],
-      ['Utility', '#9AA6B8', 'M6 10 H26 M6 22 H26 M12 6 V14 M20 18 V26']
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.3.0","date":"2026-10-14","note":"Third pass. Generated from the solver output; boards render from this object. Mirror 1:1 into mite-ui::tokens."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity"},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"azure","dark":"#54B3FD","light":"#15466A","hc":"#86C5FA","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"blush","dark":"#FEBCCF","light":"#763F51","hc":"#FEBCCF","cb":"#238EA9"},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":16.9,"light":22.8,"hc":20.0,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":17.3,"light":15.6,"hc":17.3,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"}}/*END*/;
+    const C = TOK.color;
+    const GLYPH = {
+      eq: 'M3 20 C10 20 12 8 16 8 C20 8 22 20 29 20', comp: 'M4 28 L15 17 Q17 15 20 14 L28 11', limit: 'M4 28 L15 11 Q17 9 19 9 H28 M4 5 H28',
+      multiband: 'M3 22 Q7.5 9 12 22 Q16 9 20 22 Q24.5 9 29 22', verb: 'M5 7 V26 M11 11 V26 M17 15 V26 M23 19 V26 M29 22 V26',
+      delay: 'M6 16 H6.1 M13 16 H13.1 M20 16 H20.1 M27 16 H27.1', sat: 'M4 25 C10 25 12 8 18 8 H28', deess: 'M4 11 H16 Q19 25 22 11 H28',
+      gate: 'M4 24 H10 V8 H22 V24 H28', shape: 'M4 24 H9 L12 6 L16 18 Q22 22 28 24', soothe: 'M4 20 L8 12 H11 L15 20 L19 12 H22 L26 20 H28',
+      filter: 'M4 13 H16 Q21 13 22 7 Q23 4 28 27', mod: 'M4 16 Q8 5 12 16 T20 16 T28 16', meter: 'M7 28 V18 M13 28 V10 M19 28 V14 M25 28 V6',
+      utility: 'M6 10 H26 M6 22 H26 M12 6 V14 M20 18 V26'
+    };
+    const BG = { dark: ['#0E1116', '#1C2129', '#E6EAF0'], light: ['#FAFBFC', '#D5DAE1', '#12161C'], hc: ['#000000', '#FFFFFF', '#FFFFFF'], cb: ['#0E1116', '#1C2129', '#E6EAF0'] };
+    const M = C.accentMinDeltaE;
+    const accents = Object.keys(C.accent).map((k) => {
+      const a = C.accent[k];
+      const cells = ['dark', 'light', 'hc', 'cb'].map((t) => {
+        const de = M[k][t], target = t === 'cb' ? 12 : 15;
+        return { c: a[t], de: de.toFixed(1), dc: de >= target ? '#38D080' : '#FEDD4D', bg: BG[t][0], b: BG[t][1], fg: BG[t][2], glow: t === 'light' ? 'transparent' : a[t] };
+      });
+      return { plugin: a.plugin, name: a.name, d: GLYPH[k], dark: a.dark, cells };
+    });
+    const R = C.ramp;
+    const ink = (h) => { const n = parseInt(h.slice(1), 16); const l = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); return l > 140 ? '#0E1116' : '#FFFFFF'; };
+    const rampRow = (k, t, bg, b, fg, sub, min) => ({ k, bg, b, fg, sub, min, sw: R[t].map((c, i) => ({ c, n: i + 1, ink: ink(c), name: t === 'cb' ? '' : R.names[i], dash: t === 'cb' ? R.cbDash[i] : 'none' })) });
+    const ramps = [
+      rampRow('Dark', 'dark', '#0E1116', '#1C2129', '#E6EAF0', '#A7B0BE', C.rampMinDeltaE.dark),
+      rampRow('Light', 'light', '#FAFBFC', '#D5DAE1', '#12161C', '#5A6370', C.rampMinDeltaE.light),
+      rampRow('High contrast', 'hc', '#000000', '#FFFFFF', '#FFFFFF', '#C7C7C7', C.rampMinDeltaE.hc),
+      rampRow('Colour-blind', 'cb', '#0E1116', '#1C2129', '#E6EAF0', '#A7B0BE', '12+ · numbers + dashes')
     ];
-    const plugins = P.map(([k, c, d]) => ({ k: 'Mite ' + k, c, d, tint: c + '1A', edge: c + '40' }));
-    const dark = [['window', '#0A0C0F'], ['display', '#0E1116'], ['surface.1', '#10141A'], ['surface.2', '#12161C'], ['surface.3', '#1A1E25'],
-      ['line.subtle', '#1C2129'], ['line.strong', '#2A313C'], ['text.lo', '#7C8696'], ['text.mid', '#A7B0BE'], ['text.hi', '#E6EAF0']];
-    const light = [['window', '#EEF0F3'], ['display', '#FFFFFF'], ['surface.1', '#F6F7F9'], ['surface.2', '#E9ECF0'], ['surface.3', '#DDE1E7'],
-      ['line.subtle', '#D5DAE1'], ['line.strong', '#B8BFC9'], ['text.lo', '#5F6875'], ['text.mid', '#3E4652'], ['text.hi', '#12161C']];
-    const sw = (a) => a.map(([k, c]) => ({ k, c }));
+    const semKeys = ['gr', 'warn', 'danger', 'masking', 'ok', 'sidechain', 'focus'];
+    const semantic = semKeys.map((k) => {
+      const s = C.semantic[k];
+      const cells = ['dark', 'light', 'hc', 'cb'].map((t) => {
+        const hatch = k === 'masking';
+        const dashed = k === 'sidechain' && t === 'cb';
+        return { c: s[t], bg: BG[t][0], b: BG[t][1], fg: BG[t][2], fill: hatch ? 'repeating-linear-gradient(45deg, ' + s[t] + ' 0 3px, transparent 3px 6px)' : dashed ? 'transparent' : s[t], ring: dashed ? '2px dashed ' + s[t] : hatch ? '1.5px solid ' + s[t] : 'none' };
+      });
+      return { k, cells, use: s.use || '', cue: s.cbCue || 'n/a' };
+    });
+    const NT = C.neutral;
+    const pick = (o) => Object.keys(o).filter((k) => typeof o[k] === 'string' && /^(#|rgba)/.test(o[k])).map((k) => ({ k, c: o[k] }));
     const themes = [
-      { k: 'NEUTRALS · DARK (DEFAULT)', bg: '#10141A', border: '#1C2129', label: '#8A94A3', text: '#E6EAF0', swBorder: 'rgba(255,255,255,0.08)', sw: sw(dark) },
-      { k: 'NEUTRALS · LIGHT', bg: '#F6F7F9', border: '#D5DAE1', label: '#5F6875', text: '#12161C', swBorder: 'rgba(0,0,0,0.10)', sw: sw(light) }
+      { k: 'NEUTRALS · DARK', bg: '#10141A', border: '1px solid #1C2129', label: '#A7B0BE', text: '#E6EAF0', swBorder: 'rgba(255,255,255,0.08)', sw: pick(NT.dark) },
+      { k: 'NEUTRALS · LIGHT', bg: '#F1F3F6', border: '1px solid #D5DAE1', label: '#5A6370', text: '#12161C', swBorder: 'rgba(0,0,0,0.12)', sw: pick(NT.light) },
+      { k: 'NEUTRALS · HIGH CONTRAST', bg: '#000000', border: '1.5px solid #FFFFFF', label: '#C7C7C7', text: '#FFFFFF', swBorder: '#8C8C8C', sw: pick(NT.hc) }
     ];
-    const ramp = ['#5CC8FF', '#FFB547', '#FF6FA8', '#8EE07A', '#B98BFF', '#F7D154', '#3FD6B5', '#FF8A5C'].map((c, i) => ({ c, n: i + 1 }));
-    const rampCb = ['#56B4E9', '#E69F00', '#CC79A7', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#E6EAF0'].map((c, i) => ({ c, n: i + 1 }));
-    const semantic = [
-      { k: 'Gain reduction', t: 'sem.gr', c: '#FF8A3D' },
-      { k: 'Sidechain', t: 'sem.sidechain', c: '#B38CFF' },
-      { k: 'Collision / masking', t: 'sem.collision', c: '#FF4D6A' },
-      { k: 'Pre spectrum', t: 'sem.spec.pre', c: '#8A94A3' },
-      { k: 'Warning / true peak', t: 'sem.warn', c: '#FFB547' },
-      { k: 'Healthy / in range', t: 'sem.ok', c: '#8EE07A' },
-      { k: 'Focus ring', t: 'sem.focus', c: '#FFFFFF' },
-      { k: 'Modulation', t: 'sem.mod', c: '#C9A7FF' }
+    const CC = C.contrastChecked;
+    const ctab = [
+      ['Help-strip hint · text.lo on help strip', '#0C0E12', '#7C8696', CC['dark.textLo/helpStrip'], 4.5],
+      ['Readouts · text.lo on display', '#0E1116', '#7C8696', CC['dark.textLo/display'], 4.5],
+      ['Light · text.lo on window', '#E6E9EE', '#5A6370', CC['light.textLo/window'], 4.5],
+      ['Light · text.lo on display', '#FAFBFC', '#5A6370', CC['light.textLo/display'], 4.5],
+      ['High contrast · text.lo on black', '#000000', '#C7C7C7', CC['hc.textLo/display'], 7],
+      ['High contrast · disabled on black', '#000000', '#8C8C8C', CC['hc.textDisabled/display'], 4.5],
+      ['Disabled only · text.disabled on window', '#0A0C0F', '#4A5260', CC['dark.textDisabled/window'], 99]
     ];
-    const type = [
-      { k: 'display', f: 'Manrope', ff: 'normal', s: 28, w: 800, ls: '-0.02em', sample: 'Mite EQ', spec: '28 / 800 / −2 %' },
-      { k: 'title', f: 'Manrope', ff: 'normal', s: 15, w: 700, ls: '0', sample: 'Band 3 · Bell', spec: '15 / 700' },
-      { k: 'body', f: 'Manrope', ff: 'normal', s: 12, w: 500, ls: '0', sample: 'Drag to move, Shift for fine control', spec: '12 / 500' },
-      { k: 'label', f: 'Manrope', ff: 'normal', s: 10, w: 700, ls: '0.08em', sample: 'THRESHOLD', spec: '10 / 700 / +8 % caps' },
-      { k: 'readout', f: 'Manrope', ff: "'tnum' 1", s: 11.5, w: 600, ls: '0', sample: '2.80 kHz   −4.5 dB   2.60', spec: '11.5 / 600 tnum' },
-      { k: 'readout.dial', f: 'Manrope', ff: "'tnum' 1", s: 12, w: 700, ls: '0', sample: '1.20 kHz', spec: '12 / 700 tnum + 9 unit' },
-      { k: 'readout.lg', f: 'Manrope', ff: "'tnum' 1", s: 20, w: 600, ls: '-0.01em', sample: '−14.0 LUFS', spec: '20 / 600 tnum' }
+    const contrast = ctab.map(([k, bg, fg, r, min]) => ({ k, bg, fg, r: r.toFixed(2), v: min === 99 ? 'exempt' : r >= min ? 'PASS ' + min + ':1' : 'FAIL', vc: min === 99 ? '#FEDD4D' : r >= min ? '#38D080' : '#E6424C' }));
+    const HT = TOK.hitTarget;
+    const hits = [
+      { k: HT.desktopMin + ' px · desktop minimum', px: 32, d: 'Every button, segment, dropdown, menu row and node hit area.' },
+      { k: HT.touchMin + ' px · touch / AUv3', px: 44, d: 'Touch layout swaps in 44 px segments and rows; nothing is hover-only.' },
+      { k: TOK.dial.sizes.standard + ' px · band-panel dial', px: 48, d: 'Hit area is the whole 84 × 90 column including the label.' },
+      { k: HT.nodeDot.idle + '–' + HT.nodeDot.selected + ' px dot · ' + HT.nodeHit + ' px node', px: 18, d: 'The visible dot is small; its button is always 32 × 32.' }
     ];
-    const space = [['s.1', 2], ['s.2', 4], ['s.3', 6], ['s.4', 8], ['s.5', 12], ['s.6', 16], ['s.7', 24], ['s.8', 32], ['s.9', 48]].map(([k, v]) => ({ k, v }));
-    const radii = [['r.xs', 2, 'meter'], ['r.sm', 4, 'chip'], ['r.md', 6, 'control'], ['r.lg', 10, 'card'], ['r.xl', 14, 'panel'], ['r.pill', 20, 'switch']].map(([k, v, l]) => ({ k, v, l }));
-    const bez = (x1, y1, x2, y2) => {
-      let d = '';
-      for (let i = 0; i <= 40; i++) {
-        const t = i / 40, u = 1 - t;
-        const x = 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t;
-        const y = 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t;
-        d += (i ? 'L' : 'M') + (x * 100).toFixed(1) + ' ' + (63 - y * 58).toFixed(1) + ' ';
-      }
-      return d;
-    };
-    const spring = () => {
-      let d = '';
-      for (let i = 0; i <= 60; i++) {
-        const t = i / 60;
-        const y = 1 - Math.exp(-6 * t) * Math.cos(11 * t);
-        d += (i ? 'L' : 'M') + (t * 100).toFixed(1) + ' ' + (63 - y * 50).toFixed(1) + ' ';
-      }
-      return d;
-    };
-    const eases = [
-      { k: 'ease.standard', v: 'cubic(.2, 0, 0, 1)', d: bez(0.2, 0, 0, 1) },
-      { k: 'ease.enter', v: 'cubic(0, 0, .2, 1)', d: bez(0, 0, 0.2, 1) },
-      { k: 'ease.exit', v: 'cubic(.4, 0, 1, 1)', d: bez(0.4, 0, 1, 1) },
-      { k: 'spring.node', v: 'k 420 · c 28', d: spring() }
+    const TY = TOK.typography;
+    const SAMPLE = { display: 'Mite EQ', title: 'Band 3 · Bell', body: 'Drag to move, Shift for fine control', label: 'THRESHOLD', readout: '2.80 kHz   −4.5 dB   2.60', readoutDial: '1.20 kHz', readoutLarge: '−14.0 LUFS' };
+    const type = Object.keys(TY.styles).map((k) => {
+      const v = TY.styles[k];
+      return { k, s: v.size, w: v.weight, ls: (v.tracking || 0) + 'em', ff: v.features ? "'tnum' 1" : 'normal', sample: SAMPLE[k] || k, spec: v.size + ' / ' + v.weight + (v.features ? ' tnum' : '') + (v.tracking ? ' / ' + Math.round(v.tracking * 100) + ' %' : '') };
+    });
+    const space = Object.keys(TOK.space).map((k) => ({ k: 's.' + k, v: TOK.space[k] }));
+    const radii = Object.keys(TOK.radius).map((k) => ({ k: 'r.' + k, v: TOK.radius[k] }));
+    const EL = TOK.elevation;
+    const elev = ['raised', 'inset', 'glass'].map((k) => ({ k, sh: EL[k].dark, d: EL[k].dark, l: EL[k].light, h: EL[k].hc }));
+    const MO = TOK.motion;
+    const durs = Object.keys(MO.duration).map((k) => ({ k, v: MO.duration[k] }));
+    const bez = (p) => { let d = ''; for (let i = 0; i <= 40; i++) { const t = i / 40, u = 1 - t; const x = 3 * u * u * t * p[0] + 3 * u * t * t * p[2] + t * t * t; const y = 3 * u * u * t * p[1] + 3 * u * t * t * p[3] + t * t * t; d += (i ? 'L' : 'M') + (x * 100).toFixed(1) + ' ' + (63 - y * 58).toFixed(1) + ' '; } return d; };
+    const eases = Object.keys(MO.easing).map((k) => ({ k: 'ease.' + k, v: 'cubic(' + MO.easing[k].join(', ') + ')', d: bez(MO.easing[k]) }));
+    const RU = C.rules;
+    const rules = [
+      { k: 'ΔE', t: RU.deltaE + ' ≥ ' + RU.minDeltaE + ' for ' + RU.applies + '.' },
+      { k: 'Ramp', t: RU.ramp + '.' },
+      { k: 'Accent', t: RU.accent + '.' },
+      { k: 'Colour-blind', t: RU.colourBlind + '.' },
+      { k: 'Solo', t: RU.solo + '.' },
+      { k: 'Lime vs ok', t: 'band 2 (lime) sits ' + (0.12).toFixed(2) + ' OKLCH lightness above sem.ok.' }
     ];
-    const durs = [
-      { k: 'micro', v: '80 ms', u: 'hover, focus' },
-      { k: 'fast', v: '140 ms', u: 'press, toggle' },
-      { k: 'base', v: '220 ms', u: 'band panel in' },
-      { k: 'slow', v: '360 ms', u: 'view, theme' },
-      { k: 'meter', v: '0 / 300', u: 'attack / release ms' }
-    ];
-    return { accent, plugins, themes, ramp, rampCb, semantic, type, space, radii, eases, durs };
+    return { version: TOK.meta.version, eqAccent: C.accent.eq.dark, rules, accents, ramps, semantic, themes, contrast, hits, family: TY.family, license: TY.license, type, space, radii, elev, durs, eases, reduce: 'Reduce motion: ' + MO.reduceMotion + '.' };
   }
 }
 </script>

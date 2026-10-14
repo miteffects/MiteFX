@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MiteFX interaction spec</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>body{margin:0;background:#0A0C0F}</style>
+</helmet>
+<div style="width: 1440px; height: 2920px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 22px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
+<div style="display: flex; align-items: baseline; gap: 16px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em">Interaction spec</h1>
+<span style="font-size: 13px; color: #A7B0BE">Same content as docs/design/interaction.md · timings reference tokens.json → motion</span>
+</div>
+
+<sc-for list="{{tables}}" as="tb" hint-placeholder-count="5">
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; gap: 12px"><h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">{{tb.title}}</h2><span style="font-size: 11.5px; color: #A7B0BE">{{tb.note}}</span></div>
+<div role="table" aria-label="{{tb.title}}" style="display: flex; flex-direction: column">
+<div role="row" style="display: grid; grid-template-columns: {{tb.cols}}; gap: 12px; padding: 6px 8px; border-bottom: 1px solid #262C36">
+<sc-for list="{{tb.head}}" as="h" hint-placeholder-count="5"><span role="columnheader" style="font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: #A7B0BE">{{h}}</span></sc-for>
+</div>
+<sc-for list="{{tb.rows}}" as="r" hint-placeholder-count="8">
+<div role="row" style="display: grid; grid-template-columns: {{tb.cols}}; gap: 12px; padding: 7px 8px; border-bottom: 1px solid #161A21">
+<sc-for list="{{r.cells}}" as="c" hint-placeholder-count="5"><span role="cell" style="font-size: 12px; line-height: 1.45; font-weight: {{c.w}}; color: {{c.col}}; font-feature-settings: 'tnum' 1">{{c.t}}</span></sc-for>
+</div>
+</sc-for>
+</div>
+</section>
+</sc-for>
+
+<div style="display: flex; gap: 20px">
+<section style="flex: 0 0 640px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">BAND PANEL PLACEMENT · CANDIDATES IN ORDER</h2>
+<div role="img" aria-label="Diagram: the panel is tried above the node, below it, shifted, then docked beside it; the output meter column is never covered" style="position: relative; height: 300px; border-radius: 10px; background: #0E1116; border: 1px solid #1C2129; overflow: hidden">
+<div style="position: absolute; right: 0; top: 0; bottom: 0; width: 40px; background: repeating-linear-gradient(45deg, rgba(230,66,76,0.25) 0 3px, transparent 3px 8px); border-left: 1px dashed #E6424C"></div>
+<span style="position: absolute; right: 4px; top: 8px; font-size: 9px; font-weight: 800; color: #E6424C; writing-mode: vertical-rl">NEVER COVER · METER</span>
+<div style="position: absolute; left: 0; right: 40px; top: 150px; height: 1px; background: #2A313C"></div>
+<sc-for list="{{cands}}" as="c" hint-placeholder-count="6">
+<div style="position: absolute; left: {{c.x}}px; top: {{c.y}}px; width: {{c.w}}px; height: {{c.h}}px; box-sizing: border-box; border: 1.5px {{c.bs}} {{c.col}}; border-radius: 8px; background: {{c.bg}}; display: flex; align-items: flex-start; justify-content: flex-start; padding: 4px 6px"><span style="font-size: 10px; font-weight: 800; color: {{c.col}}">{{c.n}} · {{c.t}}</span></div>
+</sc-for>
+<div style="position: absolute; left: 271px; top: 171px; width: 18px; height: 18px; border-radius: 50%; background: #F776C4; border: 2px solid #FFFFFF; box-sizing: border-box; box-shadow: 0 0 14px rgba(247,118,196,0.7)"></div>
+<div style="position: absolute; left: 140px; top: 236px; width: 14px; height: 14px; border-radius: 50%; background: rgba(61,126,252,0.25); border: 2px solid #3D7EFC; box-sizing: border-box"></div>
+<span style="position: absolute; left: 160px; top: 234px; font-size: 10px; color: #A7B0BE">other band: +10 if covered</span>
+</div>
+<span style="font-size: 11.5px; line-height: 1.5; color: #C9D1DC">Score = 10 × other nodes covered + 3 × selected nodes covered + shift px / 40. Lowest wins. 30 px gap to the node, 12 px to plot edges. Follows a dragged node with a 60 ms lag and flips sides only after crossing the midline by 24 px.</span>
+</section>
+<section style="flex: 1; min-width: 0; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">KEYBOARD FOCUS ORDER</h2>
+<ol style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{focus}}" as="f" hint-placeholder-count="5"><li style="font-size: 12px; line-height: 1.5; color: #C9D1DC"><span style="font-weight: 700; color: #E6EAF0">{{f.k}}</span> — {{f.v}}</li></sc-for>
+</ol>
+<h2 style="margin: 8px 0 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #A7B0BE">REDUCE MOTION</h2>
+<ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px">
+<sc-for list="{{reduce}}" as="r" hint-placeholder-count="5"><li style="font-size: 12px; line-height: 1.5; color: #C9D1DC">{{r}}</li></sc-for>
+</ul>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2920}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const row = (...cells) => ({ cells: cells.map((t, i) => ({ t, w: i === 0 ? 700 : 500, col: i === 0 ? '#E6EAF0' : '#C9D1DC' })) });
+    const tables = [
+      { title: 'MAIN DISPLAY GESTURES', note: 'EQ, Multiband crossovers, Comp transfer curve', cols: '160px repeat(3, minmax(0, 1fr))', head: ['GESTURE', 'EMPTY DISPLAY', 'BAND NODE', 'SPECTRUM PEAK'], rows: [
+        row('Hover', 'Help strip: frequency, note, level', 'Node grows (micro); strip names the band', 'Peak marker + tooltip after 300 ms'),
+        row('Click', 'Clears selection', 'Selects; panel opens (base, enter)', '—'),
+        row('Double-click', 'Adds a Bell at the pointer, Q 1.0', 'Resets band: 0 dB, Q 0.71', 'Adds Bell at the peak, Q 3.0, −3 dB'),
+        row('Drag', 'Lasso select', 'x = frequency, y = gain (cut/shelf: x only)', 'Ghost Bell follows; release commits, Esc cancels'),
+        row('Shift-drag', 'Adds to selection', 'Fine ×0.1', 'Fine ×0.1'),
+        row('Alt-drag', '—', 'Q: 1 octave of width per 120 px', '—'),
+        row('Cmd/Ctrl-drag', '—', 'Axis lock after 6 px', '—'),
+        row('Wheel', 'Zoom frequency axis (Shift pans)', 'Q ×2^(1/6) per notch, Shift ×2^(1/24)', '—'),
+        row('Right-click', 'Display menu', 'Band menu', '—'),
+        row('S held while dragging', '—', 'Snap to nearest note', '—')
+      ] },
+      { title: 'PER PARAMETER TYPE', note: 'Drag = vertical px for full range at 100 % scale. Shift is always ×0.1. No acceleration.', cols: '150px 120px 90px 120px 140px 140px 110px', head: ['TYPE', 'RANGE', 'MAPPING', 'DRAG', 'WHEEL / SHIFT', 'ARROWS', 'PGUP/PGDN'], rows: [
+        row('Frequency', '10 Hz – 30 kHz', 'log', '200 px · ≈17 px/oct', '1/6 oct / 1/48 oct', '1 semitone', '1 octave'),
+        row('Gain, bipolar', '±30 dB', 'linear', '200 px · 0.3 dB/px', '0.5 dB / 0.1 dB', '0.1 dB', '3 dB'),
+        row('Level, unipolar', '−60 … 0 dB', 'linear', '200 px', '0.5 dB / 0.1 dB', '0.1 dB', '3 dB'),
+        row('Q / width', '0.025 – 40', 'log', '200 px', '×2^(1/6) / ×2^(1/24)', '×2^(1/12)', '×2'),
+        row('Time', '0.01 – 5000 ms', 'log', '200 px', '×2^(1/4) / ×2^(1/16)', '×2^(1/8)', '×2'),
+        row('Synced time', '1/64 … 4 bars', 'stepped', '24 px / step', '1 step', '1 step', '4 steps'),
+        row('Ratio', '1:1 – ∞:1', 'linear in 1/ratio', '200 px', '0.1 · 0.5 · 1 by range', 'as wheel', '×2'),
+        row('Percent', '0 – 100/200 %', 'linear', '200 px', '1 % / 0.1 %', '1 %', '10 %'),
+        row('Bipolar % / pan', 'L100 – R100', 'linear', '200 px · 6 px detent at 0', '1 / 0.1', '1', '10'),
+        row('Enum', 'slope, mode', 'stepped', '24 px / step', '1 step', '1 step', 'first / last')
+      ] },
+      { title: 'STATE TRANSITIONS', note: 'micro 80 · fast 140 · base 220 · slow 360 ms', cols: '200px minmax(0, 1fr) 160px 160px', head: ['COMPONENT', 'TRANSITION', 'DURATION', 'EASING'], rows: [
+        row('Button, segment', 'rest → hover', 'micro', 'standard'), row('Button, segment', 'press (inset)', 'fast', 'standard'),
+        row('Toggle', 'off ↔ on, glow fades in', 'fast', 'standard'), row('Dial', 'hover: scale 1.1 · drag: no change', 'fast', 'standard'),
+        row('Band node', 'idle → hover / selected', 'micro / fast', 'standard / spring.node'), row('Band node', 'create / delete', 'base / fast', 'spring.node / exit'),
+        row('Band panel', 'open / close / move', 'base / fast / 60 ms lag', 'enter / exit / standard'), row('Menu', 'open (fade + 4 px drop)', 'fast', 'enter'),
+        row('Sheet', 'open / close + scrim', 'slow / base', 'enter / exit'), row('Theme change', 'whole-window crossfade', 'slow', 'standard'),
+        row('Meters, dynamic ring', 'audio rate; meter release 20 dB/s, peak hold 1.5 s', '0 / 300 ms', '—')
+      ] },
+      { title: 'TOUCH (AUV3 / IPAD AND TOUCH SCREENS)', note: '44 px targets; band panel becomes a bottom sheet under 720 px wide', cols: '220px minmax(0, 1fr)', head: ['GESTURE', 'RESULT'], rows: [
+        row('Tap / double-tap', 'Same as click / double-click'), row('Drag', 'Same as drag; starting on a node needs 4 px'),
+        row('Two-finger pinch on selected node', 'Q'), row('Two-finger vertical drag on selected node', 'Fine gain ×0.1'),
+        row('Long-press 500 ms', 'Context menu, light haptic tick'), row('Two-finger tap / three-finger tap', 'Undo / redo')
+      ] },
+      { title: 'KEYS', note: 'Esc steps back one level: typed entry → menu → panel → selection → help mode', cols: '200px minmax(0, 1fr) minmax(0, 1fr)', head: ['KEY', 'IN THE DISPLAY', 'ON A FOCUSED DIAL / FIELD'], rows: [
+        row('← →', 'Previous / next band', '1/100 of range; Shift 1/1000'), row('↑ ↓', 'Gain ±0.5 dB (Shift ±0.1)', 'Step per type table'),
+        row('PgUp / PgDn', 'Q ×2^(±1/6)', 'Per type table'), row('Home / End', 'First / last band', 'Min / max'),
+        row('N · Del · S · B · D', 'Add · delete · solo · bypass · dynamic', '—'), row('Enter', 'Open band panel', 'Typed entry'),
+        row('?', 'Toggle help mode', '—'), row('Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z', 'UI undo / redo (separate from host automation)', '—')
+      ] }
+    ];
+    const cands = [
+      { n: 1, t: 'above', x: 130, y: 20, w: 300, h: 100, col: '#38D080', bs: 'solid', bg: 'rgba(56,208,128,0.10)' },
+      { n: 2, t: 'below', x: 130, y: 210, w: 300, h: 80, col: '#7C8696', bs: 'dashed', bg: 'transparent' },
+      { n: 3, t: 'above, shifted', x: 260, y: 30, w: 300, h: 90, col: '#7C8696', bs: 'dashed', bg: 'transparent' },
+      { n: 4, t: 'dock left', x: 10, y: 120, w: 200, h: 120, col: '#7C8696', bs: 'dotted', bg: 'transparent' },
+      { n: 5, t: 'dock right', x: 330, y: 130, w: 200, h: 110, col: '#7C8696', bs: 'dotted', bg: 'transparent' }
+    ];
+    const focus = [
+      { k: 'Header', v: 'menu → presets ‹ › → undo → redo → snapshots A–D → copy → morph → analyser → ? → settings' },
+      { k: 'Display', v: 'bands in frequency order; arrows move between them' },
+      { k: 'Band panel', v: 'type → slope → stereo → solo → bypass → close → dials left to right → dynamic row' },
+      { k: 'Help strip', v: 'skipped (read-only, announced politely)' },
+      { k: 'Footer', v: 'MIDI → mode → resolution → character → channel → Auto Gain → Delta → Bypass → Mix → Output' },
+      { k: 'Focus ring', v: '2 px white, 2 px offset (3 px in high contrast); follows the node circle' }
+    ];
+    const reduce = [
+      'Transitions longer than micro (80 ms) become instant; hover colour stays.',
+      'Springs become ease.standard at fast, with no overshoot.',
+      'Dynamic ring and node breathing show the current value only.',
+      'Spectrum and meters keep their ballistics — they are data, not decoration.',
+      'Help callouts appear together; dial hover scale becomes a 1 px brighter tick ring.'
+    ];
+    return { tables, cands, focus, reduce };
+  }
+}
+</script>
+</body>
+</html>

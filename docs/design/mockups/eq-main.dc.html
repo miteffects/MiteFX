@@ -12,7 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
 <style>
 body{margin:0}
-a{color:#63CBFE}a:hover{color:#A9E0FF}
+a{color:#0ED4F6}a:hover{color:#A6EEFB}
 button{font:inherit;color:inherit;cursor:pointer}
 button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 .dial>span:first-child{transition:transform 140ms cubic-bezier(.2,0,0,1)}
@@ -70,7 +70,7 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 <stop offset="0.55" stop-color="{{th.post2}}" stop-opacity="0.12"></stop>
 <stop offset="1" stop-color="{{th.post2}}" stop-opacity="0"></stop>
 </linearGradient>
-<pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="8" fill="{{th.sem.clip}}"></rect></pattern>
+<pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="8" fill="{{th.sem.masking}}"></rect></pattern>
 <filter id="glow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1320" height="660">
 <feGaussianBlur stdDeviation="5" result="b"></feGaussianBlur>
 <feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
@@ -86,16 +86,16 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 <path d="M0 306 H1200" stroke="{{th.zero}}" stroke-width="1"></path>
 <path d="M1200.5 0 V620" stroke="{{th.line}}" stroke-width="1"></path>
 <path d="{{maskRect}}" fill="url(#hatch)" fill-opacity="0.22"></path>
-<path d="{{maskEdge}}" stroke="{{th.sem.clip}}" stroke-width="1.5" fill="none" filter="url(#sglow)"></path>
+<path d="{{maskEdge}}" stroke="{{th.sem.masking}}" stroke-width="1.5" fill="none" filter="url(#sglow)"></path>
 <path d="{{postFill}}" fill="url(#postFill)"></path>
 <path d="{{preLine}}" stroke="{{th.pre}}" stroke-opacity="0.5" stroke-width="1" fill="none"></path>
 <path d="{{postLine}}" stroke="{{th.accent}}" stroke-opacity="0.55" stroke-width="1" fill="none"></path>
 <path d="{{scLine}}" stroke="{{th.sem.sc}}" stroke-width="1.4" stroke-dasharray="{{th.scDash}}" fill="none" filter="url(#sglow)"></path>
-<path d="{{bf.b0.d}}" fill="{{bf.b0.c}}" fill-opacity="{{bf.b0.o}}"></path>
-<path d="{{bf.b1.d}}" fill="{{bf.b1.c}}" fill-opacity="{{bf.b1.o}}"></path>
-<path d="{{bf.b2.d}}" fill="{{bf.b2.c}}" fill-opacity="{{bf.b2.o}}"></path>
-<path d="{{bf.b3.d}}" fill="{{bf.b3.c}}" fill-opacity="{{bf.b3.o}}"></path>
-<path d="{{bf.b4.d}}" fill="{{bf.b4.c}}" fill-opacity="{{bf.b4.o}}"></path>
+<path d="{{bf.b0.d}}" fill="{{bf.b0.c}}" fill-opacity="{{bf.b0.o}}" stroke="{{bf.b0.c}}" stroke-opacity="{{bf.b0.so}}" stroke-width="1.5" stroke-dasharray="{{bf.b0.dash}}"></path>
+<path d="{{bf.b1.d}}" fill="{{bf.b1.c}}" fill-opacity="{{bf.b1.o}}" stroke="{{bf.b1.c}}" stroke-opacity="{{bf.b1.so}}" stroke-width="1.5" stroke-dasharray="{{bf.b1.dash}}"></path>
+<path d="{{bf.b2.d}}" fill="{{bf.b2.c}}" fill-opacity="{{bf.b2.o}}" stroke="{{bf.b2.c}}" stroke-opacity="{{bf.b2.so}}" stroke-width="1.5" stroke-dasharray="{{bf.b2.dash}}"></path>
+<path d="{{bf.b3.d}}" fill="{{bf.b3.c}}" fill-opacity="{{bf.b3.o}}" stroke="{{bf.b3.c}}" stroke-opacity="{{bf.b3.so}}" stroke-width="1.5" stroke-dasharray="{{bf.b3.dash}}"></path>
+<path d="{{bf.b4.d}}" fill="{{bf.b4.c}}" fill-opacity="{{bf.b4.o}}" stroke="{{bf.b4.c}}" stroke-opacity="{{bf.b4.so}}" stroke-width="1.5" stroke-dasharray="{{bf.b4.dash}}"></path>
 <path d="{{resRect}}" fill="{{resColor}}" fill-opacity="0.08" stroke="{{resColor}}" stroke-opacity="0.5" stroke-dasharray="3 4"></path>
 <path d="{{dynRegion}}" fill="{{dynColor}}" fill-opacity="0.14"></path>
 <path d="{{dynStatic}}" stroke="{{dynColor}}" stroke-opacity="0.7" stroke-width="1.2" stroke-dasharray="3 3" fill="none"></path>
@@ -163,7 +163,7 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 <sc-if value="{{isCollision}}" hint-placeholder-val="{{ false }}">
 <div aria-hidden="true" style="position: absolute; left: {{carve.gx}}px; top: {{carve.gy}}px; width: 20px; height: 20px; border-radius: 50%; border: 2px dashed {{th.accent}}; box-sizing: border-box; box-shadow: 0 0 12px {{th.accent}}"></div>
 <section aria-label="Masking suggestion" style="position: absolute; left: {{carve.x}}px; top: {{carve.y}}px; width: 340px; box-sizing: border-box; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: {{th.glass}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 14px; box-shadow: {{th.glassSh}}">
-<div style="display: flex; align-items: center; gap: 8px"><span style="width: 10px; height: 10px; border-radius: 2px; background: {{th.sem.clip}}; box-shadow: 0 0 8px {{th.sem.clip}}"></span><span style="font-weight: 700; font-size: 13px">Masking with “Bass DI”</span><span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 11px; color: {{th.mid}}">52–128 Hz</span></div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 10px; height: 10px; border-radius: 2px; background: {{th.sem.masking}}; box-shadow: 0 0 8px {{th.sem.masking}}"></span><span style="font-weight: 700; font-size: 13px">Masking with “Bass DI”</span><span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 11px; color: {{th.mid}}">52–128 Hz</span></div>
 <span style="font-size: 12px; line-height: 1.45; color: {{th.mid}}">Both tracks peak in the same range. Suggested carve on this track:</span>
 <div style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: {{th.well}}; box-shadow: {{th.wellSh}}"><svg width="40" height="18" viewBox="0 0 40 18" fill="none" aria-hidden="true"><path d="M1 5 C12 5 15 14 20 14 C25 14 28 5 39 5" stroke="{{th.accent}}" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3"></path></svg><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 12px">Bell · 85 Hz · −2.5 dB · Q 1.40</span></div>
 <div style="display: flex; gap: 8px">
@@ -189,7 +189,7 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 <button aria-label="Stereo placement" style="height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 6px; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 6px; box-shadow: {{th.raised}}; font-weight: 600">Stereo<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="{{th.lo}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
 </sc-if>
 <div style="flex: 1"></div>
-<button aria-label="Solo" style="width: 32px; height: 32px; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; box-shadow: {{th.raised}}; border-radius: 6px; font-size: 11px; font-weight: 800; color: {{th.mid}}">S</button>
+<button aria-label="Solo band" aria-pressed="{{sel.soloOn}}" style="width: 32px; height: 32px; background: {{sel.soloBg}}; border: 1px solid {{th.pCtlB}}; box-shadow: {{sel.soloSh}}; border-radius: 6px; font-size: 11px; font-weight: 800; color: {{sel.soloFg}}">S</button>
 <button aria-label="Bypass" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; box-shadow: {{th.raised}}; border-radius: 6px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1.5 V6.5" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path><path d="M4 3.6 A4.5 4.5 0 1 0 10 3.6" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
 <button aria-label="Close panel" onClick="{{closePanel}}" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 6px"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
 </div>
@@ -258,14 +258,14 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 <sc-for list="{{menuItems}}" as="m" hint-placeholder-count="12">
 <sc-if value="{{m.sep}}" hint-placeholder-val="{{ false }}"><div role="separator" style="height: 1px; margin: 4px 6px; background: {{th.glassB}}"></div></sc-if>
 <sc-if value="{{m.item}}" hint-placeholder-val="{{ true }}">
-<div role="menuitem" aria-disabled="{{m.dis}}" style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 6px; background: {{m.bg}}; color: {{m.fg}}; font-weight: 600"><span style="flex: 1">{{m.t}}</span><span style="font-size: 11px; font-weight: 600; color: {{m.kc}}">{{m.k}}</span></div>
+<button role="menuitem" tabindex="{{m.ti}}" aria-disabled="{{m.dis}}" aria-haspopup="{{m.sub}}" style="width: 100%; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: none; border-radius: 6px; text-align: left; background: {{m.bg}}; color: {{m.fg}}; font-weight: 600"><span style="flex: 1">{{m.t}}</span><span aria-hidden="true" style="font-size: 11px; font-weight: 600; color: {{m.kc}}">{{m.k}}</span></button>
 </sc-if>
 </sc-for>
 </div>
 <div role="menu" aria-label="Band type" style="position: absolute; left: {{menu.sx}}px; top: {{menu.sy}}px; width: 196px; padding: 5px; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; background: {{th.menu}}; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid {{th.glassB}}; border-radius: 10px; box-shadow: {{th.glassSh}}">
 <sc-for list="{{typeItems}}" as="o" hint-placeholder-count="10">
-<div role="menuitemradio" aria-checked="{{o.on}}" style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; background: {{o.bg}}; font-weight: 600; color: {{th.hi}}">
-<svg width="22" height="12" viewBox="0 0 22 12" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.gc}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="flex: 1">{{o.k}}</span><span style="font-size: 11px; color: {{th.accent}}">{{o.check}}</span></div>
+<button role="menuitemradio" tabindex="{{o.ti}}" aria-checked="{{o.on}}" style="width: 100%; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: none; border-radius: 6px; text-align: left; background: {{o.bg}}; font-weight: 600; color: {{th.hi}}">
+<svg width="22" height="12" viewBox="0 0 22 12" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.gc}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="flex: 1">{{o.k}}</span><span aria-hidden="true" style="font-size: 11px; color: {{th.accent}}">{{o.check}}</span></button>
 </sc-for>
 </div>
 </sc-if>
@@ -391,11 +391,11 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 </footer>
 
 <sc-if value="{{isHelp}}" hint-placeholder-val="{{ false }}">
-<div aria-hidden="true" style="position: absolute; inset: 0; pointer-events: none">
+<div role="list" aria-label="Help mode annotations" style="position: absolute; inset: 0; pointer-events: none">
 <sc-for list="{{helpSpots}}" as="h" hint-placeholder-count="10">
-<div style="position: absolute; left: {{h.x}}px; top: {{h.y}}px; width: {{h.w}}px; height: {{h.h}}px; border: 1.5px solid {{th.accent}}; border-radius: 8px; box-shadow: 0 0 12px {{th.accentSoft}}, inset 0 0 12px {{th.accentSoft}}"></div>
-<div style="position: absolute; left: {{h.lx}}px; top: {{h.ly}}px; max-width: 220px; display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px 7px 7px; background: {{th.menu}}; border: 1px solid {{th.glassB}}; border-radius: 10px; box-shadow: {{th.glassSh}}">
-<span style="width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: {{th.accent}}; color: {{th.nodeInk}}; font-size: 11px; font-weight: 800; box-shadow: 0 0 10px {{th.accent}}">{{h.n}}</span>
+<div aria-hidden="true" style="position: absolute; left: {{h.x}}px; top: {{h.y}}px; width: {{h.w}}px; height: {{h.h}}px; border: 1.5px solid {{th.accent}}; border-radius: 8px; box-shadow: 0 0 12px {{th.accentSoft}}, inset 0 0 12px {{th.accentSoft}}"></div>
+<div role="listitem" style="position: absolute; left: {{h.lx}}px; top: {{h.ly}}px; max-width: 220px; display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px 7px 7px; background: {{th.menu}}; border: 1px solid {{th.glassB}}; border-radius: 10px; box-shadow: {{th.glassSh}}">
+<span aria-hidden="true" style="width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: {{th.accent}}; color: {{th.nodeInk}}; font-size: 11px; font-weight: 800; box-shadow: 0 0 10px {{th.accent}}">{{h.n}}</span>
 <span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 700; font-size: 12px">{{h.t}}</span><span style="font-size: 11px; line-height: 1.4; color: {{th.mid}}">{{h.d}}</span></span>
 </div>
 </sc-for>
@@ -403,7 +403,7 @@ button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
 </sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","cb"],"default":"dark"},"variant":{"editor":"enum","options":["bands","empty","linear","collision","grab","spectral","multi","menu","presets","settings","help"],"default":"bands"},"animate":{"editor":"boolean","default":true},"$preview":{"width":1280,"height":760}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","cb","hc"],"default":"dark"},"variant":{"editor":"enum","options":["bands","solo","empty","linear","collision","grab","spectral","multi","menu","presets","settings","help"],"default":"bands"},"animate":{"editor":"boolean","default":true},"$preview":{"width":1280,"height":760}}'>
 class Component extends DCLogic {
   componentDidMount() {
     this.timer = setInterval(() => {
@@ -420,46 +420,26 @@ class Component extends DCLogic {
     const st = this.state || {};
     const t = st.t || 0;
 
-    const RAISED_D = 'inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)';
-    const RAISED_L = 'inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)';
-    const DARK = {
-      win: '#0A0C0F', disp: '#0E1116', help: '#0C0E12', line: '#1C2129', div: '#1F252E', chip: 'rgba(18,22,28,0.85)',
-      ctl: '#161A21', ctlB: '#262C36', ctlFg: '#C9D1DC', raised: RAISED_D,
-      well: '#0C0F13', wellB: '#1E242D', wellSh: 'inset 0 1px 3px rgba(0,0,0,0.65)', wellAlpha: 0.8, segOn: '#262C36',
-      pCtl: '#1E232B', pCtlB: '#2E3540',
-      glass: 'rgba(24,28,35,0.72)', glassB: 'rgba(255,255,255,0.09)', glassSh: '0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)',
-      menu: 'rgba(24,28,35,0.95)', menuHover: 'rgba(99,203,254,0.14)', scrim: 'rgba(6,8,10,0.62)',
-      disc: '#161A21', discB: '#2E3540', discAlpha: 0.75, tickOff: '#2A313C', needle: '#FFFFFF', thumb: '#E6EAF0',
-      gridMinor: '#151920', gridMajor: '#1D232C', zero: '#2A313C', curve: '#DDF3FF', post2: '#3D6FD9', pre: '#8A94A3',
-      hi: '#E6EAF0', mid: '#A7B0BE', lo: '#7C8696', strong: '#F2F5F8', dis: '#4A5260',
-      meterOff: '#1E242D', meterWell: '#0A0C10', nodeInk: '#0E1116',
-      accent: '#63CBFE', accentSoft: 'rgba(99,203,254,0.16)', accentText: '#A9E0FF',
-      ramp: ['#6095FA', '#B9E855', '#F590B8', '#41DCC7', '#DB76D3', '#D4DCE5', '#B0A4F8'],
-      sem: { gr: '#FC8731', warn: '#FEDD4D', clip: '#ED3F4B', ok: '#65E287', sc: '#A161E0' },
-      scDash: 'none', alwaysNum: false
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.3.0","date":"2026-10-14","note":"Third pass. Generated from the solver output; boards render from this object. Mirror 1:1 into mite-ui::tokens."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity"},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"azure","dark":"#54B3FD","light":"#15466A","hc":"#86C5FA","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"blush","dark":"#FEBCCF","light":"#763F51","hc":"#FEBCCF","cb":"#238EA9"},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":16.9,"light":22.8,"hc":20.0,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":17.3,"light":15.6,"hc":17.3,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"}}/*END*/;
+    const base = themeKey === 'light' ? 'light' : themeKey === 'hc' ? 'hc' : 'dark';
+    const key = themeKey === 'cb' ? 'cb' : base;
+    const NT = TOK.color.neutral[base], TC = TOK.color, E = TOK.elevation;
+    const semOf = (k) => TC.semantic[k][key];
+    const th = {
+      win: NT.window, disp: NT.display, help: NT.helpStrip, line: NT.line, div: NT.divider, chip: NT.chip,
+      ctl: NT.ctlBg, ctlB: NT.ctlBorder, ctlFg: NT.ctlText, raised: base === 'hc' ? 'none' : E.raised[base],
+      well: NT.well, wellB: NT.wellBorder, wellSh: base === 'hc' ? 'none' : E.inset[base], wellAlpha: base === 'dark' ? 0.8 : base === 'light' ? 0.25 : 0,
+      segOn: NT.segmentOn, segOnFg: NT.segmentOnText || NT.textStrong,
+      pCtl: NT.panelCtlBg, pCtlB: NT.panelCtlBorder, glass: NT.glass, glassB: NT.glassBorder, glassSh: base === 'hc' ? 'none' : E.glass[base],
+      menu: NT.menu, scrim: NT.scrim, disc: NT.dialDisc, discB: NT.dialDiscBorder, discAlpha: base === 'dark' ? 0.75 : base === 'light' ? 0.22 : 0,
+      tickOff: NT.tickOff, needle: NT.needle, thumb: NT.thumb, gridMinor: NT.gridMinor, gridMajor: NT.gridMajor, zero: NT.zeroLine,
+      curve: NT.curve, post2: NT.postFill2, pre: NT.preSpectrum, hi: NT.textHi, mid: NT.textMid, lo: NT.textLo, strong: NT.textStrong, dis: NT.textDisabled,
+      meterOff: NT.meterOff, meterWell: NT.meterWell, nodeInk: base === 'light' ? '#FFFFFF' : base === 'hc' ? '#000000' : '#0E1116',
+      accent: TC.accent.eq[key], accentSoft: key === 'cb' ? 'rgba(35,142,169,0.22)' : NT.accentSoft, accentText: key === 'cb' ? '#A6DCEA' : NT.accentText,
+      ramp: TC.ramp[key], bandDash: key === 'cb' ? TC.ramp.cbDash : null,
+      sem: { gr: semOf('gr'), warn: semOf('warn'), danger: semOf('danger'), masking: semOf('masking'), ok: semOf('ok'), sc: semOf('sidechain') },
+      scDash: key === 'cb' ? '6 4' : 'none', alwaysNum: key === 'cb' || base === 'hc', solo: '#FFFFFF'
     };
-    const LIGHT = Object.assign({}, DARK, {
-      win: '#E6E9EE', disp: '#FAFBFC', help: '#EEF0F3', line: '#D5DAE1', div: '#D0D6DE', chip: 'rgba(255,255,255,0.9)',
-      ctl: '#FFFFFF', ctlB: '#C9CFD8', ctlFg: '#2A313C', raised: RAISED_L,
-      well: '#E3E7EC', wellB: '#CDD3DB', wellSh: 'inset 0 1px 3px rgba(20,30,45,0.18)', wellAlpha: 0.25, segOn: '#FFFFFF',
-      pCtl: '#FFFFFF', pCtlB: '#C9CFD8',
-      glass: 'rgba(255,255,255,0.80)', glassB: 'rgba(20,30,45,0.12)', glassSh: '0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)',
-      menu: 'rgba(255,255,255,0.97)', scrim: 'rgba(222,226,232,0.66)',
-      disc: '#FFFFFF', discB: '#C3C9D2', discAlpha: 0.22, tickOff: '#CDD3DB', needle: '#12161C', thumb: '#FFFFFF',
-      gridMinor: '#EEF0F3', gridMajor: '#E0E4EA', zero: '#B8BFC9', curve: '#0F1B26', post2: '#8FB8E8', pre: '#8A94A3',
-      hi: '#12161C', mid: '#3E4652', lo: '#5A6370', strong: '#0A0C0F', dis: '#A3ABB6',
-      meterOff: '#D5DAE1', meterWell: '#E3E7EC', nodeInk: '#FFFFFF',
-      accent: '#047CA7', accentSoft: 'rgba(4,124,167,0.14)', accentText: '#035E80',
-      ramp: ['#356BD5', '#607E0A', '#AE4976', '#068476', '#A93EA3', '#4F565E', '#7262B7'],
-      sem: { gr: '#AF5505', warn: '#857001', clip: '#D40530', ok: '#0B883F', sc: '#8E45CF' }
-    });
-    const CB = Object.assign({}, DARK, {
-      accent: '#56B4E9', accentSoft: 'rgba(86,180,233,0.16)', accentText: '#A8D8F3',
-      ramp: ['#F0E442', '#4A9BE0', '#E6EAF0', '#E08DBB', '#1FBF8F', '#9AA6B8'],
-      sem: { gr: '#E69F00', warn: '#FFFFFF', clip: '#D55E00', ok: '#E6EAF0', sc: '#E6EAF0' },
-      scDash: '6 4', alwaysNum: true
-    });
-    const th = themeKey === 'light' ? LIGHT : themeKey === 'cb' ? CB : DARK;
 
     const W = 1200, TOP = 24, BOT = 588, MID = 306, FMIN = 10, FMAX = 30000, FS = 96000, N = 300;
     const LR = Math.log(FMAX / FMIN);
@@ -567,22 +547,23 @@ class Component extends DCLogic {
     const knob = (label, n, u, frac, bipolar, color) => Object.assign({ label, n, u, color, aria: label + ' ' + n + ' ' + u }, knobGeo(frac, bipolar));
 
     // selection per variant
-    const defSel = { bands: 2, linear: 0, spectral: 4, menu: -1, multi: -2, empty: -1, collision: -1, grab: -1, presets: -1, settings: -1, help: 2 }[variant];
+    const defSel = { bands: 2, solo: 1, linear: 0, spectral: 4, menu: -1, multi: -2, empty: -1, collision: -1, grab: -1, presets: -1, settings: -1, help: 2 }[variant];
     const selIdx = st.sel === undefined ? (defSel === undefined ? 2 : defSel) : st.sel;
     const multiSet = variant === 'multi' && selIdx === -2 ? [1, 2, 3] : [];
+    const soloIdx = variant === 'solo' ? 1 : -1;
     const nodeY = (b) => (b.kind === 'cut' ? MID : gy(b.g));
 
     const nodes = bands.map((b, i) => {
       const on = i === selIdx || multiSet.includes(i);
       const y = nodeY(b);
       return {
-        x: r1(fx(b.f) - 16), y: r1(y - 16), on: on ? 'true' : 'false', op: 1,
-        num: on || th.alwaysNum ? b.id : '', ink: th.nodeInk,
+        x: r1(fx(b.f) - 16), y: r1(y - 16), on: on ? 'true' : 'false', op: soloIdx >= 0 && i !== soloIdx ? 0.35 : 1,
+        num: i === soloIdx ? 'S' : on || th.alwaysNum ? b.id : '', ink: th.nodeInk,
         aria: 'Band ' + b.id + ', ' + b.type + ', ' + fmtHz(b.f) + (b.kind === 'cut' ? '' : ', ' + fmtDb(b.g)),
         size: on ? 18 : (th.alwaysNum ? 16 : 14), bs: 'solid',
         fill: on ? b.color : (th.alwaysNum ? b.color : b.color + '33'),
         stroke: on ? th.needle : b.color,
-        shadow: on ? '0 0 0 5px ' + b.color + '33, 0 0 18px ' + b.color + 'AA, 0 3px 8px rgba(0,0,0,0.5)' : '0 0 8px ' + b.color + '66, 0 2px 6px rgba(0,0,0,0.5)',
+        shadow: i === soloIdx ? '0 0 0 3px ' + th.disp + ', 0 0 0 5px ' + th.solo + ', 0 0 18px rgba(255,255,255,0.55)' : on ? '0 0 0 5px ' + b.color + '33, 0 0 18px ' + b.color + 'AA, 0 3px 8px rgba(0,0,0,0.5)' : '0 0 8px ' + b.color + '66, 0 2px 6px rgba(0,0,0,0.5)',
         pick: () => this.setState({ sel: i })
       };
     });
@@ -681,6 +662,7 @@ class Component extends DCLogic {
       sel = {
         title: 'Band ' + b.id, type: b.type, color: b.color, px: r1(px), py: r1(py), pw: PW, knobs, single: true,
         hasSlope: !!b.slope, slope: b.slope || '', isDyn: !!b.dyn, isRes: b.kind === 'res', isMulti: false,
+        soloBg: selIdx === soloIdx ? th.solo : th.pCtl, soloFg: selIdx === soloIdx ? '#0E1116' : th.mid, soloSh: selIdx === soloIdx ? '0 0 14px rgba(255,255,255,0.5)' : th.raised, soloOn: selIdx === soloIdx ? 'true' : 'false',
         isPlain: !b.dyn && b.kind !== 'res', note: isLinear && b.kind === 'cut' ? 'Brickwall needs Linear Phase' : 'Alt-drag node for Q', gr: fmtDb(dynNow)
       };
     } else if (multiSet.length) {
@@ -689,19 +671,19 @@ class Component extends DCLogic {
         knob('FREQ', '+0', 'st', 0.5, true, th.accent),
         knob('Q ×', '100', '%', 0.5, false, th.accent)
       ];
-      sel = { title: multiSet.length + ' bands selected', type: '', color: th.accent, px: r1(fx(110)), py: r1(gy(6) - 30 - 216), pw: 476, knobs, single: false, hasSlope: false, slope: '', isDyn: false, isRes: false, isMulti: true, isPlain: false, note: '', gr: '' };
+      sel = { title: multiSet.length + ' bands selected', type: '', color: th.accent, px: r1(fx(110)), py: r1(gy(6) - 30 - 216), pw: 476, knobs, single: false, soloBg: th.pCtl, soloFg: th.mid, soloSh: th.raised, soloOn: 'false', hasSlope: false, slope: '', isDyn: false, isRes: false, isMulti: true, isPlain: false, note: '', gr: '' };
     }
 
     // menu
     const menuB = bands[1] || { f: 160, g: 3.5 };
     const menu = { x: r1(fx(menuB.f) + 14), y: r1(gy(menuB.g) + 10), sx: r1(fx(menuB.f) + 14 + 240), sy: r1(gy(menuB.g) + 10) };
-    const mi = (t, k, extra) => Object.assign({ item: true, sep: false, t, k: k || '', dis: 'false', bg: 'transparent', fg: th.hi, kc: th.lo }, extra || {});
+    const mi = (t, k, extra) => Object.assign({ item: true, sep: false, t, k: k || '', dis: 'false', sub: k === '▸' ? 'menu' : 'false', ti: '-1', bg: 'transparent', fg: th.hi, kc: th.lo }, extra || {});
     const sep = { item: false, sep: true };
     const menuItems = [
-      mi('Type', '▸', { bg: th.accentSoft }), mi('Slope', '▸', { dis: 'true', fg: th.dis, kc: th.dis }), mi('Stereo placement', '▸'), sep,
+      mi('Type', '▸', { bg: th.accentSoft, ti: '0' }), mi('Slope', '▸', { dis: 'true', fg: th.dis, kc: th.dis }), mi('Stereo placement', '▸'), sep,
       mi('Make dynamic', 'D'), mi('Make spectral', ''), sep,
       mi('Solo band', 'S'), mi('Bypass band', 'B'), sep,
-      mi('Copy band', '⌘C'), mi('Paste band', '⌘V', { dis: 'true', fg: th.dis, kc: th.dis }), mi('Reset to default', 'Dbl-click'), mi('Delete band', 'Del', { fg: th.sem.clip })
+      mi('Copy band', '⌘C'), mi('Paste band', '⌘V', { dis: 'true', fg: th.dis, kc: th.dis }), mi('Reset to default', 'Dbl-click'), mi('Delete band', 'Del', { fg: th.sem.danger })
     ];
     const tg = {
       'Bell': 'M1 9 C7 9 8 2 11 2 C14 2 15 9 21 9', 'Low Shelf': 'M1 3 H6 C9 3 11 9 14 9 H21', 'High Shelf': 'M1 9 H8 C11 9 13 3 16 3 H21',
@@ -709,13 +691,13 @@ class Component extends DCLogic {
       'Band Pass': 'M1 11 C6 11 8 3 11 3 C14 3 16 11 21 11', 'Tilt Shelf': 'M1 9 L21 3', 'All-Pass': 'M1 6 H21 M8 3 C10 9 12 3 14 9',
       'Resonance': 'M1 6 H5 L7 3 L9 8 L11 4 L13 7 L15 5 H21'
     };
-    const typeItems = Object.keys(tg).map((k) => ({ k, d: tg[k], on: k === 'Bell' ? 'true' : 'false', check: k === 'Bell' ? '✓' : '', bg: k === 'Notch' ? th.accentSoft : 'transparent', gc: k === 'Bell' ? th.accent : th.lo }));
+    const typeItems = Object.keys(tg).map((k) => ({ k, d: tg[k], ti: k === 'Notch' ? '0' : '-1', on: k === 'Bell' ? 'true' : 'false', check: k === 'Bell' ? '✓' : '', bg: k === 'Notch' ? th.accentSoft : 'transparent', gc: k === 'Bell' ? th.accent : th.lo }));
 
     // segmented helper
     const segSh = (on, onBg) => !on ? 'none' : onBg ? '0 0 12px ' + th.accentSoft + ', inset 0 0 0 1px ' + th.accent : th.raised;
     const seg = (labels, cur, key, onBg) => labels.map((k, i) => ({
       k, on: i === cur ? 'true' : 'false',
-      bg: i === cur ? (onBg ? th.accentSoft : th.segOn) : 'transparent', fg: i === cur ? (onBg ? th.accentText : th.strong) : th.mid,
+      bg: i === cur ? (onBg ? th.accentSoft : th.segOn) : 'transparent', fg: i === cur ? (onBg ? th.accentText : th.segOnFg) : th.mid,
       sh: segSh(i === cur, onBg), pick: () => this.setState({ [key]: i })
     }));
     const mode = st.mode === undefined ? (isLinear ? 2 : 0) : st.mode;
@@ -731,17 +713,18 @@ class Component extends DCLogic {
 
     // band fill slots
     const bf = {};
-    [0, 1, 2, 3, 4].forEach((i) => { bf['b' + i] = bands[i] ? { d: fill0(bandArr[i]), c: bands[i].color, o: (i === selIdx || multiSet.includes(i)) ? 0.22 : 0.08 } : { d: '', c: th.accent, o: 0 }; });
+    [0, 1, 2, 3, 4].forEach((i) => { bf['b' + i] = bands[i] ? { d: fill0(bandArr[i]), c: bands[i].color, o: soloIdx >= 0 ? (i === soloIdx ? 0.28 : 0.03) : (i === selIdx || multiSet.includes(i)) ? 0.22 : 0.08, dash: th.bandDash ? th.bandDash[i % th.bandDash.length] : 'none', so: th.bandDash ? 0.85 : 0 } : { d: '', c: th.accent, o: 0, dash: 'none', so: 0 }; });
 
     // chips
     const chips = [{ t: 'Pre', c: th.pre, h: 2 }, { t: 'Post', c: th.accent, h: 8 }];
     if (db) chips.push({ t: 'Dynamic range', c: db.color, h: 2 });
-    if (variant === 'collision') chips.push({ t: 'Sidechain · Bass DI', c: th.sem.sc, h: 2 }, { t: 'Masking', c: th.sem.clip, h: 8 });
+    if (variant === 'collision') chips.push({ t: 'Sidechain · Bass DI', c: th.sem.sc, h: 2 }, { t: 'Masking', c: th.sem.masking, h: 8 });
     if (isLinear) chips.push({ t: 'Linear Phase · High', c: th.accent, h: 8 });
+    if (soloIdx >= 0) chips.push({ t: 'Solo · Band ' + bands[soloIdx].id + ' · others muted', c: th.solo, h: 8 });
 
     // presets
     const presetCats = [['All', 214], ['Favourites', 12], ['Vocal', 38], ['Drums', 41], ['Bass', 17], ['Guitar', 22], ['Mix bus', 19], ['Mastering', 15], ['Corrective', 26], ['User', 24]]
-      .map(([k, n], i) => ({ k, n, on: i === 2 ? 'true' : 'false', bg: i === 2 ? th.segOn : 'transparent', fg: i === 2 ? th.strong : th.mid, sh: i === 2 ? th.raised : 'none' }));
+      .map(([k, n], i) => ({ k, n, on: i === 2 ? 'true' : 'false', bg: i === 2 ? th.segOn : 'transparent', fg: i === 2 ? th.segOnFg : th.mid, sh: i === 2 ? th.raised : 'none' }));
     const presetTags = [['Bright', false], ['Warm', false], ['Dynamic', true], ['Corrective', false]]
       .map(([k, on]) => ({ k, on: on ? 'true' : 'false', bg: on ? th.accentSoft : 'transparent', b: on ? th.accent : th.ctlB, fg: on ? th.accentText : th.mid }));
     const thumb = (spec) => {
@@ -770,10 +753,10 @@ class Component extends DCLogic {
     }));
 
     // settings
-    const so = (labels, cur) => labels.map((k, i) => ({ k, on: i === cur ? 'true' : 'false', bg: i === cur ? th.segOn : 'transparent', fg: i === cur ? th.strong : th.mid, sh: i === cur ? th.raised : 'none' }));
+    const so = (labels, cur) => labels.map((k, i) => ({ k, on: i === cur ? 'true' : 'false', bg: i === cur ? th.segOn : 'transparent', fg: i === cur ? th.segOnFg : th.mid, sh: i === cur ? th.raised : 'none' }));
     const row = (k, kind, extra) => Object.assign({ k, isSeg: kind === 'seg', isToggle: kind === 'tog', isDrop: kind === 'drop', isSwatch: kind === 'sw' }, extra);
     const tog = (on) => ({ on: on ? 'true' : 'false', tbg: on ? th.accent : th.well, tsh: on ? '0 0 10px ' + th.accentSoft : th.wellSh, tx: on ? 19 : 3, knob: on ? th.nodeInk : th.lo });
-    const sws = ['#63CBFE', '#6095FA', '#41DCC7', '#B9E855', '#F590B8', '#DB76D3', '#B0A4F8'].map((c, i) => ({ c, n: 'Accent ' + (i + 1), on: i === 0 ? 'true' : 'false', sh: i === 0 ? '0 0 0 2px ' + th.disp + ', 0 0 0 4px ' + c + ', 0 0 12px ' + c : 'none' }));
+    const sws = ['eq', 'comp', 'multiband', 'soothe', 'sat', 'delay', 'mod'].map((k) => TC.accent[k][key]).map((c, i) => ({ c, n: 'Accent ' + (i + 1), on: i === 0 ? 'true' : 'false', sh: i === 0 ? '0 0 0 2px ' + th.disp + ', 0 0 0 4px ' + c + ', 0 0 12px ' + c : 'none' }));
     const settings = [
       { h: 'APPEARANCE', rows: [
         row('Theme', 'seg', { opts: so(['Dark', 'Light', 'High contrast', 'Colour-blind'], themeKey === 'light' ? 1 : themeKey === 'cb' ? 3 : 0) }),
@@ -820,6 +803,7 @@ class Component extends DCLogic {
     if (variant === 'settings') help = 'Settings are global and stored per user, not per project';
     if (variant === 'help') { help = 'Help mode is on — hover any control for its explanation'; helpHint = 'Press ? or Esc to leave'; }
     if (variant === 'empty') help = 'No bands yet — the plugin is passing audio unchanged';
+    if (variant === 'solo') { help = 'Soloing band 2 — you hear only the range this band changes. S or the panel button toggles it.'; helpHint = 'Solo is white, never amber'; }
 
     const btnOn = (on) => on ? { bg: th.accentSoft, b: th.accent, sh: '0 0 12px ' + th.accentSoft, fg: th.accentText } : { bg: th.ctl, b: th.ctlB, sh: th.raised, fg: th.mid };
 
@@ -830,7 +814,7 @@ class Component extends DCLogic {
       dynRegion, dynStatic, dynBar, dynRing, dynColor, hasDynRing: !!db,
       scLine, maskRect, maskEdge, ghostCurve, ghostLink, carve, grab, lasso,
       curve: bands.length ? line(total, (v) => gy(clampDb(v))) : 'M0 306 H1200',
-      nodes, hasSel: !!sel, sel: sel || { knobs: [], title: '', type: '', color: th.accent, px: 0, py: 0, pw: 476, single: false, hasSlope: false, slope: '', isDyn: false, isRes: false, isMulti: false, isPlain: false, note: '', gr: '' },
+      nodes, hasSel: !!sel, sel: sel || { knobs: [], soloBg: th.pCtl, soloFg: th.mid, soloSh: th.raised, soloOn: 'false', title: '', type: '', color: th.accent, px: 0, py: 0, pw: 476, single: false, hasSlope: false, slope: '', isDyn: false, isRes: false, isMulti: false, isPlain: false, note: '', gr: '' },
       closePanel: () => this.setState({ sel: -1 }),
       snaps: seg(['A', 'B', 'C', 'D'], st.snap || 0, 'snap', true),
       modes: seg(['Zero Latency', 'Natural Phase', 'Linear Phase'], mode, 'mode'),

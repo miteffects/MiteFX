@@ -2,7 +2,16 @@
 
 **Source canvas:** https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5 (Claude Design). The canvas is the living version. The files here are a snapshot and the implementation contract.
 
-**Status:** second pass received on 2026-10-14. The direction is locked. A short third pass is needed (see "Third pass" below).
+**Status:** third pass received on 2026-10-14, and the design system is complete enough to build on.
+- **`tokens.json`** is now the board's own token object (`mitefx-tokens/3`), extracted verbatim:
+  - one fixed band ramp;
+  - semantic colours, including `danger` and `masking`;
+  - a 15-plugin accent table, with checked colour distances;
+  - dark, light, high-contrast and colour-blind themes.
+- **`interaction.md`** holds the gesture, step-size, focus, touch and reduce-motion spec.
+- **New canvas boards:** a high-contrast EQ and the solo state.
+
+The "Third pass" list below is kept as history; the design addressed all of it.
 
 | File | What it is |
 |---|---|

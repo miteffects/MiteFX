@@ -10,25 +10,157 @@
   },
   "pages": [],
   "boards": {
-    "EqLight.dc.html": {"x": -2720, "y": 0, "w": 1280, "h": 760, "title": "Mite EQ — light theme", "is_interactive": true},
-    "EqColourBlind.dc.html": {"x": -1360, "y": 0, "w": 1280, "h": 760, "title": "Mite EQ — colour-blind theme (beside default)", "is_interactive": true},
-    "Main.dc.html": {"x": 0, "y": 0, "w": 1280, "h": 760, "title": "Mite EQ — default dark · dynamic band selected", "is_interactive": true},
-    "Components.dc.html": {"x": 1360, "y": 0, "w": 1440, "h": 1120, "title": "Component sheet"},
-    "Tokens.dc.html": {"x": 2880, "y": 0, "w": 1440, "h": 1320, "title": "Brand + tokens"},
-    "EqEmpty.dc.html": {"x": 0, "y": 2700, "w": 1280, "h": 760, "title": "Empty state"},
-    "EqLinearPhase.dc.html": {"x": 1360, "y": 2700, "w": 1280, "h": 760, "title": "Linear Phase · resolution + latency", "is_interactive": true},
-    "EqCollision.dc.html": {"x": 2720, "y": 2700, "w": 1280, "h": 760, "title": "Collision / masking + carve suggestion"},
-    "EqSpectrumGrab.dc.html": {"x": 4080, "y": 2700, "w": 1280, "h": 760, "title": "Spectrum grab · dragging a peak"},
-    "EqSpectralResonance.dc.html": {"x": 0, "y": 3580, "w": 1280, "h": 760, "title": "Spectral dynamic band + Resonance band", "is_interactive": true},
-    "EqMultiSelect.dc.html": {"x": 1360, "y": 3580, "w": 1280, "h": 760, "title": "Multi-select with lasso"},
-    "EqContextMenu.dc.html": {"x": 2720, "y": 3580, "w": 1280, "h": 760, "title": "Right-click menu + type submenu"},
-    "EqPresetBrowser.dc.html": {"x": 4080, "y": 3580, "w": 1280, "h": 760, "title": "Preset browser · hover auditions"},
-    "EqSettings.dc.html": {"x": 0, "y": 4460, "w": 1280, "h": 760, "title": "Settings sheet"},
-    "EqHelpOverlay.dc.html": {"x": 1360, "y": 4460, "w": 1280, "h": 760, "title": "Help ? overlay"},
-    "EqCompact.dc.html": {"x": 2720, "y": 4460, "w": 640, "h": 400, "title": "Compact 640 × 400", "is_interactive": true},
-    "Shared.dc.html": {"x": 4400, "y": 0, "w": 1440, "h": 1380, "title": "Shared components"}
+    "EqLight.dc.html": {
+      "x": -2720,
+      "y": 0,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite EQ — light theme",
+      "is_interactive": true
+    },
+    "EqColourBlind.dc.html": {
+      "x": -1360,
+      "y": 0,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite EQ — colour-blind theme (beside default)",
+      "is_interactive": true
+    },
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite EQ — default dark · dynamic band selected",
+      "is_interactive": true
+    },
+    "Components.dc.html": {
+      "x": 1360,
+      "y": 0,
+      "w": 1440,
+      "h": 1300,
+      "title": "Component sheet"
+    },
+    "Tokens.dc.html": {
+      "x": 2880,
+      "y": 0,
+      "w": 1440,
+      "h": 2780,
+      "title": "Brand + tokens"
+    },
+    "EqEmpty.dc.html": {
+      "x": 0,
+      "y": 3200,
+      "w": 1280,
+      "h": 760,
+      "title": "Empty state"
+    },
+    "EqLinearPhase.dc.html": {
+      "x": 1360,
+      "y": 3200,
+      "w": 1280,
+      "h": 760,
+      "title": "Linear Phase · resolution + latency",
+      "is_interactive": true
+    },
+    "EqCollision.dc.html": {
+      "x": 2720,
+      "y": 3200,
+      "w": 1280,
+      "h": 760,
+      "title": "Collision / masking + carve suggestion"
+    },
+    "EqSpectrumGrab.dc.html": {
+      "x": 4080,
+      "y": 3200,
+      "w": 1280,
+      "h": 760,
+      "title": "Spectrum grab · dragging a peak"
+    },
+    "EqSpectralResonance.dc.html": {
+      "x": 0,
+      "y": 4080,
+      "w": 1280,
+      "h": 760,
+      "title": "Spectral dynamic band + Resonance band",
+      "is_interactive": true
+    },
+    "EqMultiSelect.dc.html": {
+      "x": 1360,
+      "y": 4080,
+      "w": 1280,
+      "h": 760,
+      "title": "Multi-select with lasso"
+    },
+    "EqContextMenu.dc.html": {
+      "x": 2720,
+      "y": 4080,
+      "w": 1280,
+      "h": 760,
+      "title": "Right-click menu + type submenu"
+    },
+    "EqPresetBrowser.dc.html": {
+      "x": 4080,
+      "y": 4080,
+      "w": 1280,
+      "h": 760,
+      "title": "Preset browser · hover auditions"
+    },
+    "EqSettings.dc.html": {
+      "x": 0,
+      "y": 4960,
+      "w": 1280,
+      "h": 760,
+      "title": "Settings sheet"
+    },
+    "EqHelpOverlay.dc.html": {
+      "x": 1360,
+      "y": 4960,
+      "w": 1280,
+      "h": 760,
+      "title": "Help ? overlay"
+    },
+    "EqCompact.dc.html": {
+      "x": 2720,
+      "y": 4960,
+      "w": 640,
+      "h": 400,
+      "title": "Compact 640 × 400",
+      "is_interactive": true
+    },
+    "Shared.dc.html": {
+      "x": 4400,
+      "y": 0,
+      "w": 1440,
+      "h": 1380,
+      "title": "Shared components"
+    },
+    "EqHighContrast.dc.html": {
+      "x": -4080,
+      "y": 0,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite EQ — high-contrast theme",
+      "is_interactive": true
+    },
+    "EqSolo.dc.html": {
+      "x": 4080,
+      "y": 4960,
+      "w": 1280,
+      "h": 760,
+      "title": "Band 2 soloed (white ring + S, others dimmed)",
+      "is_interactive": true
+    },
+    "Interaction.dc.html": {
+      "x": 5920,
+      "y": 0,
+      "w": 1440,
+      "h": 2920,
+      "title": "Interaction spec (interaction.md)"
+    }
   },
   "order": [
+    "EqHighContrast.dc.html",
     "EqLight.dc.html",
     "EqColourBlind.dc.html",
     "Main.dc.html",
@@ -45,15 +177,17 @@
     "EqSettings.dc.html",
     "EqHelpOverlay.dc.html",
     "EqCompact.dc.html",
-    "Shared.dc.html"
+    "Shared.dc.html",
+    "EqSolo.dc.html",
+    "Interaction.dc.html"
   ],
   "notes": {
     "suiteTitle": {
-      "x": -2720,
+      "x": -4080,
       "y": -300,
-      "text": "MiteFX — shared UX system, second pass",
+      "text": "MiteFX — shared UX system, third pass",
       "kind": "title1",
-      "maxW": 8560
+      "maxW": 11440
     },
     "secondPassBrief": {
       "x": 0,
@@ -66,10 +200,19 @@
     },
     "screensTitle": {
       "x": 0,
-      "y": 2400,
+      "y": 2900,
       "text": "Mite EQ — screens from the second-pass brief",
       "kind": "title1",
       "maxW": 5360
+    },
+    "thirdPassBrief": {
+      "x": 1360,
+      "y": 1360,
+      "text": "THIRD PASS BRIEF (engineering review of pass 2, 2026-10-14). Pass 2 approved: every screen, theme and shared component stays as drawn. This pass is system clean-up so tokens can be generated into code.\n\n1 PLUGIN ACCENT TABLE\nAll 15 plugins x 3 themes (dark, light, colour-blind). No accent within dE ~15 of any band-ramp or semantic colour. Comp #6095FA, Limit #B9E855, Delay #DB76D3 are band 1, 2 and 5 colours; Comp (sidechain EQ) and Delay (per-tap EQ) draw bands, so they must move. Unrevised accents still collide: Verb~band 1, Gate~band 2/ok, Shape~band 3, Soothe~band 4, Multiband~band 7, Sat~gr.\n\n2 BAND RAMP\nBand 6 #D4DCE5 is 1.2:1 against the total curve #DDF3FF (2.3:1 in light): use a hue. Band 2 #B9E855 has the same lightness as ok #65E287: separate them.\n\n3 COLOUR-BLIND THEME\n#E6EAF0 is reused for band 3, ok, sidechain and text; warn is pure white. Split them, and give ok/warn a non-colour cue (icon or pattern).\n\n4 SEMANTIC NAMES\nSplit clip into masking (hatch overlay) and danger (delete, destructive). Confirm sem.mod is gone and modulation always uses the accent.\n\n5 REGENERATE Tokens + Components boards from the pass-2 theme objects: new ramp, new semantics, 32 px segments.\n\n6 SOLO STATE\nAdd to the node-state row and show a soloed band on the EQ (no amber ring).\n\n7 HIGH-CONTRAST palette (it is listed in Settings).\n\n8 interaction.md (still missing)\nKnob drag px per full range, fine factor, wheel steps per parameter type; band-panel placement and collision rules; keyboard focus order; reduce-motion behaviour; touch gestures.\n\n9 MOCKUP A11Y\nCompact delta button needs aria-label; menu items must be focusable; help-overlay text must be readable by screen readers.",
+      "w": 1280,
+      "maxH": 980,
+      "fill": "orange",
+      "size": "m"
     }
   },
   "designSystems": []
