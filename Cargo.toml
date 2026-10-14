@@ -25,7 +25,7 @@ nih_plug_xtask = { git = "https://github.com/ansabic/nih-plug", rev = "a9cca13a4
 
 baseview = "0.4.1"
 keyboard-types = "0.8.3"
-parley = "0.12"
+parley = { version = "0.12", default-features = false, features = ["std"] }
 pollster = "0.4"
 raw-window-handle = "0.6.2"
 serde = { version = "1", features = ["derive"] }

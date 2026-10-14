@@ -10,7 +10,8 @@ const GOLDEN: &str = include_str!("../../../tests/golden/mite_gain.params.txt");
 
 #[test]
 fn manifest_matches_golden() {
-    assert_eq!(mite_core::manifest(SPECS), GOLDEN);
+    // Normalise line endings in case a checkout converted them despite .gitattributes.
+    assert_eq!(mite_core::manifest(SPECS), GOLDEN.replace("\r\n", "\n"));
 }
 
 #[test]
