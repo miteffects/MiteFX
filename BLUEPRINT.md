@@ -4,7 +4,7 @@
 > follows this file or changes this file first. Audience: Claude Design (visual
 > system), implementation sessions, and future contributors.
 
-**Status:** Phase 0 (not started) · **License:** GPL-3.0-or-later · **Last revised:** 2026-10-14
+**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-10-14
 
 ---
 
@@ -383,7 +383,21 @@ FabFilter's strengths:
 - Modulation matrix (shared).
 - Multiband crossover bar.
 
-### 7.4 Deliverables expected from Claude Design (into `docs/design/`)
+### 7.4 Design status
+
+**First pass received on 2026-10-14.** The canvas is https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5, with a snapshot and review in `docs/design/README.md`.
+
+What it settles:
+- **Brand:** `miteFX`, monoline mite mark, per-plugin accent and glyph.
+- **Font:** Manrope only, with tabular readouts.
+- **Base:** near-black blue-grey neutrals with glass panels and glow.
+- **Knob:** tick-scale dial.
+- **EQ layout:** header, display, help strip, footer.
+- **Band panel:** glass, floats above or below the node.
+
+`docs/design/tokens.json` is the source for `mite-ui::tokens`. Open items for the second pass (colour collisions, contrast, missing screens, `interaction.md`) are listed in the README's review section. The brief sent to Design is `docs/design/second-pass-brief.md`.
+
+### 7.5 Deliverables expected from Claude Design (into `docs/design/`)
 
 1. **`tokens.json`:** colour, with full dark and light palettes, the band colour ramp, and semantic colours (gain-reduction, sidechain, collision); typography; spacing; radii; elevation and glow; blur; motion durations and easings. We translate this 1:1 into `mite-ui::tokens`.
 2. **`mockups/*.html`:** Mite EQ screens (empty, 3 bands, dynamic band, linear-phase, collision view, preset browser, compact size, light theme), plus a component sheet.
@@ -392,7 +406,7 @@ FabFilter's strengths:
 
 Technical constraints for Design:
 - Everything must be renderable as vector paths plus gradients plus blur/glow shader passes. Raster images are allowed only for subtle noise textures.
-- Fonts must be OFL-licensed (we embed them).
+- Fonts must be OFL-licensed (we embed them). Chosen: Manrope.
 - Animations must be describable as property tweens with easing curves.
 
 ---

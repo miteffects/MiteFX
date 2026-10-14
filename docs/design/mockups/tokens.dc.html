@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MiteFX brand and tokens</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0C0F}
+a{color:#5CC8FF}a:hover{color:#9FDDFF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1320px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 22px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
+
+<div style="display: flex; gap: 20px">
+<section style="flex: 0 0 420px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 28px; display: flex; flex-direction: column; justify-content: space-between; gap: 24px">
+<div style="display: flex; align-items: center; gap: 16px">
+<svg width="64" height="64" viewBox="0 0 32 32" fill="none" role="img" aria-label="MiteFX mark">
+<path d="M10.5 15 L5 12 M10 19 L4 19 M10.5 23 L5 26 M21.5 15 L27 12 M22 19 L28 19 M21.5 23 L27 26" stroke="#7C8696" stroke-width="1.4" stroke-linecap="round"></path>
+<path d="M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z" stroke="#E6EAF0" stroke-width="1.6"></path>
+<circle cx="16" cy="7.4" r="2.6" stroke="#E6EAF0" stroke-width="1.6"></circle>
+<path d="M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21" stroke="{{accent}}" stroke-width="1.8" stroke-linecap="round"></path>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 44px; font-weight: 800; letter-spacing: -0.035em; line-height: 1">mite<span style="color: {{accent}}">FX</span></span>
+<span style="font-size: 12.5px; color: #8A94A3">Open-source studio effects · GPL-3.0</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">LOGO DIRECTION</h2>
+<p style="margin: 0; font-size: 13px; line-height: 1.55; color: #C9D1DC">A tiny mite seen from above, its body carrying the plugin's own signal glyph. Monoline, 1.6 px at 32 px, drawn as vector paths only. The wordmark is lower-case Manrope ExtraBold, with FX in the plugin accent.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">ACCENT RULE</h2>
+<p style="margin: 0; font-size: 13px; line-height: 1.55; color: #C9D1DC">One hue per plugin on the shared neutral base. The accent paints the post spectrum, the total-curve glow, latched toggles and the logo. Bands always use the band ramp, never the accent. Semantic colours never change between plugins.</p>
+</div>
+</section>
+
+<section style="flex: 1; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SUITE · PER-PLUGIN GLYPH + ACCENT</h2>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{plugins}}" as="p" hint-placeholder-count="15">
+<div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 10px">
+<span style="width: 40px; height: 40px; flex: 0 0 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: {{p.tint}}; border: 1px solid {{p.edge}}">
+<svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="{{p.d}}" stroke="{{p.c}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</span>
+<span style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
+<span style="font-weight: 700; font-size: 13px">{{p.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{p.c}}</span>
+</span>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+<sc-for list="{{themes}}" as="th" hint-placeholder-count="2">
+<section style="background: {{th.bg}}; border: 1px solid {{th.border}}; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{th.label}}">{{th.k}}</h2>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{th.sw}}" as="s" hint-placeholder-count="10">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="height: 44px; border-radius: 8px; background: {{s.c}}; border: 1px solid {{th.swBorder}}"></span>
+<span style="font-size: 11px; font-weight: 600; color: {{th.text}}">{{s.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: {{th.label}}">{{s.c}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+
+<div style="display: flex; gap: 20px">
+<section style="flex: 1; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">BAND RAMP · DEFAULT AND COLOUR-BLIND SAFE</h2>
+<div style="display: flex; gap: 6px">
+<sc-for list="{{ramp}}" as="r" hint-placeholder-count="8">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px; align-items: center">
+<span style="width: 100%; height: 36px; border-radius: 6px; background: {{r.c}}; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #0E1116">{{r.n}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">{{r.c}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; gap: 6px">
+<sc-for list="{{rampCb}}" as="r" hint-placeholder-count="8">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px; align-items: center">
+<span style="width: 100%; height: 36px; border-radius: 6px; background: {{r.c}}; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #0E1116">{{r.n}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">{{r.c}}</span>
+</div>
+</sc-for>
+</div>
+<span style="font-size: 11px; color: #7C8696">Band 9+ repeats the ramp; the node number disambiguates. The second row is the Okabe–Ito set used by the colour-blind theme.</span>
+</section>
+<section style="flex: 0 0 520px; box-sizing: border-box; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SEMANTIC · SAME IN EVERY PLUGIN</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px">
+<sc-for list="{{semantic}}" as="s" hint-placeholder-count="8">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="width: 28px; height: 28px; flex: 0 0 28px; border-radius: 7px; background: {{s.c}}"></span>
+<span style="display: flex; flex-direction: column; gap: 1px"><span style="font-weight: 600; font-size: 12px">{{s.k}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{s.t}} · {{s.c}}</span></span>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px">
+<section style="grid-column: span 2; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">TYPE · MANROPE ONLY (OFL) · TABULAR FIGURES FOR EVERY READOUT</h2>
+<sc-for list="{{type}}" as="t" hint-placeholder-count="6">
+<div style="display: flex; align-items: baseline; gap: 16px; padding: 6px 0; border-bottom: 1px solid #161A21">
+<span style="width: 132px; flex: 0 0 132px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{t.k}}</span>
+<span style="font-family: {{t.f}}; font-feature-settings: {{t.ff}}; font-size: {{t.s}}px; font-weight: {{t.w}}; letter-spacing: {{t.ls}}; color: #E6EAF0">{{t.sample}}</span>
+<span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #7C8696">{{t.spec}}</span>
+</div>
+</sc-for>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SPACING · 4 PX BASE</h2>
+<sc-for list="{{space}}" as="s" hint-placeholder-count="8">
+<div style="display: flex; align-items: center; gap: 12px">
+<span style="width: 52px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{s.k}}</span>
+<span style="height: 10px; width: {{s.v}}px; background: {{accent}}; border-radius: 2px; opacity: 0.8"></span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #C9D1DC">{{s.v}}</span>
+</div>
+</sc-for>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">RADII</h2>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{radii}}" as="r" hint-placeholder-count="6">
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: center">
+<span style="width: 52px; height: 40px; border: 1.5px solid #A7B0BE; border-radius: {{r.v}}px; box-sizing: border-box"></span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10.5px; color: #8A94A3">{{r.k}} · {{r.l}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">ELEVATION · GLOW · BLUR</h2>
+<div style="position: relative; height: 176px; border-radius: 10px; overflow: hidden; background: #0E1116">
+<svg width="580" height="176" viewBox="0 0 580 176" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+<defs>
+<linearGradient id="tkFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{accent}}" stop-opacity="0.4"></stop><stop offset="1" stop-color="#3D6FD9" stop-opacity="0"></stop></linearGradient>
+<filter id="tkGlow" x="-5%" y="-30%" width="110%" height="160%"><feGaussianBlur stdDeviation="5" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+</defs>
+<path d="M0 120 C40 100 70 70 110 84 C150 98 170 60 210 70 C250 80 270 40 300 52 C330 64 360 96 400 90 C440 84 470 120 520 130 L580 140 L580 176 L0 176 Z" fill="url(#tkFill)"></path>
+<path d="M0 96 C80 96 120 60 170 60 C220 60 250 100 330 100 C380 100 400 120 450 120 C500 120 540 96 580 96" stroke="#DDF3FF" stroke-width="2.2" fill="none" filter="url(#tkGlow)"></path>
+</svg>
+<div style="position: absolute; left: 24px; top: 24px; width: 150px; height: 64px; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; background: #1A1E25; border: 1px solid #262C36; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)"><span style="display: block; font-weight: 700">raised</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">every control · fields sit inset</span></div>
+<div style="position: absolute; left: 200px; top: 48px; width: 190px; height: 92px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: rgba(24,28,35,0.72); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)"><span style="display: block; font-weight: 700">glass.panel</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #A7B0BE">72 % fill · blur 18 · sat 1.2</span><span style="display: block; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #A7B0BE">shadow 0 18 48 / 55 %</span></div>
+<div style="position: absolute; right: 22px; top: 22px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end"><span style="font-weight: 700">glow.curve</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">blur 5 + source</span><span style="font-weight: 700; margin-top: 6px">glow.accent</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">every accent mark · ticks, needle, fills</span></div>
+</div>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">MOTION · DURATIONS + EASINGS</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{eases}}" as="e" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 8px">
+<svg width="100%" height="64" viewBox="0 0 100 64" preserveAspectRatio="none" aria-hidden="true"><path d="M0 63.5 H100 M0.5 0 V64" stroke="#262C36" stroke-width="1" fill="none"></path><path d="{{e.d}}" stroke="{{accent}}" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"></path></svg>
+<span style="font-weight: 700; font-size: 12px">{{e.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #8A94A3">{{e.v}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{durs}}" as="d" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 16px; font-weight: 500">{{d.v}}</span><span style="font-weight: 700; font-size: 11px">{{d.k}}</span><span style="font-size: 10.5px; color: #7C8696">{{d.u}}</span></div>
+</sc-for>
+</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5CC8FF","options":["#5CC8FF","#FF9F43","#B98BFF","#3FD6B5"]},"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#5CC8FF';
+    const P = [
+      ['EQ', '#5CC8FF', 'M3 20 C10 20 12 8 16 8 C20 8 22 20 29 20'],
+      ['Comp', '#FF9F43', 'M4 28 L15 17 Q17 15 20 14 L28 11'],
+      ['Limit', '#FF5E6C', 'M4 28 L15 11 Q17 9 19 9 H28 M4 5 H28'],
+      ['Multiband', '#B98BFF', 'M3 22 Q7.5 9 12 22 Q16 9 20 22 Q24.5 9 29 22'],
+      ['Verb', '#6F8CFF', 'M5 7 V26 M11 11 V26 M17 15 V26 M23 19 V26 M29 22 V26'],
+      ['Delay', '#3FD6B5', 'M6 16 H6.1 M13 16 H13.1 M20 16 H20.1 M27 16 H27.1'],
+      ['Sat', '#FF7A45', 'M4 25 C10 25 12 8 18 8 H28'],
+      ['DeEss', '#F7D154', 'M4 11 H16 Q19 25 22 11 H28'],
+      ['Gate', '#9BE15D', 'M4 24 H10 V8 H22 V24 H28'],
+      ['Shape', '#FF6FB5', 'M4 24 H9 L12 6 L16 18 Q22 22 28 24'],
+      ['Soothe', '#7FE3C0', 'M4 20 L8 12 H11 L15 20 L19 12 H22 L26 20 H28'],
+      ['Filter', '#FFC15C', 'M4 13 H16 Q21 13 22 7 Q23 4 28 27'],
+      ['Mod', '#E07BFF', 'M4 16 Q8 5 12 16 T20 16 T28 16'],
+      ['Meter', '#D6DCE4', 'M7 28 V18 M13 28 V10 M19 28 V14 M25 28 V6'],
+      ['Utility', '#9AA6B8', 'M6 10 H26 M6 22 H26 M12 6 V14 M20 18 V26']
+    ];
+    const plugins = P.map(([k, c, d]) => ({ k: 'Mite ' + k, c, d, tint: c + '1A', edge: c + '40' }));
+    const dark = [['window', '#0A0C0F'], ['display', '#0E1116'], ['surface.1', '#10141A'], ['surface.2', '#12161C'], ['surface.3', '#1A1E25'],
+      ['line.subtle', '#1C2129'], ['line.strong', '#2A313C'], ['text.lo', '#7C8696'], ['text.mid', '#A7B0BE'], ['text.hi', '#E6EAF0']];
+    const light = [['window', '#EEF0F3'], ['display', '#FFFFFF'], ['surface.1', '#F6F7F9'], ['surface.2', '#E9ECF0'], ['surface.3', '#DDE1E7'],
+      ['line.subtle', '#D5DAE1'], ['line.strong', '#B8BFC9'], ['text.lo', '#5F6875'], ['text.mid', '#3E4652'], ['text.hi', '#12161C']];
+    const sw = (a) => a.map(([k, c]) => ({ k, c }));
+    const themes = [
+      { k: 'NEUTRALS · DARK (DEFAULT)', bg: '#10141A', border: '#1C2129', label: '#8A94A3', text: '#E6EAF0', swBorder: 'rgba(255,255,255,0.08)', sw: sw(dark) },
+      { k: 'NEUTRALS · LIGHT', bg: '#F6F7F9', border: '#D5DAE1', label: '#5F6875', text: '#12161C', swBorder: 'rgba(0,0,0,0.10)', sw: sw(light) }
+    ];
+    const ramp = ['#5CC8FF', '#FFB547', '#FF6FA8', '#8EE07A', '#B98BFF', '#F7D154', '#3FD6B5', '#FF8A5C'].map((c, i) => ({ c, n: i + 1 }));
+    const rampCb = ['#56B4E9', '#E69F00', '#CC79A7', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#E6EAF0'].map((c, i) => ({ c, n: i + 1 }));
+    const semantic = [
+      { k: 'Gain reduction', t: 'sem.gr', c: '#FF8A3D' },
+      { k: 'Sidechain', t: 'sem.sidechain', c: '#B38CFF' },
+      { k: 'Collision / masking', t: 'sem.collision', c: '#FF4D6A' },
+      { k: 'Pre spectrum', t: 'sem.spec.pre', c: '#8A94A3' },
+      { k: 'Warning / true peak', t: 'sem.warn', c: '#FFB547' },
+      { k: 'Healthy / in range', t: 'sem.ok', c: '#8EE07A' },
+      { k: 'Focus ring', t: 'sem.focus', c: '#FFFFFF' },
+      { k: 'Modulation', t: 'sem.mod', c: '#C9A7FF' }
+    ];
+    const type = [
+      { k: 'display', f: 'Manrope', ff: 'normal', s: 28, w: 800, ls: '-0.02em', sample: 'Mite EQ', spec: '28 / 800 / −2 %' },
+      { k: 'title', f: 'Manrope', ff: 'normal', s: 15, w: 700, ls: '0', sample: 'Band 3 · Bell', spec: '15 / 700' },
+      { k: 'body', f: 'Manrope', ff: 'normal', s: 12, w: 500, ls: '0', sample: 'Drag to move, Shift for fine control', spec: '12 / 500' },
+      { k: 'label', f: 'Manrope', ff: 'normal', s: 10, w: 700, ls: '0.08em', sample: 'THRESHOLD', spec: '10 / 700 / +8 % caps' },
+      { k: 'readout', f: 'Manrope', ff: "'tnum' 1", s: 11.5, w: 600, ls: '0', sample: '2.80 kHz   −4.5 dB   2.60', spec: '11.5 / 600 tnum' },
+      { k: 'readout.dial', f: 'Manrope', ff: "'tnum' 1", s: 12, w: 700, ls: '0', sample: '1.20 kHz', spec: '12 / 700 tnum + 9 unit' },
+      { k: 'readout.lg', f: 'Manrope', ff: "'tnum' 1", s: 20, w: 600, ls: '-0.01em', sample: '−14.0 LUFS', spec: '20 / 600 tnum' }
+    ];
+    const space = [['s.1', 2], ['s.2', 4], ['s.3', 6], ['s.4', 8], ['s.5', 12], ['s.6', 16], ['s.7', 24], ['s.8', 32], ['s.9', 48]].map(([k, v]) => ({ k, v }));
+    const radii = [['r.xs', 2, 'meter'], ['r.sm', 4, 'chip'], ['r.md', 6, 'control'], ['r.lg', 10, 'card'], ['r.xl', 14, 'panel'], ['r.pill', 20, 'switch']].map(([k, v, l]) => ({ k, v, l }));
+    const bez = (x1, y1, x2, y2) => {
+      let d = '';
+      for (let i = 0; i <= 40; i++) {
+        const t = i / 40, u = 1 - t;
+        const x = 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t;
+        const y = 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t;
+        d += (i ? 'L' : 'M') + (x * 100).toFixed(1) + ' ' + (63 - y * 58).toFixed(1) + ' ';
+      }
+      return d;
+    };
+    const spring = () => {
+      let d = '';
+      for (let i = 0; i <= 60; i++) {
+        const t = i / 60;
+        const y = 1 - Math.exp(-6 * t) * Math.cos(11 * t);
+        d += (i ? 'L' : 'M') + (t * 100).toFixed(1) + ' ' + (63 - y * 50).toFixed(1) + ' ';
+      }
+      return d;
+    };
+    const eases = [
+      { k: 'ease.standard', v: 'cubic(.2, 0, 0, 1)', d: bez(0.2, 0, 0, 1) },
+      { k: 'ease.enter', v: 'cubic(0, 0, .2, 1)', d: bez(0, 0, 0.2, 1) },
+      { k: 'ease.exit', v: 'cubic(.4, 0, 1, 1)', d: bez(0.4, 0, 1, 1) },
+      { k: 'spring.node', v: 'k 420 · c 28', d: spring() }
+    ];
+    const durs = [
+      { k: 'micro', v: '80 ms', u: 'hover, focus' },
+      { k: 'fast', v: '140 ms', u: 'press, toggle' },
+      { k: 'base', v: '220 ms', u: 'band panel in' },
+      { k: 'slow', v: '360 ms', u: 'view, theme' },
+      { k: 'meter', v: '0 / 300', u: 'attack / release ms' }
+    ];
+    return { accent, plugins, themes, ramp, rampCb, semantic, type, space, radii, eases, durs };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MiteFX component sheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0C0F}
+a{color:#5CC8FF}a:hover{color:#9FDDFF}
+button{font:inherit;color:inherit}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1120px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 24px; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
+
+<div style="display: flex; align-items: baseline; gap: 16px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em">Component sheet</h1>
+<span style="font-size: 13px; color: #8A94A3">Shared by every MiteFX plugin · shown with the Mite EQ accent · 100 % scale</span>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">KNOBS · TICK-SCALE DIAL</h2>
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<sc-for list="{{knobs}}" as="k" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 88px">
+<span style="position: relative; width: {{k.size}}px; height: {{k.size}}px; display: block">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<defs>
+<filter id="cg{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feGaussianBlur stdDeviation="1.8" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+<filter id="cn{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#5CC8FF" flood-opacity="1"></feDropShadow></filter>
+<filter id="cd{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.75"></feDropShadow></filter>
+</defs>
+<path d="{{k.mod}}" stroke="#C9A7FF" stroke-width="2.6" stroke-linecap="round" filter="url(#cg{{$index}})"></path>
+<path d="{{k.dim}}" stroke="#2A313C" stroke-width="{{k.sw}}" stroke-linecap="round"></path>
+<path d="{{k.ctr}}" stroke="#C9D1DC" stroke-width="{{k.sw}}" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="#5CC8FF" stroke-width="{{k.sw}}" stroke-linecap="round" filter="url(#cg{{$index}})"></path>
+<circle cx="32" cy="32" r="{{k.disc}}" fill="#161A21" stroke="#2E3540" filter="url(#cd{{$index}})"></circle>
+<path d="{{k.ptr}}" stroke="#FFFFFF" stroke-width="{{k.pw}}" stroke-linecap="round" filter="url(#cn{{$index}})"></path>
+</svg>
+<sc-if value="{{k.showVal}}" hint-placeholder-val="{{ true }}">
+<span style="position: absolute; left: 0; top: 0; width: 64px; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: #8A94A3; margin-top: 2px">{{k.u}}</span></span>
+</sc-if>
+</span>
+<span style="font-size: 11.5px; font-weight: 600; font-feature-settings: 'tnum' 1">{{k.below}}</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">{{k.label}}</span>
+<span style="font-size: 10.5px; color: #7C8696">{{k.kind}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; padding-top: 14px; border-top: 1px solid #1C2129">
+<sc-for list="{{kstates}}" as="k" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 88px; opacity: {{k.op}}">
+<span style="position: relative; width: 64px; height: 64px; display: block; transform: scale({{k.scale}}); transition: transform 140ms cubic-bezier(.2,0,0,1)">
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<defs>
+<filter id="sg{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feGaussianBlur stdDeviation="{{k.glow}}" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+<filter id="sn{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="{{k.glow}}" flood-color="{{k.litC}}" flood-opacity="1"></feDropShadow></filter>
+<filter id="sd{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="{{k.lift}}" stdDeviation="{{k.lift}}" flood-color="#000000" flood-opacity="0.75"></feDropShadow></filter>
+</defs>
+<circle cx="32" cy="32" r="32" fill="{{k.halo}}"></circle>
+<path d="{{k.dim}}" stroke="{{k.dimC}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="{{k.litC}}" stroke-width="2" stroke-linecap="round" filter="url(#sg{{$index}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="#161A21" stroke="{{k.ring}}" stroke-width="{{k.ringW}}" filter="url(#sd{{$index}})"></circle>
+<path d="{{k.ptr}}" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" filter="url(#sn{{$index}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 64px; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: #8A94A3; margin-top: 2px">{{k.u}}</span></span>
+</span>
+<span style="font-size: 10.5px; color: #A7B0BE">{{k.label}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">SLIDERS</h2>
+<div style="display: flex; gap: 28px; align-items: stretch">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 22px; justify-content: center">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">WIDTH</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">140 %</span></div>
+<div style="position: relative; height: 16px">
+<div style="position: absolute; left: 0; right: 0; top: 7px; height: 3px; border-radius: 2px; background: #252B35"></div>
+<div style="position: absolute; left: 0; width: 70%; top: 7px; height: 3px; border-radius: 2px; background: #5CC8FF; box-shadow: 0 0 8px rgba(92,200,255,0.7)"></div>
+<div style="position: absolute; left: calc(70% - 7px); top: 1px; width: 14px; height: 14px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #10141A, 0 3px 8px rgba(0,0,0,0.8), 0 0 12px rgba(92,200,255,0.6)"></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">PAN · BIPOLAR</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">L 24</span></div>
+<div style="position: relative; height: 16px">
+<div style="position: absolute; left: 0; right: 0; top: 7px; height: 3px; border-radius: 2px; background: #252B35"></div>
+<div style="position: absolute; left: 50%; top: 3px; width: 1px; height: 11px; background: #3A4250"></div>
+<div style="position: absolute; left: 38%; width: 12%; top: 7px; height: 3px; background: #5CC8FF; box-shadow: 0 0 8px rgba(92,200,255,0.7)"></div>
+<div style="position: absolute; left: calc(38% - 7px); top: 1px; width: 14px; height: 14px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #10141A, 0 3px 8px rgba(0,0,0,0.8)"></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">MORPH · A B C D</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">B → C 40 %</span></div>
+<div style="position: relative; height: 16px">
+<div style="position: absolute; left: 0; right: 0; top: 7px; height: 3px; border-radius: 2px; background: #252B35"></div>
+<div style="position: absolute; left: 0; right: 0; top: 2px; display: flex; justify-content: space-between"><span style="width: 2px; height: 13px; background: #3A4250"></span><span style="width: 2px; height: 13px; background: #3A4250"></span><span style="width: 2px; height: 13px; background: #3A4250"></span><span style="width: 2px; height: 13px; background: #3A4250"></span></div>
+<div style="position: absolute; left: calc(46.6% - 7px); top: 1px; width: 14px; height: 14px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #10141A, 0 3px 8px rgba(0,0,0,0.8)"></div>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; color: #7C8696"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+</div>
+</div>
+<div style="width: 64px; display: flex; flex-direction: column; align-items: center; gap: 8px">
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">OUT</span>
+<div style="position: relative; width: 40px; height: 176px">
+<div style="position: absolute; left: 18px; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: #252B35"></div>
+<div style="position: absolute; left: 18px; top: 62px; bottom: 0; width: 4px; border-radius: 2px; background: #5CC8FF; box-shadow: 0 0 8px rgba(92,200,255,0.7)"></div>
+<div style="position: absolute; left: 0; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-between"><span style="width: 8px; height: 1px; background: #3A4250"></span><span style="width: 8px; height: 1px; background: #3A4250"></span><span style="width: 12px; height: 1px; background: #7C8696"></span><span style="width: 8px; height: 1px; background: #3A4250"></span><span style="width: 8px; height: 1px; background: #3A4250"></span></div>
+<div style="position: absolute; left: 6px; top: 54px; width: 28px; height: 16px; border-radius: 4px; background: #E6EAF0; box-shadow: 0 2px 8px rgba(0,0,0,0.5)"><div style="margin: 7px 5px 0; height: 2px; background: #10141A"></div></div>
+</div>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">+2.0 dB</span>
+</div>
+</div>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">TOGGLE · SEGMENTED · DROPDOWN</h2>
+<div style="display: flex; gap: 20px; align-items: center">
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 32px; height: 18px; border-radius: 9px; background: #5CC8FF; position: relative; display: block; box-shadow: 0 0 10px rgba(92,200,255,0.7)"><span style="position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #0A0C0F"></span></span><span style="font-weight: 600">On</span></div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 32px; height: 18px; border-radius: 9px; background: #252B35; position: relative; display: block"><span style="position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #7C8696"></span></span><span style="font-weight: 600; color: #A7B0BE">Off</span></div>
+<button style="height: 32px; padding: 0 10px; background: rgba(92,200,255,0.14); border: 1px solid rgba(92,200,255,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(92,200,255,0.35), inset 0 0 10px rgba(92,200,255,0.15); text-shadow: 0 0 8px rgba(92,200,255,0.8); font-weight: 700; color: #9FDDFF">Latched</button>
+</div>
+<div role="group" aria-label="Channel" style="display: flex; align-self: flex-start; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<button style="height: 26px; padding: 0 10px; border: none; border-radius: 6px; font-weight: 700; background: #262C36; color: #F2F5F8; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 2px rgba(0,0,0,0.7), 0 3px 8px rgba(0,0,0,0.4)">Stereo</button>
+<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">L</button>
+<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">R</button>
+<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">M</button>
+<button style="height: 26px; min-width: 28px; border: none; border-radius: 6px; font-weight: 700; background: transparent; color: #8A94A3">S</button>
+</div>
+<div style="display: flex; gap: 12px; align-items: flex-start">
+<button style="height: 32px; width: 136px; padding: 0 10px; display: flex; align-items: center; justify-content: space-between; background: #12161C; border: 1px solid #5CC8FF; border-radius: 6px; box-shadow: 0 0 12px rgba(92,200,255,0.35), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600">Bell<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 7.5 L6 4.5 L9 7.5" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<div role="listbox" aria-label="Band type" style="flex: 1; padding: 4px; background: rgba(24,28,35,0.92); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 1px">
+<sc-for list="{{types}}" as="o" hint-placeholder-count="6">
+<div role="option" aria-selected="{{o.on}}" style="height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; background: {{o.bg}}; color: {{o.fg}}; font-weight: 600">
+<svg width="22" height="12" viewBox="0 0 22 12" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.gc}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>{{o.k}}</div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">NUMERIC FIELD — DRAG OR TYPE</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Idle</span><div style="height: 32px; display: flex; align-items: center; padding: 0 10px; background: #0C0F13; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px">2.80 kHz</div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Hover — ↕ drag cursor</span><div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: #12161C; border: 1px solid #3A4250; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px">2.80 kHz<svg width="10" height="14" viewBox="0 0 10 14" fill="none" aria-hidden="true"><path d="M2 5 L5 2 L8 5 M2 9 L5 12 L8 9" stroke="#7C8696" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Dragging — Shift = fine</span><div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: rgba(92,200,255,0.08); border: 1px solid #5CC8FF; border-radius: 6px; box-shadow: 0 0 12px rgba(92,200,255,0.4), inset 0 1px 3px rgba(0,0,0,0.5); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px; color: #DDF3FF">3.14 kHz<span style="font-family: Manrope, sans-serif; font-size: 10px; font-weight: 700; color: #5CC8FF">FINE</span></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Editing — typed entry</span><div style="height: 32px; display: flex; align-items: center; padding: 0 10px; background: #0C0F13; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65); outline: 2px solid #FFFFFF; outline-offset: 2px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 12px"><span style="background: rgba(92,200,255,0.35)">3.5k</span><span style="width: 1px; height: 16px; background: #FFFFFF; margin-left: 1px"></span></div></div>
+</div>
+<p style="margin: 0; font-size: 11.5px; line-height: 1.5; color: #8A94A3">Typed entry accepts units and suffixes: <span style="font-feature-settings: 'tnum' 1; font-weight: 600;color: #C9D1DC">3.5k</span>, <span style="font-feature-settings: 'tnum' 1; font-weight: 600;color: #C9D1DC">A4</span> (note), <span style="font-feature-settings: 'tnum' 1; font-weight: 600;color: #C9D1DC">-3</span>. Enter commits, Esc reverts, double-click resets.</p>
+</section>
+
+<section style="grid-column: span 2; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">METERS</h2>
+<div style="display: flex; gap: 28px; align-items: stretch">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+<div style="display: flex; gap: 6px; padding: 4px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 6px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)">
+<div style="position: relative; width: 10px; height: 144px">
+<div style="position: absolute; inset: 0; background: repeating-linear-gradient(to top, #1E242D 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 104px; background: repeating-linear-gradient(to top, rgba(92,200,255,0.38) 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 84px; background: repeating-linear-gradient(to top, #5CC8FF 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(92,200,255,0.9))"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 124px; height: 2px; background: #FFFFFF; box-shadow: 0 0 6px rgba(255,255,255,0.9)"></div>
+</div>
+<div style="position: relative; width: 10px; height: 144px">
+<div style="position: absolute; inset: 0; background: repeating-linear-gradient(to top, #1E242D 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 116px; background: repeating-linear-gradient(to top, rgba(92,200,255,0.38) 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 92px; background: repeating-linear-gradient(to top, #5CC8FF 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(92,200,255,0.9))"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 116px; height: 8px; background: repeating-linear-gradient(to top, #FFB547 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(255,181,71,0.9))"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 132px; height: 2px; background: #FFB547; box-shadow: 0 0 6px rgba(255,181,71,0.95)"></div>
+</div>
+</div>
+<span style="font-size: 10.5px; color: #A7B0BE">Peak + RMS · hot above −6</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+<div style="padding: 4px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 6px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)">
+<div style="position: relative; width: 10px; height: 144px">
+<div style="position: absolute; inset: 0; background: repeating-linear-gradient(to bottom, #1E242D 0 2px, transparent 2px 4px)"></div>
+<div style="position: absolute; left: 0; right: 0; top: 0; height: 32px; background: repeating-linear-gradient(to bottom, #FF8A3D 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(255,138,61,0.95))"></div>
+</div>
+</div>
+<span style="font-size: 10.5px; color: #A7B0BE">Gain reduction</span>
+</div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{loud}}" as="l" hint-placeholder-count="5">
+<div style="padding: 10px 12px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 8px; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">{{l.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 20px; font-weight: 500; color: {{l.c}}">{{l.v}}</span>
+<span style="font-size: 10px; color: #7C8696">{{l.u}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">CORRELATION</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px">+0.62</span></div>
+<div style="position: relative; height: 14px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 4px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)">
+<div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #3A4250"></div>
+<div style="position: absolute; left: 50%; width: 31%; top: 4px; height: 6px; border-radius: 2px; background: #8EE07A; box-shadow: 0 0 8px rgba(142,224,122,0.7)"></div>
+<div style="position: absolute; left: 81%; top: -2px; width: 2px; height: 18px; background: #E6EAF0"></div>
+</div>
+<div style="display: flex; justify-content: space-between; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #7C8696"><span>−1</span><span>0</span><span>+1</span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">GAIN REDUCTION · HORIZONTAL</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11.5px; color: #FFB27A">−4.2 dB</span></div>
+<div style="padding: 3px; background: #0A0C10; border: 1px solid #1E242D; border-radius: 5px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.75)"><div style="position: relative; height: 8px"><div style="position: absolute; inset: 0; background: repeating-linear-gradient(to left, #1E242D 0 2px, transparent 2px 4px)"></div><div style="position: absolute; right: 0; width: 18%; top: 0; bottom: 0; background: repeating-linear-gradient(to left, #FF8A3D 0 2px, transparent 2px 4px); filter: drop-shadow(0 0 3px rgba(255,138,61,0.95))"></div></div></div>
+</div>
+</div>
+</div>
+</section>
+
+<section style="grid-column: span 2; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">BAND NODE STATES</h2>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; padding: 20px 8px; background: #0E1116; border: 1px solid #1C2129; border-radius: 10px">
+<sc-for list="{{nodeStates}}" as="n" hint-placeholder-count="7">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="position: relative; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center">
+<span style="position: absolute; width: 36px; height: 36px; border-radius: 50%; border: 1.5px {{n.ringStyle}} {{n.ringC}}; box-sizing: border-box"></span>
+<span style="width: {{n.size}}px; height: {{n.size}}px; box-sizing: border-box; border-radius: 50%; background: {{n.fill}}; border: 2px {{n.borderStyle}} {{n.stroke}}; box-shadow: {{n.shadow}}; opacity: {{n.op}}; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #0E1116">{{n.badge}}</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 2px">
+<span style="font-weight: 700; font-size: 12px">{{n.k}}</span>
+<span style="font-size: 10.5px; color: #7C8696; text-align: center">{{n.d}}</span>
+</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section style="background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">BUTTONS · FOCUS</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Default</span><button style="height: 32px; background: #12161C; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 700; color: #C9D1DC">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Hover</span><button style="height: 32px; background: #1A1F27; border: 1px solid #3A4250; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 3px rgba(0,0,0,0.7), 0 6px 16px rgba(0,0,0,0.45); font-weight: 700; color: #E6EAF0">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">On</span><button style="height: 32px; background: rgba(92,200,255,0.14); border: 1px solid rgba(92,200,255,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(92,200,255,0.35), inset 0 0 10px rgba(92,200,255,0.15); text-shadow: 0 0 8px rgba(92,200,255,0.8); font-weight: 700; color: #9FDDFF">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Focus-visible</span><button style="height: 32px; background: #12161C; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); outline: 2px solid #FFFFFF; outline-offset: 2px; font-weight: 700; color: #C9D1DC">Delta</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Warning on</span><button style="height: 32px; background: rgba(255,94,108,0.14); border: 1px solid rgba(255,94,108,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(255,94,108,0.35), inset 0 0 10px rgba(255,94,108,0.15); text-shadow: 0 0 8px rgba(255,94,108,0.8); font-weight: 700; color: #FF9AA3">Bypassed</button></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10.5px; color: #7C8696">Disabled</span><button disabled style="height: 32px; background: transparent; border: 1px solid #1C2129; border-radius: 6px; font-weight: 700; color: #4A5260">Match</button></div>
+</div>
+</section>
+
+<section style="grid-column: span 3; background: #10141A; border: 1px solid #1C2129; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #8A94A3">MULTIBAND CROSSOVER BAR · PIANO-ROLL STRIP</h2>
+<div style="position: relative; height: 40px; display: flex; border-radius: 8px; overflow: hidden; border: 1px solid #1C2129">
+<sc-for list="{{xover}}" as="b" hint-placeholder-count="4">
+<div style="width: {{b.w}}%; height: 40px; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; background: {{b.bg}}; border-top: 2px solid {{b.c}}">
+<span style="font-weight: 700; color: {{b.c}}">{{b.k}}</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11px; color: #C9D1DC">{{b.gr}}</span>
+</div>
+</sc-for>
+<sc-for list="{{splits}}" as="s" hint-placeholder-count="3">
+<div style="position: absolute; left: {{s.x}}%; top: 0; bottom: 0; width: 0">
+<span style="position: absolute; left: -2px; top: 0; bottom: 0; width: 4px; background: #E6EAF0; border-radius: 2px; box-shadow: 0 0 6px rgba(0,0,0,0.8)"></span>
+</div>
+</sc-for>
+</div>
+<div style="position: relative; height: 18px">
+<sc-for list="{{splits}}" as="s" hint-placeholder-count="3">
+<span style="position: absolute; left: {{s.x}}%; transform: translateX(-50%); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11px; color: #A7B0BE">{{s.f}}</span>
+</sc-for>
+</div>
+<div style="position: relative; height: 30px; background: #0C0F13; border: 1px solid #1C2129; border-radius: 6px; overflow: hidden">
+<sc-for list="{{keys}}" as="k" hint-placeholder-count="40">
+<span style="position: absolute; left: {{k.x}}%; width: {{k.w}}%; top: 0; height: {{k.h}}px; background: {{k.c}}; box-sizing: border-box; border-right: 1px solid #0C0F13"></span>
+</sc-for>
+<span style="position: absolute; left: {{snapX}}%; top: 0; bottom: 0; width: 2px; background: #FFB547; box-shadow: 0 0 8px #FFB547"></span>
+</div>
+<div style="position: relative; height: 16px">
+<sc-for list="{{cLabels}}" as="c" hint-placeholder-count="9">
+<span style="position: absolute; left: {{c.x}}%; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #7C8696">{{c.k}}</span>
+</sc-for>
+<span style="position: absolute; left: {{snapX}}%; transform: translateX(-50%); top: 0; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; font-weight: 600; color: #FFB547; background: #10141A; padding: 0 4px">A2 · 110 Hz</span>
+</div>
+</section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const polar = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [32 + r * Math.cos(a), 32 + r * Math.sin(a)]; };
+    const tk = (deg, ra, rb) => { const [x0, y0] = polar(deg, ra), [x1, y1] = polar(deg, rb); return 'M' + r1(x0) + ' ' + r1(y0) + ' L' + r1(x1) + ' ' + r1(y1) + ' '; };
+    const geo = (fr, bip, n) => {
+      const cnt = n || 31, step = 270 / (cnt - 1);
+      const dv = -135 + 270 * fr;
+      let lit = '', dim = '';
+      for (let i = 0; i < cnt; i++) {
+        const d = -135 + i * step;
+        const s = tk(d, 25, 29);
+        const on = bip ? (d >= Math.min(0, dv) - 0.01 && d <= Math.max(0, dv) + 0.01) : d <= dv + 0.01;
+        if (on) lit += s; else dim += s;
+      }
+      return { lit, dim, ctr: bip ? tk(0, 22.5, 30) : '', ptr: tk(dv, 21.5, 31) };
+    };
+    const dots = (a, b) => { let d = ''; for (let x = a; x <= b + 0.01; x += 9) { const [px, py] = polar(x, 33); d += 'M' + r1(px) + ' ' + r1(py) + ' h0.01 '; } return d; };
+    const big = { size: 64, showVal: true, below: '', mod: '', sw: 2, pw: 2.5, disc: 19.5 };
+    const knobs = [
+      Object.assign({}, big, { n: '1.20', u: 'kHz', label: 'FREQ', kind: 'Standard' }, geo(0.63, false)),
+      Object.assign({}, big, { size: 36, showVal: false, below: '100 %', n: '', u: '', label: 'MIX', kind: 'Small · 15 ticks', sw: 3.5, pw: 4, disc: 17 }, geo(1, false, 15)),
+      Object.assign({}, big, { n: '+3.5', u: 'dB', label: 'GAIN', kind: 'Bipolar' }, geo(0.6, true)),
+      Object.assign({}, big, { n: '2.40', u: 'kHz', label: 'CUTOFF', kind: 'Modulated', mod: dots(-135 + 270 * 0.4, -135 + 270 * 0.8) }, geo(0.6, false))
+    ];
+    const ks = (label, extra) => Object.assign({ label, n: '1.20', u: 'kHz', op: 1, scale: 1, halo: 'transparent', dimC: '#2A313C', litC: '#5CC8FF', ring: '#2E3540', ringW: 1, glow: 1.8, lift: 2.5 }, geo(0.45, false), extra);
+    const kstates = [
+      ks('Idle', {}),
+      ks('Hover · grows 10 %', { scale: 1.1 }),
+      ks('Dragging · unchanged', Object.assign({ n: '1.34' }, geo(0.5, false))),
+      ks('Disabled', { op: 0.4, litC: '#5C6573', glow: 0.01, lift: 0.5 })
+    ];
+    const tg = {
+      'Bell': 'M1 9 C7 9 8 2 11 2 C14 2 15 9 21 9',
+      'Low Shelf': 'M1 3 H6 C9 3 11 9 14 9 H21',
+      'High Shelf': 'M1 9 H8 C11 9 13 3 16 3 H21',
+      'Low Cut': 'M2 11 C5 4 7 4 10 4 H21',
+      'Notch': 'M1 4 H8 L11 11 L14 4 H21',
+      'All-Pass': 'M1 6 H21 M8 3 C10 9 12 3 14 9',
+      'Resonance': 'M1 6 H5 L7 3 L9 8 L11 4 L13 7 L15 5 H21'
+    };
+    const types = Object.keys(tg).map((k) => {
+      const on = k === 'Bell';
+      return { k, d: tg[k], on: on ? 'true' : 'false', bg: on ? 'rgba(92,200,255,0.14)' : 'transparent', fg: on ? '#E6EAF0' : '#C9D1DC', gc: on ? '#5CC8FF' : '#7C8696' };
+    });
+    const loud = [
+      { k: 'MOMENTARY', v: '−13.6', u: 'LUFS', c: '#E6EAF0' },
+      { k: 'SHORT-TERM', v: '−14.1', u: 'LUFS', c: '#E6EAF0' },
+      { k: 'INTEGRATED', v: '−14.0', u: 'LUFS', c: '#9FDDFF' },
+      { k: 'LRA', v: '5.2', u: 'LU', c: '#E6EAF0' },
+      { k: 'TRUE PEAK', v: '−1.0', u: 'dBTP', c: '#FFB547' }
+    ];
+    const c = '#FF6FA8';
+    const nodeStates = [
+      { k: 'Idle', d: 'tinted fill', size: 14, fill: c + '33', stroke: c, borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 1, ringStyle: 'solid', ringC: 'transparent', badge: '' },
+      { k: 'Hover', d: 'halo + grow', size: 16, fill: c + '55', stroke: c, borderStyle: 'solid', shadow: '0 0 0 6px ' + c + '22', op: 1, ringStyle: 'solid', ringC: 'transparent', badge: '' },
+      { k: 'Selected', d: 'solid + glow', size: 18, fill: c, stroke: '#FFFFFF', borderStyle: 'solid', shadow: '0 0 0 5px ' + c + '33, 0 0 18px ' + c + 'AA', op: 1, ringStyle: 'solid', ringC: 'transparent', badge: '3' },
+      { k: 'Dynamic', d: 'breathing ring', size: 14, fill: c + '33', stroke: c, borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 1, ringStyle: 'dashed', ringC: c, badge: '' },
+      { k: 'Solo', d: 'amber ring, rest dim', size: 18, fill: c, stroke: '#FFFFFF', borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 1, ringStyle: 'solid', ringC: '#FFB547', badge: 'S' },
+      { k: 'Bypassed', d: 'hollow, dashed', size: 14, fill: 'transparent', stroke: c, borderStyle: 'dashed', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 0.8, ringStyle: 'solid', ringC: 'transparent', badge: '' },
+      { k: 'Disabled', d: 'neutral, no hit', size: 12, fill: '#2A313C', stroke: '#3A4250', borderStyle: 'solid', shadow: '0 2px 6px rgba(0,0,0,0.6)', op: 0.6, ringStyle: 'solid', ringC: 'transparent', badge: '' }
+    ];
+    const LR = Math.log(20000 / 20);
+    const px = (f) => 100 * Math.log(f / 20) / LR;
+    const splitsF = [120, 900, 5200];
+    const splits = splitsF.map((f) => ({ x: r1(px(f)), f: f < 1000 ? f + ' Hz' : (f / 1000).toFixed(1) + ' kHz' }));
+    const edges = [0].concat(splits.map((s) => s.x), [100]);
+    const xc = ['#5CC8FF', '#FFB547', '#FF6FA8', '#8EE07A'];
+    const xg = ['−2.1 dB', '−0.4 dB', '−3.8 dB', '0.0 dB'];
+    const xover = xc.map((col, i) => ({ k: 'Band ' + (i + 1), c: col, w: r1(edges[i + 1] - edges[i]), bg: col + '14', gr: xg[i] }));
+    const keys = [], cLabels = [];
+    for (let m = 16; m <= 135; m++) {
+      const f = 440 * Math.pow(2, (m - 69) / 12), f2 = 440 * Math.pow(2, (m - 68) / 12);
+      if (f < 20 || f2 > 20000) continue;
+      const black = [1, 3, 6, 8, 10].includes(m % 12);
+      keys.push({ x: r1(px(f)), w: r1(px(f2) - px(f)), c: black ? '#1A1E25' : '#2E3540', h: black ? 18 : 30 });
+      if (m % 12 === 0) cLabels.push({ x: r1(px(f)), k: 'C' + (m / 12 - 1) });
+    }
+    return { knobs, kstates, types, loud, nodeStates, xover, splits, keys, cLabels, snapX: r1(px(110)) };
+  }
+}
+</script>
+</body>
+</html>

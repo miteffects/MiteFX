@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mite EQ — main screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0C0F}
+a{color:#5CC8FF}a:hover{color:#9FDDFF}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
+.dial>span:first-child{transition:transform 140ms cubic-bezier(.2,0,0,1)}
+.dial:hover>span:first-child{transform:scale(1.1)}
+</style>
+</helmet>
+<div style="width: 1280px; height: 760px; display: flex; flex-direction: column; background: #0A0C0F; color: #E6EAF0; font-family: Manrope, system-ui, sans-serif; font-size: 12px; overflow: hidden">
+
+<header style="height: 56px; flex: 0 0 56px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #0A0C0F; border-bottom: 1px solid #1C2129">
+<button aria-label="Mite EQ menu" style="height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 6px; background: transparent; border: none; border-radius: 8px">
+<svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" stroke="{{accent}}" stroke-width="1.5" opacity="0.5"></rect><path d="M5 20 C11 20 12.5 9 16 9 C19.5 9 21 20 27 20" stroke="{{accent}}" stroke-width="2.2" stroke-linecap="round"></path></svg>
+<span style="font-size: 15px; font-weight: 800; letter-spacing: -0.01em">Mite<span style="font-weight: 500; color: #A7B0BE"> EQ</span></span>
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+<div style="width: 1px; height: 24px; background: #1F252E"></div>
+<div style="display: flex; align-items: center; gap: 0; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)">
+<button aria-label="Previous preset" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: #12161C; border: 1px solid #222832; border-radius: 6px 0 0 6px"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M7.5 3 L4.5 6 L7.5 9" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<button aria-label="Open preset browser" style="height: 32px; width: 248px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #12161C; border: 1px solid #222832; border-left: none; border-right: none; text-align: left">
+<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="4" stroke="#7C8696" stroke-width="1.5"></circle><path d="M9 9 L12.5 12.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round"></path></svg>
+<span style="flex: 1; font-weight: 600; color: #E6EAF0">Vocal — Air &amp; Body</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: #7C8696">FACTORY</span>
+</button>
+<button aria-label="Next preset" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: #12161C; border: 1px solid #222832; border-radius: 0 6px 6px 0"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 3 L7.5 6 L4.5 9" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</div>
+<button aria-label="Undo" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 6px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5 4 L2 7 L5 10" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M2.5 7 H10 A3.5 3.5 0 0 1 10 14 H7" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<button aria-label="Redo" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 6px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 4 L14 7 L11 10" stroke="#5C6573" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M13.5 7 H6 A3.5 3.5 0 0 0 6 14 H9" stroke="#5C6573" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<div style="width: 1px; height: 24px; background: #1F252E"></div>
+<div role="group" aria-label="Snapshots" style="display: flex; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<sc-for list="{{snaps}}" as="s" hint-placeholder-count="4">
+<button aria-label="Snapshot {{s.k}}" aria-pressed="{{s.on}}" onClick="{{s.pick}}" style="width: 28px; height: 26px; border: none; border-radius: 6px; font-weight: 700; background: {{s.bg}}; color: {{s.fg}}; box-shadow: {{s.sh}}">{{s.k}}</button>
+</sc-for>
+</div>
+<button aria-label="Copy snapshot A to B" style="height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 6px; background: #12161C; border: 1px solid #222832; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px; color: #A7B0BE; font-weight: 600">A<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 6 H10 M7 3 L10 6 L7 9" stroke="#7C8696" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>B</button>
+<div style="display: flex; align-items: center; gap: 8px; margin-left: 4px">
+<label for="morph" style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: #7C8696">MORPH</label>
+<div id="morph" role="slider" tabindex="0" aria-label="Snapshot morph" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="position: relative; width: 132px; height: 32px">
+<div style="position: absolute; left: 0; right: 0; top: 15px; height: 2px; background: #252B35; border-radius: 1px"></div>
+<div style="position: absolute; left: 0; top: 9px; display: flex; width: 132px; justify-content: space-between; pointer-events: none">
+<span style="width: 2px; height: 14px; background: #2E3540"></span><span style="width: 2px; height: 14px; background: #2E3540"></span><span style="width: 2px; height: 14px; background: #2E3540"></span><span style="width: 2px; height: 14px; background: #2E3540"></span>
+</div>
+<div style="position: absolute; left: -6px; top: 10px; width: 12px; height: 12px; border-radius: 50%; background: #E6EAF0; box-shadow: 0 0 0 3px #0A0C0F, 0 3px 8px rgba(0,0,0,0.8)"></div>
+</div>
+</div>
+<div style="flex: 1"></div>
+<button aria-label="Quality" style="height: 32px; padding: 0 10px; display: flex; align-items: center; gap: 6px; background: #12161C; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); color: #C9D1DC; font-weight: 600"><span style="color: #7C8696; font-weight: 500">Analyzer</span>High<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<button aria-label="Help: annotate the interface" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: #12161C; border: 1px solid #222832; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px; font-weight: 700; color: #A7B0BE">?</button>
+<button aria-label="Settings" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: #12161C; border: 1px solid #222832; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4 H14 M2 8 H14 M2 12 H14" stroke="#A7B0BE" stroke-width="1.4" stroke-linecap="round"></path><circle cx="5" cy="4" r="1.6" fill="#0A0C0F" stroke="#A7B0BE" stroke-width="1.4"></circle><circle cx="11" cy="8" r="1.6" fill="#0A0C0F" stroke="#A7B0BE" stroke-width="1.4"></circle><circle cx="7" cy="12" r="1.6" fill="#0A0C0F" stroke="#A7B0BE" stroke-width="1.4"></circle></svg></button>
+</header>
+
+<main style="position: relative; height: 620px; flex: 0 0 620px; background: #0E1116; overflow: hidden">
+<svg width="1280" height="620" viewBox="0 0 1280 620" style="position: absolute; left: 0; top: 0" role="img" aria-label="EQ display: pre and post spectrum with the total EQ curve">
+<defs>
+<linearGradient id="postFill" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="{{accent}}" stop-opacity="0.34"></stop>
+<stop offset="0.55" stop-color="#3D6FD9" stop-opacity="0.12"></stop>
+<stop offset="1" stop-color="#3D6FD9" stop-opacity="0"></stop>
+</linearGradient>
+<linearGradient id="meterFill" x1="0" y1="1" x2="0" y2="0">
+<stop offset="0" stop-color="{{accent}}" stop-opacity="0.55"></stop>
+<stop offset="0.8" stop-color="{{accent}}" stop-opacity="0.95"></stop>
+<stop offset="0.92" stop-color="#FFB547"></stop>
+<stop offset="1" stop-color="#FF5E6C"></stop>
+</linearGradient>
+<filter id="glow" x="-5%" y="-20%" width="110%" height="140%">
+<feGaussianBlur stdDeviation="5" result="b"></feGaussianBlur>
+<feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+</filter>
+</defs>
+<path d="{{gridMinor}}" stroke="#151920" stroke-width="1" fill="none"></path>
+<path d="{{gridMajor}}" stroke="#1D232C" stroke-width="1" fill="none"></path>
+<path d="M0 306 H1200" stroke="#2A313C" stroke-width="1"></path>
+<path d="M1200.5 0 V620" stroke="#1C2129" stroke-width="1"></path>
+<path d="{{postFill}}" fill="url(#postFill)"></path>
+<path d="{{preLine}}" stroke="#8A94A3" stroke-opacity="0.45" stroke-width="1" fill="none"></path>
+<path d="{{postLine}}" stroke="{{accent}}" stroke-opacity="0.5" stroke-width="1" fill="none"></path>
+<path d="{{bf1}}" fill="#5CC8FF" fill-opacity="{{bo1}}"></path>
+<path d="{{bf2}}" fill="#FFB547" fill-opacity="{{bo2}}"></path>
+<path d="{{bf3}}" fill="#FF6FA8" fill-opacity="{{bo3}}"></path>
+<path d="{{bf4}}" fill="#8EE07A" fill-opacity="{{bo4}}"></path>
+<path d="{{dynRegion}}" fill="#FF6FA8" fill-opacity="0.14"></path>
+<path d="{{dynStatic}}" stroke="#FF6FA8" stroke-opacity="0.7" stroke-width="1.2" stroke-dasharray="3 3" fill="none"></path>
+<path d="{{dynBar}}" stroke="#FF6FA8" stroke-width="1.5" stroke-dasharray="2 3" fill="none"></path>
+<path d="{{curve}}" stroke="#DDF3FF" stroke-width="2.2" fill="none" filter="url(#glow)" stroke-linejoin="round"></path>
+<defs>
+<filter id="mGlow" filterUnits="userSpaceOnUse" x="1210" y="0" width="80" height="620"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+<filter id="mWell" filterUnits="userSpaceOnUse" x="1220" y="10" width="60" height="590"><feOffset dy="1.5" in="SourceAlpha" result="o"></feOffset><feGaussianBlur stdDeviation="2" in="o" result="b"></feGaussianBlur><feComposite in="SourceAlpha" in2="b" operator="out" result="inner"></feComposite><feFlood flood-color="#000000" flood-opacity="0.8"></feFlood><feComposite in2="inner" operator="in" result="sh"></feComposite><feMerge><feMergeNode in="SourceGraphic"></feMergeNode><feMergeNode in="sh"></feMergeNode></feMerge></filter>
+</defs>
+<rect x="1233.5" y="19.5" width="33" height="573" rx="6" fill="#0A0C10" stroke="#1E242D" filter="url(#mWell)"></rect>
+<path d="M1242 588 V24 M1258 588 V24" stroke="#1E242D" stroke-width="10" stroke-dasharray="2 2"></path>
+<path d="{{mLit}}" stroke="{{accent}}" stroke-width="10" stroke-dasharray="2 2" filter="url(#mGlow)"></path>
+<path d="{{mHot}}" stroke="#FFB547" stroke-width="10" stroke-dasharray="2 2" filter="url(#mGlow)"></path>
+<path d="{{mPk}}" stroke="#FFFFFF" stroke-width="10" filter="url(#mGlow)"></path>
+</svg>
+
+<sc-for list="{{fLabels}}" as="l" hint-placeholder-count="10">
+<span style="position: absolute; top: 596px; left: {{l.x}}px; transform: translateX(-50%); font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: #7C8696">{{l.t}}</span>
+</sc-for>
+<sc-for list="{{dLabels}}" as="l" hint-placeholder-count="5">
+<span style="position: absolute; left: 1206px; top: {{l.y}}px; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 10px; color: {{l.c}}">{{l.t}}</span>
+</sc-for>
+<span style="position: absolute; left: 1232px; top: 596px; width: 36px; text-align: center; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: #7C8696">OUT</span>
+
+<div style="position: absolute; left: 14px; top: 12px; display: flex; gap: 6px; align-items: center">
+<span style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px; background: rgba(18,22,28,0.8); border: 1px solid #222832; font-size: 11px; color: #A7B0BE"><span style="width: 10px; height: 2px; background: #8A94A3"></span>Pre</span>
+<span style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px; background: rgba(18,22,28,0.8); border: 1px solid #222832; font-size: 11px; color: #A7B0BE"><span style="width: 10px; height: 8px; border-radius: 2px; background: {{accent}}; opacity: 0.7"></span>Post</span>
+<span style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px; background: rgba(18,22,28,0.8); border: 1px solid #222832; font-size: 11px; color: #A7B0BE"><span style="width: 10px; height: 2px; border-top: 2px dashed #FF6FA8"></span>Dynamic range</span>
+</div>
+
+<sc-if value="{{hasDyn}}" hint-placeholder-val="{{ true }}">
+<div aria-hidden="true" style="position: absolute; left: {{dyn.x}}px; top: {{dyn.y}}px; width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #FF6FA8; opacity: 0.55; box-sizing: border-box; pointer-events: none"></div>
+</sc-if>
+
+<sc-for list="{{nodes}}" as="n" hint-placeholder-count="4">
+<button aria-label="{{n.aria}}" aria-pressed="{{n.on}}" onClick="{{n.pick}}" style="position: absolute; left: {{n.x}}px; top: {{n.y}}px; width: 32px; height: 32px; padding: 0; background: transparent; border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center">
+<span style="width: {{n.size}}px; height: {{n.size}}px; box-sizing: border-box; border-radius: 50%; background: {{n.fill}}; border: 2px solid {{n.stroke}}; box-shadow: {{n.shadow}}; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #0E1116">{{n.num}}</span>
+</button>
+</sc-for>
+
+<sc-if value="{{hasSel}}" hint-placeholder-val="{{ true }}">
+<section aria-label="{{sel.title}} controls" style="position: absolute; left: {{sel.px}}px; top: {{sel.py}}px; width: 476px; box-sizing: border-box; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; background: rgba(24,28,35,0.72); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid rgba(255,255,255,0.09); border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="width: 10px; height: 10px; border-radius: 50%; background: {{sel.color}}; box-shadow: 0 0 10px {{sel.color}}"></span>
+<span style="font-weight: 700; font-size: 13px">{{sel.title}}</span>
+<button aria-label="Band type" style="height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 6px; background: #1E232B; border: 1px solid #2E3540; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600">{{sel.type}}<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<sc-if value="{{sel.hasSlope}}" hint-placeholder-val="{{ false }}">
+<button aria-label="Slope" style="height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 6px; background: #1E232B; border: 1px solid #2E3540; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600">{{sel.slope}}<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-if>
+<button aria-label="Stereo placement" style="height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 6px; background: #1E232B; border: 1px solid #2E3540; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600">Stereo<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<div style="flex: 1"></div>
+<button aria-label="Solo band" style="width: 28px; height: 28px; background: #1E232B; border: 1px solid #2E3540; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px; font-size: 11px; font-weight: 800; color: #A7B0BE">S</button>
+<button aria-label="Bypass band" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: #1E232B; border: 1px solid #2E3540; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1.5 V6.5" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round"></path><path d="M4 3.6 A4.5 4.5 0 1 0 10 3.6" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<button aria-label="Close band panel" onClick="{{closePanel}}" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; border-radius: 6px"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+</div>
+<div style="display: flex; gap: 4px">
+<sc-for list="{{sel.knobs}}" as="k" hint-placeholder-count="3">
+<button class="dial" aria-label="{{k.aria}}" style="width: 84px; padding: 2px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; background: transparent; border: none; border-radius: 8px">
+<span style="position: relative; width: 64px; height: 64px; display: block">
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<defs>
+<filter id="pkg{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feGaussianBlur stdDeviation="1.8" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+<filter id="pkn{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="{{k.color}}" flood-opacity="1"></feDropShadow></filter>
+<filter id="pkd{{$index}}" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.75"></feDropShadow></filter>
+</defs>
+<path d="{{k.dim}}" stroke="#2A313C" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.ctr}}" stroke="#C9D1DC" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="{{k.color}}" stroke-width="2" stroke-linecap="round" filter="url(#pkg{{$index}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="#161A21" stroke="#2E3540" filter="url(#pkd{{$index}})"></circle>
+<path d="{{k.ptr}}" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" filter="url(#pkn{{$index}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 64px; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: #F2F5F8">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: #8A94A3; margin-top: 2px">{{k.u}}</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: #8A94A3">{{k.label}}</span>
+</button>
+</sc-for>
+</div>
+<sc-if value="{{sel.isDyn}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.07)">
+<button aria-label="Dynamic: on" aria-pressed="true" style="height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 4px; background: transparent; border: none; font-weight: 600">
+<span style="width: 28px; height: 16px; border-radius: 8px; background: #FF6FA8; position: relative; display: block; box-shadow: 0 0 10px rgba(255,111,168,0.75)"><span style="position: absolute; right: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #0E1116"></span></span>Dynamic</button>
+<button aria-label="Detection source" style="height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 6px; background: #1E232B; border: 1px solid #2E3540; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600"><span style="color: #8A94A3; font-weight: 500">Detect</span>Band<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<div role="group" aria-label="Focus" style="display: flex; padding: 2px; gap: 2px; background: rgba(10,12,15,0.6); border: 1px solid #252B35; border-radius: 7px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<sc-for list="{{focus}}" as="f" hint-placeholder-count="3">
+<button aria-pressed="{{f.on}}" onClick="{{f.pick}}" style="height: 22px; padding: 0 8px; border: none; border-radius: 5px; font-size: 11px; font-weight: 600; background: {{f.bg}}; color: {{f.fg}}; box-shadow: {{f.sh}}">{{f.k}}</button>
+</sc-for>
+</div>
+<span style="margin-left: auto; font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11px; color: #FF8FBF">GR {{sel.gr}}</span>
+</div>
+</sc-if>
+<sc-if value="{{sel.notDyn}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.07)">
+<button style="height: 28px; padding: 0 10px; background: transparent; border: 1px dashed #3A4250; border-radius: 6px; font-weight: 600; color: #C9D1DC">+ Make dynamic</button>
+<button style="height: 28px; padding: 0 10px; background: transparent; border: 1px dashed #3A4250; border-radius: 6px; font-weight: 600; color: #C9D1DC">+ Spectral</button>
+<span style="margin-left: auto; font-size: 11px; color: #7C8696">Alt-drag node for Q</span>
+</div>
+</sc-if>
+</section>
+</sc-if>
+</main>
+
+<div style="height: 28px; flex: 0 0 28px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: #0C0E12; border-top: 1px solid #1C2129; font-size: 11px; color: #8A94A3">
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="5" stroke="#5C6573" stroke-width="1.2"></circle><path d="M6 5.5 V8.5 M6 3.5 V3.6" stroke="#8A94A3" stroke-width="1.4" stroke-linecap="round"></path></svg>
+<span>{{help}}</span>
+<span style="margin-left: auto; color: #5C6573">Double-click empty space to add a band</span>
+</div>
+
+<footer style="height: 56px; flex: 0 0 56px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #0A0C0F; border-top: 1px solid #1C2129">
+<button style="height: 32px; padding: 0 10px; display: flex; align-items: center; gap: 6px; background: #12161C; border: 1px solid #222832; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px; font-weight: 600; color: #A7B0BE"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="1.5" y="3" width="11" height="8" rx="1.5" stroke="#8A94A3" stroke-width="1.3"></rect><path d="M4.5 3 V7 M7 3 V7 M9.5 3 V7" stroke="#8A94A3" stroke-width="1.3"></path></svg>MIDI</button>
+<div role="group" aria-label="Processing mode" style="display: flex; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+<button aria-pressed="{{m.on}}" onClick="{{m.pick}}" style="height: 26px; padding: 0 10px; border: none; border-radius: 6px; font-weight: 600; background: {{m.bg}}; color: {{m.fg}}; box-shadow: {{m.sh}}">{{m.k}}</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 1px; padding: 0 6px; min-width: 92px">
+<span style="font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: #7C8696">LATENCY</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11px; color: #E6EAF0">{{latency}}</span>
+</div>
+<button style="height: 32px; padding: 0 10px; display: flex; align-items: center; gap: 6px; background: #12161C; border: 1px solid #222832; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); font-weight: 600; color: #C9D1DC"><span style="color: #7C8696; font-weight: 500">Character</span>Clean<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="#7C8696" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<div style="flex: 1"></div>
+<div role="group" aria-label="Channel mode" style="display: flex; padding: 2px; gap: 2px; background: #0C0F13; border: 1px solid #1E242D; border-radius: 8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.65)">
+<sc-for list="{{chans}}" as="c" hint-placeholder-count="5">
+<button aria-pressed="{{c.on}}" onClick="{{c.pick}}" style="height: 26px; min-width: 26px; padding: 0 7px; border: none; border-radius: 6px; font-weight: 700; background: {{c.bg}}; color: {{c.fg}}; box-shadow: {{c.sh}}">{{c.k}}</button>
+</sc-for>
+</div>
+<button aria-pressed="true" style="height: 32px; padding: 0 10px; background: rgba(92,200,255,0.14); border: 1px solid rgba(92,200,255,0.6); border-radius: 6px; box-shadow: 0 0 14px rgba(92,200,255,0.35), inset 0 0 10px rgba(92,200,255,0.15); text-shadow: 0 0 8px rgba(92,200,255,0.8); font-weight: 700; color: #9FDDFF">Auto Gain</button>
+<button aria-pressed="false" style="height: 32px; padding: 0 10px; background: #12161C; border: 1px solid #222832; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px; font-weight: 700; color: #A7B0BE">Delta</button>
+<button aria-label="Bypass plugin" aria-pressed="false" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: #12161C; border: 1px solid #222832; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4); border-radius: 6px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1.5 V6.5" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round"></path><path d="M4 3.6 A4.5 4.5 0 1 0 10 3.6" stroke="#A7B0BE" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<div style="width: 1px; height: 24px; background: #1F252E"></div>
+<button aria-label="Mix 100 percent" style="height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 4px; background: transparent; border: none">
+<svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="overflow: visible"><defs><filter id="fmg" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feGaussianBlur stdDeviation="2.6" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter><filter id="fmn" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="{{accent}}" flood-opacity="1"></feDropShadow></filter><filter id="fmd" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.75"></feDropShadow></filter></defs><path d="{{mix.dim}}" stroke="#2A313C" stroke-width="3.5" stroke-linecap="round"></path><path d="{{mix.lit}}" stroke="{{accent}}" stroke-width="3.5" stroke-linecap="round" filter="url(#fmg)"></path><circle cx="32" cy="32" r="17" fill="#161A21" stroke="#2E3540" stroke-width="2" filter="url(#fmd)"></circle><path d="{{mix.ptr}}" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" filter="url(#fmn)"></path></svg>
+<span style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: #7C8696">MIX</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11px">100 %</span></span>
+</button>
+<button aria-label="Output gain" style="height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 4px; background: transparent; border: none">
+<svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="overflow: visible"><defs><filter id="fog" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feGaussianBlur stdDeviation="2.6" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter><filter id="fon" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="{{accent}}" flood-opacity="1"></feDropShadow></filter><filter id="fod" filterUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="84"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.75"></feDropShadow></filter></defs><path d="{{out.dim}}" stroke="#2A313C" stroke-width="3.5" stroke-linecap="round"></path><path d="{{out.ctr}}" stroke="#C9D1DC" stroke-width="3.5" stroke-linecap="round"></path><path d="{{out.lit}}" stroke="{{accent}}" stroke-width="3.5" stroke-linecap="round" filter="url(#fog)"></path><circle cx="32" cy="32" r="17" fill="#161A21" stroke="#2E3540" stroke-width="2" filter="url(#fod)"></circle><path d="{{out.ptr}}" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" filter="url(#fon)"></path></svg>
+<span style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: #7C8696">OUTPUT</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600;font-size: 11px">−0.8 dB</span></span>
+</button>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5CC8FF","options":["#5CC8FF","#FF9F43","#B98BFF","#3FD6B5"]},"animate":{"editor":"boolean","default":true},"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      if (this.props.animate ?? true) {
+        const st = this.state || {};
+        this.setState({ t: (st.t || 0) + 1 });
+      }
+    }, 50);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+  renderVals() {
+    const accent = this.props.accent ?? '#5CC8FF';
+    const st = this.state || {};
+    const t = st.t || 0;
+    const selIdx = st.sel === undefined ? 2 : st.sel;
+    const mode = st.mode || 0;
+    const snap = st.snap || 0;
+    const chan = st.chan || 0;
+    const focusIdx = st.focus === undefined ? 0 : st.focus;
+
+    const W = 1200, TOP = 24, BOT = 588, MID = 306, FMIN = 10, FMAX = 30000, FS = 96000, N = 300;
+    const LR = Math.log(FMAX / FMIN);
+    const fx = (f) => W * Math.log(f / FMIN) / LR;
+    const xf = (x) => FMIN * Math.exp((x / W) * LR);
+    const gy = (db) => MID - db * (264 / 18);
+    const sy = (db) => TOP + (-db / 90) * (BOT - TOP);
+    const r1 = (v) => Math.round(v * 10) / 10;
+
+    const mag = (c, w) => {
+      const [b0, b1, b2, a0, a1, a2] = c;
+      const cw = Math.cos(w), c2 = Math.cos(2 * w);
+      const num = b0 * b0 + b1 * b1 + b2 * b2 + 2 * (b0 * b1 + b1 * b2) * cw + 2 * b0 * b2 * c2;
+      const den = a0 * a0 + a1 * a1 + a2 * a2 + 2 * (a0 * a1 + a1 * a2) * cw + 2 * a0 * a2 * c2;
+      return 10 * Math.log10(num / den);
+    };
+    const pre = (f0, q) => { const w0 = 2 * Math.PI * f0 / FS; return { cs: Math.cos(w0), al: Math.sin(w0) / (2 * q) }; };
+    const peak = (f0, g, q) => { const A = Math.pow(10, g / 40); const { cs, al } = pre(f0, q); return [1 + al * A, -2 * cs, 1 - al * A, 1 + al / A, -2 * cs, 1 - al / A]; };
+    const hshelf = (f0, g, q) => {
+      const A = Math.pow(10, g / 40); const { cs, al } = pre(f0, q); const s = 2 * Math.sqrt(A) * al;
+      return [A * ((A + 1) + (A - 1) * cs + s), -2 * A * ((A - 1) + (A + 1) * cs), A * ((A + 1) + (A - 1) * cs - s),
+        (A + 1) - (A - 1) * cs + s, 2 * ((A - 1) - (A + 1) * cs), (A + 1) - (A - 1) * cs - s];
+    };
+    const hp = (f0, q) => { const { cs, al } = pre(f0, q); return [(1 + cs) / 2, -(1 + cs), (1 + cs) / 2, 1 + al, -2 * cs, 1 - al]; };
+    const coefs = (b, g) => b.kind === 'cut' ? [hp(b.f, 0.5412), hp(b.f, 1.3066)] : b.kind === 'shelf' ? [hshelf(b.f, g, b.q)] : [peak(b.f, g, b.q)];
+
+    const pulse = 0.5 + 0.5 * Math.sin(t * 0.13);
+    const dynNow = -6 * (0.25 + 0.6 * pulse * (0.75 + 0.25 * Math.sin(t * 0.41)));
+
+    const bands = [
+      { id: 1, kind: 'cut', type: 'Low Cut', f: 32, g: 0, q: 0.71, color: '#5CC8FF', slope: '24 dB/oct' },
+      { id: 2, kind: 'bell', type: 'Bell', f: 160, g: 3.5, q: 0.9, color: '#FFB547' },
+      { id: 3, kind: 'bell', type: 'Bell', f: 2800, g: -3, q: 2.6, color: '#FF6FA8', dyn: -6, thr: -24 },
+      { id: 4, kind: 'shelf', type: 'High Shelf', f: 9500, g: 2.5, q: 0.71, color: '#8EE07A', slope: '12 dB/oct' }
+    ];
+
+    const xs = [], fs = [];
+    for (let i = 0; i <= N; i++) { const x = i * W / N; xs.push(x); fs.push(xf(x)); }
+    const resp = (cs) => fs.map((f) => { const w = 2 * Math.PI * f / FS; let s = 0; for (const c of cs) s += mag(c, w); return s; });
+
+    const bandArr = bands.map((b) => resp(coefs(b, b.dyn ? b.g + dynNow : b.g)));
+    const total = xs.map((_, i) => bandArr.reduce((s, a) => s + a[i], 0));
+    const line = (arr, map) => arr.map((v, i) => (i ? 'L' : 'M') + r1(xs[i]) + ' ' + r1(map(v))).join(' ');
+    const clampDb = (v) => Math.max(-20, Math.min(20, v));
+    const fill0 = (arr) => line(arr, (v) => gy(clampDb(v))) + ' L' + W + ' ' + MID + ' L0 ' + MID + ' Z';
+
+    const db = bands[2];
+    const dynStaticArr = resp(coefs(db, db.g));
+    const dynFullArr = resp(coefs(db, db.g + db.dyn));
+    const back = dynStaticArr.map((v, i) => [xs[i], gy(v)]).reverse().map(([x, y]) => 'L' + r1(x) + ' ' + r1(y)).join(' ');
+    const dynRegion = line(dynFullArr, gy) + ' ' + back + ' Z';
+
+    const preArr = fs.map((f, i) => {
+      const L = Math.log2;
+      let v = -34 - 0.8 * L(f / 1000)
+        + 7 * Math.exp(-Math.pow(L(f / 80), 2) / 0.8)
+        + 3 * Math.exp(-Math.pow(L(f / 450), 2) / 1.0)
+        + 6 * Math.exp(-Math.pow(L(f / 2800), 2) / 0.05)
+        - 9 * Math.max(0, L(f / 9000)) - 40 * Math.max(0, L(f / 18000)) - 30 * Math.max(0, L(35 / f))
+        + 1.6 * Math.sin(i * 0.41 + t * 0.9) + 1.1 * Math.sin(i * 1.37 - t * 1.3) + 0.7 * Math.sin(i * 3.1 + t * 0.5);
+      return Math.max(-92, v);
+    });
+    const postArr = preArr.map((v, i) => Math.max(-92, v + total[i]));
+    const postLine = line(postArr, sy);
+
+    let gridMinor = '', gridMajor = '';
+    for (const dec of [10, 100, 1000, 10000]) {
+      for (let k = 1; k <= 9; k++) {
+        const f = dec * k; if (f > FMAX) break;
+        const x = r1(fx(f));
+        if (k === 1) gridMajor += 'M' + x + ' 0 V620 '; else gridMinor += 'M' + x + ' 0 V620 ';
+      }
+    }
+    for (const d of [-15, -9, -3, 3, 9, 15]) gridMinor += 'M0 ' + r1(gy(d)) + ' H1200 ';
+    for (const d of [-12, -6, 6, 12]) gridMajor += 'M0 ' + r1(gy(d)) + ' H1200 ';
+
+    const fLabels = [[20, '20'], [50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k'], [20000, '20k']]
+      .map(([f, s]) => ({ x: r1(fx(f)), t: s }));
+    const dLabels = [12, 6, 0, -6, -12].map((d) => ({ y: r1(gy(d) - 7), t: (d > 0 ? '+' : d < 0 ? '−' : ' ') + Math.abs(d), c: d === 0 ? '#A7B0BE' : '#7C8696' }));
+
+    const polar = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [32 + r * Math.cos(a), 32 + r * Math.sin(a)]; };
+    const tk = (deg, ra, rb) => { const [x0, y0] = polar(deg, ra), [x1, y1] = polar(deg, rb); return 'M' + r1(x0) + ' ' + r1(y0) + ' L' + r1(x1) + ' ' + r1(y1) + ' '; };
+    const knobGeo = (frac, bipolar, n) => {
+      const cnt = n || 31, step = 270 / (cnt - 1);
+      const fr = Math.max(0, Math.min(1, frac));
+      const dv = -135 + 270 * fr;
+      let lit = '', dim = '';
+      for (let i = 0; i < cnt; i++) {
+        const d = -135 + i * step;
+        const s = tk(d, 25, 29);
+        const on = bipolar ? (d >= Math.min(0, dv) - 0.01 && d <= Math.max(0, dv) + 0.01) : d <= dv + 0.01;
+        if (on) lit += s; else dim += s;
+      }
+      return { lit, dim, ctr: bipolar ? tk(0, 22.5, 30) : '', ptr: tk(dv, 21.5, 31) };
+    };
+    const fmtHz = (f) => f < 1000 ? Math.round(f) + ' Hz' : (f / 1000).toFixed(2) + ' kHz';
+    const fmtDb = (g) => (g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1) + ' dB';
+    const hzP = (f) => f < 1000 ? [String(Math.round(f)), 'Hz'] : [(f / 1000).toFixed(2), 'kHz'];
+    const dbP = (g) => [(g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1), 'dB'];
+    const knob = (label, n, u, frac, bipolar, color) => Object.assign({ label, n, u, color, aria: label + ' ' + n + ' ' + u }, knobGeo(frac, bipolar));
+
+    const nodes = bands.map((b, i) => {
+      const on = i === selIdx;
+      const y = b.kind === 'cut' ? MID : gy(b.g);
+      return {
+        x: r1(fx(b.f) - 16), y: r1(y - 16), on: on ? 'true' : 'false', num: on ? b.id : '',
+        aria: 'Band ' + b.id + ', ' + b.type + ', ' + fmtHz(b.f) + (b.kind === 'cut' ? '' : ', ' + fmtDb(b.g)),
+        size: on ? 18 : 14,
+        fill: on ? b.color : b.color + '33',
+        stroke: on ? '#FFFFFF' : b.color,
+        shadow: on ? '0 0 0 5px ' + b.color + '33, 0 0 18px ' + b.color + 'AA, 0 3px 8px rgba(0,0,0,0.6)' : '0 0 8px ' + b.color + '66, 0 2px 6px rgba(0,0,0,0.6)',
+        pick: () => this.setState({ sel: i })
+      };
+    });
+
+    const dx = fx(db.f);
+    const dynBar = 'M' + r1(dx) + ' ' + r1(gy(db.g)) + ' V' + r1(gy(db.g + db.dyn));
+    const dyn = { x: r1(dx - 14), y: r1(gy(db.g + dynNow) - 14) };
+
+    let sel = null;
+    if (selIdx >= 0) {
+      const b = bands[selIdx];
+      const nx = fx(b.f), ny = b.kind === 'cut' ? MID : gy(b.g);
+      const PW = 476, PH = b.dyn ? 214 : 204;
+      const px = Math.max(12, Math.min(W - PW - 12, nx - PW / 2));
+      const py = ny > 290 ? ny - 30 - PH : ny + 30;
+      const fFrac = Math.log(b.f / 10) / Math.log(3000);
+      const qFrac = Math.log(b.q / 0.025) / Math.log(1600);
+      const knobs = [knob('FREQ', ...hzP(b.f), fFrac, false, b.color)];
+      if (b.kind !== 'cut') knobs.push(knob('GAIN', ...dbP(b.g), (b.g + 18) / 36, true, b.color));
+      knobs.push(knob('Q', b.q.toFixed(2), '', qFrac, false, b.color));
+      if (b.dyn) {
+        knobs.push(knob('RANGE', ...dbP(b.dyn), (b.dyn + 30) / 60, true, b.color));
+        knobs.push(knob('THRESH', ...dbP(b.thr), (b.thr + 60) / 60, false, '#A7B0BE'));
+      }
+      sel = {
+        title: 'Band ' + b.id, type: b.type, color: b.color, px: r1(px), py: r1(py), knobs,
+        hasSlope: !!b.slope, slope: b.slope || '', isDyn: !!b.dyn, notDyn: !b.dyn, gr: fmtDb(dynNow)
+      };
+    }
+
+    const seg = (labels, cur, key, onBg) => labels.map((k, i) => ({
+      k, on: i === cur ? 'true' : 'false',
+      bg: i === cur ? (onBg || '#262C36') : 'transparent', fg: i === cur ? '#F2F5F8' : '#8A94A3',
+      sh: i !== cur ? 'none' : onBg ? '0 0 12px ' + accent + '66, inset 0 0 0 1px ' + accent + '99' : 'inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 2px rgba(0,0,0,0.7), 0 3px 8px rgba(0,0,0,0.4)',
+      pick: () => this.setState({ [key]: i })
+    }));
+    const lat = ['0 ms', '≈ 3 ms', '≈ 12 ms · Med'][mode];
+
+    const lvL = -9 + 3.2 * Math.sin(t * 0.31) + 1.4 * Math.sin(t * 0.9);
+    const lvR = -9.5 + 3.4 * Math.sin(t * 0.27 + 1) + 1.2 * Math.sin(t * 1.1);
+    const my = (d) => { const y = 24 + (-d / 60) * 564; return 588 - Math.round((588 - y) / 4) * 4; };
+    const yH = my(-6);
+    const meter = (x, lv) => {
+      const y = my(lv), yp = my(Math.min(0, lv + 3));
+      return { lit: 'M' + x + ' 588 V' + Math.max(y, yH), hot: y < yH ? 'M' + x + ' ' + yH + ' V' + y : '', pk: 'M' + x + ' ' + yp + ' V' + (yp - 2) };
+    };
+    const mtL = meter(1242, lvL), mtR = meter(1258, lvR);
+
+    const sb = bands.map((b, i) => (i === selIdx ? 0.22 : 0.08));
+    const selB = selIdx >= 0 ? bands[selIdx] : null;
+    const help = selB
+      ? 'Band ' + selB.id + ' · ' + selB.type + (selB.dyn ? ' · dynamic' : '') + ' — drag to move, Shift for fine, Alt-drag or wheel for Q, right-click for more'
+      : 'Click a band to edit it. Drag on the spectrum to grab a peak.';
+
+    return {
+      accent,
+      gridMinor, gridMajor, fLabels, dLabels,
+      preLine: line(preArr, sy), postLine, postFill: postLine + ' L' + W + ' 620 L0 620 Z',
+      bf1: fill0(bandArr[0]), bf2: fill0(bandArr[1]), bf3: fill0(bandArr[2]), bf4: fill0(bandArr[3]),
+      bo1: sb[0], bo2: sb[1], bo3: sb[2], bo4: sb[3],
+      dynRegion, dynStatic: line(dynStaticArr, gy), dynBar, dyn, hasDyn: true,
+      curve: line(total, (v) => gy(clampDb(v))),
+      nodes, hasSel: !!sel, sel: sel || { knobs: [] },
+      closePanel: () => this.setState({ sel: -1 }),
+      snaps: seg(['A', 'B', 'C', 'D'], snap, 'snap', accent + '33'),
+      modes: seg(['Zero Latency', 'Natural Phase', 'Linear Phase'], mode, 'mode'),
+      chans: seg(['Stereo', 'L', 'R', 'M', 'S'], chan, 'chan'),
+      focus: seg(['Both', 'Transient', 'Sustain'], focusIdx, 'focus'),
+      latency: lat,
+      mix: knobGeo(1, false, 15), out: knobGeo((-0.8 + 24) / 48, true, 15),
+      mLit: mtL.lit + ' ' + mtR.lit, mHot: (mtL.hot + ' ' + mtR.hot).trim() || 'M0 0', mPk: mtL.pk + ' ' + mtR.pk,
+      help
+    };
+  }
+}
+</script>
+</body>
+</html>
