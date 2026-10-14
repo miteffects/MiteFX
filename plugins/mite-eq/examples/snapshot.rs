@@ -9,7 +9,7 @@ use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::EqView;
-use mite_eq::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, TYPE};
+use mite_eq::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, STEREO, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::render::render_view;
@@ -56,7 +56,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_id(leak(band_id(b, FREQ.id)), FREQ)
             .with_id(leak(band_id(b, GAIN.id)), GAIN)
             .with_id(leak(band_id(b, Q.id)), Q)
-            .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default));
+            .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default))
+            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0));
     }
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),
@@ -71,7 +72,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(&band_id(b, FREQ.id), freq);
         host.set_plain(&band_id(b, GAIN.id), gain);
         host.set_plain(&band_id(b, Q.id), q);
-        settings[b] = BandSettings { enabled: true, kind, freq: f64::from(freq), gain_db: f64::from(gain), q: f64::from(q), slope: 3 };
+        // Bands 2 and 3 on the sides, band 4 on the right channel: shows the per-placement colours.
+        host.set_plain(&band_id(b, STEREO.id), [0.0, 4.0, 4.0, 2.0][b]);
+        settings[b] = BandSettings { enabled: true, kind, freq: f64::from(freq), gain_db: f64::from(gain), q: f64::from(q), slope: 3, ..Default::default() };
     }
 
     // Pink-ish noise (Paul Kellet's filter) through the real engine feeds both analyzer taps.
@@ -112,6 +115,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
     view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
     let _ = host.normalized(OUT_GAIN.id);
+    // Optional further clicks in design units, e.g. SNAPSHOT_CLICK="380,600" to open a dropdown.
+    // Each is preceded by a render so the view knows where its controls are.
+    if let Ok(clicks) = std::env::var("SNAPSHOT_CLICK") {
+        for p in clicks.split(';') {
+            let Some((x, y)) = p.split_once(',') else { continue };
+            let at = Point::new(x.trim().parse()?, y.trim().parse()?);
+            render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), 1.0)?;
+            view.event(&UiEvent::PointerMove { pos: at, mods }, &host);
+            view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
+            view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
+        }
+    }
 
     let image = render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), scale)?;
     let file = std::io::BufWriter::new(std::fs::File::create(&path)?);

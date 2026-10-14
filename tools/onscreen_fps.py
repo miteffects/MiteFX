@@ -6,7 +6,7 @@ delivered by Mutter's screen cast of the area, which is what reaches the display
 
     python3 tools/onscreen_fps.py X Y W H [seconds]     (X11/XWayland root coordinates)
 """
-import sys, time
+import os, sys, time
 import gi
 gi.require_version("Gio", "2.0"); gi.require_version("Gst", "1.0")
 from gi.repository import Gio, GLib, Gst
@@ -42,6 +42,13 @@ if "id" not in node:
     sys.exit("no PipeWire stream")
 
 Gst.init(None)
+if os.environ.get("SAVE_PNG"):
+    # Grab one full-resolution frame of the area instead of measuring.
+    pipe = Gst.parse_launch(f"pipewiresrc path={node['id']} num-buffers=5 ! videoconvert ! pngenc snapshot=true ! filesink location={os.environ['SAVE_PNG']}")
+    pipe.set_state(Gst.State.PLAYING)
+    pipe.get_bus().timed_pop_filtered(10 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+    pipe.set_state(Gst.State.NULL)
+    sys.exit(0)
 pipe = Gst.parse_launch(f"pipewiresrc path={node['id']} always-copy=true ! videoscale method=nearest-neighbour ! video/x-raw,width=320 ! videoconvert ! video/x-raw,format=GRAY8 ! appsink name=sink emit-signals=false sync=false max-buffers=1000")
 sink = pipe.get_by_name("sink")
 pipe.set_state(Gst.State.PLAYING)

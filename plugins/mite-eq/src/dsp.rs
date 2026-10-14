@@ -135,7 +135,7 @@ mod tests {
     fn bands_stack_in_series() {
         let mut settings = flat();
         for (i, s) in settings.iter_mut().take(2).enumerate() {
-            *s = BandSettings { enabled: true, kind: BandType::Bell, freq: 1000.0, gain_db: 3.0, q: 1.0, slope: 3 };
+            *s = BandSettings { enabled: true, kind: BandType::Bell, freq: 1000.0, gain_db: 3.0, q: 1.0, slope: 3, ..Default::default() };
             let _ = i;
         }
         let mut eq = EqEngine::new(SR, &settings, 0.0);

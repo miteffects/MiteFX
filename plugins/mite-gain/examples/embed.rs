@@ -41,7 +41,7 @@ fn main() {
 
     let meter = Arc::new(StereoMeter::new(-150.0));
     meter.store(-10.0, -7.0);
-    let options = WindowOptions { title: "Mite Gain".into(), logical_size: (WIDTH, HEIGHT), fallback_scale: None, theme: ThemeKind::Dark, accent: "utility" };
+    let options = WindowOptions { title: "Mite Gain".into(), logical_size: (WIDTH, HEIGHT), fallback_scale: None, theme: ThemeKind::Dark, accent: "utility", on_resize: None };
     match open_parented(&handle, options, Box::new(GainView::new(meter)), Box::new(MemoryParamHost::new().with(GAIN))) {
         Ok(child) => {
             eprintln!("child window opened");

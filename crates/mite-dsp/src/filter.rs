@@ -178,12 +178,12 @@ fn lowpass_zeros(p: &Analog, w0: f64, a1: f64, a2: f64) -> Coeffs {
     Coeffs { b0, b1: r0 - b0, b2: 0.0, a1, a2 }
 }
 
-/// High-pass (Vicanek): double zero at DC, gain matched at the corner.
+/// High-pass: double zero at DC, gain matched at Nyquist. The passband of a high-pass is the top
+/// of the spectrum, so pinning it there keeps cuts flat; matching at the corner instead let the
+/// top end rise up to +0.4 dB above the analog response for corners above ~5 kHz.
 fn highpass_zeros(p: &Analog, w0: f64, a1: f64, a2: f64) -> Coeffs {
-    let wm = w0.min(MAX_MATCH_W);
-    let (dm, _, phi1) = den_sq(a1, a2, wm);
-    // |1 − z⁻¹|⁴ = (4·φ1)² on the unit circle.
-    let g = (p.magnitude_sq(wm / w0) * dm).sqrt() / (4.0 * phi1);
+    // |1 − z⁻¹|² = 4 and |A| = 1 − a1 + a2 at Nyquist.
+    let g = p.magnitude_sq(PI / w0).sqrt() * (1.0 - a1 + a2) / 4.0;
     Coeffs { b0: g, b1: -2.0 * g, b2: g, a1, a2 }
 }
 

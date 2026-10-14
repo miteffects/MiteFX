@@ -51,6 +51,26 @@ impl BandType {
     }
 }
 
+/// Which part of a stereo signal a band processes, in its frozen parameter order (append only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Placement {
+    #[default]
+    Stereo,
+    Left,
+    Right,
+    Mid,
+    Side,
+}
+
+impl Placement {
+    pub const ALL: [Self; 5] = [Self::Stereo, Self::Left, Self::Right, Self::Mid, Self::Side];
+    pub const NAMES: [&'static str; 5] = ["Stereo", "Left", "Right", "Mid", "Side"];
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL.get(i).copied().unwrap_or_default()
+    }
+}
+
 /// Cut slopes in dB/octave, in their frozen parameter order.
 pub const SLOPES_DB: [u32; 9] = [6, 12, 18, 24, 30, 36, 48, 72, 96];
 pub const SLOPE_NAMES: [&str; 9] =
@@ -77,11 +97,19 @@ pub struct BandSettings {
     pub q: f64,
     /// Index into [`SLOPES_DB`].
     pub slope: usize,
+    pub placement: Placement,
 }
 
 impl Default for BandSettings {
     fn default() -> Self {
-        Self { enabled: false, kind: BandType::Bell, freq: 1000.0, gain_db: 0.0, q: FRAC_1_SQRT_2, slope: DEFAULT_SLOPE }
+        Self { enabled: false, kind: BandType::Bell, freq: 1000.0, gain_db: 0.0, q: FRAC_1_SQRT_2, slope: DEFAULT_SLOPE, placement: Placement::Stereo }
+    }
+}
+
+impl BandSettings {
+    /// Whether `other` needs a different filter structure (a crossfade instead of smoothing).
+    fn structure_differs(&self, other: &Self) -> bool {
+        self.enabled != other.enabled || self.kind != other.kind || self.slope != other.slope || self.placement != other.placement
     }
 }
 
@@ -117,8 +145,9 @@ impl Sections {
 }
 
 /// Butterworth Q of section `k` (0-based) in an order-`order` cascade.
+/// Q of the `k`-th pole pair of an order-`order` Butterworth filter; `k = 0` is the sharpest.
 fn butterworth_q(order: usize, k: usize) -> f64 {
-    1.0 / (2.0 * ((2 * k + 1) as f64 * PI / (2 * order) as f64).cos())
+    1.0 / (2.0 * ((2 * k + 1) as f64 * PI / (2 * order) as f64).sin())
 }
 
 /// Calls `f` with every analog section of the band, plus whether it is a cut (|H| < 1 at the
@@ -151,7 +180,7 @@ fn for_each_prototype(s: &BandSettings, mut f: impl FnMut(Analog, bool)) {
             let resonance = q / FRAC_1_SQRT_2;
             for k in 0..pairs {
                 let mut qk = butterworth_q(order, k);
-                if k == pairs - 1 {
+                if k == 0 {
                     qk *= resonance;
                 }
                 f(
@@ -261,9 +290,7 @@ impl BandProcessor {
         self.log_freq.set_target(s.freq.ln() as f32);
         self.gain.set_target(s.gain_db as f32);
         self.log_q.set_target(s.q.ln() as f32);
-        let structure_changed =
-            s.enabled != self.active.enabled || s.kind != self.active.kind || s.slope != self.active.slope;
-        if structure_changed {
+        if s.structure_differs(&self.active) {
             // Fade the band out; the swap happens once it is silent (see `advance`).
             self.mix.set_target(0.0);
         }
@@ -302,13 +329,11 @@ impl BandProcessor {
         self.log_q.next_value();
         let mix = self.mix.next_value();
 
-        let structure_pending = self.target.enabled != self.active.enabled
-            || self.target.kind != self.active.kind
-            || self.target.slope != self.active.slope;
-        if structure_pending && mix == 0.0 {
+        if mix == 0.0 && self.target.structure_differs(&self.active) {
             self.active.enabled = self.target.enabled;
             self.active.kind = self.target.kind;
             self.active.slope = self.target.slope;
+            self.active.placement = self.target.placement;
             self.state = [[Tdf2::default(); MAX_SECTIONS]; 2];
             self.redesign();
             self.countdown = CONTROL_INTERVAL;
@@ -323,24 +348,47 @@ impl BandProcessor {
         f64::from(mix)
     }
 
-    /// Processes up to two channels in place.
+    /// Processes up to two channels in place. With one channel every placement processes it.
     pub fn process(&mut self, channels: &mut [&mut [f32]]) {
         if self.is_idle() {
             return;
         }
         let frames = channels.first().map_or(0, |c| c.len());
+        let placement = if channels.len() >= 2 { self.active.placement } else { Placement::Stereo };
         for i in 0..frames {
             let mix = self.advance();
             if mix == 0.0 {
                 continue;
             }
-            for (ch, state) in channels.iter_mut().zip(self.state.iter_mut()) {
-                let x = f64::from(ch[i]);
+            let sections = self.sections.as_slice();
+            let filter = |state: &mut [Tdf2; MAX_SECTIONS], x: f64| {
                 let mut y = x;
-                for (section, st) in self.sections.as_slice().iter().zip(state.iter_mut()) {
+                for (section, st) in sections.iter().zip(state.iter_mut()) {
                     y = st.process(section, y);
                 }
-                ch[i] = if mix == 1.0 { y as f32 } else { (x + mix * (y - x)) as f32 };
+                if mix == 1.0 { y } else { x + mix * (y - x) }
+            };
+            match placement {
+                Placement::Stereo => {
+                    for (ch, state) in channels.iter_mut().zip(self.state.iter_mut()) {
+                        ch[i] = filter(state, f64::from(ch[i])) as f32;
+                    }
+                }
+                Placement::Left | Placement::Right => {
+                    let c = usize::from(placement == Placement::Right);
+                    channels[c][i] = filter(&mut self.state[0], f64::from(channels[c][i])) as f32;
+                }
+                Placement::Mid | Placement::Side => {
+                    let (l, r) = (f64::from(channels[0][i]), f64::from(channels[1][i]));
+                    let (mut m, mut s) = (0.5 * (l + r), 0.5 * (l - r));
+                    if placement == Placement::Mid {
+                        m = filter(&mut self.state[0], m);
+                    } else {
+                        s = filter(&mut self.state[0], s);
+                    }
+                    channels[0][i] = (m + s) as f32;
+                    channels[1][i] = (m - s) as f32;
+                }
             }
         }
     }
@@ -361,7 +409,7 @@ mod tests {
     }
 
     fn band(kind: BandType, freq: f64, gain_db: f64, q: f64) -> BandSettings {
-        BandSettings { enabled: true, kind, freq, gain_db, q, slope: DEFAULT_SLOPE }
+        BandSettings { enabled: true, kind, freq, gain_db, q, slope: DEFAULT_SLOPE, placement: Placement::Stereo }
     }
 
     #[test]
@@ -468,5 +516,83 @@ mod tests {
         let mut after = input.clone();
         p.process(&mut [&mut after]);
         assert_eq!(after, input);
+    }
+
+    fn gain_db_at(p: &mut BandProcessor, freq: f64, channel: usize, other: f32) -> (f64, Vec<f32>) {
+        let x = sine(freq, 48_000);
+        let mut l = x.clone();
+        let mut r: Vec<f32> = x.iter().map(|v| v * other).collect();
+        p.process(&mut [&mut l, &mut r]);
+        let out = if channel == 0 { &l } else { &r };
+        let reference: Vec<f32> = if channel == 0 { x.clone() } else { x.iter().map(|v| v * other).collect() };
+        (20.0 * (rms(&out[24_000..]) / rms(&reference[24_000..])).log10(), if channel == 0 { r } else { l })
+    }
+
+    #[test]
+    fn left_and_right_placement_touch_only_their_channel() {
+        for (placement, c) in [(Placement::Left, 0), (Placement::Right, 1)] {
+            let s = BandSettings { placement, ..band(BandType::Bell, 1000.0, 6.0, 1.0) };
+            let mut p = BandProcessor::new(FS, 20.0);
+            p.reset(&s);
+            let (gain, other) = gain_db_at(&mut p, 1000.0, c, 1.0);
+            assert!((gain - 6.0).abs() < 0.05, "{placement:?} {gain}");
+            assert_eq!(other, sine(1000.0, 48_000), "{placement:?} touched the other channel");
+        }
+    }
+
+    #[test]
+    fn mid_and_side_placement_process_only_their_component() {
+        // Identical channels are pure mid: a side band leaves them bit-exact, a mid band boosts.
+        let mut p = BandProcessor::new(FS, 20.0);
+        p.reset(&BandSettings { placement: Placement::Side, ..band(BandType::Bell, 1000.0, 6.0, 1.0) });
+        let (gain, _) = gain_db_at(&mut p, 1000.0, 0, 1.0);
+        assert!(gain.abs() < 1e-6, "side band changed mid signal: {gain}");
+        let mut p = BandProcessor::new(FS, 20.0);
+        p.reset(&BandSettings { placement: Placement::Mid, ..band(BandType::Bell, 1000.0, 6.0, 1.0) });
+        let (gain, _) = gain_db_at(&mut p, 1000.0, 0, 1.0);
+        assert!((gain - 6.0).abs() < 0.05, "{gain}");
+        // Opposite channels are pure side.
+        let mut p = BandProcessor::new(FS, 20.0);
+        p.reset(&BandSettings { placement: Placement::Side, ..band(BandType::Bell, 1000.0, 6.0, 1.0) });
+        let (gain, _) = gain_db_at(&mut p, 1000.0, 0, -1.0);
+        assert!((gain - 6.0).abs() < 0.05, "{gain}");
+    }
+
+    #[test]
+    fn placement_change_crossfades() {
+        let s = band(BandType::Bell, 1000.0, 12.0, 1.0);
+        let mut p = BandProcessor::new(FS, 20.0);
+        p.reset(&s);
+        let x = sine(1000.0, 4800);
+        let (mut l, mut r) = (x.clone(), x.clone());
+        p.process(&mut [&mut l, &mut r]);
+        p.set_target(&BandSettings { placement: Placement::Left, ..s });
+        let (mut l, mut r) = (x.clone(), x.clone());
+        p.process(&mut [&mut l, &mut r]);
+        let jump = r.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f32, f32::max);
+        // A 1 kHz sine at 12 dB (amplitude 2) moves at most ~0.27 per sample.
+        assert!(jump < 0.3, "right channel jumped {jump}");
+        assert_eq!(p.current().placement, Placement::Left);
+    }
+
+    #[test]
+    fn every_cut_slope_is_butterworth_at_default_q() {
+        // −3 dB at the cutoff and no overshoot anywhere, for every slope: changing the slope must
+        // never add a bump.
+        for kind in [BandType::LowCut, BandType::HighCut] {
+            for (slope, db_oct) in SLOPES_DB.iter().enumerate() {
+                let s = BandSettings { slope, ..band(kind, 1000.0, 0.0, FRAC_1_SQRT_2) };
+                let at_cutoff = analog_response_db(&s, 1000.0);
+                assert!((at_cutoff + 3.0103).abs() < 0.01, "{kind:?} {db_oct} dB/oct: {at_cutoff}");
+                // Every corner, up to near Nyquist: corner-matched high-pass sections used to lift
+                // the top end by up to 0.5 dB for corners above ~5 kHz.
+                for f0 in [30.0, 1000.0, 5000.0, 12_000.0, 18_000.0] {
+                    let sec = design(&BandSettings { freq: f0, ..s }, FS);
+                    let peak = (1..4000).map(|i| sec.response_db(PI * f64::from(i) / 4000.0)).fold(f64::MIN, f64::max);
+                    let limit = if kind == BandType::HighCut && db_oct % 12 != 0 { 0.25 } else { 0.01 };
+                    assert!(peak < limit, "{kind:?} {db_oct} dB/oct at {f0} Hz overshoots {peak}");
+                }
+            }
+        }
     }
 }

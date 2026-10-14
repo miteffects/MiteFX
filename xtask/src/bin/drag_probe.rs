@@ -76,9 +76,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         conn.flush()?;
         Ok(())
     };
-    // Add a band: move there, double-click.
+    // Add a band: move there, double-click (skipped with NO_ADD=1, e.g. to drag the resize grip).
     send(MOTION_NOTIFY_EVENT, x0, y0, 0)?;
-    for _ in 0..2 {
+    for _ in 0..if std::env::var_os("NO_ADD").is_some() { 0 } else { 2 } {
         send(BUTTON_PRESS_EVENT, x0, y0, 0)?;
         send(BUTTON_RELEASE_EVENT, x0, y0, 0x100)?;
         std::thread::sleep(Duration::from_millis(60));

@@ -8,15 +8,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_dsp::analyzer::Analyzer;
-use mite_dsp::eq::{design, BandSettings, BandType, FREQ_MAX, FREQ_MIN};
+use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Placement, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
-use mite_ui::paint::{glow_stroke, panel};
+use mite_ui::paint::{glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
-use crate::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, TYPE};
+use crate::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, STEREO, TYPE};
 use crate::EqShared;
 
 /// Mite EQ wears the EQ accent (tokens.json `color.accent.eq`).
@@ -44,8 +44,15 @@ const PX_PER_DB: f64 = 264.0 / 18.0;
 const POINTS: usize = 301;
 
 const NODE_HIT: f64 = 16.0;
-const PANEL_W: f64 = 476.0;
-const PANEL_H: f64 = 158.0;
+const PANEL_W: f64 = 600.0;
+const PANEL_H: f64 = 104.0;
+/// Panel dials: diameter, and the x of their group's centre relative to the panel.
+const PANEL_DIAL: f64 = 56.0;
+const PANEL_DIALS_X: f64 = 440.0;
+const MENU_ITEM_H: f64 = 28.0;
+/// The band panel is docked at the bottom centre of the plot, like FabFilter's, so it never
+/// covers the area around the node being edited.
+const PANEL_ORIGIN: Point = Point::new((PLOT_W - PANEL_W) / 2.0, HELP_TOP - PANEL_H - 10.0);
 
 fn fx(f: f64) -> f64 {
     PLOT_W * (f / FREQ_MIN).ln() / (FREQ_MAX / FREQ_MIN).ln()
@@ -86,6 +93,7 @@ struct BandIds {
     gain: String,
     q: String,
     slope: String,
+    stereo: String,
 }
 
 impl BandIds {
@@ -97,6 +105,7 @@ impl BandIds {
             gain: band_id(b, GAIN.id),
             q: band_id(b, Q.id),
             slope: band_id(b, SLOPE.id),
+            stereo: band_id(b, STEREO.id),
         }
     }
 }
@@ -126,12 +135,78 @@ struct SpectrumPoint {
     average: bool,
 }
 
+struct BandResponse {
+    settings: BandSettings,
+    fs: f64,
+    sections: Sections,
+    grid: Vec<f64>,
+}
+
+/// x of display grid point `i`.
+fn grid_x(i: usize) -> f64 {
+    i as f64 * PLOT_W / (POINTS - 1) as f64
+}
+
+/// A band's response in dB at `f`. Up to Nyquist it is the digital filter's; above (the plot runs
+/// to 30 kHz) the analog shape continues, offset so the curve joins the digital one at Nyquist
+/// without a step.
+fn band_db(sections: &Sections, s: &BandSettings, f: f64, fs: f64) -> f64 {
+    let nyquist = 0.5 * fs;
+    if f <= nyquist {
+        return sections.response_db(2.0 * std::f64::consts::PI * f / fs);
+    }
+    let floor = |db: f64| if db.is_nan() { -300.0 } else { db.max(-300.0) };
+    let join = floor(sections.response_db(std::f64::consts::PI)) - floor(analog_response_db(s, nyquist));
+    floor(analog_response_db(s, f)) + join
+}
+
+/// Which band setting an open dropdown chooses.
+#[derive(Clone, Copy, PartialEq)]
+enum MenuKind {
+    Type,
+    Slope,
+    Stereo,
+}
+
+/// An open dropdown: its button, its items and the hovered item.
+struct Menu {
+    kind: MenuKind,
+    band: usize,
+    anchor: Rect,
+    items: &'static [&'static str],
+    current: usize,
+    hover: Option<usize>,
+}
+
+impl Menu {
+    /// Item rectangles: below the button when they fit inside the display, otherwise above.
+    fn item_rects(&self) -> Vec<Rect> {
+        let n = self.items.len() as f64;
+        let w = self.anchor.width().max(150.0);
+        let h = n * MENU_ITEM_H + 8.0;
+        let top = if self.anchor.y1 + 4.0 + h <= HELP_TOP { self.anchor.y1 + 4.0 } else { self.anchor.y0 - 4.0 - h };
+        (0..self.items.len())
+            .map(|i| {
+                let y = top + 4.0 + i as f64 * MENU_ITEM_H;
+                Rect::new(self.anchor.x0, y, self.anchor.x0 + w, y + MENU_ITEM_H)
+            })
+            .collect()
+    }
+
+    fn bounds(&self) -> Rect {
+        let items = self.item_rects();
+        let (first, last) = (items[0], items[items.len() - 1]);
+        Rect::new(first.x0, first.y0 - 4.0, first.x1, last.y1 + 4.0)
+    }
+}
+
 /// Clickable rectangles of the open band panel, set while drawing.
 #[derive(Default, Clone, Copy)]
 struct PanelHits {
     panel: Rect,
     kind: Rect,
     slope: Option<Rect>,
+    stereo: Rect,
     bypass: Rect,
     close: Rect,
 }
@@ -145,6 +220,7 @@ pub struct EqView {
     drag: Option<NodeDrag>,
     panel_knobs: Vec<Knob>,
     panel_hits: Option<PanelHits>,
+    menu: Option<Menu>,
     out_knob: Knob,
     meter: LevelMeter,
     analyzer: Analyzer,
@@ -158,9 +234,12 @@ pub struct EqView {
     last_analysis: Instant,
     pre_target: Vec<f32>,
     post_target: Vec<f32>,
-    responses: Vec<Option<(BandSettings, Vec<f64>)>>,
+    responses: Vec<Option<BandResponse>>,
     signature: Vec<f32>,
     last_signature_check: Instant,
+    /// Wheel movement not yet turned into whole slope steps (smooth-scrolling devices send
+    /// fractions of a line).
+    slope_wheel: f32,
     ticks: u32,
 }
 
@@ -179,6 +258,7 @@ impl EqView {
             drag: None,
             panel_knobs: Vec::new(),
             panel_hits: None,
+            menu: None,
             out_knob,
             meter: LevelMeter::new(Rect::new(1233.5, DISPLAY_TOP + 19.5, 1266.5, DISPLAY_TOP + 592.5)),
             analyzer,
@@ -195,6 +275,7 @@ impl EqView {
             responses: (0..BANDS).map(|_| None).collect(),
             signature: Vec::new(),
             last_signature_check: Instant::now(),
+            slope_wheel: 0.0,
             ticks: 0,
         }
     }
@@ -212,6 +293,7 @@ impl EqView {
             gain_db: f64::from(Self::plain(host, &ids.gain)),
             q: f64::from(Self::plain(host, &ids.q)),
             slope: Self::plain(host, &ids.slope).round().max(0.0) as usize,
+            placement: Placement::from_index(Self::plain(host, &ids.stereo).round().max(0.0) as usize),
         }
     }
 
@@ -226,8 +308,10 @@ impl EqView {
         Point::new(fx(s.freq), y)
     }
 
-    fn band_color(&self, theme: &mite_ui::Theme, b: usize) -> Color {
-        theme.band_ramp[b % theme.band_ramp.len()]
+    /// One colour per stereo placement: all stereo bands share a colour, all left bands
+    /// another, and so on, so the colour says what the band processes.
+    fn band_color(theme: &mite_ui::Theme, s: &BandSettings) -> Color {
+        theme.band_ramp[s.placement as usize % theme.band_ramp.len()]
     }
 
     fn node_at(&self, host: &dyn ParamHost, p: Point) -> Option<usize> {
@@ -245,6 +329,8 @@ impl EqView {
 
     fn select(&mut self, band: Option<usize>) {
         self.selected = band;
+        self.slope_wheel = 0.0;
+        self.menu = None;
         self.panel_knobs.clear();
         self.panel_hits = None;
     }
@@ -253,21 +339,17 @@ impl EqView {
         f64::from(self.shared.sample_rate.load()).max(8000.0)
     }
 
-    /// Response of band `b` in dB at every display point, cached until its settings change.
-    fn response(&mut self, b: usize, s: &BandSettings) -> &[f64] {
-        let stale = !matches!(&self.responses[b], Some((cached, _)) if cached == s);
+    /// Band `b`'s digital sections and its response in dB at every grid point, cached until its
+    /// settings or the sample rate change.
+    fn response(&mut self, b: usize, s: &BandSettings) -> &BandResponse {
+        let fs = self.sample_rate();
+        let stale = !matches!(&self.responses[b], Some(r) if r.settings == *s && r.fs == fs);
         if stale {
-            let fs = self.sample_rate();
             let sections = design(s, fs);
-            let curve = (0..POINTS)
-                .map(|i| {
-                    let f = xf(i as f64 * PLOT_W / (POINTS - 1) as f64);
-                    if f >= fs * 0.5 { f64::NAN } else { sections.response_db(2.0 * std::f64::consts::PI * f / fs) }
-                })
-                .collect();
-            self.responses[b] = Some((*s, curve));
+            let grid = (0..POINTS).map(|i| band_db(&sections, s, xf(grid_x(i)), fs)).collect();
+            self.responses[b] = Some(BandResponse { settings: *s, fs, sections, grid });
         }
-        &self.responses[b].as_ref().expect("just filled").1
+        self.responses[b].as_ref().expect("just filled")
     }
 
     /// Per display point: the FFT bins it averages (or the bin pair it interpolates) and its
@@ -347,7 +429,8 @@ impl EqView {
             if s.kind.has_gain() {
                 t += &format!(" · {}", GAIN.format(s.gain_db as f32));
             }
-            t + " — drag to move, Shift for fine, Alt-drag or wheel for Q, double-click resets, right-click deletes"
+            let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
+            t + " — drag to move, Shift for fine, " + wheel + ", double-click resets, right-click deletes"
         };
         if let Some(d) = &self.drag {
             return band_line(d.band);
@@ -385,8 +468,11 @@ impl EqView {
         let s = self.band(host, b);
         let ids = &self.ids[b];
         let mut col = 0.0;
+        // Dials in a row on the right of the panel, beside the buttons.
+        let count = if s.kind.has_gain() { 3.0 } else { 2.0 };
+        let first = origin.x + PANEL_DIALS_X - (count - 1.0) * 40.0;
         let mut knob = |spec, label, kind, id: &str| {
-            let k = Knob::new(spec, label, kind, Point::new(origin.x + 14.0 + 42.0 + col * 88.0, origin.y + 92.0), 64.0)
+            let k = Knob::new(spec, label, kind, Point::new(first + col * 80.0, origin.y + 44.0), PANEL_DIAL)
                 .with_id(id);
             col += 1.0;
             k
@@ -397,13 +483,6 @@ impl EqView {
         }
         knobs.push(knob(Q, "Q", KnobKind::Unipolar, &ids.q));
         self.panel_knobs = knobs;
-    }
-
-    fn panel_origin(&self, host: &dyn ParamHost, b: usize) -> Point {
-        let node = Self::node_pos(&self.band(host, b));
-        let x = (node.x - PANEL_W / 2.0).clamp(12.0, PLOT_W - PANEL_W - 12.0);
-        let y = if node.y > DISPLAY_TOP + 290.0 { node.y - 30.0 - PANEL_H } else { node.y + 30.0 };
-        Point::new(x, y)
     }
 
     // ---- drawing ------------------------------------------------------------------------
@@ -470,6 +549,18 @@ impl EqView {
         path
     }
 
+    fn xy_path(xs: &[(f64, Option<usize>)], values: &[f64], map: impl Fn(f64) -> f64) -> BezPath {
+        let mut path = BezPath::new();
+        for (i, (&(x, _), &v)) in xs.iter().zip(values).enumerate() {
+            if i == 0 {
+                path.move_to((x, map(v)));
+            } else {
+                path.line_to((x, map(v)));
+            }
+        }
+        path
+    }
+
     fn draw_spectrum(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         // Silence (or no audio yet): draw nothing rather than a line along the floor.
@@ -496,29 +587,46 @@ impl EqView {
 
     fn draw_curves(&mut self, cx: &mut DrawCx<'_>, bands: &[BandSettings]) {
         let theme = cx.theme;
-        let mut total = vec![0.0_f64; POINTS];
+        let fs = self.sample_rate();
+        // The fixed grid plus every band's own frequency: a notch's zero (or a narrow bell's peak)
+        // falls between grid points, so without it the drawn depth changed as the band moved.
+        let mut xs: Vec<(f64, Option<usize>)> = (0..POINTS).map(|i| (grid_x(i), Some(i))).collect();
+        for s in bands.iter().filter(|s| s.enabled) {
+            let x = fx(s.freq);
+            if x > 0.0 && x < PLOT_W {
+                xs.push((x, None));
+            }
+        }
+        xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut total = vec![0.0_f64; xs.len()];
         let mut any = false;
         // Curves may leave the plot (the display is clipped); clamping only keeps paths finite.
-        let clamp = |db: f64| gy(db.clamp(-40.0, 40.0));
+        let clamp = |db: f64| gy(if db.is_nan() { -40.0 } else { db.clamp(-40.0, 40.0) });
+        let mut values = vec![0.0_f64; xs.len()];
         for (b, s) in bands.iter().enumerate() {
             if !s.enabled {
                 continue;
             }
             any = true;
-            let color = self.band_color(theme, b);
+            let color = Self::band_color(theme, s);
             let selected = self.selected == Some(b);
-            let curve = self.response(b, s).to_vec();
-            for (t, v) in total.iter_mut().zip(&curve) {
+            let r = self.response(b, s);
+            for (v, &(x, grid)) in values.iter_mut().zip(&xs) {
+                *v = match grid {
+                    Some(i) => r.grid[i],
+                    None => band_db(&r.sections, s, xf(x), fs),
+                };
+            }
+            for (t, v) in total.iter_mut().zip(&values) {
                 *t += v;
             }
-            let mut fill = Self::curve_path(&curve, clamp);
-            let last_x = curve.iter().rposition(|v| v.is_finite()).map_or(PLOT_W, |i| i as f64 * PLOT_W / (POINTS - 1) as f64);
-            fill.line_to((last_x, MID));
+            let mut fill = Self::xy_path(&xs, &values, clamp);
+            fill.line_to((PLOT_W, MID));
             fill.line_to((0.0, MID));
             fill.close_path();
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if selected { 0.22 } else { 0.08 }), None, &fill);
         }
-        let curve = if any { Self::curve_path(&total, clamp) } else {
+        let curve = if any { Self::xy_path(&xs, &total, clamp) } else {
             let mut flat = BezPath::new();
             flat.move_to((0.0, MID));
             flat.line_to((PLOT_W, MID));
@@ -539,7 +647,7 @@ impl EqView {
             if !s.enabled {
                 continue;
             }
-            let color = self.band_color(theme, b);
+            let color = Self::band_color(theme, s);
             let p = Self::node_pos(s);
             let selected = self.selected == Some(b);
             let hovered = self.hover == Some(b);
@@ -567,47 +675,64 @@ impl EqView {
             return;
         }
         let theme = cx.theme;
-        let origin = self.panel_origin(cx.host, b);
-        if self.panel_knobs.is_empty() || self.panel_knobs[0].center.x != origin.x + 56.0 || self.panel_knobs[0].center.y != origin.y + 92.0
-            || self.panel_knobs.len() != if s.kind.has_gain() { 3 } else { 2 }
-        {
+        let origin = PANEL_ORIGIN;
+        if self.panel_knobs.len() != if s.kind.has_gain() { 3 } else { 2 } {
             self.build_panel_knobs(cx.host, origin);
         }
         let rect = Rect::new(origin.x, origin.y, origin.x + PANEL_W, origin.y + PANEL_H);
         let shape = RoundedRect::from_rect(rect, 14.0);
         if theme.shadows {
-            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 18.0)), rect, Color::from_rgba8(0, 0, 0, 140), 14.0, 24.0);
+            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 14.0)), rect, Color::from_rgba8(0, 0, 0, 140), 14.0, 20.0);
         }
         // Backdrop blur is a later shader pass; the glass tint is drawn nearly opaque until then.
         panel(cx.scene, shape, theme.glass.with_alpha(0.94), theme.glass_border);
 
-        let color = self.band_color(theme, b);
-        let row_y = origin.y + 12.0;
-        glow_stroke(cx.scene, &Circle::new((origin.x + 19.0, row_y + 16.0), 4.0), 2.0, color, color, 4.0);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new((origin.x + 19.0, row_y + 16.0), 5.0));
+        // Left: band title over a row of dropdown buttons.
+        let color = Self::band_color(theme, &s);
+        let dot = Point::new(origin.x + 22.0, origin.y + 24.0);
+        glow_stroke(cx.scene, &Circle::new(dot, 4.0), 2.0, color, color, 4.0);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new(dot, 5.0));
         let title = format!("Band {}", b + 1);
-        let tw = cx.text.draw(cx.scene, &title, origin.x + 30.0, row_y + 8.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
+        cx.text.draw(cx.scene, &title, origin.x + 34.0, origin.y + 16.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
 
-        let button = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str| -> Rect {
+        let row_y = origin.y + 54.0;
+        let open = self.menu.as_ref().map(|m| m.kind);
+        let dropdown = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str, active: bool| -> Rect {
             let r = Rect::new(x, row_y, x + w, row_y + 32.0);
-            panel(cx.scene, RoundedRect::from_rect(r, 6.0), cx.theme.panel_control, cx.theme.panel_control_border);
-            cx.text.draw(cx.scene, text, x + w / 2.0, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Center);
+            let border = if active { color } else { cx.theme.panel_control_border };
+            raised(cx.scene, RoundedRect::from_rect(r, 6.0), cx.theme.panel_control, border, cx.theme.shadows);
+            cx.text.draw(cx.scene, text, x + 12.0, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Left);
+            let mut chevron = BezPath::new();
+            let (cxr, cy) = (r.x1 - 14.0, r.center().y);
+            chevron.move_to((cxr - 4.0, cy - 2.0));
+            chevron.line_to((cxr, cy + 2.0));
+            chevron.line_to((cxr + 4.0, cy - 2.0));
+            let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+            cx.scene.stroke(&round, Affine::IDENTITY, cx.theme.text_mid, None, &chevron);
             r
         };
-        let mut x = origin.x + 30.0 + f64::from(tw) + 10.0;
-        let kind = button(cx, x, 104.0, BandType::NAMES[s.kind as usize]);
-        x += 112.0;
-        let slope = s.kind.has_slope().then(|| button(cx, x, 96.0, SLOPE.choices[s.slope.min(SLOPE.choices.len() - 1)]));
-        let close = Rect::new(origin.x + PANEL_W - 46.0, row_y, origin.x + PANEL_W - 14.0, row_y + 32.0);
-        let bypass = Rect::new(close.x0 - 40.0, row_y, close.x0 - 8.0, row_y + 32.0);
-        panel(cx.scene, RoundedRect::from_rect(bypass, 6.0), theme.panel_control, theme.panel_control_border);
-        // Power glyph.
+        let mut x = origin.x + 14.0;
+        let kind = dropdown(cx, x, 116.0, BandType::NAMES[s.kind as usize], open == Some(MenuKind::Type));
+        x += 124.0;
+        let slope = s.kind.has_slope().then(|| {
+            let r = dropdown(cx, x, 108.0, SLOPE.choices[s.slope.min(SLOPE.choices.len() - 1)], open == Some(MenuKind::Slope));
+            x += 116.0;
+            r
+        });
+        let stereo = dropdown(cx, x, 90.0, Placement::NAMES[s.placement as usize], open == Some(MenuKind::Stereo));
+
+        // Right: bypass over close.
+        let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
+        let close = Rect::new(origin.x + PANEL_W - 44.0, origin.y + 12.0, origin.x + PANEL_W - 14.0, origin.y + 42.0);
+        let bypass = Rect::new(close.x0, origin.y + 58.0, close.x1, origin.y + 88.0);
+        for r in [close, bypass] {
+            raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, theme.panel_control_border, theme.shadows);
+        }
         let c = bypass.center();
         let mut glyph = BezPath::new();
         glyph.move_to((c.x, c.y - 5.5));
         glyph.line_to((c.x, c.y - 0.5));
         let arc = mite_ui::kurbo::Arc::new(c + (0.0, 1.0), (4.5, 4.5), -1.0, 5.3, 0.0);
-        let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
         cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &glyph);
         cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &arc);
         let mut cross = BezPath::new();
@@ -622,7 +747,91 @@ impl EqView {
             knob.color = Some(color);
             knob.draw(cx);
         }
-        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, bypass, close });
+        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, bypass, close });
+    }
+
+    /// The open dropdown, drawn over everything.
+    fn draw_menu(&self, cx: &mut DrawCx<'_>) {
+        let Some(menu) = &self.menu else { return };
+        let theme = cx.theme;
+        let bounds = menu.bounds();
+        if theme.shadows {
+            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 8.0)), bounds, Color::from_rgba8(0, 0, 0, 150), 8.0, 14.0);
+        }
+        panel(cx.scene, RoundedRect::from_rect(bounds, 8.0), theme.glass.with_alpha(0.98), theme.glass_border);
+        for (i, (r, item)) in menu.item_rects().into_iter().zip(menu.items).enumerate() {
+            let r = r.inset((-4.0, 0.0));
+            if menu.hover == Some(i) {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &RoundedRect::from_rect(r, 5.0));
+            }
+            let current = i == menu.current;
+            let color = if current { theme.text_strong } else { theme.text_hi };
+            let style = TextStyle::BODY.weighted(if current { 700.0 } else { 500.0 });
+            cx.text.draw(cx.scene, item, r.x0 + 24.0, r.y0 + 7.0, style, color, Align::Left);
+            if current {
+                let mut tick = BezPath::new();
+                let (tx, ty) = (r.x0 + 11.0, r.center().y);
+                tick.move_to((tx - 3.5, ty));
+                tick.line_to((tx - 1.0, ty + 3.0));
+                tick.line_to((tx + 4.0, ty - 3.0));
+                let round = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+                cx.scene.stroke(&round, Affine::IDENTITY, theme.accent, None, &tick);
+            }
+        }
+    }
+
+    /// Opens (or, if it is already open, closes) a band's dropdown.
+    fn toggle_menu(&mut self, kind: MenuKind, band: usize, anchor: Rect, host: &dyn ParamHost) {
+        if self.menu.as_ref().is_some_and(|m| m.kind == kind) {
+            self.menu = None;
+            return;
+        }
+        let ids = &self.ids[band];
+        let (items, id): (&'static [&'static str], &str) = match kind {
+            MenuKind::Type => (&BandType::NAMES, &ids.kind),
+            MenuKind::Slope => (SLOPE.choices, &ids.slope),
+            MenuKind::Stereo => (&Placement::NAMES, &ids.stereo),
+        };
+        let current = Self::plain(host, id).round().max(0.0) as usize;
+        self.menu = Some(Menu { kind, band, anchor, items, current, hover: None });
+    }
+
+    /// Routes an event to the open dropdown. It is modal: everything is consumed, and a click
+    /// outside closes it.
+    fn menu_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        let Some(menu) = &mut self.menu else { return false };
+        let item_at = |p: Point| menu.item_rects().iter().position(|r| r.contains(p));
+        match *event {
+            UiEvent::PointerMove { pos, .. } => {
+                menu.hover = item_at(pos);
+                self.pointer = Some(pos);
+            }
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
+                if let Some(i) = item_at(pos) {
+                    let ids = &self.ids[menu.band];
+                    let id = match menu.kind {
+                        MenuKind::Type => &ids.kind,
+                        MenuKind::Slope => &ids.slope,
+                        MenuKind::Stereo => &ids.stereo,
+                    };
+                    Self::set(host, id, i as f32);
+                    if menu.kind == MenuKind::Type {
+                        // Cuts are Butterworth (flat) at Q 0.71; a Q carried over from a bell would
+                        // add a resonant bump.
+                        if BandType::from_index(i).has_slope() {
+                            Self::set(host, &ids.q, std::f32::consts::FRAC_1_SQRT_2);
+                        }
+                        self.panel_knobs.clear();
+                    }
+                }
+                // A pick, a click outside, or the button again: all close the menu.
+                self.menu = None;
+            }
+            UiEvent::PointerDown { .. } => self.menu = None,
+            UiEvent::PointerLeft => menu.hover = None,
+            _ => {}
+        }
+        true
     }
 
     /// Empty state (mockup "EqEmpty"): an invitation in the middle of the display.
@@ -655,7 +864,7 @@ impl EqView {
         for (i, (label, w)) in [("Zero Latency", 118.0), ("Natural Phase", 118.0), ("Linear Phase", 120.0)].iter().enumerate() {
             let r = Rect::new(x, track.y0 + 2.0, x + w, track.y1 - 2.0);
             if i == 0 {
-                panel(cx.scene, RoundedRect::from_rect(r, 6.0), theme.control, theme.control_border);
+                raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.control, theme.control_border, theme.shadows);
             }
             let color = if i == 0 { theme.text_strong } else { theme.text_disabled };
             cx.text.draw(cx.scene, label, r.center().x, r.y0 + 9.0, TextStyle::BODY.weighted(700.0), color, Align::Center);
@@ -716,9 +925,13 @@ impl View for EqView {
         self.draw_help(cx);
         self.draw_footer(cx);
         self.out_knob.draw(cx);
+        self.draw_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        if self.menu.is_some() {
+            return self.menu_event(event, host);
+        }
         // Footer output dial.
         if self.out_knob.event(event, host) {
             return true;
@@ -767,12 +980,11 @@ impl View for EqView {
                     if hits.panel.contains(pos) {
                         let ids = &self.ids[b];
                         if hits.kind.contains(pos) {
-                            let next = (Self::plain(host, &ids.kind).round() as usize + 1) % BandType::ALL.len();
-                            Self::set(host, &ids.kind, next as f32);
-                            self.panel_knobs.clear();
-                        } else if hits.slope.is_some_and(|r| r.contains(pos)) {
-                            let next = (Self::plain(host, &ids.slope).round() as usize + 1) % SLOPE.choices.len();
-                            Self::set(host, &ids.slope, next as f32);
+                            self.toggle_menu(MenuKind::Type, b, hits.kind, host);
+                        } else if let Some(r) = hits.slope.filter(|r| r.contains(pos)) {
+                            self.toggle_menu(MenuKind::Slope, b, r, host);
+                        } else if hits.stereo.contains(pos) {
+                            self.toggle_menu(MenuKind::Stereo, b, hits.stereo, host);
                         } else if hits.bypass.contains(pos) {
                             Self::set(host, &ids.on, 0.0);
                             self.select(None);
@@ -873,6 +1085,19 @@ impl View for EqView {
                     return changed;
                 }
                 if let Some(b) = self.node_at(host, pos).or(self.selected) {
+                    let s = self.band(host, b);
+                    if s.kind.has_slope() {
+                        // Cuts: the wheel steps the slope, up = steeper.
+                        self.slope_wheel += lines;
+                        let steps = self.slope_wheel.trunc();
+                        if steps == 0.0 {
+                            return false;
+                        }
+                        self.slope_wheel -= steps;
+                        let next = (s.slope as f32 + steps).clamp(0.0, (SLOPE.choices.len() - 1) as f32);
+                        Self::set(host, &self.ids[b].slope, next);
+                        return true;
+                    }
                     let id = &self.ids[b].q;
                     let q = Q.wheel(Self::plain(host, id), lines, mods.fine());
                     Self::set(host, id, q);
@@ -901,10 +1126,10 @@ impl View for EqView {
             return dirty;
         }
         self.last_signature_check = Instant::now();
-        let mut signature = Vec::with_capacity(1 + BANDS * 6);
+        let mut signature = Vec::with_capacity(1 + BANDS * 7);
         signature.push(host.normalized(OUT_GAIN.id));
         for ids in &self.ids {
-            for id in [&ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope] {
+            for id in [&ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo] {
                 signature.push(host.normalized(id));
             }
         }

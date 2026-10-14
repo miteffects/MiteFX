@@ -4,7 +4,7 @@
 //! `b{NN}_{param}` with all 24 bands pre-declared because hosts need static parameter lists.
 
 use mite_core::{BoolSpec, ChoiceSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::eq::{BandSettings, BandType, DEFAULT_SLOPE, SLOPE_NAMES};
+use mite_dsp::eq::{BandSettings, BandType, Placement, DEFAULT_SLOPE, SLOPE_NAMES};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
@@ -75,6 +75,8 @@ pub const Q: ParamSpec = ParamSpec {
 
 pub const SLOPE: ChoiceSpec = ChoiceSpec { id: "slope", name: "Slope", choices: &SLOPE_NAMES, default: DEFAULT_SLOPE };
 
+pub const STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &Placement::NAMES, default: 0 };
+
 /// `b03_freq` for band index 2.
 pub fn band_id(band: usize, param: &str) -> String {
     format!("b{:02}_{param}", band + 1)
@@ -91,6 +93,7 @@ pub fn manifest() -> String {
         lines.push(prefix(GAIN.manifest_line()));
         lines.push(prefix(Q.manifest_line()));
         lines.push(prefix(SLOPE.manifest_line()));
+        lines.push(prefix(STEREO.manifest_line()));
     }
     lines.join("\n") + "\n"
 }
@@ -102,6 +105,7 @@ pub struct BandParams {
     pub gain: FloatParam,
     pub q: FloatParam,
     pub slope: IntParam,
+    pub stereo: IntParam,
 }
 
 impl BandParams {
@@ -114,6 +118,7 @@ impl BandParams {
             gain: float_param_named(&GAIN, name("Gain")),
             q: float_param_named(&Q, name("Q")),
             slope: choice_param(&SLOPE, name("Slope")),
+            stereo: choice_param(&STEREO, name("Stereo")),
         }
     }
 
@@ -126,6 +131,7 @@ impl BandParams {
             gain_db: f64::from(self.gain.value()),
             q: f64::from(self.q.value()),
             slope: self.slope.value().max(0) as usize,
+            placement: Placement::from_index(self.stereo.value().max(0) as usize),
         }
     }
 }
@@ -153,7 +159,8 @@ unsafe impl Params for EqParams {
             map.push((band_id(i, FREQ.id), b.freq.as_ptr(), group.clone()));
             map.push((band_id(i, GAIN.id), b.gain.as_ptr(), group.clone()));
             map.push((band_id(i, Q.id), b.q.as_ptr(), group.clone()));
-            map.push((band_id(i, SLOPE.id), b.slope.as_ptr(), group));
+            map.push((band_id(i, SLOPE.id), b.slope.as_ptr(), group.clone()));
+            map.push((band_id(i, STEREO.id), b.stereo.as_ptr(), group));
         }
         map
     }

@@ -52,18 +52,16 @@ Drag = vertical pixels for the full range at 100 % scale. Shift is always ×0.1.
 
 ## Band panel placement
 
-Candidates are tried in this order:
-1. Above the node.
-2. Below the node.
-3. Above, shifted.
-4. Docked left.
-5. Docked right.
+The band panel is docked at the bottom centre of the plot, 10 px above the help strip, and never moves (user decision, 2026-10-14). A panel that followed the node covered the curve around the band being edited. Docking it where FabFilter does keeps that area visible.
 
-Scoring and placement rules:
-- **Score** = 10 × other nodes covered + 3 × selected nodes covered + shift px / 40. The lowest score wins.
-- **Gaps:** 30 px to the node, 12 px to the plot edges.
-- **Never** cover the output meter column.
-- **While a node is dragged,** the panel follows with a 60 ms lag. It flips sides only after the node crosses the midline by 24 px.
+## Band colours
+
+One colour per stereo placement, from the band ramp in placement order: Stereo, Left, Right, Mid, Side (user decision, 2026-10-14). Every band of the same placement shares a colour, so the colour says what the band processes; the node number tells bands apart. This replaces one colour per band number.
+
+## Wheel on a node
+
+- Cut bands (low cut, high cut): the wheel steps the slope; up is steeper.
+- Every other type: the wheel changes Q.
 
 ## Keyboard focus order
 

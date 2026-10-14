@@ -4,10 +4,10 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::num::{NonZeroIsize, NonZeroU32};
 use std::ptr::NonNull;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mite_core::AtomicF32;
-use mite_ui::{open_parented, ParamHost, ThemeKind, View, WindowOptions};
+use mite_ui::{open_parented, ParamHost, ResizeRequest, ThemeKind, View, WindowOptions};
 use nih_plug::prelude::{Editor, GuiContext, ParamPtr, Params, ParentWindowHandle};
 use nih_plug::{nih_error, nih_log};
 use raw_window_handle::{
@@ -36,7 +36,7 @@ where
         params,
         title,
         accent,
-        logical_size: (w.round() as u32, h.round() as u32),
+        logical_size: Arc::new(Mutex::new((w.round() as u32, h.round() as u32))),
         make_view: Arc::new(move || Box::new(make_view()) as Box<dyn View>),
         scale: AtomicF32::new(0.0),
     }))
@@ -46,7 +46,9 @@ struct MiteEditor {
     params: Arc<dyn Params>,
     title: &'static str,
     accent: &'static str,
-    logical_size: (u32, u32),
+    /// Current editor size in logical px. The resize grip changes it; it outlives editor windows,
+    /// so reopening keeps the size.
+    logical_size: Arc<Mutex<(u32, u32)>>,
     make_view: Arc<ViewFactory>,
     /// Host-provided DPI scale, 0 until the host sets one.
     scale: AtomicF32,
@@ -54,15 +56,28 @@ struct MiteEditor {
 
 impl Editor for MiteEditor {
     fn spawn(&self, parent: ParentWindowHandle, context: Arc<dyn GuiContext>) -> Box<dyn Any + Send> {
-        let host = NihParamHost::new(self.params.clone(), context);
+        let host = NihParamHost::new(self.params.clone(), context.clone());
         let scale = self.scale.load();
+        let (w, h) = self.size();
+        let shared = self.logical_size.clone();
+        let on_resize: ResizeRequest = Arc::new(move |w, h| {
+            // nih-plug reports `Editor::size()` to the host, so it must hold the new size before
+            // asking; on refusal it goes back.
+            let old = std::mem::replace(&mut *shared.lock().unwrap_or_else(|e| e.into_inner()), (w, h));
+            let accepted = context.request_resize();
+            if !accepted {
+                *shared.lock().unwrap_or_else(|e| e.into_inner()) = old;
+            }
+            accepted
+        });
         let options = WindowOptions {
             title: self.title.to_owned(),
-            logical_size: (f64::from(self.logical_size.0), f64::from(self.logical_size.1)),
+            logical_size: (f64::from(w), f64::from(h)),
             fallback_scale: (scale > 0.0).then_some(f64::from(scale)),
             // Theme comes from the global settings once they exist (interaction.md, Settings).
             theme: ThemeKind::Dark,
             accent: self.accent,
+            on_resize: Some(on_resize),
         };
         match open_parented(&HostParent(parent), options, (self.make_view)(), Box::new(host)) {
             Ok(window) => Box::new(EditorHandle { _window: window }),
@@ -74,7 +89,7 @@ impl Editor for MiteEditor {
     }
 
     fn size(&self) -> (u32, u32) {
-        self.logical_size
+        *self.logical_size.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn set_scale_factor(&self, factor: f32) -> bool {

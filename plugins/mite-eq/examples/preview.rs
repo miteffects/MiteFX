@@ -10,7 +10,7 @@ use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, TYPE};
+use mite_eq::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, STEREO, TYPE};
 use mite_eq::EqShared;
 use mite_ui::{run_standalone, MemoryParamHost, ThemeKind, View, WindowOptions};
 
@@ -44,7 +44,8 @@ fn main() -> Result<(), String> {
             .with_id(leak(band_id(b, FREQ.id)), FREQ)
             .with_id(leak(band_id(b, GAIN.id)), GAIN)
             .with_id(leak(band_id(b, Q.id)), Q)
-            .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default));
+            .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default))
+            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0));
     }
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),
@@ -59,7 +60,7 @@ fn main() -> Result<(), String> {
         host.set_plain(&band_id(b, FREQ.id), freq);
         host.set_plain(&band_id(b, GAIN.id), gain);
         host.set_plain(&band_id(b, Q.id), q);
-        settings[b] = BandSettings { enabled: true, kind, freq: f64::from(freq), gain_db: f64::from(gain), q: f64::from(q), slope: 3 };
+        settings[b] = BandSettings { enabled: true, kind, freq: f64::from(freq), gain_db: f64::from(gain), q: f64::from(q), slope: 3, ..Default::default() };
     }
 
     // "Audio thread": 512-sample blocks of pink noise at 48 kHz, in real time.
@@ -104,6 +105,7 @@ fn main() -> Result<(), String> {
         fallback_scale: None,
         theme: ThemeKind::Dark,
         accent: ACCENT,
+        on_resize: None,
     };
     run_standalone(options, Box::new(view), Box::new(host)).map_err(|e| format!("{e:?}"))
 }

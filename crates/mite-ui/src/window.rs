@@ -5,15 +5,16 @@
 
 use std::cell::{Cell, RefCell};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use baseview::dpi::LogicalSize;
 use baseview::{
-    Event, EventStatus, HandlerError, MouseEvent, ScrollDelta, TimerHandle, Window, WindowContext,
+    Event, EventStatus, HandlerError, MouseCursor, MouseEvent, ScrollDelta, TimerHandle, Window, WindowContext,
     WindowHandler, WindowSettings, WindowSize,
 };
 use raw_window_handle::HasWindowHandle;
-use vello::kurbo::{Affine, Point};
+use vello::kurbo::{Affine, BezPath, Point, Stroke};
 use vello::util::RenderContext;
 use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
 
@@ -32,8 +33,17 @@ const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(400);
 const DOUBLE_CLICK_SLOP: f64 = 4.0;
 /// Pixels per wheel "line" when the platform reports pixel deltas.
 const PIXELS_PER_LINE: f32 = 40.0;
+/// Resize grip: the square of this size (window logical px) in the bottom-right corner.
+const GRIP: f64 = 16.0;
+/// Window scale range relative to the view's design size (BLUEPRINT: 50–400 %).
+pub const MIN_ZOOM: f64 = 0.5;
+pub const MAX_ZOOM: f64 = 4.0;
 
-#[derive(Debug, Clone)]
+/// Asks the host to resize the editor to a logical size; returns whether it agreed. The window
+/// is resized only if it did.
+pub type ResizeRequest = Arc<dyn Fn(u32, u32) -> bool + Send + Sync>;
+
+#[derive(Clone)]
 pub struct WindowOptions {
     pub title: String,
     pub logical_size: (f64, f64),
@@ -42,6 +52,9 @@ pub struct WindowOptions {
     pub theme: ThemeKind,
     /// Plugin key into `color.accent` in tokens.json (`eq`, `comp`, … `utility`).
     pub accent: &'static str,
+    /// Embedded editors: how to ask the host for a new size. `None` (standalone windows)
+    /// resizes directly.
+    pub on_resize: Option<ResizeRequest>,
 }
 
 /// Opens the view as a child of a host-provided parent window.
@@ -53,7 +66,8 @@ pub fn open_parented(
 ) -> Result<Window, baseview::Error> {
     let settings = settings(&options).with_parent(parent);
     let theme = Theme::load(options.theme, options.accent);
-    let window = Window::create(settings, move |ctx| UiWindow::new(ctx, view, host, theme))?;
+    let on_resize = options.on_resize.clone();
+    let window = Window::create(settings, move |ctx| UiWindow::new(ctx, view, host, theme, on_resize))?;
     trace("created parented");
     // baseview creates windows unmapped; nothing draws until it is shown.
     window.show()?;
@@ -68,7 +82,8 @@ pub fn run_standalone(
     host: Box<dyn ParamHost + Send>,
 ) -> Result<(), baseview::Error> {
     let theme = Theme::load(options.theme, options.accent);
-    let window = Window::create(settings(&options), move |ctx| UiWindow::new(ctx, view, host, theme))?;
+    let on_resize = options.on_resize.clone();
+    let window = Window::create(settings(&options), move |ctx| UiWindow::new(ctx, view, host, theme, on_resize))?;
     window.show()?;
     window.run_until_closed()
 }
@@ -121,6 +136,16 @@ struct UiWindow {
     frame_period: Duration,
     next_animation: Cell<Instant>,
     _timer: Option<TimerHandle>,
+    ctx: WindowContext,
+    on_resize: Option<ResizeRequest>,
+    /// The view's design size; the window keeps its aspect ratio and the zoom is window width
+    /// over design width.
+    design: (f64, f64),
+    /// Grip drag in progress: pointer start (window logical px) and the window width then.
+    resize_drag: Cell<Option<(Point, f64)>>,
+    /// Last size asked for, so a drag doesn't repeat requests for the same pixel size.
+    requested: Cell<(u32, u32)>,
+    over_grip: Cell<bool>,
 }
 
 fn handler_error(e: impl std::error::Error + 'static) -> HandlerError {
@@ -137,7 +162,9 @@ impl UiWindow {
         view: Box<dyn View>,
         host: Box<dyn ParamHost + Send>,
         theme: Theme,
+        on_resize: Option<ResizeRequest>,
     ) -> Result<Self, HandlerError> {
+        let design = view.logical_size();
         let size = ctx.size();
         let (w, h) = (size.physical.width.max(1), size.physical.height.max(1));
         trace("init start");
@@ -189,6 +216,12 @@ impl UiWindow {
             frame_period: animation_period(),
             next_animation: Cell::new(Instant::now()),
             _timer: timer,
+            requested: Cell::new((size.logical.width.round() as u32, size.logical.height.round() as u32)),
+            ctx,
+            on_resize,
+            design,
+            resize_drag: Cell::new(None),
+            over_grip: Cell::new(false),
         })
     }
 
@@ -209,17 +242,107 @@ impl UiWindow {
 }
 
 impl UiWindow {
+    /// The corner resize grip. Returns `Some` when it consumed the event.
+    fn grip_event(&self, mouse: &MouseEvent, dpi: f64, window: (f64, f64)) -> Option<EventStatus> {
+        match *mouse {
+            MouseEvent::CursorMoved { position, .. } => {
+                let p = Point::new(position.x / dpi, position.y / dpi);
+                if let Some((start, start_w)) = self.resize_drag.get() {
+                    // Follow whichever axis moved further, keeping the aspect ratio.
+                    let aspect = self.design.0 / self.design.1;
+                    let (dx, dy) = (p.x - start.x, (p.y - start.y) * aspect);
+                    let grow = if dx.abs() >= dy.abs() { dx } else { dy };
+                    let zoom = ((start_w + grow) / self.design.0).clamp(MIN_ZOOM, MAX_ZOOM);
+                    self.resize_to(zoom);
+                    return Some(EventStatus::Captured);
+                }
+                let over = p.x >= window.0 - GRIP && p.y >= window.1 - GRIP;
+                if over != self.over_grip.get() {
+                    self.over_grip.set(over);
+                    self.ctx.set_mouse_cursor(if over { MouseCursor::NwseResize } else { MouseCursor::Default }).ok();
+                    self.dirty.set(true);
+                }
+                if over {
+                    // Keep the cursor position current for when the pointer leaves the grip.
+                    self.state.borrow_mut().cursor = Point::new(p.x * self.design.0 / window.0, p.y * self.design.0 / window.0);
+                    return Some(EventStatus::Captured);
+                }
+                None
+            }
+            MouseEvent::ButtonPressed { button: baseview::MouseButton::Left, .. } if self.over_grip.get() => {
+                let c = self.state.borrow().cursor;
+                let start = Point::new(c.x * window.0 / self.design.0, c.y * window.0 / self.design.0);
+                self.resize_drag.set(Some((start, window.0)));
+                Some(EventStatus::Captured)
+            }
+            MouseEvent::ButtonReleased { button: baseview::MouseButton::Left, .. } if self.resize_drag.get().is_some() => {
+                self.resize_drag.set(None);
+                self.dirty.set(true);
+                Some(EventStatus::Captured)
+            }
+            _ => None,
+        }
+    }
+
+    /// Resizes the window to `zoom` × the design size, asking the host first when embedded.
+    fn resize_to(&self, zoom: f64) {
+        let size = ((self.design.0 * zoom).round() as u32, (self.design.1 * zoom).round() as u32);
+        if size == self.requested.get() {
+            return;
+        }
+        let accepted = self.on_resize.as_ref().is_none_or(|ask| ask(size.0, size.1));
+        trace(&format!("resize to {}x{} ({:.0} %): host {}", size.0, size.1, zoom * 100.0, if accepted { "agreed" } else { "refused" }));
+        if accepted {
+            self.requested.set(size);
+            let logical = LogicalSize::new(f64::from(size.0), f64::from(size.1));
+            if self.ctx.resize(logical).is_ok() {
+                // baseview reports only resizes it didn't initiate, so apply our own here.
+                let scale = self.state.borrow().scale;
+                if let Err(e) = self.apply_size(WindowSize::from_logical(logical, scale)) {
+                    trace(&format!("resize failed: {e}"));
+                }
+                if let Err(e) = self.render() {
+                    trace(&format!("render failed: {e}"));
+                }
+            }
+        }
+    }
+
+    /// Resizes the swapchain and offscreen frame and updates the layout to `new_size`.
+    fn apply_size(&self, new_size: WindowSize) -> Result<(), HandlerError> {
+        let (w, h) = (new_size.physical.width, new_size.physical.height);
+        if w > 0 && h > 0 {
+            let mut gpu = self.gpu.borrow_mut();
+            let Gpu { cx, presenter, frame, .. } = &mut *gpu;
+            presenter.resize(cx, w, h).map_err(message_error)?;
+            *frame = Offscreen::new(&cx.devices[presenter.dev_id()].device, w, h);
+        }
+        let mut st = self.state.borrow_mut();
+        st.scale = new_size.scale_factor;
+        st.logical_size = (new_size.logical.width, new_size.logical.height);
+        self.dirty.set(true);
+        Ok(())
+    }
+
     /// Renders and presents one frame. Clears `dirty` once the frame is on screen.
     fn render(&self) -> Result<(), HandlerError> {
         let t0 = Instant::now();
         let mut st = self.state.borrow_mut();
         let State { view, host, theme, text, logical, scene, scale, logical_size, .. } = &mut *st;
         logical.reset();
-        let zoom = view.zoom();
-        let design = (logical_size.0 / zoom, logical_size.1 / zoom);
-        view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: design });
+        let zoom = logical_size.0 / self.design.0;
+        view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: self.design });
         scene.reset();
         scene.append(logical, Some(Affine::scale(*scale * zoom)));
+        // Resize grip: three short diagonals in the bottom-right corner, in window logical px.
+        let (w, h) = *logical_size;
+        let mut grip = BezPath::new();
+        for k in [4.0, 8.0, 12.0] {
+            grip.move_to((w - 3.0, h - 3.0 - k));
+            grip.line_to((w - 3.0 - k, h - 3.0));
+        }
+        let color = if self.over_grip.get() || self.resize_drag.get().is_some() { theme.text_mid } else { theme.text_lo };
+        scene.stroke(&Stroke::new(1.0), Affine::scale(*scale), color, None, &grip);
         let t_scene = t0.elapsed();
 
         let mut gpu = self.gpu.borrow_mut();
@@ -265,18 +388,7 @@ impl WindowHandler for UiWindow {
 
     fn resized(&self, new_size: WindowSize) -> Result<(), HandlerError> {
         trace(&format!("resized {new_size:?}"));
-        let (w, h) = (new_size.physical.width, new_size.physical.height);
-        if w > 0 && h > 0 {
-            let mut gpu = self.gpu.borrow_mut();
-            let Gpu { cx, presenter, frame, .. } = &mut *gpu;
-            presenter.resize(cx, w, h).map_err(message_error)?;
-            *frame = Offscreen::new(&cx.devices[presenter.dev_id()].device, w, h);
-        }
-        let mut st = self.state.borrow_mut();
-        st.scale = new_size.scale_factor;
-        st.logical_size = (new_size.logical.width, new_size.logical.height);
-        self.dirty.set(true);
-        Ok(())
+        self.apply_size(new_size)
     }
 
     fn on_event(&self, event: Event) -> EventStatus {
@@ -284,12 +396,16 @@ impl WindowHandler for UiWindow {
         if tracing() {
             trace(&format!("t={:.6} event {:?}", wall_clock(), std::mem::discriminant(&mouse)));
         }
-        let scale = {
+        let (dpi, window) = {
             let st = self.state.borrow();
-            st.scale * st.view.zoom()
+            (st.scale, st.logical_size)
         };
+        let scale = dpi * window.0 / self.design.0;
         // Events reach the view in design units.
         let to_logical = |p: baseview::dpi::PhysicalPosition<f64>| Point::new(p.x / scale, p.y / scale);
+        if let Some(status) = self.grip_event(&mouse, dpi, window) {
+            return status;
+        }
         match mouse {
             MouseEvent::CursorMoved { position, modifiers } => {
                 let pos = to_logical(position);

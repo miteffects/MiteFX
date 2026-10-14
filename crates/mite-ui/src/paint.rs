@@ -49,3 +49,18 @@ pub fn panel(scene: &mut Scene, rect: RoundedRect, fill: Color, border: Color) {
     let inset = RoundedRect::from_rect(rect.rect().inset(-0.5), rect.radii().top_left - 0.5);
     scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, border, None, &inset);
 }
+
+/// A raised control (button, active segment): `panel` plus a soft drop shadow and a faint top
+/// highlight, so it reads as pressable. `shadows` is the theme's flag (off in high contrast).
+pub fn raised(scene: &mut Scene, rect: RoundedRect, fill: Color, border: Color, shadows: bool) {
+    let r = rect.radii().top_left;
+    if shadows {
+        scene.draw_blurred_rounded_rect(Affine::translate((0.0, 2.0)), rect.rect(), Color::from_rgba8(0, 0, 0, 120), r, 3.0);
+    }
+    panel(scene, rect, fill, border);
+    let b = rect.rect();
+    let mut highlight = vello::kurbo::BezPath::new();
+    highlight.move_to((b.x0 + r, b.y0 + 1.5));
+    highlight.line_to((b.x1 - r, b.y0 + 1.5));
+    scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, Color::from_rgba8(255, 255, 255, 16), None, &highlight);
+}
