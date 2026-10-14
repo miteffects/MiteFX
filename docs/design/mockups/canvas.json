@@ -1,0 +1,76 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-14T16:40:00Z"
+  },
+  "title": "MiteFX Design System",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "EqLight.dc.html": {"x": -2720, "y": 0, "w": 1280, "h": 760, "title": "Mite EQ — light theme", "is_interactive": true},
+    "EqColourBlind.dc.html": {"x": -1360, "y": 0, "w": 1280, "h": 760, "title": "Mite EQ — colour-blind theme (beside default)", "is_interactive": true},
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1280, "h": 760, "title": "Mite EQ — default dark · dynamic band selected", "is_interactive": true},
+    "Components.dc.html": {"x": 1360, "y": 0, "w": 1440, "h": 1120, "title": "Component sheet"},
+    "Tokens.dc.html": {"x": 2880, "y": 0, "w": 1440, "h": 1320, "title": "Brand + tokens"},
+    "EqEmpty.dc.html": {"x": 0, "y": 2700, "w": 1280, "h": 760, "title": "Empty state"},
+    "EqLinearPhase.dc.html": {"x": 1360, "y": 2700, "w": 1280, "h": 760, "title": "Linear Phase · resolution + latency", "is_interactive": true},
+    "EqCollision.dc.html": {"x": 2720, "y": 2700, "w": 1280, "h": 760, "title": "Collision / masking + carve suggestion"},
+    "EqSpectrumGrab.dc.html": {"x": 4080, "y": 2700, "w": 1280, "h": 760, "title": "Spectrum grab · dragging a peak"},
+    "EqSpectralResonance.dc.html": {"x": 0, "y": 3580, "w": 1280, "h": 760, "title": "Spectral dynamic band + Resonance band", "is_interactive": true},
+    "EqMultiSelect.dc.html": {"x": 1360, "y": 3580, "w": 1280, "h": 760, "title": "Multi-select with lasso"},
+    "EqContextMenu.dc.html": {"x": 2720, "y": 3580, "w": 1280, "h": 760, "title": "Right-click menu + type submenu"},
+    "EqPresetBrowser.dc.html": {"x": 4080, "y": 3580, "w": 1280, "h": 760, "title": "Preset browser · hover auditions"},
+    "EqSettings.dc.html": {"x": 0, "y": 4460, "w": 1280, "h": 760, "title": "Settings sheet"},
+    "EqHelpOverlay.dc.html": {"x": 1360, "y": 4460, "w": 1280, "h": 760, "title": "Help ? overlay"},
+    "EqCompact.dc.html": {"x": 2720, "y": 4460, "w": 640, "h": 400, "title": "Compact 640 × 400", "is_interactive": true},
+    "Shared.dc.html": {"x": 4400, "y": 0, "w": 1440, "h": 1380, "title": "Shared components"}
+  },
+  "order": [
+    "EqLight.dc.html",
+    "EqColourBlind.dc.html",
+    "Main.dc.html",
+    "Components.dc.html",
+    "Tokens.dc.html",
+    "EqEmpty.dc.html",
+    "EqLinearPhase.dc.html",
+    "EqCollision.dc.html",
+    "EqSpectrumGrab.dc.html",
+    "EqSpectralResonance.dc.html",
+    "EqMultiSelect.dc.html",
+    "EqContextMenu.dc.html",
+    "EqPresetBrowser.dc.html",
+    "EqSettings.dc.html",
+    "EqHelpOverlay.dc.html",
+    "EqCompact.dc.html",
+    "Shared.dc.html"
+  ],
+  "notes": {
+    "suiteTitle": {
+      "x": -2720,
+      "y": -300,
+      "text": "MiteFX — shared UX system, second pass",
+      "kind": "title1",
+      "maxW": 8560
+    },
+    "secondPassBrief": {
+      "x": 0,
+      "y": 880,
+      "text": "SECOND PASS BRIEF (from engineering review, 2026-10-14). Direction approved; keep neutrals, glass, glow, Manrope, tick knob, EQ layout, band panel.\n\n1 COLOUR FIXES\n- Band 1 #5CC8FF = EQ accent (breaks 'bands never use accent'). Rotate ramp per plugin or pick a ramp that avoids every accent. Show EQ, Multiband, Sat.\n- Band 2 #FFB547 = sem.warn = solo ring. Give solo its own treatment (white ring + S badge, others dimmed); amber = warnings only.\n- Band 3 #FF6FA8 ~ Shape accent #FF6FB5. Band 4 #8EE07A = sem.ok.\n- sem.gr #FF8A3D sits between Comp #FF9F43 and Sat #FF7A45: GR must read as GR in exactly those plugins.\n- Limit accent #FF5E6C ~ sem.collision #FF4D6A.\n- Every colliding pair must also differ in lightness. Show colour-blind theme beside default on the EQ.\n- Tokenise mockup-only values: button #12161C/#222832, panel control #1E232B/#2E3540, knob disc #161A21, segment track #0C0F13, grid #151920/#1D232C, curve #DDF3FF, post-fill #3D6FD9.\n\n2 CONTRAST\n- Help strip hint #5C6573 on #0C0E12 = 3.3:1, needs 4.5:1. Disabled #4A5260 only for disabled controls. Check light theme too.\n\n3 HIT TARGETS\n- Segments are 26 px; blueprint asks >= 32 px at 100 % (future iPad). Add a 32 px variant or document 26 px desktop + touch variant.\n\n4 MISSING EQ SCREENS (1280x760)\nEmpty state · Linear Phase (resolution + latency) · Collision/masking view with carve suggestion · Spectrum grab hover/drag · Spectral dynamic + Resonance bands · Multi-select + lasso · Right-click menus · Preset browser · Settings sheet · Help ? overlay · Compact 640x400 · Light theme full screen.\n\n5 SHARED COMPONENTS\nModulation matrix · Comp transfer-curve editor (4-node) · Waveform/GR history · Spectrogram.\n\n6 interaction.md\nGesture map (+ touch), state transitions with duration/easing tokens, band-panel placement rules, knob drag maths (px per range, fine factor, wheel steps), keyboard focus order, reduce-motion behaviour.\n\nFull brief: github.com/ansabic/MiteFX docs/design/second-pass-brief.md",
+      "w": 1280,
+      "maxH": 1500,
+      "fill": "orange",
+      "size": "m"
+    },
+    "screensTitle": {
+      "x": 0,
+      "y": 2400,
+      "text": "Mite EQ — screens from the second-pass brief",
+      "kind": "title1",
+      "maxW": 5360
+    }
+  },
+  "designSystems": []
+}

@@ -385,6 +385,8 @@ FabFilter's strengths:
 
 ### 7.4 Design status
 
+**Second pass received on 2026-10-14.** All EQ screens are delivered (12 states × dark, light and colour-blind themes, plus a compact layout), as are the shared components. A short third pass covers accent and token clean-up; see `docs/design/third-pass-brief.md`.
+
 **First pass received on 2026-10-14.** The canvas is https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5, with a snapshot and review in `docs/design/README.md`.
 
 What it settles:
@@ -454,6 +456,8 @@ Mode switches are click-free. Dynamic bands in linear-phase mode use the Pro-Q a
 - Pre, post and sidechain spectra. FFT size is 1k–32k with selectable range, speed (ballistics) and tilt (0, 3 or 4.5 dB/oct).
 - **Spectrum grab:** hover the spectrum to see peaks; drag a peak to create a band there.
 - **Collision detection** against the sidechain or other MiteFX EQ instances (a shared-memory instance registry). The masking map highlights conflicting regions.
+- **Carve suggestions** (from design pass 2): **Carve** on this instance, **Carve on <other>**, or **Ignore**. "Carve on <other>" writes to the other instance, so the instance registry needs a command channel as well as spectrum sharing.
+- **Preset audition on hover:** crossfades into the hovered preset's state on the live signal without touching undo or the host's parameters, and reverts when the pointer leaves.
 - **EQ Match:** match the spectrum to a reference (sidechain or an imported file) with smoothing and band-count limits.
 - Piano-roll strip that snaps bands to notes.
 - Auto-gain: gain compensation from loudness, not peak.
