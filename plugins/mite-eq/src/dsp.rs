@@ -94,6 +94,16 @@ impl EqEngine {
     pub fn band_state(&self, band: usize) -> BandSettings {
         self.bands[band].current()
     }
+
+    /// Each band's dynamic gain right now, dB, for the display.
+    pub fn dynamic_gains(&self) -> impl Iterator<Item = f32> + '_ {
+        self.bands.iter().map(|b| b.dynamic_gain_db() as f32)
+    }
+
+    /// Each band's detected level right now, dBFS, for the display.
+    pub fn detector_levels(&self) -> impl Iterator<Item = f32> + '_ {
+        self.bands.iter().map(|b| b.detector_level_db() as f32)
+    }
 }
 
 fn push_mono(tap: &SpectrumTap, channels: &[&mut [f32]]) {

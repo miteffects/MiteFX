@@ -24,8 +24,14 @@ fn host_ids_match_manifest() {
 #[test]
 fn ids_follow_the_blueprint_scheme() {
     let ids: Vec<String> = EqParams::default().param_map().into_iter().map(|(id, _, _)| id).collect();
-    assert_eq!(ids.len(), 1 + 24 * 7);
+    assert_eq!(ids.len(), 1 + 24 * 18);
     assert!(ids.contains(&"b01_freq".to_owned()));
     assert!(ids.contains(&"b24_slope".to_owned()));
     assert!(ids.contains(&"b24_stereo".to_owned()));
+    assert!(ids.contains(&"b24_ratio".to_owned()));
+    assert!(ids.contains(&"b24_dmode".to_owned()));
+    assert!(ids.contains(&"b24_sustain".to_owned()));
+    assert!(ids.contains(&"b24_transient".to_owned()));
+    assert!(ids.contains(&"b24_ttime".to_owned()));
+    assert!(ids.contains(&"b24_transition".to_owned()));
 }

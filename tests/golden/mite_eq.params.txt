@@ -6,6 +6,17 @@ b01_gain | dB | -30 | 30 | 0 | Linear
 b01_q |  | 0.025 | 40 | 0.70710677 | Log
 b01_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b01_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b01_dyn | bool | false
+b01_range | dB | -30 | 30 | -6 | Linear
+b01_thresh | dB | -80 | 0 | -30 | Linear
+b01_attack | ms | 0.5 | 200 | 10 | Log
+b01_release | ms | 10 | 2500 | 150 | Log
+b01_ratio | :1 | 1 | 20 | 3 | Log
+b01_dmode | choice | Compressor, Transient | 0
+b01_sustain | dB | -12 | 12 | 0 | Linear
+b01_transient | dB | -12 | 12 | 0 | Linear
+b01_ttime | ms | 5 | 200 | 25 | Log
+b01_transition | % | 0 | 200 | 100 | Linear
 b02_on | bool | false
 b02_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b02_freq | Hz | 10 | 30000 | 1000 | Log
@@ -13,6 +24,17 @@ b02_gain | dB | -30 | 30 | 0 | Linear
 b02_q |  | 0.025 | 40 | 0.70710677 | Log
 b02_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b02_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b02_dyn | bool | false
+b02_range | dB | -30 | 30 | -6 | Linear
+b02_thresh | dB | -80 | 0 | -30 | Linear
+b02_attack | ms | 0.5 | 200 | 10 | Log
+b02_release | ms | 10 | 2500 | 150 | Log
+b02_ratio | :1 | 1 | 20 | 3 | Log
+b02_dmode | choice | Compressor, Transient | 0
+b02_sustain | dB | -12 | 12 | 0 | Linear
+b02_transient | dB | -12 | 12 | 0 | Linear
+b02_ttime | ms | 5 | 200 | 25 | Log
+b02_transition | % | 0 | 200 | 100 | Linear
 b03_on | bool | false
 b03_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b03_freq | Hz | 10 | 30000 | 1000 | Log
@@ -20,6 +42,17 @@ b03_gain | dB | -30 | 30 | 0 | Linear
 b03_q |  | 0.025 | 40 | 0.70710677 | Log
 b03_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b03_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b03_dyn | bool | false
+b03_range | dB | -30 | 30 | -6 | Linear
+b03_thresh | dB | -80 | 0 | -30 | Linear
+b03_attack | ms | 0.5 | 200 | 10 | Log
+b03_release | ms | 10 | 2500 | 150 | Log
+b03_ratio | :1 | 1 | 20 | 3 | Log
+b03_dmode | choice | Compressor, Transient | 0
+b03_sustain | dB | -12 | 12 | 0 | Linear
+b03_transient | dB | -12 | 12 | 0 | Linear
+b03_ttime | ms | 5 | 200 | 25 | Log
+b03_transition | % | 0 | 200 | 100 | Linear
 b04_on | bool | false
 b04_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b04_freq | Hz | 10 | 30000 | 1000 | Log
@@ -27,6 +60,17 @@ b04_gain | dB | -30 | 30 | 0 | Linear
 b04_q |  | 0.025 | 40 | 0.70710677 | Log
 b04_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b04_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b04_dyn | bool | false
+b04_range | dB | -30 | 30 | -6 | Linear
+b04_thresh | dB | -80 | 0 | -30 | Linear
+b04_attack | ms | 0.5 | 200 | 10 | Log
+b04_release | ms | 10 | 2500 | 150 | Log
+b04_ratio | :1 | 1 | 20 | 3 | Log
+b04_dmode | choice | Compressor, Transient | 0
+b04_sustain | dB | -12 | 12 | 0 | Linear
+b04_transient | dB | -12 | 12 | 0 | Linear
+b04_ttime | ms | 5 | 200 | 25 | Log
+b04_transition | % | 0 | 200 | 100 | Linear
 b05_on | bool | false
 b05_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b05_freq | Hz | 10 | 30000 | 1000 | Log
@@ -34,6 +78,17 @@ b05_gain | dB | -30 | 30 | 0 | Linear
 b05_q |  | 0.025 | 40 | 0.70710677 | Log
 b05_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b05_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b05_dyn | bool | false
+b05_range | dB | -30 | 30 | -6 | Linear
+b05_thresh | dB | -80 | 0 | -30 | Linear
+b05_attack | ms | 0.5 | 200 | 10 | Log
+b05_release | ms | 10 | 2500 | 150 | Log
+b05_ratio | :1 | 1 | 20 | 3 | Log
+b05_dmode | choice | Compressor, Transient | 0
+b05_sustain | dB | -12 | 12 | 0 | Linear
+b05_transient | dB | -12 | 12 | 0 | Linear
+b05_ttime | ms | 5 | 200 | 25 | Log
+b05_transition | % | 0 | 200 | 100 | Linear
 b06_on | bool | false
 b06_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b06_freq | Hz | 10 | 30000 | 1000 | Log
@@ -41,6 +96,17 @@ b06_gain | dB | -30 | 30 | 0 | Linear
 b06_q |  | 0.025 | 40 | 0.70710677 | Log
 b06_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b06_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b06_dyn | bool | false
+b06_range | dB | -30 | 30 | -6 | Linear
+b06_thresh | dB | -80 | 0 | -30 | Linear
+b06_attack | ms | 0.5 | 200 | 10 | Log
+b06_release | ms | 10 | 2500 | 150 | Log
+b06_ratio | :1 | 1 | 20 | 3 | Log
+b06_dmode | choice | Compressor, Transient | 0
+b06_sustain | dB | -12 | 12 | 0 | Linear
+b06_transient | dB | -12 | 12 | 0 | Linear
+b06_ttime | ms | 5 | 200 | 25 | Log
+b06_transition | % | 0 | 200 | 100 | Linear
 b07_on | bool | false
 b07_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b07_freq | Hz | 10 | 30000 | 1000 | Log
@@ -48,6 +114,17 @@ b07_gain | dB | -30 | 30 | 0 | Linear
 b07_q |  | 0.025 | 40 | 0.70710677 | Log
 b07_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b07_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b07_dyn | bool | false
+b07_range | dB | -30 | 30 | -6 | Linear
+b07_thresh | dB | -80 | 0 | -30 | Linear
+b07_attack | ms | 0.5 | 200 | 10 | Log
+b07_release | ms | 10 | 2500 | 150 | Log
+b07_ratio | :1 | 1 | 20 | 3 | Log
+b07_dmode | choice | Compressor, Transient | 0
+b07_sustain | dB | -12 | 12 | 0 | Linear
+b07_transient | dB | -12 | 12 | 0 | Linear
+b07_ttime | ms | 5 | 200 | 25 | Log
+b07_transition | % | 0 | 200 | 100 | Linear
 b08_on | bool | false
 b08_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b08_freq | Hz | 10 | 30000 | 1000 | Log
@@ -55,6 +132,17 @@ b08_gain | dB | -30 | 30 | 0 | Linear
 b08_q |  | 0.025 | 40 | 0.70710677 | Log
 b08_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b08_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b08_dyn | bool | false
+b08_range | dB | -30 | 30 | -6 | Linear
+b08_thresh | dB | -80 | 0 | -30 | Linear
+b08_attack | ms | 0.5 | 200 | 10 | Log
+b08_release | ms | 10 | 2500 | 150 | Log
+b08_ratio | :1 | 1 | 20 | 3 | Log
+b08_dmode | choice | Compressor, Transient | 0
+b08_sustain | dB | -12 | 12 | 0 | Linear
+b08_transient | dB | -12 | 12 | 0 | Linear
+b08_ttime | ms | 5 | 200 | 25 | Log
+b08_transition | % | 0 | 200 | 100 | Linear
 b09_on | bool | false
 b09_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b09_freq | Hz | 10 | 30000 | 1000 | Log
@@ -62,6 +150,17 @@ b09_gain | dB | -30 | 30 | 0 | Linear
 b09_q |  | 0.025 | 40 | 0.70710677 | Log
 b09_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b09_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b09_dyn | bool | false
+b09_range | dB | -30 | 30 | -6 | Linear
+b09_thresh | dB | -80 | 0 | -30 | Linear
+b09_attack | ms | 0.5 | 200 | 10 | Log
+b09_release | ms | 10 | 2500 | 150 | Log
+b09_ratio | :1 | 1 | 20 | 3 | Log
+b09_dmode | choice | Compressor, Transient | 0
+b09_sustain | dB | -12 | 12 | 0 | Linear
+b09_transient | dB | -12 | 12 | 0 | Linear
+b09_ttime | ms | 5 | 200 | 25 | Log
+b09_transition | % | 0 | 200 | 100 | Linear
 b10_on | bool | false
 b10_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b10_freq | Hz | 10 | 30000 | 1000 | Log
@@ -69,6 +168,17 @@ b10_gain | dB | -30 | 30 | 0 | Linear
 b10_q |  | 0.025 | 40 | 0.70710677 | Log
 b10_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b10_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b10_dyn | bool | false
+b10_range | dB | -30 | 30 | -6 | Linear
+b10_thresh | dB | -80 | 0 | -30 | Linear
+b10_attack | ms | 0.5 | 200 | 10 | Log
+b10_release | ms | 10 | 2500 | 150 | Log
+b10_ratio | :1 | 1 | 20 | 3 | Log
+b10_dmode | choice | Compressor, Transient | 0
+b10_sustain | dB | -12 | 12 | 0 | Linear
+b10_transient | dB | -12 | 12 | 0 | Linear
+b10_ttime | ms | 5 | 200 | 25 | Log
+b10_transition | % | 0 | 200 | 100 | Linear
 b11_on | bool | false
 b11_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b11_freq | Hz | 10 | 30000 | 1000 | Log
@@ -76,6 +186,17 @@ b11_gain | dB | -30 | 30 | 0 | Linear
 b11_q |  | 0.025 | 40 | 0.70710677 | Log
 b11_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b11_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b11_dyn | bool | false
+b11_range | dB | -30 | 30 | -6 | Linear
+b11_thresh | dB | -80 | 0 | -30 | Linear
+b11_attack | ms | 0.5 | 200 | 10 | Log
+b11_release | ms | 10 | 2500 | 150 | Log
+b11_ratio | :1 | 1 | 20 | 3 | Log
+b11_dmode | choice | Compressor, Transient | 0
+b11_sustain | dB | -12 | 12 | 0 | Linear
+b11_transient | dB | -12 | 12 | 0 | Linear
+b11_ttime | ms | 5 | 200 | 25 | Log
+b11_transition | % | 0 | 200 | 100 | Linear
 b12_on | bool | false
 b12_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b12_freq | Hz | 10 | 30000 | 1000 | Log
@@ -83,6 +204,17 @@ b12_gain | dB | -30 | 30 | 0 | Linear
 b12_q |  | 0.025 | 40 | 0.70710677 | Log
 b12_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b12_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b12_dyn | bool | false
+b12_range | dB | -30 | 30 | -6 | Linear
+b12_thresh | dB | -80 | 0 | -30 | Linear
+b12_attack | ms | 0.5 | 200 | 10 | Log
+b12_release | ms | 10 | 2500 | 150 | Log
+b12_ratio | :1 | 1 | 20 | 3 | Log
+b12_dmode | choice | Compressor, Transient | 0
+b12_sustain | dB | -12 | 12 | 0 | Linear
+b12_transient | dB | -12 | 12 | 0 | Linear
+b12_ttime | ms | 5 | 200 | 25 | Log
+b12_transition | % | 0 | 200 | 100 | Linear
 b13_on | bool | false
 b13_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b13_freq | Hz | 10 | 30000 | 1000 | Log
@@ -90,6 +222,17 @@ b13_gain | dB | -30 | 30 | 0 | Linear
 b13_q |  | 0.025 | 40 | 0.70710677 | Log
 b13_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b13_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b13_dyn | bool | false
+b13_range | dB | -30 | 30 | -6 | Linear
+b13_thresh | dB | -80 | 0 | -30 | Linear
+b13_attack | ms | 0.5 | 200 | 10 | Log
+b13_release | ms | 10 | 2500 | 150 | Log
+b13_ratio | :1 | 1 | 20 | 3 | Log
+b13_dmode | choice | Compressor, Transient | 0
+b13_sustain | dB | -12 | 12 | 0 | Linear
+b13_transient | dB | -12 | 12 | 0 | Linear
+b13_ttime | ms | 5 | 200 | 25 | Log
+b13_transition | % | 0 | 200 | 100 | Linear
 b14_on | bool | false
 b14_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b14_freq | Hz | 10 | 30000 | 1000 | Log
@@ -97,6 +240,17 @@ b14_gain | dB | -30 | 30 | 0 | Linear
 b14_q |  | 0.025 | 40 | 0.70710677 | Log
 b14_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b14_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b14_dyn | bool | false
+b14_range | dB | -30 | 30 | -6 | Linear
+b14_thresh | dB | -80 | 0 | -30 | Linear
+b14_attack | ms | 0.5 | 200 | 10 | Log
+b14_release | ms | 10 | 2500 | 150 | Log
+b14_ratio | :1 | 1 | 20 | 3 | Log
+b14_dmode | choice | Compressor, Transient | 0
+b14_sustain | dB | -12 | 12 | 0 | Linear
+b14_transient | dB | -12 | 12 | 0 | Linear
+b14_ttime | ms | 5 | 200 | 25 | Log
+b14_transition | % | 0 | 200 | 100 | Linear
 b15_on | bool | false
 b15_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b15_freq | Hz | 10 | 30000 | 1000 | Log
@@ -104,6 +258,17 @@ b15_gain | dB | -30 | 30 | 0 | Linear
 b15_q |  | 0.025 | 40 | 0.70710677 | Log
 b15_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b15_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b15_dyn | bool | false
+b15_range | dB | -30 | 30 | -6 | Linear
+b15_thresh | dB | -80 | 0 | -30 | Linear
+b15_attack | ms | 0.5 | 200 | 10 | Log
+b15_release | ms | 10 | 2500 | 150 | Log
+b15_ratio | :1 | 1 | 20 | 3 | Log
+b15_dmode | choice | Compressor, Transient | 0
+b15_sustain | dB | -12 | 12 | 0 | Linear
+b15_transient | dB | -12 | 12 | 0 | Linear
+b15_ttime | ms | 5 | 200 | 25 | Log
+b15_transition | % | 0 | 200 | 100 | Linear
 b16_on | bool | false
 b16_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b16_freq | Hz | 10 | 30000 | 1000 | Log
@@ -111,6 +276,17 @@ b16_gain | dB | -30 | 30 | 0 | Linear
 b16_q |  | 0.025 | 40 | 0.70710677 | Log
 b16_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b16_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b16_dyn | bool | false
+b16_range | dB | -30 | 30 | -6 | Linear
+b16_thresh | dB | -80 | 0 | -30 | Linear
+b16_attack | ms | 0.5 | 200 | 10 | Log
+b16_release | ms | 10 | 2500 | 150 | Log
+b16_ratio | :1 | 1 | 20 | 3 | Log
+b16_dmode | choice | Compressor, Transient | 0
+b16_sustain | dB | -12 | 12 | 0 | Linear
+b16_transient | dB | -12 | 12 | 0 | Linear
+b16_ttime | ms | 5 | 200 | 25 | Log
+b16_transition | % | 0 | 200 | 100 | Linear
 b17_on | bool | false
 b17_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b17_freq | Hz | 10 | 30000 | 1000 | Log
@@ -118,6 +294,17 @@ b17_gain | dB | -30 | 30 | 0 | Linear
 b17_q |  | 0.025 | 40 | 0.70710677 | Log
 b17_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b17_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b17_dyn | bool | false
+b17_range | dB | -30 | 30 | -6 | Linear
+b17_thresh | dB | -80 | 0 | -30 | Linear
+b17_attack | ms | 0.5 | 200 | 10 | Log
+b17_release | ms | 10 | 2500 | 150 | Log
+b17_ratio | :1 | 1 | 20 | 3 | Log
+b17_dmode | choice | Compressor, Transient | 0
+b17_sustain | dB | -12 | 12 | 0 | Linear
+b17_transient | dB | -12 | 12 | 0 | Linear
+b17_ttime | ms | 5 | 200 | 25 | Log
+b17_transition | % | 0 | 200 | 100 | Linear
 b18_on | bool | false
 b18_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b18_freq | Hz | 10 | 30000 | 1000 | Log
@@ -125,6 +312,17 @@ b18_gain | dB | -30 | 30 | 0 | Linear
 b18_q |  | 0.025 | 40 | 0.70710677 | Log
 b18_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b18_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b18_dyn | bool | false
+b18_range | dB | -30 | 30 | -6 | Linear
+b18_thresh | dB | -80 | 0 | -30 | Linear
+b18_attack | ms | 0.5 | 200 | 10 | Log
+b18_release | ms | 10 | 2500 | 150 | Log
+b18_ratio | :1 | 1 | 20 | 3 | Log
+b18_dmode | choice | Compressor, Transient | 0
+b18_sustain | dB | -12 | 12 | 0 | Linear
+b18_transient | dB | -12 | 12 | 0 | Linear
+b18_ttime | ms | 5 | 200 | 25 | Log
+b18_transition | % | 0 | 200 | 100 | Linear
 b19_on | bool | false
 b19_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b19_freq | Hz | 10 | 30000 | 1000 | Log
@@ -132,6 +330,17 @@ b19_gain | dB | -30 | 30 | 0 | Linear
 b19_q |  | 0.025 | 40 | 0.70710677 | Log
 b19_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b19_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b19_dyn | bool | false
+b19_range | dB | -30 | 30 | -6 | Linear
+b19_thresh | dB | -80 | 0 | -30 | Linear
+b19_attack | ms | 0.5 | 200 | 10 | Log
+b19_release | ms | 10 | 2500 | 150 | Log
+b19_ratio | :1 | 1 | 20 | 3 | Log
+b19_dmode | choice | Compressor, Transient | 0
+b19_sustain | dB | -12 | 12 | 0 | Linear
+b19_transient | dB | -12 | 12 | 0 | Linear
+b19_ttime | ms | 5 | 200 | 25 | Log
+b19_transition | % | 0 | 200 | 100 | Linear
 b20_on | bool | false
 b20_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b20_freq | Hz | 10 | 30000 | 1000 | Log
@@ -139,6 +348,17 @@ b20_gain | dB | -30 | 30 | 0 | Linear
 b20_q |  | 0.025 | 40 | 0.70710677 | Log
 b20_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b20_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b20_dyn | bool | false
+b20_range | dB | -30 | 30 | -6 | Linear
+b20_thresh | dB | -80 | 0 | -30 | Linear
+b20_attack | ms | 0.5 | 200 | 10 | Log
+b20_release | ms | 10 | 2500 | 150 | Log
+b20_ratio | :1 | 1 | 20 | 3 | Log
+b20_dmode | choice | Compressor, Transient | 0
+b20_sustain | dB | -12 | 12 | 0 | Linear
+b20_transient | dB | -12 | 12 | 0 | Linear
+b20_ttime | ms | 5 | 200 | 25 | Log
+b20_transition | % | 0 | 200 | 100 | Linear
 b21_on | bool | false
 b21_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b21_freq | Hz | 10 | 30000 | 1000 | Log
@@ -146,6 +366,17 @@ b21_gain | dB | -30 | 30 | 0 | Linear
 b21_q |  | 0.025 | 40 | 0.70710677 | Log
 b21_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b21_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b21_dyn | bool | false
+b21_range | dB | -30 | 30 | -6 | Linear
+b21_thresh | dB | -80 | 0 | -30 | Linear
+b21_attack | ms | 0.5 | 200 | 10 | Log
+b21_release | ms | 10 | 2500 | 150 | Log
+b21_ratio | :1 | 1 | 20 | 3 | Log
+b21_dmode | choice | Compressor, Transient | 0
+b21_sustain | dB | -12 | 12 | 0 | Linear
+b21_transient | dB | -12 | 12 | 0 | Linear
+b21_ttime | ms | 5 | 200 | 25 | Log
+b21_transition | % | 0 | 200 | 100 | Linear
 b22_on | bool | false
 b22_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b22_freq | Hz | 10 | 30000 | 1000 | Log
@@ -153,6 +384,17 @@ b22_gain | dB | -30 | 30 | 0 | Linear
 b22_q |  | 0.025 | 40 | 0.70710677 | Log
 b22_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b22_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b22_dyn | bool | false
+b22_range | dB | -30 | 30 | -6 | Linear
+b22_thresh | dB | -80 | 0 | -30 | Linear
+b22_attack | ms | 0.5 | 200 | 10 | Log
+b22_release | ms | 10 | 2500 | 150 | Log
+b22_ratio | :1 | 1 | 20 | 3 | Log
+b22_dmode | choice | Compressor, Transient | 0
+b22_sustain | dB | -12 | 12 | 0 | Linear
+b22_transient | dB | -12 | 12 | 0 | Linear
+b22_ttime | ms | 5 | 200 | 25 | Log
+b22_transition | % | 0 | 200 | 100 | Linear
 b23_on | bool | false
 b23_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b23_freq | Hz | 10 | 30000 | 1000 | Log
@@ -160,6 +402,17 @@ b23_gain | dB | -30 | 30 | 0 | Linear
 b23_q |  | 0.025 | 40 | 0.70710677 | Log
 b23_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b23_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b23_dyn | bool | false
+b23_range | dB | -30 | 30 | -6 | Linear
+b23_thresh | dB | -80 | 0 | -30 | Linear
+b23_attack | ms | 0.5 | 200 | 10 | Log
+b23_release | ms | 10 | 2500 | 150 | Log
+b23_ratio | :1 | 1 | 20 | 3 | Log
+b23_dmode | choice | Compressor, Transient | 0
+b23_sustain | dB | -12 | 12 | 0 | Linear
+b23_transient | dB | -12 | 12 | 0 | Linear
+b23_ttime | ms | 5 | 200 | 25 | Log
+b23_transition | % | 0 | 200 | 100 | Linear
 b24_on | bool | false
 b24_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b24_freq | Hz | 10 | 30000 | 1000 | Log
@@ -167,3 +420,14 @@ b24_gain | dB | -30 | 30 | 0 | Linear
 b24_q |  | 0.025 | 40 | 0.70710677 | Log
 b24_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 b24_stereo | choice | Stereo, Left, Right, Mid, Side | 0
+b24_dyn | bool | false
+b24_range | dB | -30 | 30 | -6 | Linear
+b24_thresh | dB | -80 | 0 | -30 | Linear
+b24_attack | ms | 0.5 | 200 | 10 | Log
+b24_release | ms | 10 | 2500 | 150 | Log
+b24_ratio | :1 | 1 | 20 | 3 | Log
+b24_dmode | choice | Compressor, Transient | 0
+b24_sustain | dB | -12 | 12 | 0 | Linear
+b24_transient | dB | -12 | 12 | 0 | Linear
+b24_ttime | ms | 5 | 200 | 25 | Log
+b24_transition | % | 0 | 200 | 100 | Linear

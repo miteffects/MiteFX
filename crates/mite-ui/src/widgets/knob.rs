@@ -4,7 +4,7 @@
 //! 25 and 29, a disc of radius 19.5 with a drop shadow, and a pointer from 21.5 to 31. The value
 //! and unit sit inside the disc, and the label sits below it.
 
-use mite_core::ParamSpec;
+use mite_core::{DialCurve, ParamSpec};
 use vello::kurbo::{BezPath, Circle, Point, Rect, Stroke, Vec2};
 use vello::peniko::{Color, Fill};
 
@@ -42,6 +42,8 @@ pub struct Knob {
     pub diameter: f64,
     /// Lit-tick colour. `None` uses the plugin accent.
     pub color: Option<Color>,
+    /// How the dial maps to values, when not the host's normalisation (see [`DialCurve`]).
+    pub curve: Option<DialCurve>,
     hover: bool,
     drag: Option<Drag>,
 }
@@ -63,6 +65,7 @@ impl Knob {
             center,
             diameter,
             color: None,
+            curve: None,
             hover: false,
             drag: None,
         }
@@ -89,6 +92,26 @@ impl Knob {
         path.line_to(self.point(deg, r1));
     }
 
+    /// The same dial with its own feel (see [`DialCurve`]).
+    pub fn with_curve(mut self, curve: DialCurve) -> Self {
+        self.curve = Some(curve);
+        self
+    }
+
+    /// Where the dial points, 0…1.
+    fn position(&self, host: &dyn ParamHost) -> f32 {
+        let norm = host.normalized(&self.id);
+        match self.curve {
+            Some(c) => c.to_position(host.plain(&self.id, norm)),
+            None => norm,
+        }
+    }
+
+    /// Whether a drag of this dial is in progress.
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
     /// Hit area: the dial's square plus the label below it.
     pub fn bounds(&self) -> Rect {
         let r = self.diameter / 2.0;
@@ -101,7 +124,7 @@ impl Knob {
         let color = self.color.unwrap_or(theme.accent);
         let norm = cx.host.normalized(&self.id);
         let to_deg = |n: f32| -SWEEP_DEG / 2.0 + SWEEP_DEG * f64::from(n);
-        let value_deg = to_deg(norm);
+        let value_deg = to_deg(self.position(cx.host));
         // Bipolar dials light from the zero point, which is not the middle of an asymmetric
         // range (gain −48…+24 dB has 0 dB at two thirds).
         let origin_deg = to_deg(self.spec.normalize(0.0_f32.clamp(self.spec.min, self.spec.max)));
@@ -182,7 +205,12 @@ impl Knob {
                     let delta = (drag.last_y - pos.y) as f32 / DRAG_PX_PER_RANGE * factor;
                     drag.last_y = pos.y;
                     drag.value = (drag.value + delta).clamp(0.0, 1.0);
-                    host.set_normalized(id, drag.value);
+                    // The drag moves the dial; a curved dial turns its position into a value.
+                    let value = match self.curve {
+                        Some(c) => host.normalize(id, c.to_plain(drag.value)),
+                        None => drag.value,
+                    };
+                    host.set_normalized(id, value);
                     true
                 } else {
                     let hover = self.bounds().contains(pos);
@@ -191,7 +219,7 @@ impl Knob {
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if self.bounds().contains(pos) => {
                 host.begin_gesture(id);
-                self.drag = Some(Drag { last_y: pos.y, value: host.normalized(id) });
+                self.drag = Some(Drag { last_y: pos.y, value: self.position(host) });
                 true
             }
             UiEvent::PointerUp { button: MouseButton::Left, .. } if self.drag.is_some() => {
@@ -279,6 +307,24 @@ mod tests {
         assert!((host.plain("gain", host.normalized("gain")) - 0.5).abs() < 1e-4);
         k.event(&UiEvent::Wheel { pos: at, lines: -1.0, mods: mods(true) }, &host);
         assert!((host.plain("gain", host.normalized("gain")) - 0.4).abs() < 1e-4);
+    }
+
+    #[test]
+    fn curved_dials_give_common_values_more_travel() {
+        let release = ParamSpec { id: "release", unit: "ms", min: 10.0, max: 2500.0, default: 150.0, scale: ParamScale::Log, ..SPEC };
+        let curve = DialCurve(&[(0.0, 10.0), (0.3, 100.0), (0.75, 300.0), (1.0, 2500.0)]);
+        let host = MemoryParamHost::new().with(release);
+        host.set_plain("release", 100.0);
+        let mut k = Knob::new(release, "RELEASE", KnobKind::Unipolar, Point::new(100.0, 100.0), 48.0).with_curve(curve);
+        // 100 → 300 ms takes 45 % of the dial's travel: 90 px at 200 px per range.
+        k.event(&UiEvent::PointerDown { pos: Point::new(100.0, 100.0), button: MouseButton::Left, mods: mods(false) }, &host);
+        k.event(&UiEvent::PointerMove { pos: Point::new(100.0, 10.0), mods: mods(false) }, &host);
+        let ms = host.plain("release", host.normalized("release"));
+        assert!((ms - 300.0).abs() < 1.0, "{ms} ms");
+        // No snapping: a one-pixel move changes the value by a fraction of a millisecond step.
+        k.event(&UiEvent::PointerMove { pos: Point::new(100.0, 11.0), mods: mods(false) }, &host);
+        let next = host.plain("release", host.normalized("release"));
+        assert!(next < ms && ms - next < 4.0 && (next - next.round()).abs() > 1e-3, "{next} ms");
     }
 
     #[test]

@@ -3,8 +3,8 @@
 //! IDs are frozen once released (`tests/golden/mite_eq.params.txt`): globals by name, bands as
 //! `b{NN}_{param}` with all 24 bands pre-declared because hosts need static parameter lists.
 
-use mite_core::{BoolSpec, ChoiceSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::eq::{BandSettings, BandType, Placement, DEFAULT_SLOPE, SLOPE_NAMES};
+use mite_core::{BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
+use mite_dsp::eq::{BandSettings, BandType, Dynamics, DynamicsMode, Placement, DEFAULT_SLOPE, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION, SLOPE_NAMES};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
@@ -77,6 +77,155 @@ pub const SLOPE: ChoiceSpec = ChoiceSpec { id: "slope", name: "Slope", choices: 
 
 pub const STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &Placement::NAMES, default: 0 };
 
+// Dynamic EQ (BLUEPRINT §8.1). Defaults match `mite_dsp::eq::Dynamics::default()`.
+pub const DYN: BoolSpec = BoolSpec { id: "dyn", name: "Dynamic", default: false };
+
+pub const RANGE: ParamSpec = ParamSpec {
+    id: "range",
+    name: "Dynamic Range",
+    unit: "dB",
+    min: -30.0,
+    max: 30.0,
+    default: -6.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 0.5,
+    wheel_step_fine: 0.1,
+    display: ParamDisplay::Number,
+};
+
+pub const THRESH: ParamSpec = ParamSpec {
+    id: "thresh",
+    name: "Threshold",
+    unit: "dB",
+    min: -80.0,
+    max: 0.0,
+    default: -30.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 1.0,
+    wheel_step_fine: 0.1,
+    display: ParamDisplay::Number,
+};
+
+pub const ATTACK: ParamSpec = ParamSpec {
+    id: "attack",
+    name: "Attack",
+    unit: "ms",
+    min: 0.5,
+    max: 200.0,
+    default: 10.0,
+    scale: ParamScale::Log,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 1.0 / 12.0,
+    wheel_step_fine: 1.0 / 48.0,
+    display: ParamDisplay::Time,
+};
+
+pub const RELEASE: ParamSpec = ParamSpec {
+    id: "release",
+    name: "Release",
+    unit: "ms",
+    min: 10.0,
+    max: 2500.0,
+    default: 150.0,
+    scale: ParamScale::Log,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 1.0 / 12.0,
+    wheel_step_fine: 1.0 / 48.0,
+    display: ParamDisplay::Time,
+};
+
+pub const DMODE: ChoiceSpec = ChoiceSpec { id: "dmode", name: "Dynamics Mode", choices: &DynamicsMode::NAMES, default: 0 };
+
+/// Transient mode: how far the band moves on attacks.
+pub const TRANSIENT: ParamSpec = ParamSpec {
+    id: "transient",
+    name: "Transient Attack",
+    unit: "dB",
+    min: -12.0,
+    max: 12.0,
+    default: 0.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 0.5,
+    wheel_step_fine: 0.1,
+    display: ParamDisplay::Number,
+};
+
+/// Transient mode: how far the band moves in the tails after attacks.
+pub const SUSTAIN: ParamSpec = ParamSpec {
+    id: "sustain",
+    name: "Sustain",
+    unit: "dB",
+    min: -12.0,
+    max: 12.0,
+    default: 0.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 0.5,
+    wheel_step_fine: 0.1,
+    display: ParamDisplay::Number,
+};
+
+/// Transient mode: where the attack phase hands over to the sustain phase.
+pub const TTIME: ParamSpec = ParamSpec {
+    id: "ttime",
+    name: "Transient Time",
+    unit: "ms",
+    min: 5.0,
+    max: 200.0,
+    default: DEFAULT_TRANSIENT_MS as f32,
+    scale: ParamScale::Log,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 1.0 / 12.0,
+    wheel_step_fine: 1.0 / 48.0,
+    display: ParamDisplay::Time,
+};
+
+/// Transient mode: how wide the crossfade from attack to sustain is, % of the transient time.
+pub const TRANSITION: ParamSpec = ParamSpec {
+    id: "transition",
+    name: "Transition",
+    unit: "%",
+    min: 0.0,
+    max: 200.0,
+    default: (DEFAULT_TRANSITION * 100.0) as f32,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+
+/// How the attack and release dials feel: common times get most of the travel (attack up to
+/// 50 ms, release 100–300 ms); the rarely used ends move faster.
+pub const ATTACK_DIAL: DialCurve = DialCurve(&[(0.0, 0.5), (0.12, 2.0), (0.3, 10.0), (0.75, 50.0), (1.0, 200.0)]);
+pub const RELEASE_DIAL: DialCurve = DialCurve(&[(0.0, 10.0), (0.15, 40.0), (0.3, 100.0), (0.75, 300.0), (1.0, 2500.0)]);
+
+pub const RATIO: ParamSpec = ParamSpec {
+    id: "ratio",
+    name: "Ratio",
+    unit: ":1",
+    min: 1.0,
+    max: 20.0,
+    default: 3.0,
+    scale: ParamScale::Log,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 1.0 / 12.0,
+    wheel_step_fine: 1.0 / 48.0,
+    display: ParamDisplay::Number,
+};
+
 /// `b03_freq` for band index 2.
 pub fn band_id(band: usize, param: &str) -> String {
     format!("b{:02}_{param}", band + 1)
@@ -94,6 +243,15 @@ pub fn manifest() -> String {
         lines.push(prefix(Q.manifest_line()));
         lines.push(prefix(SLOPE.manifest_line()));
         lines.push(prefix(STEREO.manifest_line()));
+        lines.push(prefix(DYN.manifest_line()));
+        for spec in [RANGE, THRESH, ATTACK, RELEASE, RATIO] {
+            lines.push(prefix(spec.manifest_line()));
+        }
+        lines.push(prefix(DMODE.manifest_line()));
+        lines.push(prefix(SUSTAIN.manifest_line()));
+        lines.push(prefix(TRANSIENT.manifest_line()));
+        lines.push(prefix(TTIME.manifest_line()));
+        lines.push(prefix(TRANSITION.manifest_line()));
     }
     lines.join("\n") + "\n"
 }
@@ -106,6 +264,17 @@ pub struct BandParams {
     pub q: FloatParam,
     pub slope: IntParam,
     pub stereo: IntParam,
+    pub dyn_on: BoolParam,
+    pub range: FloatParam,
+    pub thresh: FloatParam,
+    pub attack: FloatParam,
+    pub release: FloatParam,
+    pub ratio: FloatParam,
+    pub dmode: IntParam,
+    pub sustain: FloatParam,
+    pub transient: FloatParam,
+    pub ttime: FloatParam,
+    pub transition: FloatParam,
 }
 
 impl BandParams {
@@ -119,6 +288,17 @@ impl BandParams {
             q: float_param_named(&Q, name("Q")),
             slope: choice_param(&SLOPE, name("Slope")),
             stereo: choice_param(&STEREO, name("Stereo")),
+            dyn_on: bool_param(&DYN, name("Dynamic")),
+            range: float_param_named(&RANGE, name("Dynamic Range")),
+            thresh: float_param_named(&THRESH, name("Threshold")),
+            attack: float_param_named(&ATTACK, name("Attack")),
+            release: float_param_named(&RELEASE, name("Release")),
+            ratio: float_param_named(&RATIO, name("Ratio")),
+            dmode: choice_param(&DMODE, name("Dynamics Mode")),
+            sustain: float_param_named(&SUSTAIN, name("Sustain")),
+            transient: float_param_named(&TRANSIENT, name("Transient Attack")),
+            ttime: float_param_named(&TTIME, name("Transient Time")),
+            transition: float_param_named(&TRANSITION, name("Transition")),
         }
     }
 
@@ -132,6 +312,19 @@ impl BandParams {
             q: f64::from(self.q.value()),
             slope: self.slope.value().max(0) as usize,
             placement: Placement::from_index(self.stereo.value().max(0) as usize),
+            dynamics: Dynamics {
+                enabled: self.dyn_on.value(),
+                mode: DynamicsMode::from_index(self.dmode.value().max(0) as usize),
+                range_db: f64::from(self.range.value()),
+                transient_db: f64::from(self.transient.value()),
+                sustain_db: f64::from(self.sustain.value()),
+                transient_ms: f64::from(self.ttime.value()),
+                transition: f64::from(self.transition.value()) / 100.0,
+                threshold_db: f64::from(self.thresh.value()),
+                attack_ms: f64::from(self.attack.value()),
+                release_ms: f64::from(self.release.value()),
+                ratio: f64::from(self.ratio.value()),
+            },
         }
     }
 }
@@ -160,7 +353,18 @@ unsafe impl Params for EqParams {
             map.push((band_id(i, GAIN.id), b.gain.as_ptr(), group.clone()));
             map.push((band_id(i, Q.id), b.q.as_ptr(), group.clone()));
             map.push((band_id(i, SLOPE.id), b.slope.as_ptr(), group.clone()));
-            map.push((band_id(i, STEREO.id), b.stereo.as_ptr(), group));
+            map.push((band_id(i, STEREO.id), b.stereo.as_ptr(), group.clone()));
+            map.push((band_id(i, DYN.id), b.dyn_on.as_ptr(), group.clone()));
+            map.push((band_id(i, RANGE.id), b.range.as_ptr(), group.clone()));
+            map.push((band_id(i, THRESH.id), b.thresh.as_ptr(), group.clone()));
+            map.push((band_id(i, ATTACK.id), b.attack.as_ptr(), group.clone()));
+            map.push((band_id(i, RELEASE.id), b.release.as_ptr(), group.clone()));
+            map.push((band_id(i, RATIO.id), b.ratio.as_ptr(), group.clone()));
+            map.push((band_id(i, DMODE.id), b.dmode.as_ptr(), group.clone()));
+            map.push((band_id(i, SUSTAIN.id), b.sustain.as_ptr(), group.clone()));
+            map.push((band_id(i, TRANSIENT.id), b.transient.as_ptr(), group.clone()));
+            map.push((band_id(i, TTIME.id), b.ttime.as_ptr(), group.clone()));
+            map.push((band_id(i, TRANSITION.id), b.transition.as_ptr(), group));
         }
         map
     }

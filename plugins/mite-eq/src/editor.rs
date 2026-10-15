@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_dsp::analyzer::Analyzer;
-use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Placement, Sections, FREQ_MAX, FREQ_MIN};
+use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
@@ -16,7 +16,7 @@ use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
-use crate::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, STEREO, TYPE};
+use crate::params::{band_id, ATTACK, ATTACK_DIAL, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use crate::EqShared;
 
 /// Mite EQ wears the EQ accent (tokens.json `color.accent.eq`).
@@ -44,15 +44,51 @@ const PX_PER_DB: f64 = 264.0 / 18.0;
 const POINTS: usize = 301;
 
 const NODE_HIT: f64 = 16.0;
-const PANEL_W: f64 = 620.0;
+const PANEL_W: f64 = 700.0;
 const PANEL_H: f64 = 104.0;
-/// Panel dials: diameter, and the x of their group's centre relative to the panel.
+/// Extra height of the dynamics row (dynamic bands only).
+const PANEL_DYN_H: f64 = 104.0;
+/// Panel dials: diameter, and the x of the rightmost dial's centre relative to the panel (clear
+/// of the close and bypass buttons).
 const PANEL_DIAL: f64 = 56.0;
-const PANEL_DIALS_X: f64 = 450.0;
-const MENU_ITEM_H: f64 = 28.0;
-/// The band panel is docked at the bottom centre of the plot, like FabFilter's, so it never
-/// covers the area around the node being edited.
-const PANEL_ORIGIN: Point = Point::new((PLOT_W - PANEL_W) / 2.0, HELP_TOP - PANEL_H - 10.0);
+const PANEL_LAST_DIAL_X: f64 = 596.0;
+const PANEL_DIAL_STEP: f64 = 84.0;
+const MENU_ITEM_H: f64 = 30.0;
+/// The gain dial's dynamics ring: its radius, and the radial band that grabs it.
+const RING_R: f64 = PANEL_DIAL / 2.0 + 7.0;
+const RING_HIT: (f64, f64) = (PANEL_DIAL / 2.0 + 1.0, PANEL_DIAL / 2.0 + 14.0);
+/// dB of dynamic range per px dragged on the ring or the dynamics scope.
+const RING_DB_PER_PX: f64 = 0.1;
+/// Below this |range| a band is static: pulling the range back to the node turns dynamics off.
+const RANGE_OFF_DB: f64 = 0.5;
+/// Distance of the "make dynamic" grips from a static node, and their hit radius.
+const GRIP_OFFSET: f64 = 28.0;
+const GRIP_HIT: f64 = 11.0;
+/// The dynamics scope in the panel: size, and the quietest level it shows (dBFS).
+const SCOPE_W: f64 = 200.0;
+const SCOPE_H: f64 = 86.0;
+const SCOPE_FLOOR_DB: f64 = -60.0;
+/// Transient scope: the simulated hit's silence before the onset and its length, s, and the inner
+/// padding. Time runs on a square-root axis (see [`scope_x`]).
+const SCOPE_PRE_S: f64 = 0.005;
+const SCOPE_LEN_S: f64 = 0.6;
+const SCOPE_PAD: f64 = 8.0;
+
+/// x in the transient scope `r` of time `t` s after the hit starts. Square-root time: the first
+/// tens of milliseconds, where the attack acts, get room to show their shape.
+fn scope_x(r: Rect, t: f64) -> f64 {
+    r.x0 + SCOPE_PAD + ((t + SCOPE_PRE_S) / SCOPE_LEN_S).clamp(0.0, 1.0).sqrt() * (r.width() - 2.0 * SCOPE_PAD)
+}
+
+/// The time after the hit starts, s, at x in the transient scope `r` (the inverse of [`scope_x`]).
+fn scope_time(r: Rect, x: f64) -> f64 {
+    let u = ((x - r.x0 - SCOPE_PAD) / (r.width() - 2.0 * SCOPE_PAD)).clamp(0.0, 1.0);
+    u * u * SCOPE_LEN_S - SCOPE_PRE_S
+}
+/// dB per px dragged on the transient scope.
+const SCOPE_DB_PER_PX: f64 = 0.15;
+/// Gap between the band panel and the plot's edges.
+const PANEL_MARGIN: f64 = 14.0;
 
 fn fx(f: f64) -> f64 {
     PLOT_W * (f / FREQ_MIN).ln() / (FREQ_MAX / FREQ_MIN).ln()
@@ -68,6 +104,11 @@ fn gy(db: f64) -> f64 {
 
 fn yg(y: f64) -> f64 {
     (MID - y) / PX_PER_DB
+}
+
+/// The analyzer's display tilt at `f`: 4.5 dB/oct around 1 kHz, so pink noise reads flat.
+fn tilt_db(f: f64) -> f64 {
+    4.5 * (f / 1000.0).log2()
 }
 
 /// Spectrum: 0 dBFS at the top of the plot, −90 at the bottom.
@@ -94,6 +135,17 @@ struct BandIds {
     q: String,
     slope: String,
     stereo: String,
+    dyn_on: String,
+    range: String,
+    thresh: String,
+    attack: String,
+    release: String,
+    ratio: String,
+    dmode: String,
+    sustain: String,
+    transient: String,
+    ttime: String,
+    transition: String,
 }
 
 impl BandIds {
@@ -106,6 +158,17 @@ impl BandIds {
             q: band_id(b, Q.id),
             slope: band_id(b, SLOPE.id),
             stereo: band_id(b, STEREO.id),
+            dyn_on: band_id(b, DYN.id),
+            range: band_id(b, RANGE.id),
+            thresh: band_id(b, THRESH.id),
+            attack: band_id(b, ATTACK.id),
+            release: band_id(b, RELEASE.id),
+            ratio: band_id(b, RATIO.id),
+            dmode: band_id(b, DMODE.id),
+            sustain: band_id(b, SUSTAIN.id),
+            transient: band_id(b, TRANSIENT.id),
+            ttime: band_id(b, TTIME.id),
+            transition: band_id(b, TRANSITION.id),
         }
     }
 }
@@ -114,6 +177,18 @@ impl BandIds {
 enum DragMode {
     Move,
     Width,
+    /// A plot grip: the range follows the pointer's height above or below the node.
+    Range,
+    /// The gain dial's ring: right lifts the band when loud, left ducks it.
+    Ring,
+    /// The compressor scope: sideways sets the threshold, up and down the range.
+    Scope,
+    /// The transient scope's attack: up and down set the transient amount.
+    TransientAttack,
+    /// The transient scope's tail: up and down set the sustain.
+    Sustain,
+    /// The transient scope's handover line: sideways sets the transient time.
+    Split,
 }
 
 struct NodeDrag {
@@ -123,17 +198,29 @@ struct NodeDrag {
     log_freq: f64,
     gain: f64,
     log_q: f64,
+    range: f64,
+    thresh: f64,
+    sustain: f64,
+    transient: f64,
 }
 
-/// How one display point reads the FFT: average bins `first..=last`, or interpolate between
-/// `first` and `last` by `frac`.
+/// How one display point reads the FFT: a weighted sum of the bins in
+/// `EqView::spectrum_weights[start..end]`, then its tilt gain. `cubic` points (where bins are
+/// sparser than the display) sum the bins' levels in dB with Catmull-Rom weights, so the curve
+/// passes smoothly through the bins; the others average power.
 struct SpectrumPoint {
-    first: usize,
-    last: usize,
-    frac: f32,
+    start: usize,
+    end: usize,
     tilt: f32,
-    average: bool,
+    cubic: bool,
 }
+
+/// Analyzer smoothing across frequency: a raised-cosine window this many octaves wide, so bins
+/// fade in and out of a point instead of stepping.
+const SPECTRUM_SMOOTH_OCT: f64 = 1.0 / 6.0;
+/// Analyzer motion: time constants of the rise and of the fall, s.
+const SPECTRUM_RISE_S: f64 = 0.06;
+const SPECTRUM_FALL_S: f64 = 0.3;
 
 struct BandResponse {
     settings: BandSettings,
@@ -225,6 +312,72 @@ fn draw_type_icon(scene: &mut mite_ui::vello::Scene, kind: BandType, at: Point, 
     scene.stroke(&stroke, Affine::IDENTITY, color, None, &p);
 }
 
+/// Draws a cut's steepness for slope choice `i` of `n` as a 22 × 12 icon: steeper is more upright.
+fn draw_slope_icon(scene: &mut mite_ui::vello::Scene, kind: BandType, i: usize, n: usize, at: Point, color: Color) {
+    let t = i as f64 / (n.max(2) - 1) as f64;
+    let run = 12.0 - 11.0 * t.sqrt();
+    // Drawn as a low cut; a high cut is its mirror image.
+    let mirror = kind == BandType::HighCut;
+    let pt = |x: f64, y: f64| (at.x + if mirror { 22.0 - x } else { x }, at.y + y);
+    let knee = 13.0;
+    let mut p = BezPath::new();
+    p.move_to(pt(knee - run, 12.0));
+    p.quad_to(pt(knee - 0.1 * run, 3.0), pt(knee + 2.0, 3.0));
+    p.line_to(pt(22.0, 3.0));
+    let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+    scene.stroke(&stroke, Affine::IDENTITY, color, None, &p);
+}
+
+/// Draws a stereo placement as a 22 × 12 icon: two overlapping circles for the left and right
+/// channels, filled where the band works (both, one, their shared middle or their sides).
+fn draw_placement_icon(scene: &mut mite_ui::vello::Scene, placement: Placement, at: Point, color: Color) {
+    let (l, r) = (Circle::new((at.x + 7.5, at.y + 6.0), 5.0), Circle::new((at.x + 14.5, at.y + 6.0), 5.0));
+    let fill = color.multiply_alpha(0.9);
+    let both = |rule| {
+        let mut p = BezPath::new();
+        p.extend(mite_ui::kurbo::Shape::path_elements(&l, 0.1));
+        p.extend(mite_ui::kurbo::Shape::path_elements(&r, 0.1));
+        (rule, p)
+    };
+    match placement {
+        Placement::Stereo => {
+            let (rule, p) = both(Fill::NonZero);
+            scene.fill(rule, Affine::IDENTITY, fill, None, &p);
+        }
+        Placement::Left => scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &l),
+        Placement::Right => scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &r),
+        Placement::Mid => {
+            scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &l);
+            scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &r);
+            scene.pop_layer();
+        }
+        Placement::Side => {
+            let (rule, p) = both(Fill::EvenOdd);
+            scene.fill(rule, Affine::IDENTITY, fill, None, &p);
+        }
+    }
+    let stroke = Stroke::new(1.2);
+    scene.stroke(&stroke, Affine::IDENTITY, color.multiply_alpha(0.7), None, &l);
+    scene.stroke(&stroke, Affine::IDENTITY, color.multiply_alpha(0.7), None, &r);
+}
+
+/// A dropdown's icon.
+#[derive(Clone, Copy)]
+enum Icon {
+    Type(BandType),
+    /// A cut type and its slope index.
+    Slope(BandType, usize),
+    Stereo(Placement),
+}
+
+fn draw_icon(scene: &mut mite_ui::vello::Scene, icon: Icon, at: Point, color: Color) {
+    match icon {
+        Icon::Type(kind) => draw_type_icon(scene, kind, at, color),
+        Icon::Slope(kind, i) => draw_slope_icon(scene, kind, i, SLOPE.choices.len(), at, color),
+        Icon::Stereo(placement) => draw_placement_icon(scene, placement, at, color),
+    }
+}
+
 /// Which band setting an open dropdown chooses.
 #[derive(Clone, Copy, PartialEq)]
 enum MenuKind {
@@ -237,6 +390,8 @@ enum MenuKind {
 struct Menu {
     kind: MenuKind,
     band: usize,
+    /// The band's type when the menu opened (slope icons are drawn for it).
+    band_kind: BandType,
     anchor: Rect,
     items: &'static [&'static str],
     current: usize,
@@ -244,10 +399,18 @@ struct Menu {
 }
 
 impl Menu {
+    fn icon(&self, i: usize) -> Icon {
+        match self.kind {
+            MenuKind::Type => Icon::Type(BandType::from_index(i)),
+            MenuKind::Slope => Icon::Slope(self.band_kind, i),
+            MenuKind::Stereo => Icon::Stereo(Placement::from_index(i)),
+        }
+    }
+
     /// Item rectangles: below the button when they fit inside the display, otherwise above.
     fn item_rects(&self) -> Vec<Rect> {
         let n = self.items.len() as f64;
-        let w = self.anchor.width().max(if self.kind == MenuKind::Type { 180.0 } else { 150.0 });
+        let w = self.anchor.width().max(if self.kind == MenuKind::Type { 184.0 } else { 150.0 });
         let h = n * MENU_ITEM_H + 8.0;
         let top = if self.anchor.y1 + 4.0 + h <= HELP_TOP { self.anchor.y1 + 4.0 } else { self.anchor.y0 - 4.0 - h };
         (0..self.items.len())
@@ -272,8 +435,29 @@ struct PanelHits {
     kind: Rect,
     slope: Option<Rect>,
     stereo: Rect,
+    /// Centre of the gain dial, whose outer ring sets the dynamic range (types with gain only).
+    ring: Option<Point>,
+    /// The dynamics scope and the button that removes dynamics (dynamic bands only).
+    scope: Option<Rect>,
+    modes: Option<[Rect; 2]>,
+    remove_dynamics: Option<Rect>,
     bypass: Rect,
     close: Rect,
+}
+
+/// The dynamics control under the pointer.
+#[derive(Clone, Copy, PartialEq)]
+enum Hot {
+    /// A grip on the plot: the end of a dynamic band's range, or one of the two grips beside a
+    /// static node that make it dynamic.
+    Grip(Point),
+    Ring,
+    Scope,
+    /// The transient scope's line where the attack hands over to the sustain.
+    Split,
+    /// A dynamics mode button (index into `DynamicsMode::NAMES`).
+    Mode(usize),
+    RemoveDynamics,
 }
 
 pub struct EqView {
@@ -292,6 +476,7 @@ pub struct EqView {
     samples: Vec<f32>,
     power: Vec<f32>,
     spectrum_map: Vec<SpectrumPoint>,
+    spectrum_weights: Vec<(usize, f32)>,
     spectrum_rate: f64,
     pre: Vec<f64>,
     post: Vec<f64>,
@@ -305,6 +490,15 @@ pub struct EqView {
     /// Wheel movement not yet turned into whole slope steps (smooth-scrolling devices send
     /// fractions of a line).
     slope_wheel: f32,
+    /// Dynamic gains last drawn, dB.
+    last_dynamic: [f32; BANDS],
+    /// The selected band's detected level last drawn, dBFS.
+    last_level: f32,
+    hot: Option<Hot>,
+    /// Origin the panel dials were laid out for, and whether the dynamics row was included.
+    knobs_layout: Option<(Point, Option<f64>)>,
+    /// The panel's dock: x, and whether it hangs from the bottom of the plot.
+    panel_dock: Option<(f64, bool)>,
     ticks: u32,
 }
 
@@ -330,6 +524,7 @@ impl EqView {
             samples: vec![0.0; ANALYZER_SIZE],
             power: vec![0.0; bins],
             spectrum_map: Vec::new(),
+            spectrum_weights: Vec::new(),
             spectrum_rate: 0.0,
             pre: vec![-150.0; POINTS],
             post: vec![-150.0; POINTS],
@@ -341,6 +536,11 @@ impl EqView {
             signature: Vec::new(),
             last_signature_check: Instant::now(),
             slope_wheel: 0.0,
+            last_dynamic: [0.0; BANDS],
+            last_level: -120.0,
+            hot: None,
+            knobs_layout: None,
+            panel_dock: None,
             ticks: 0,
         }
     }
@@ -359,6 +559,19 @@ impl EqView {
             q: f64::from(Self::plain(host, &ids.q)),
             slope: Self::plain(host, &ids.slope).round().max(0.0) as usize,
             placement: Placement::from_index(Self::plain(host, &ids.stereo).round().max(0.0) as usize),
+            dynamics: Dynamics {
+                enabled: Self::plain(host, &ids.dyn_on) >= 0.5,
+                mode: DynamicsMode::from_index(Self::plain(host, &ids.dmode).round().max(0.0) as usize),
+                range_db: f64::from(Self::plain(host, &ids.range)),
+                transient_db: f64::from(Self::plain(host, &ids.transient)),
+                sustain_db: f64::from(Self::plain(host, &ids.sustain)),
+                transient_ms: f64::from(Self::plain(host, &ids.ttime)),
+                transition: f64::from(Self::plain(host, &ids.transition)) / 100.0,
+                threshold_db: f64::from(Self::plain(host, &ids.thresh)),
+                attack_ms: f64::from(Self::plain(host, &ids.attack)),
+                release_ms: f64::from(Self::plain(host, &ids.release)),
+                ratio: f64::from(Self::plain(host, &ids.ratio)),
+            },
         }
     }
 
@@ -398,6 +611,7 @@ impl EqView {
         self.menu = None;
         self.panel_knobs.clear();
         self.panel_hits = None;
+        self.panel_dock = None;
     }
 
     fn sample_rate(&self) -> f64 {
@@ -417,28 +631,49 @@ impl EqView {
         self.responses[b].as_ref().expect("just filled")
     }
 
-    /// Per display point: the FFT bins it averages (or the bin pair it interpolates) and its
-    /// tilt gain. Depends only on the sample rate, so it is rebuilt only when that changes.
+    /// Per display point: the FFT bins it reads with their weights, and its tilt gain. Depends
+    /// only on the sample rate, so it is rebuilt only when that changes.
     fn rebuild_spectrum_map(&mut self, fs: f64) {
         let size = self.analyzer.size() as f64;
         let last = self.power.len() - 1;
+        let half = 0.5 * SPECTRUM_SMOOTH_OCT;
+        let mut weights = Vec::new();
         self.spectrum_map = (0..POINTS)
             .map(|i| {
-                let f = xf(i as f64 * PLOT_W / (POINTS - 1) as f64);
-                // 1/12-octave smoothing: ±1/24 octave around the point.
-                let (lo, hi) = (f * 2f64.powf(-1.0 / 24.0) * size / fs, f * 2f64.powf(1.0 / 24.0) * size / fs);
-                // 4.5 dB/oct tilt around 1 kHz (settings default), as a power factor.
-                let tilt = 10f64.powf(0.45 * (f / 1000.0).log2()) as f32;
-                if hi.floor() - lo.ceil() < 1.0 {
-                    let k = f * size / fs;
-                    let k0 = (k.floor() as usize).min(last - 1);
-                    SpectrumPoint { first: k0, last: k0 + 1, frac: (k - k0 as f64) as f32, tilt, average: false }
+                let f = xf(grid_x(i));
+                let tilt = 10f64.powf(tilt_db(f) / 10.0) as f32;
+                let start = weights.len();
+                let (lo, hi) = (f * 2f64.powf(-half) * size / fs, f * 2f64.powf(half) * size / fs);
+                let (a, b) = ((lo.ceil() as usize).max(1), (hi.floor() as usize).min(last));
+                if b >= a + 2 {
+                    let mut sum = 0.0;
+                    for k in a..=b {
+                        let d = (k as f64 * fs / size / f).log2() / half;
+                        let w = 0.5 * (1.0 + (std::f64::consts::PI * d).cos());
+                        weights.push((k, w as f32));
+                        sum += w;
+                    }
+                    for w in &mut weights[start..] {
+                        w.1 /= sum as f32;
+                    }
+                    SpectrumPoint { start, end: weights.len(), tilt, cubic: false }
                 } else {
-                    let (a, b) = (lo.ceil() as usize, (hi.floor() as usize).min(last));
-                    SpectrumPoint { first: a.min(b), last: b, frac: 0.0, tilt, average: true }
+                    // Fewer bins than the window needs (low frequencies): a cubic through the
+                    // four bins around the point. Linear interpolation in power bows outwards in
+                    // dB and meets the next segment in a point at every bin.
+                    let k = (f * size / fs).clamp(1.0, last as f64 - 2.0);
+                    let k0 = k.floor() as usize;
+                    let t = (k - k0 as f64) as f32;
+                    let (t2, t3) = (t * t, t * t * t);
+                    weights.push((k0 - 1, 0.5 * (-t3 + 2.0 * t2 - t)));
+                    weights.push((k0, 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0)));
+                    weights.push((k0 + 1, 0.5 * (-3.0 * t3 + 4.0 * t2 + t)));
+                    weights.push((k0 + 2, 0.5 * (t3 - t2)));
+                    SpectrumPoint { start, end: weights.len(), tilt, cubic: true }
                 }
             })
             .collect();
+        self.spectrum_weights = weights;
         self.spectrum_rate = fs;
     }
 
@@ -459,25 +694,35 @@ impl EqView {
                 tap.read_latest(&mut self.samples);
                 self.analyzer.analyze_power(&self.samples, &mut self.power);
                 let target = if which == 0 { &mut self.pre_target } else { &mut self.post_target };
+                let db = |p: f32| 10.0 * p.max(1e-15).log10();
                 for (t, m) in target.iter_mut().zip(&self.spectrum_map) {
-                    let power = if m.average {
-                        let span = &self.power[m.first..=m.last];
-                        span.iter().sum::<f32>() / span.len() as f32
+                    let bins = &self.spectrum_weights[m.start..m.end];
+                    *t = if m.cubic {
+                        bins.iter().map(|&(k, w)| db(self.power[k]) * w).sum::<f32>() + db(m.tilt)
                     } else {
-                        self.power[m.first] * (1.0 - m.frac) + self.power[m.last] * m.frac
+                        db(bins.iter().map(|&(k, w)| self.power[k] * w).sum::<f32>() * m.tilt)
                     };
-                    *t = 10.0 * (power * m.tilt).max(1e-15).log10();
+                }
+                // Round what is left of dips and peaks: a light [1 2 1] pass in dB, twice (about
+                // 0.04 octave), far narrower than the frequency smoothing.
+                for _ in 0..2 {
+                    let mut prev = target[0];
+                    for i in 1..target.len() - 1 {
+                        let here = target[i];
+                        target[i] = 0.25 * prev + 0.5 * here + 0.25 * target[i + 1];
+                        prev = here;
+                    }
                 }
             }
         }
-        let rise = (1.0 - (-dt / 0.03).exp()) as f32;
-        let fall = (60.0 * dt) as f32;
+        let rise = (1.0 - (-dt / SPECTRUM_RISE_S).exp()) as f32;
+        let fall = (1.0 - (-dt / SPECTRUM_FALL_S).exp()) as f32;
         let mut changed = false;
         for (curve, target) in [(&mut self.pre, &self.pre_target), (&mut self.post, &self.post_target)] {
             for (value, &db) in curve.iter_mut().zip(target.iter()) {
-                // Ballistics: ~30 ms rise, 60 dB/s fall.
+                // Ballistics: both ways eased, so frames glide into each other instead of jumping.
                 let current = *value as f32;
-                let next = if db > current { current + (db - current) * rise } else { db.max(current - fall) };
+                let next = current + (db - current) * if db > current { rise } else { fall };
                 if (next - current).abs() > 0.02 {
                     changed = true;
                 }
@@ -494,9 +739,15 @@ impl EqView {
             if s.kind.has_gain() {
                 t += &format!(" · {}", GAIN.format(s.gain_db as f32));
             }
+            if s.is_dynamic() {
+                t += &format!(" · {}", Self::dynamics_words(&s));
+            }
             let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
             t + " — drag to move, Shift for fine, " + wheel + ", double-click resets, right-click deletes"
         };
+        if let Some(text) = self.dynamics_help(host) {
+            return text;
+        }
         if let Some(d) = &self.drag {
             return band_line(d.band);
         }
@@ -517,6 +768,46 @@ impl EqView {
         }
     }
 
+    /// "dynamic −6.0 dB", "attack +6.0 dB · sustain −3.0 dB", or "static".
+    fn dynamics_words(s: &BandSettings) -> String {
+        let d = &s.dynamics;
+        match (s.is_dynamic(), d.mode) {
+            (false, _) => "static".into(),
+            (true, DynamicsMode::Compressor) => format!("dynamic {}", RANGE.format(d.range_db as f32)),
+            (true, DynamicsMode::Transient) => {
+                format!("attack {} · sustain {}", TRANSIENT.format(d.transient_db as f32), SUSTAIN.format(d.sustain_db as f32))
+            }
+        }
+    }
+
+    /// Help for the dynamics control being dragged or pointed at.
+    fn dynamics_help(&self, host: &dyn ParamHost) -> Option<String> {
+        let hot = match self.drag.as_ref().map(|d| d.mode) {
+            Some(DragMode::Range) => Hot::Grip(Point::ZERO),
+            Some(DragMode::TransientAttack | DragMode::Sustain) => Hot::Scope,
+            Some(DragMode::Split) => Hot::Split,
+            Some(DragMode::Ring) => Hot::Ring,
+            Some(DragMode::Scope) => Hot::Scope,
+            Some(_) => return None,
+            None => self.hot?,
+        };
+        let b = self.selected?;
+        let s = self.band(host, b);
+        let n = b + 1;
+        let words = Self::dynamics_words(&s);
+        Some(match hot {
+            Hot::Grip(_) if s.is_dynamic() => format!("Band {n} {words} — drag; double-click removes"),
+            Hot::Grip(_) => format!("Band {n} — drag to make dynamic"),
+            Hot::Ring => format!("Band {n} {words} — drag the ring; double-click removes"),
+            Hot::Scope if s.dynamics.mode == DynamicsMode::Transient => format!("Band {n} {words} — drag"),
+            Hot::Scope => format!("Band {n} {words} · threshold {} — drag", THRESH.format(s.dynamics.threshold_db as f32)),
+            Hot::Split => format!("Band {n} transient time {} — drag; double-click resets", TTIME.format(s.dynamics.transient_ms as f32)),
+            Hot::Mode(0) => "Compressor".into(),
+            Hot::Mode(_) => "Transient shaper".into(),
+            Hot::RemoveDynamics => format!("Band {n} — make static"),
+        })
+    }
+
     fn add_band(&mut self, host: &dyn ParamHost, p: Point) {
         let Some(b) = (0..BANDS).find(|&b| !self.band(host, b).enabled) else { return };
         let ids = &self.ids[b];
@@ -528,16 +819,17 @@ impl EqView {
         self.select(Some(b));
     }
 
-    fn build_panel_knobs(&mut self, host: &dyn ParamHost, origin: Point) {
+    /// Lays out the panel dials: the core row at `origin`, the dynamics row (if shown) from `dyn_top`.
+    fn build_panel_knobs(&mut self, host: &dyn ParamHost, origin: Point, dyn_top: Option<f64>) {
         let Some(b) = self.selected else { return };
         let s = self.band(host, b);
         let ids = &self.ids[b];
         let mut col = 0.0;
-        // Dials in a row on the right of the panel, beside the buttons.
+        // Dials in a row on the right of the panel, clear of the buttons.
         let count = if s.kind.has_gain() { 3.0 } else { 2.0 };
-        let first = origin.x + PANEL_DIALS_X - (count - 1.0) * 40.0;
+        let first = origin.x + PANEL_LAST_DIAL_X - (count - 1.0) * PANEL_DIAL_STEP;
         let mut knob = |spec, label, kind, id: &str| {
-            let k = Knob::new(spec, label, kind, Point::new(first + col * 80.0, origin.y + 44.0), PANEL_DIAL)
+            let k = Knob::new(spec, label, kind, Point::new(first + col * PANEL_DIAL_STEP, origin.y + 44.0), PANEL_DIAL)
                 .with_id(id);
             col += 1.0;
             k
@@ -547,7 +839,205 @@ impl EqView {
             knobs.push(knob(GAIN, "GAIN", KnobKind::Bipolar, &ids.gain));
         }
         knobs.push(knob(Q, "Q", KnobKind::Unipolar, &ids.q));
+        if let Some(dyn_top) = dyn_top {
+            // Dynamics row: the scope on the left, then smaller dials. The range has no dial: it
+            // is the gain dial's ring, the scope and the grip on the plot.
+            let mut col = 0.0;
+            let x0 = origin.x + 14.0 + SCOPE_W + 12.0 + 30.0 + 52.0;
+            let mut small = |spec, label, kind, id: &str| {
+                let k = Knob::new(spec, label, kind, Point::new(x0 + col * 82.0, dyn_top + 38.0), 48.0)
+                    .with_id(id);
+                col += 1.0;
+                k
+            };
+            if s.dynamics.mode == DynamicsMode::Transient {
+                knobs.push(small(TRANSIENT, "ATTACK", KnobKind::Bipolar, &ids.transient));
+                knobs.push(small(SUSTAIN, "SUSTAIN", KnobKind::Bipolar, &ids.sustain));
+                knobs.push(small(TTIME, "TIME", KnobKind::Unipolar, &ids.ttime));
+                knobs.push(small(TRANSITION, "TRANSITION", KnobKind::Unipolar, &ids.transition));
+            } else {
+                knobs.push(small(THRESH, "THRESHOLD", KnobKind::Unipolar, &ids.thresh));
+                knobs.push(small(ATTACK, "ATTACK", KnobKind::Unipolar, &ids.attack).with_curve(ATTACK_DIAL));
+                knobs.push(small(RELEASE, "RELEASE", KnobKind::Unipolar, &ids.release).with_curve(RELEASE_DIAL));
+                knobs.push(small(RATIO, "RATIO", KnobKind::Unipolar, &ids.ratio));
+            }
+        }
         self.panel_knobs = knobs;
+    }
+
+    /// Dials the panel shows for `s`.
+    fn panel_dial_count(s: &BandSettings, show_dynamics: bool) -> usize {
+        let dynamics = match s.dynamics.mode {
+            DynamicsMode::Compressor => 4,
+            DynamicsMode::Transient => 4,
+        };
+        (if s.kind.has_gain() { 3 } else { 2 }) + if show_dynamics { dynamics } else { 0 }
+    }
+
+    fn panel_height(s: &BandSettings) -> f64 {
+        PANEL_H + if s.is_dynamic() { PANEL_DYN_H } else { 0.0 }
+    }
+
+    /// The panel at its dock (x, and whether it hangs from the bottom of the plot) for `s`.
+    fn docked_rect(s: &BandSettings, x: f64, bottom: bool) -> Rect {
+        let height = Self::panel_height(s);
+        let y = if bottom { HELP_TOP - height - 10.0 } else { DISPLAY_TOP + 10.0 };
+        Rect::new(x, y, x + PANEL_W, y + height)
+    }
+
+    /// Where the band panel goes: docked at the bottom centre of the plot, unless that would hide
+    /// the band's node or range; then to the bottom corner away from it, and failing
+    /// that the top.
+    fn panel_rect(s: &BandSettings) -> Rect {
+        let height = Self::panel_height(s);
+        let p = Self::node_pos(s);
+        let (mut top, mut bottom) = (p.y, p.y);
+        for g in Self::grips(s) {
+            top = top.min(g.y);
+            bottom = bottom.max(g.y);
+        }
+        let keep_out = [Rect::new(p.x - 30.0, top - 10.0, p.x + 30.0, bottom + 10.0)];
+        let (left, right) = (PANEL_MARGIN, PLOT_W - PANEL_MARGIN - PANEL_W);
+        let away = if p.x > PLOT_W / 2.0 { [left, right] } else { [right, left] };
+        let xs = [(PLOT_W - PANEL_W) / 2.0, away[0], away[1]];
+        for y in [HELP_TOP - height - 10.0, DISPLAY_TOP + 10.0] {
+            for x in xs {
+                let r = Rect::new(x, y, x + PANEL_W, y + height);
+                if keep_out.iter().all(|k| r.intersect(*k).area() <= 0.0) {
+                    return r;
+                }
+            }
+        }
+        let y = HELP_TOP - height - 10.0;
+        Rect::new(xs[0], y, xs[0] + PANEL_W, y + height)
+    }
+
+    /// The band's live dynamic gain, dB (0 when not dynamic).
+    fn dynamic_now(&self, b: usize, s: &BandSettings) -> f64 {
+        if s.is_dynamic() { f64::from(self.shared.dynamic[b].load()) } else { 0.0 }
+    }
+
+    /// The plot grips that set a band's dynamic range: the end of the range when the band is
+    /// dynamic, otherwise one above the node (lift when loud) and one below it (duck). A transient
+    /// band has none: its movement follows the sound's shape, set in the panel.
+    fn grips(s: &BandSettings) -> Vec<Point> {
+        if !s.enabled || !s.kind.has_gain() || Self::is_transient(s) {
+            return Vec::new();
+        }
+        let p = Self::node_pos(s);
+        if s.is_dynamic() {
+            return vec![Point::new(p.x, gy((s.gain_db + s.dynamics.range_db).clamp(-18.0, 18.0)))];
+        }
+        vec![
+            Point::new(p.x, (p.y - GRIP_OFFSET).max(PLOT_TOP + 6.0)),
+            Point::new(p.x, (p.y + GRIP_OFFSET).min(PLOT_BOT - 6.0)),
+        ]
+    }
+
+    /// Whether `s` is a dynamic band in transient mode.
+    fn is_transient(s: &BandSettings) -> bool {
+        s.is_dynamic() && s.dynamics.mode == DynamicsMode::Transient
+    }
+
+    /// The dynamics control at `p`, for the selected band.
+    fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
+        let s = self.band(host, self.selected?);
+        if !s.enabled {
+            return None;
+        }
+        if let Some(h) = self.panel_hits.filter(|h| h.panel.contains(p)) {
+            if !Self::is_transient(&s) && h.ring.is_some_and(|c| (RING_HIT.0..=RING_HIT.1).contains(&c.distance(p))) {
+                return Some(Hot::Ring);
+            }
+            if let Some(r) = h.scope.filter(|r| r.contains(p)) {
+                if Self::is_transient(&s) && (p.x - scope_x(r, s.dynamics.transient_ms / 1000.0)).abs() <= 6.0 {
+                    return Some(Hot::Split);
+                }
+                return Some(Hot::Scope);
+            }
+            if let Some(i) = h.modes.and_then(|m| m.iter().position(|r| r.contains(p))) {
+                return Some(Hot::Mode(i));
+            }
+            if h.remove_dynamics.is_some_and(|r| r.contains(p)) {
+                return Some(Hot::RemoveDynamics);
+            }
+            return None;
+        }
+        // A grip wins over the node only when the pointer is nearer to it.
+        let node = Self::node_pos(&s).distance(p);
+        if let Some(g) = Self::grips(&s).into_iter().find(|g| g.distance(p) <= GRIP_HIT && g.distance(p) < node) {
+            return Some(Hot::Grip(g));
+        }
+        None
+    }
+
+    /// Host ids a drag of `mode` changes, for its gestures.
+    fn drag_ids(ids: &BandIds, mode: DragMode, has_gain: bool) -> Vec<&str> {
+        match mode {
+            DragMode::Move if has_gain => vec![&ids.freq, &ids.gain],
+            DragMode::Move => vec![&ids.freq],
+            DragMode::Width => vec![&ids.q],
+            DragMode::Range | DragMode::Ring => vec![&ids.range, &ids.dyn_on],
+            DragMode::Scope => vec![&ids.thresh, &ids.range, &ids.dyn_on],
+            DragMode::TransientAttack => vec![&ids.transient, &ids.dyn_on],
+            DragMode::Sustain => vec![&ids.sustain, &ids.dyn_on],
+            DragMode::Split => vec![&ids.ttime],
+        }
+    }
+
+    /// Starts a drag of band `b`; `range` is where a range drag starts from.
+    fn begin_drag(&mut self, host: &dyn ParamHost, b: usize, mode: DragMode, pos: Point, range: f64) {
+        let s = self.band(host, b);
+        if matches!(mode, DragMode::Range | DragMode::Ring) && !s.is_dynamic() {
+            // The ring and the grips are compressor gestures: a band made dynamic with them is one.
+            Self::set(host, &self.ids[b].dmode, 0.0);
+        }
+        for id in Self::drag_ids(&self.ids[b], mode, s.kind.has_gain()) {
+            host.begin_gesture(id);
+        }
+        self.drag = Some(NodeDrag {
+            band: b,
+            mode,
+            last: pos,
+            log_freq: s.freq.ln(),
+            gain: s.gain_db,
+            log_q: s.q.ln(),
+            range,
+            thresh: s.dynamics.threshold_db,
+            sustain: s.dynamics.sustain_db,
+            transient: s.dynamics.transient_db,
+        });
+    }
+
+    /// The range a band can take: its gain plus the range stays on the gain dial.
+    fn range_limits(host: &dyn ParamHost, ids: &BandIds) -> (f64, f64) {
+        let gain = f64::from(Self::plain(host, &ids.gain));
+        ((-GAIN_LIMIT_DB - gain).max(f64::from(RANGE.min)), (GAIN_LIMIT_DB - gain).min(f64::from(RANGE.max)))
+    }
+
+    /// Sets a band's dynamic range (within [`Self::range_limits`]) and switches dynamics to match.
+    fn apply_range(host: &dyn ParamHost, ids: &BandIds, range: f64) {
+        let (lo, hi) = Self::range_limits(host, ids);
+        host.set_normalized(&ids.range, host.normalize(&ids.range, range.clamp(lo, hi) as f32));
+        Self::update_dynamics_on(host, ids);
+    }
+
+    /// Dynamics are on while the band has somewhere to move: a range, or in transient mode an
+    /// attack or sustain amount, away from zero.
+    fn update_dynamics_on(host: &dyn ParamHost, ids: &BandIds) {
+        let transient = Self::plain(host, &ids.dmode).round() >= 1.0;
+        let away = |id: &str| f64::from(Self::plain(host, id)).abs() >= RANGE_OFF_DB;
+        let on = if transient { away(&ids.transient) || away(&ids.sustain) } else { away(&ids.range) };
+        if (Self::plain(host, &ids.dyn_on) >= 0.5) != on {
+            host.set_normalized(&ids.dyn_on, host.normalize(&ids.dyn_on, if on { 1.0 } else { 0.0 }));
+        }
+    }
+
+    /// Makes band `b` static.
+    fn remove_dynamics(&mut self, host: &dyn ParamHost, b: usize) {
+        Self::set(host, &self.ids[b].dyn_on, 0.0);
+        self.panel_knobs.clear();
+        self.hot = None;
     }
 
     // ---- drawing ------------------------------------------------------------------------
@@ -596,20 +1086,18 @@ impl EqView {
         }
     }
 
+    /// A smooth curve through the grid values (Catmull-Rom as cubic Béziers): no corners at the
+    /// points, so the analyzer reads as a line, not a polyline.
     fn curve_path(values: &[f64], map: impl Fn(f64) -> f64) -> BezPath {
+        let pts: Vec<Point> =
+            values.iter().enumerate().filter(|(_, v)| v.is_finite()).map(|(i, &v)| Point::new(grid_x(i), map(v))).collect();
         let mut path = BezPath::new();
-        let mut started = false;
-        for (i, &v) in values.iter().enumerate() {
-            if !v.is_finite() {
-                continue;
-            }
-            let p = (i as f64 * PLOT_W / (POINTS - 1) as f64, map(v));
-            if started {
-                path.line_to(p);
-            } else {
-                path.move_to(p);
-                started = true;
-            }
+        let Some(&first) = pts.first() else { return path };
+        path.move_to(first);
+        let n = pts.len();
+        for i in 0..n.saturating_sub(1) {
+            let (p0, p1, p2, p3) = (pts[i.saturating_sub(1)], pts[i], pts[i + 1], pts[(i + 2).min(n - 1)]);
+            path.curve_to(p1 + (p2 - p0) / 6.0, p2 - (p3 - p1) / 6.0, p2);
         }
         path
     }
@@ -675,11 +1163,27 @@ impl EqView {
             any = true;
             let color = Self::band_color(theme, s);
             let selected = self.selected == Some(b);
-            let r = self.response(b, s);
+            if s.is_dynamic() && !Self::is_transient(s) {
+                // Where the dynamics can take the band: from the static curve to static + range.
+                let static_curve = Self::curve_at(s, &xs, fs);
+                let full = Self::curve_at(&BandSettings { gain_db: s.gain_db + s.dynamics.range_db, ..*s }, &xs, fs);
+                let mut region = Self::xy_path(&xs, &full, clamp);
+                for (&(x, _), &v) in xs.iter().zip(&static_curve).rev() {
+                    region.line_to((x, clamp(v)));
+                }
+                region.close_path();
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.14), None, &region);
+                // The static curve as the region's edge. Solid: Vello mis-renders dashes along
+                // long many-segment paths (a thick bar appeared along the line).
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.5), None, &Self::xy_path(&xs, &static_curve, clamp));
+            }
+            // The band as it is right now, including its live dynamic gain.
+            let live = BandSettings { gain_db: s.gain_db + self.dynamic_now(b, s), ..*s };
+            let r = self.response(b, &live);
             for (v, &(x, grid)) in values.iter_mut().zip(&xs) {
                 *v = match grid {
                     Some(i) => r.grid[i],
-                    None => band_db(&r.sections, s, xf(x), fs),
+                    None => band_db(&r.sections, &live, xf(x), fs),
                 };
             }
             for (t, v) in total.iter_mut().zip(&values) {
@@ -700,6 +1204,12 @@ impl EqView {
         glow_stroke(cx.scene, &curve, 2.2, theme.curve, theme.curve, 5.0);
     }
 
+    /// A band's drawn response at `xs`, designed fresh (not cached).
+    fn curve_at(s: &BandSettings, xs: &[(f64, Option<usize>)], fs: f64) -> Vec<f64> {
+        let sections = design(s, fs);
+        xs.iter().map(|&(x, _)| band_db(&sections, s, xf(x), fs)).collect()
+    }
+
     fn draw_nodes(&self, cx: &mut DrawCx<'_>, bands: &[BandSettings]) {
         let theme = cx.theme;
         let mut order: Vec<usize> = (0..BANDS).collect();
@@ -717,6 +1227,25 @@ impl EqView {
             let selected = self.selected == Some(b);
             let hovered = self.hover == Some(b);
             let r = if selected { 9.0 } else if hovered { 8.0 } else { 7.0 };
+            if s.is_dynamic() {
+                // A track from the node to where the range ends, filled as far as the band has
+                // moved right now: a meter living on the curve.
+                let transient = Self::is_transient(s);
+                let end = gy((s.gain_db + s.dynamics.range_db).clamp(-18.0, 18.0));
+                let now = gy((s.gain_db + self.dynamic_now(b, s)).clamp(-18.0, 18.0));
+                let bar = |a: f64, z: f64| RoundedRect::new(p.x - 3.0, a.min(z), p.x + 3.0, a.max(z), 3.0);
+                // A transient band has no range to show, only its live motion.
+                if !transient {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.2), None, &bar(p.y, end));
+                }
+                if (now - p.y).abs() > 0.5 {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.85), None, &bar(p.y, now));
+                    glow_stroke(cx.scene, &Circle::new((p.x, now), 3.5), 1.5, theme.needle, color, 5.0);
+                }
+                if !selected && !transient {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.8), None, &Circle::new((p.x, end), 3.0));
+                }
+            }
             if selected {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.2), None, &Circle::new(p, r + 5.0));
                 glow_stroke(cx.scene, &Circle::new(p, r - 1.0), 2.0, theme.needle, color, 6.0);
@@ -731,6 +1260,263 @@ impl EqView {
                 glow_stroke(cx.scene, &Circle::new(p, r - 1.0), 2.0, color, color, 3.0);
             }
         }
+        self.draw_grips(cx, bands);
+    }
+
+    /// The selected band's range grips (see [`Self::grips`]).
+    fn draw_grips(&self, cx: &mut DrawCx<'_>, bands: &[BandSettings]) {
+        let Some(b) = self.selected else { return };
+        let s = &bands[b];
+        if self.drag.as_ref().is_some_and(|d| matches!(d.mode, DragMode::Move | DragMode::Width)) {
+            return;
+        }
+        let theme = cx.theme;
+        let color = Self::band_color(theme, s);
+        let p = Self::node_pos(s);
+        let dragging = self.drag.as_ref().is_some_and(|d| d.mode == DragMode::Range);
+        let round = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+        for g in Self::grips(s) {
+            let hot = dragging || self.hot == Some(Hot::Grip(g));
+            if s.is_dynamic() {
+                // A pill handle at the end of the range, ridged so it reads as grabbable.
+                let pill = RoundedRect::new(g.x - 10.0, g.y - 5.5, g.x + 10.0, g.y + 5.5, 5.5);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &pill);
+                glow_stroke(cx.scene, &pill, 1.6, color, color, if hot { 6.0 } else { 2.5 });
+                let mut ridges = BezPath::new();
+                for dx in [-3.5, 0.0, 3.5] {
+                    ridges.move_to((g.x + dx, g.y - 2.0));
+                    ridges.line_to((g.x + dx, g.y + 2.0));
+                }
+                cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, if hot { theme.needle } else { color }, None, &ridges);
+            } else {
+                // A ghost grip on a thread from the node, its arrow pointing the way it moves the band.
+                let up = g.y < p.y;
+                let dir = if up { -1.0 } else { 1.0 };
+                let alpha = if hot { 1.0 } else { 0.55 };
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.3 * alpha), None, &Line::new((p.x, p.y + dir * 11.0), (g.x, g.y - dir * 7.0)));
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.85), None, &Circle::new(g, 7.0));
+                if hot {
+                    glow_stroke(cx.scene, &Circle::new(g, 7.0), 1.4, color, color, 5.0);
+                } else {
+                    cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, color.multiply_alpha(alpha), None, &Circle::new(g, 7.0));
+                }
+                let mut arrow = BezPath::new();
+                arrow.move_to((g.x - 3.0, g.y - dir * 1.5));
+                arrow.line_to((g.x, g.y + dir * 1.8));
+                arrow.line_to((g.x + 3.0, g.y - dir * 1.5));
+                cx.scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(alpha), None, &arrow);
+            }
+        }
+    }
+
+    /// The gain dial's dynamics ring: the range as an arc from the gain to where the dynamics can
+    /// take it, filled live as far as the band has moved. On a static band it stays hidden until
+    /// the pointer comes near, then shows arrows inviting a pull either way.
+    fn draw_ring(&self, cx: &mut DrawCx<'_>, c: Point, b: usize, s: &BandSettings, color: Color) {
+        let theme = cx.theme;
+        let id = &self.ids[b].gain;
+        let to_deg = |db: f64| -135.0 + 270.0 * f64::from(cx.host.normalize(id, db as f32));
+        let arc = |from: f64, to: f64| mite_ui::kurbo::Arc::new(c, (RING_R, RING_R), (from - 90.0).to_radians(), (to - from).to_radians(), 0.0);
+        let polar = |deg: f64| {
+            let a = (deg - 90.0).to_radians();
+            Point::new(c.x + RING_R * a.cos(), c.y + RING_R * a.sin())
+        };
+        let dragging = self.drag.as_ref().is_some_and(|d| d.mode == DragMode::Ring);
+        let hot = dragging || self.hot == Some(Hot::Ring);
+        let near = self.pointer.is_some_and(|p| p.distance(c) <= RING_HIT.1);
+        let gain = to_deg(s.gain_db);
+        let round = Stroke::new(3.0).with_caps(mite_ui::kurbo::Cap::Round);
+        if Self::is_transient(s) {
+            // Not a control in transient mode: just the band's live motion.
+            let now = to_deg(s.gain_db + self.dynamic_now(b, s));
+            if (now - gain).abs() > 0.5 {
+                glow_stroke(cx.scene, &arc(gain, now), 3.0, color, color, 3.0);
+            }
+        } else if s.is_dynamic() {
+            let end = to_deg(s.gain_db + s.dynamics.range_db);
+            let now = to_deg(s.gain_db + self.dynamic_now(b, s));
+            cx.scene.stroke(&round, Affine::IDENTITY, theme.tick_off.multiply_alpha(0.5), None, &arc(-135.0, 135.0));
+            cx.scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.35), None, &arc(gain, end));
+            if (now - gain).abs() > 0.5 {
+                glow_stroke(cx.scene, &arc(gain, now), 3.0, color, color, 3.0);
+            }
+            let grip = polar(end);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.needle, None, &Circle::new(grip, if hot { 5.0 } else { 4.0 }));
+            glow_stroke(cx.scene, &Circle::new(grip, if hot { 5.0 } else { 4.0 }), 1.5, color, color, if hot { 5.0 } else { 2.0 });
+        } else if near || hot {
+            let alpha = if hot { 1.0 } else { 0.6 };
+            cx.scene.stroke(&Stroke::new(2.0).with_caps(mite_ui::kurbo::Cap::Round), Affine::IDENTITY, color.multiply_alpha(0.25 * alpha), None, &arc(-135.0, 135.0));
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(alpha), None, &Circle::new(polar(gain), 3.5));
+            // Arrows along the ring either side of the grip.
+            let mut arrows = BezPath::new();
+            for side in [-1.0, 1.0] {
+                let a = (gain + side * 16.0 - 90.0).to_radians();
+                let q = polar(gain + side * 16.0);
+                let (tx, ty) = (-a.sin() * side, a.cos() * side);
+                let (nx, ny) = (a.cos(), a.sin());
+                arrows.move_to((q.x - tx * 1.5 + nx * 3.0, q.y - ty * 1.5 + ny * 3.0));
+                arrows.line_to((q.x + tx * 1.5, q.y + ty * 1.5));
+                arrows.line_to((q.x - tx * 1.5 - nx * 3.0, q.y - ty * 1.5 - ny * 3.0));
+            }
+            let stroke = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+            cx.scene.stroke(&stroke, Affine::IDENTITY, color.multiply_alpha(alpha), None, &arrows);
+        }
+    }
+
+    /// The dynamics scope, framed; its contents are clipped to the frame, glow included.
+    fn draw_scope(&self, cx: &mut DrawCx<'_>, r: Rect, b: usize, s: &BandSettings, color: Color) {
+        let theme = cx.theme;
+        panel(cx.scene, RoundedRect::from_rect(r, 8.0), theme.well, theme.well_border);
+        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(r.inset(-1.0), 7.0));
+        match s.dynamics.mode {
+            DynamicsMode::Compressor => self.draw_compressor_scope(cx, r, b, s, color),
+            DynamicsMode::Transient => self.draw_transient_scope(cx, r, s, color),
+        }
+        cx.scene.pop_layer();
+    }
+
+    /// Compressor scope: how far the band moves (up or down from the middle line) as its level
+    /// rises from quiet (left) to loud (right), with a dot riding the curve live. The vertical
+    /// scale is fixed (square-root, ±30 dB at the edges), so a bigger range looks bigger.
+    fn draw_compressor_scope(&self, cx: &mut DrawCx<'_>, r: Rect, b: usize, s: &BandSettings, color: Color) {
+        let theme = cx.theme;
+        let range = if s.is_dynamic() { s.dynamics.range_db } else { 0.0 };
+        let (mid, half) = (r.center().y, 0.5 * r.height() - 6.0);
+        let x_of = |db: f64| r.x0 + (db.clamp(SCOPE_FLOOR_DB, 0.0) - SCOPE_FLOOR_DB) / -SCOPE_FLOOR_DB * r.width();
+        let y_of = |g: f64| mid - g.signum() * (g.abs() / GAIN_LIMIT_DB).min(1.0).sqrt() * half;
+        let mut grid = BezPath::new();
+        for g in [-24.0, -12.0, -6.0, 6.0, 12.0, 24.0] {
+            grid.move_to((r.x0, y_of(g)));
+            grid.line_to((r.x1, y_of(g)));
+        }
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &grid);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_major, None, &Line::new((r.x0, mid), (r.x1, mid)));
+        let tx = x_of(s.dynamics.threshold_db);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.3), None, &Line::new((tx, r.y0), (tx, r.y1)));
+        let dynamics = Dynamics { range_db: range, ..s.dynamics };
+        let mut curve = BezPath::new();
+        for i in 0..=64 {
+            let db = SCOPE_FLOOR_DB * (1.0 - f64::from(i) / 64.0);
+            let pt = (x_of(db), y_of(dynamics.gain_db(db)));
+            if i == 0 {
+                curve.move_to(pt);
+            } else {
+                curve.line_to(pt);
+            }
+        }
+        let mut fill = curve.clone();
+        fill.line_to((r.x1, mid));
+        fill.line_to((r.x0, mid));
+        fill.close_path();
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.18), None, &fill);
+        glow_stroke(cx.scene, &curve, 1.8, color, color, 3.0);
+        let level = f64::from(self.shared.level[b].load());
+        if s.is_dynamic() && level > SCOPE_FLOOR_DB {
+            let lx = x_of(level);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.5), None, &RoundedRect::new(r.x0 + 3.0, r.y1 - 5.0, lx, r.y1 - 3.0, 1.0));
+            let dot = Point::new(lx, y_of(self.dynamic_now(b, s)));
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.needle, None, &Circle::new(dot, 4.0));
+            glow_stroke(cx.scene, &Circle::new(dot, 4.0), 1.5, color, color, 5.0);
+        }
+    }
+
+    /// Transient scope: one hit's envelope over time, as it comes in (faint) and as the band shapes
+    /// it (lit). The hit runs through the band's own detector ([`ShapeDetector`]), so the curve is
+    /// what the band does: a softer attack rounds the onset, more sustain slows the decay. The
+    /// part under the pointer (attack or tail) is tinted, since that is what a drag there changes.
+    fn draw_transient_scope(&self, cx: &mut DrawCx<'_>, r: Rect, s: &BandSettings, color: Color) {
+        let theme = cx.theme;
+        let (attack, sustain) = if s.is_dynamic() { (s.dynamics.transient_db, s.dynamics.sustain_db) } else { (0.0, 0.0) };
+        // A short silence, then a 3 ms rise into a decay of 60 dB/s, peaking at −6 dBFS.
+        const RATE: f64 = 2000.0;
+        let hit = |t: f64| if t < 0.0 { 0.0 } else { (1.0 - (-t / 0.003).exp()) * (-t / 0.145).exp() };
+        let steps = (SCOPE_LEN_S * RATE) as usize;
+        let time = |i: usize| i as f64 / RATE - SCOPE_PRE_S;
+        let peak = (0..steps).map(|i| hit(time(i))).fold(0.0, f64::max);
+        let mut detector = ShapeDetector::new(RATE, s.dynamics.transient_ms, s.dynamics.transition);
+        let (mut input, mut output) = (Vec::with_capacity(steps), Vec::with_capacity(steps));
+        for i in 0..steps {
+            let level = hit(time(i)) / peak;
+            detector.process(0.5 * level);
+            let db = 20.0 * level.max(1e-4).log10();
+            input.push(db);
+            output.push(db + detector.gain_db(attack, sustain));
+        }
+
+        let pad = SCOPE_PAD;
+        let x_of = |i: usize| scope_x(r, time(i));
+        // +12 dB at the top and −40 dB at the bottom, widened to fit the shaped hit (a big attack
+        // boost, a deep tail cut) with 3 dB to spare, so its top is never cut off.
+        let high = output.iter().copied().fold(12.0, f64::max).min(GAIN_LIMIT_DB) + 3.0;
+        let low = output.iter().copied().fold(-40.0, f64::min).max(-80.0);
+        let y_of = |db: f64| r.y0 + pad + (high - db.clamp(low, high)) / (high - low) * (r.height() - 2.0 * pad);
+        let path = |values: &[f64]| {
+            let mut p = BezPath::new();
+            for (i, &v) in values.iter().enumerate() {
+                let pt = (x_of(i), y_of(v));
+                if i == 0 {
+                    p.move_to(pt);
+                } else {
+                    p.line_to(pt);
+                }
+            }
+            p
+        };
+        let split = scope_x(r, s.dynamics.transient_ms / 1000.0);
+        if let Some(p) = self.pointer.filter(|p| r.contains(*p) && self.hot != Some(Hot::Split)) {
+            let part = if p.x < split { Rect::new(r.x0, r.y0, split, r.y1) } else { Rect::new(split, r.y0, r.x1, r.y1) };
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.07), None, &part);
+        }
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_major, None, &Line::new((r.x0, y_of(0.0)), (r.x1, y_of(0.0))));
+        let (out, inp) = (path(&output), path(&input));
+        let mut fill = out.clone();
+        fill.line_to((x_of(steps - 1), r.y1));
+        fill.line_to((x_of(0), r.y1));
+        fill.close_path();
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.12), None, &fill);
+        // What the band changes: the area between the hit as it comes in and as it leaves.
+        let mut change = out.clone();
+        for i in (0..steps).rev() {
+            change.line_to((x_of(i), y_of(input[i])));
+        }
+        change.close_path();
+        cx.scene.fill(Fill::EvenOdd, Affine::IDENTITY, color.multiply_alpha(0.35), None, &change);
+        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.text_lo, None, &inp);
+        glow_stroke(cx.scene, &out, 1.8, color, color, 3.0);
+        // The crossfade from attack to sustain, shaded around the line.
+        let width = (s.dynamics.transition * s.dynamics.transient_ms).max(1.5) / 1000.0;
+        let (z0, z1) = (scope_x(r, s.dynamics.transient_ms / 1000.0 - 0.5 * width), scope_x(r, s.dynamics.transient_ms / 1000.0 + 0.5 * width));
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.1), None, &Rect::new(z0, r.y0, z1, r.y1));
+        // Where the attack hands over to the sustain: a line with a grip at its top.
+        let hot = self.hot == Some(Hot::Split) || self.drag.as_ref().is_some_and(|d| d.mode == DragMode::Split);
+        let line = color.multiply_alpha(if hot { 0.8 } else { 0.35 });
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, line, None, &Line::new((split, r.y0 + 14.0), (split, r.y1)));
+        let grip = RoundedRect::new(split - 3.0, r.y0 + 4.0, split + 3.0, r.y0 + 14.0, 3.0);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { color } else { color.multiply_alpha(0.6) }, None, &grip);
+        if hot {
+            let text = TTIME.format(s.dynamics.transient_ms as f32);
+            let (x, align) = if split > r.center().x { (split - 7.0, Align::Right) } else { (split + 7.0, Align::Left) };
+            cx.text.draw(cx.scene, &text, x, r.y0 + 3.0, TextStyle::READOUT.sized(10.0), theme.text_hi, align);
+        }
+    }
+
+    /// Icons for the dynamics modes, 16 × 16 at `at`: a compressor's bent transfer line, and a
+    /// hit's spike and decay.
+    fn draw_mode_icon(scene: &mut mite_ui::vello::Scene, mode: usize, at: Point, color: Color) {
+        let pt = |x: f64, y: f64| (at.x + x, at.y + y);
+        let mut p = BezPath::new();
+        if mode == 0 {
+            p.move_to(pt(1.0, 15.0));
+            p.line_to(pt(8.0, 8.0));
+            p.quad_to(pt(10.0, 6.0), pt(15.0, 5.0));
+        } else {
+            p.move_to(pt(0.0, 14.0));
+            p.line_to(pt(3.0, 14.0));
+            p.line_to(pt(5.0, 2.0));
+            p.curve_to(pt(7.0, 9.0), pt(10.0, 12.0), pt(16.0, 13.0));
+        }
+        let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+        scene.stroke(&stroke, Affine::IDENTITY, color, None, &p);
     }
 
     fn draw_panel(&mut self, cx: &mut DrawCx<'_>, bands: &[BandSettings]) {
@@ -740,11 +1526,33 @@ impl EqView {
             return;
         }
         let theme = cx.theme;
-        let origin = PANEL_ORIGIN;
-        if self.panel_knobs.len() != if s.kind.has_gain() { 3 } else { 2 } {
-            self.build_panel_knobs(cx.host, origin);
+        // The panel holds still while anything is dragged, so nothing moves under the pointer.
+        let locked = self.drag.is_some() || self.panel_knobs.iter().any(Knob::is_dragging);
+        // The dock is chosen when a band is selected or moved on the plot, never by edits made in
+        // the panel itself.
+        let (x, bottom) = *self.panel_dock.get_or_insert_with(|| {
+            let r = Self::panel_rect(&s);
+            (r.x0, r.y1 >= HELP_TOP - 11.0)
+        });
+        let rect = match self.panel_hits {
+            Some(h) if locked => h.panel,
+            _ => Self::docked_rect(&s, x, bottom),
+        };
+        let show_dynamics = rect.height() > PANEL_H;
+        // The core row stays beside the edge the panel is docked to and the dynamics row grows
+        // into the plot, so turning dynamics on never moves the controls under the pointer.
+        let docked_bottom = bottom;
+        let (origin, dyn_top, divider) = if !show_dynamics {
+            (rect.origin(), None, 0.0)
+        } else if docked_bottom {
+            (Point::new(rect.x0, rect.y0 + PANEL_DYN_H), Some(rect.y0 + 4.0), rect.y0 + PANEL_DYN_H)
+        } else {
+            (rect.origin(), Some(rect.y0 + PANEL_H - 2.0), rect.y0 + PANEL_H - 4.0)
+        };
+        if self.panel_knobs.len() != Self::panel_dial_count(&s, show_dynamics) || self.knobs_layout != Some((origin, dyn_top)) {
+            self.build_panel_knobs(cx.host, origin, dyn_top);
+            self.knobs_layout = Some((origin, dyn_top));
         }
-        let rect = Rect::new(origin.x, origin.y, origin.x + PANEL_W, origin.y + PANEL_H);
         let shape = RoundedRect::from_rect(rect, 14.0);
         if theme.shadows {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 14.0)), rect, Color::from_rgba8(0, 0, 0, 140), 14.0, 20.0);
@@ -762,18 +1570,12 @@ impl EqView {
 
         let row_y = origin.y + 54.0;
         let open = self.menu.as_ref().map(|m| m.kind);
-        let dropdown = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str, icon: Option<BandType>, active: bool| -> Rect {
+        let dropdown = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str, icon: Icon, active: bool| -> Rect {
             let r = Rect::new(x, row_y, x + w, row_y + 32.0);
             let border = if active { color } else { cx.theme.panel_control_border };
             raised(cx.scene, RoundedRect::from_rect(r, 6.0), cx.theme.panel_control, border, cx.theme.shadows);
-            let text_x = match icon {
-                Some(kind) => {
-                    draw_type_icon(cx.scene, kind, Point::new(x + 10.0, row_y + 10.0), color);
-                    x + 40.0
-                }
-                None => x + 12.0,
-            };
-            cx.text.draw(cx.scene, text, text_x, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Left);
+            draw_icon(cx.scene, icon, Point::new(x + 10.0, row_y + 10.0), color);
+            cx.text.draw(cx.scene, text, x + 40.0, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Left);
             let mut chevron = BezPath::new();
             let (cxr, cy) = (r.x1 - 14.0, r.center().y);
             chevron.move_to((cxr - 4.0, cy - 2.0));
@@ -784,14 +1586,55 @@ impl EqView {
             r
         };
         let mut x = origin.x + 14.0;
-        let kind = dropdown(cx, x, 140.0, BandType::NAMES[s.kind as usize], Some(s.kind), open == Some(MenuKind::Type));
-        x += 148.0;
+        let kind = dropdown(cx, x, 150.0, BandType::NAMES[s.kind as usize], Icon::Type(s.kind), open == Some(MenuKind::Type));
+        x += 158.0;
         let slope = s.kind.has_slope().then(|| {
-            let r = dropdown(cx, x, 108.0, SLOPE.choices[s.slope.min(SLOPE.choices.len() - 1)], None, open == Some(MenuKind::Slope));
-            x += 116.0;
+            let i = s.slope.min(SLOPE.choices.len() - 1);
+            let r = dropdown(cx, x, 124.0, SLOPE.choices[i], Icon::Slope(s.kind, i), open == Some(MenuKind::Slope));
+            x += 132.0;
             r
         });
-        let stereo = dropdown(cx, x, 90.0, Placement::NAMES[s.placement as usize], None, open == Some(MenuKind::Stereo));
+        let stereo = dropdown(cx, x, 118.0, Placement::NAMES[s.placement as usize], Icon::Stereo(s.placement), open == Some(MenuKind::Stereo));
+
+        let (scope, modes, remove_dynamics) = if let Some(top) = dyn_top {
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((origin.x + 14.0, divider), (origin.x + PANEL_W - 14.0, divider)));
+            let scope = Rect::new(origin.x + 14.0, top + 8.0, origin.x + 14.0 + SCOPE_W, top + 8.0 + SCOPE_H);
+            self.draw_scope(cx, scope, b, &s, color);
+            // Mode buttons, stacked beside the scope: compressor over transient shaper.
+            let mx = scope.x1 + 12.0;
+            let modes = [Rect::new(mx, scope.y0, mx + 30.0, scope.y0 + 41.0), Rect::new(mx, scope.y1 - 41.0, mx + 30.0, scope.y1)];
+            for (i, m) in modes.iter().enumerate() {
+                let on = s.dynamics.mode as usize == i;
+                let hot = self.hot == Some(Hot::Mode(i));
+                let shape = RoundedRect::from_rect(*m, 6.0);
+                raised(cx.scene, shape, theme.panel_control, if on { color } else { theme.panel_control_border }, theme.shadows);
+                if on {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
+                }
+                let icon = if on { color } else if hot { theme.text_hi } else { theme.text_mid };
+                Self::draw_mode_icon(cx.scene, i, m.center() - (8.0, 8.0), icon);
+            }
+            let remove = Rect::new(origin.x + PANEL_W - 44.0, top + 23.0, origin.x + PANEL_W - 14.0, top + 53.0);
+            let hot = self.hot == Some(Hot::RemoveDynamics);
+            raised(cx.scene, RoundedRect::from_rect(remove, 6.0), theme.panel_control, if hot { color } else { theme.panel_control_border }, theme.shadows);
+            // A level line with its range arrow struck through: "no dynamics".
+            let k = remove.center();
+            let mut glyph = BezPath::new();
+            glyph.move_to((k.x - 6.0, k.y + 3.0));
+            glyph.line_to((k.x + 6.0, k.y + 3.0));
+            glyph.move_to((k.x, k.y + 1.0));
+            glyph.line_to((k.x, k.y - 6.0));
+            glyph.move_to((k.x - 2.5, k.y - 3.5));
+            glyph.line_to((k.x, k.y - 6.0));
+            glyph.line_to((k.x + 2.5, k.y - 3.5));
+            glyph.move_to((k.x - 6.0, k.y - 6.0));
+            glyph.line_to((k.x + 6.0, k.y + 6.0));
+            let stroke = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+            cx.scene.stroke(&stroke, Affine::IDENTITY, if hot { theme.text_hi } else { theme.text_mid }, None, &glyph);
+            (Some(scope), Some(modes), Some(remove))
+        } else {
+            (None, None, None)
+        };
 
         // Right: bypass over close.
         let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
@@ -819,7 +1662,11 @@ impl EqView {
             knob.color = Some(color);
             knob.draw(cx);
         }
-        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, bypass, close });
+        let ring = if s.kind.has_gain() { self.panel_knobs.iter().find(|k| k.id == self.ids[b].gain).map(|k| k.center) } else { None };
+        if let Some(c) = ring {
+            self.draw_ring(cx, c, b, &s, color);
+        }
+        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, bypass, close });
     }
 
     /// The open dropdown, drawn over everything.
@@ -831,31 +1678,24 @@ impl EqView {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 8.0)), bounds, Color::from_rgba8(0, 0, 0, 150), 8.0, 14.0);
         }
         panel(cx.scene, RoundedRect::from_rect(bounds, 8.0), theme.glass.with_alpha(0.98), theme.glass_border);
+        let color = Self::band_color(theme, &self.band(cx.host, menu.band));
         for (i, (r, item)) in menu.item_rects().into_iter().zip(menu.items).enumerate() {
-            let r = r.inset((-4.0, 0.0));
-            if menu.hover == Some(i) {
-                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &RoundedRect::from_rect(r, 5.0));
-            }
+            let r = r.inset((-4.0, -1.0));
+            let shape = RoundedRect::from_rect(r, 6.0);
             let current = i == menu.current;
-            let color = if current { theme.text_strong } else { theme.text_hi };
-            let style = TextStyle::BODY.weighted(if current { 700.0 } else { 500.0 });
-            let text_x = if menu.kind == MenuKind::Type {
-                let icon = if current { theme.text_strong } else { theme.text_mid };
-                draw_type_icon(cx.scene, BandType::from_index(i), Point::new(r.x0 + 24.0, r.y0 + 8.0), icon);
-                r.x0 + 56.0
-            } else {
-                r.x0 + 24.0
-            };
-            cx.text.draw(cx.scene, item, text_x, r.y0 + 7.0, style, color, Align::Left);
+            let hovered = menu.hover == Some(i);
+            // The current choice glows in the band's colour; hover is a quiet lift.
             if current {
-                let mut tick = BezPath::new();
-                let (tx, ty) = (r.x0 + 11.0, r.center().y);
-                tick.move_to((tx - 3.5, ty));
-                tick.line_to((tx - 1.0, ty + 3.0));
-                tick.line_to((tx + 4.0, ty - 3.0));
-                let round = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
-                cx.scene.stroke(&round, Affine::IDENTITY, theme.accent, None, &tick);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if hovered { 0.24 } else { 0.16 }), None, &shape);
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.55), None, &shape);
+            } else if hovered {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &shape);
             }
+            let icon = if current { color } else if hovered { theme.text_hi } else { theme.text_mid };
+            draw_icon(cx.scene, menu.icon(i), Point::new(r.x0 + 12.0, r.y0 + 8.0), icon);
+            let text = if current { theme.text_strong } else { theme.text_hi };
+            let style = TextStyle::BODY.weighted(if current { 700.0 } else { 500.0 });
+            cx.text.draw(cx.scene, item, r.x0 + 44.0, r.y0 + 7.0, style, text, Align::Left);
         }
     }
 
@@ -872,7 +1712,8 @@ impl EqView {
             MenuKind::Stereo => (&Placement::NAMES, &ids.stereo),
         };
         let current = Self::plain(host, id).round().max(0.0) as usize;
-        self.menu = Some(Menu { kind, band, anchor, items, current, hover: None });
+        let band_kind = BandType::from_index(Self::plain(host, &ids.kind).round().max(0.0) as usize);
+        self.menu = Some(Menu { kind, band, band_kind, anchor, items, current, hover: None });
     }
 
     /// Routes an event to the open dropdown. It is modal: everything is consumed, and a click
@@ -1041,6 +1882,38 @@ impl View for EqView {
                             d.log_q = (d.log_q - dy * factor * LN_2 / 120.0).clamp(0.025f64.ln(), 40f64.ln());
                             host.set_normalized(&ids.q, host.normalize(&ids.q, d.log_q.exp() as f32));
                         }
+                        // Range drags stop where the gain dial ends, so reversing responds at once.
+                        DragMode::Range | DragMode::Ring | DragMode::Scope => {
+                            let (lo, hi) = Self::range_limits(host, ids);
+                            let delta = match d.mode {
+                                DragMode::Range => -dy / PX_PER_DB,
+                                DragMode::Ring => (dx - dy) * RING_DB_PER_PX,
+                                _ => -dy * RING_DB_PER_PX * 1.5,
+                            };
+                            d.range = (d.range + delta * factor).clamp(lo, hi);
+                            Self::apply_range(host, ids, d.range);
+                            if d.mode == DragMode::Scope {
+                                d.thresh = (d.thresh + dx * factor * -SCOPE_FLOOR_DB / SCOPE_W).clamp(f64::from(THRESH.min), f64::from(THRESH.max));
+                                host.set_normalized(&ids.thresh, host.normalize(&ids.thresh, d.thresh as f32));
+                            }
+                        }
+                        DragMode::TransientAttack => {
+                            d.transient = (d.transient - dy * factor * SCOPE_DB_PER_PX).clamp(f64::from(TRANSIENT.min), f64::from(TRANSIENT.max));
+                            host.set_normalized(&ids.transient, host.normalize(&ids.transient, d.transient as f32));
+                            Self::update_dynamics_on(host, ids);
+                        }
+                        DragMode::Split => {
+                            // The line follows the pointer along the scope's time axis.
+                            if let Some(r) = self.panel_hits.and_then(|h| h.scope) {
+                                let ms = (scope_time(r, pos.x) * 1000.0).clamp(f64::from(TTIME.min), f64::from(TTIME.max));
+                                host.set_normalized(&ids.ttime, host.normalize(&ids.ttime, ms as f32));
+                            }
+                        }
+                        DragMode::Sustain => {
+                            d.sustain = (d.sustain - dy * factor * SCOPE_DB_PER_PX).clamp(f64::from(SUSTAIN.min), f64::from(SUSTAIN.max));
+                            host.set_normalized(&ids.sustain, host.normalize(&ids.sustain, d.sustain as f32));
+                            Self::update_dynamics_on(host, ids);
+                        }
                     }
                     return true;
                 }
@@ -1048,13 +1921,45 @@ impl View for EqView {
                 for k in &mut self.panel_knobs {
                     changed |= k.event(event, host);
                 }
-                let hover = if in_panel(&self.panel_hits, pos) { None } else { self.node_at(host, pos) };
+                let hot = self.hot_at(host, pos);
+                changed |= hot != self.hot;
+                self.hot = hot;
+                let hover = if in_panel(&self.panel_hits, pos) || hot.is_some() { None } else { self.node_at(host, pos) };
                 changed |= hover != self.hover;
                 self.hover = hover;
                 // The help strip follows the pointer over the display.
                 changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP)
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => {
+                if let (Some(hot), Some(b)) = (self.hot_at(host, pos), self.selected) {
+                    let s = self.band(host, b);
+                    let range = if s.is_dynamic() { s.dynamics.range_db } else { 0.0 };
+                    match hot {
+                        Hot::Ring => self.begin_drag(host, b, DragMode::Ring, pos, range),
+                        Hot::Scope => {
+                            // Transient scope: the hit's attack sets the attack amount, its tail the sustain.
+                            let head = self.panel_hits.and_then(|h| h.scope).is_some_and(|r| pos.x < scope_x(r, s.dynamics.transient_ms / 1000.0));
+                            let mode = match (s.dynamics.mode, head) {
+                                (DynamicsMode::Compressor, _) => DragMode::Scope,
+                                (DynamicsMode::Transient, true) => DragMode::TransientAttack,
+                                (DynamicsMode::Transient, false) => DragMode::Sustain,
+                            };
+                            self.begin_drag(host, b, mode, pos, range);
+                        }
+                        Hot::Split => self.begin_drag(host, b, DragMode::Split, pos, range),
+                        Hot::Mode(i) => {
+                            Self::set(host, &self.ids[b].dmode, i as f32);
+                            self.panel_knobs.clear();
+                        }
+                        // A ghost grip starts from where it sits, so the band follows the pointer.
+                        Hot::Grip(g) => {
+                            let from = if s.is_dynamic() { range } else { yg(g.y) - s.gain_db };
+                            self.begin_drag(host, b, DragMode::Range, pos, from);
+                        }
+                        Hot::RemoveDynamics => self.remove_dynamics(host, b),
+                    }
+                    return true;
+                }
                 if let (Some(hits), Some(b)) = (self.panel_hits, self.selected) {
                     if hits.panel.contains(pos) {
                         let ids = &self.ids[b];
@@ -1081,19 +1986,8 @@ impl View for EqView {
                     if self.selected != Some(b) {
                         self.select(Some(b));
                     }
-                    let s = self.band(host, b);
                     let mode = if mods.alt { DragMode::Width } else { DragMode::Move };
-                    let ids = &self.ids[b];
-                    match mode {
-                        DragMode::Move => {
-                            host.begin_gesture(&ids.freq);
-                            if s.kind.has_gain() {
-                                host.begin_gesture(&ids.gain);
-                            }
-                        }
-                        DragMode::Width => host.begin_gesture(&ids.q),
-                    }
-                    self.drag = Some(NodeDrag { band: b, mode, last: pos, log_freq: s.freq.ln(), gain: s.gain_db, log_q: s.q.ln() });
+                    self.begin_drag(host, b, mode, pos, 0.0);
                     return true;
                 }
                 if pos.y > DISPLAY_TOP && pos.y < HELP_TOP && self.selected.is_some() {
@@ -1105,15 +1999,13 @@ impl View for EqView {
             UiEvent::PointerUp { button: MouseButton::Left, .. } => {
                 if let Some(d) = self.drag.take() {
                     let ids = &self.ids[d.band];
-                    match d.mode {
-                        DragMode::Move => {
-                            host.end_gesture(&ids.freq);
-                            let kind = BandType::from_index(Self::plain(host, &ids.kind).round() as usize);
-                            if kind.has_gain() {
-                                host.end_gesture(&ids.gain);
-                            }
-                        }
-                        DragMode::Width => host.end_gesture(&ids.q),
+                    let kind = BandType::from_index(Self::plain(host, &ids.kind).round() as usize);
+                    for id in Self::drag_ids(ids, d.mode, kind.has_gain()) {
+                        host.end_gesture(id);
+                    }
+                    // A move on the plot may have put the band under the panel: dock it afresh.
+                    if !matches!(d.mode, DragMode::Ring | DragMode::Scope) {
+                        self.panel_dock = None;
                     }
                     return true;
                 }
@@ -1135,6 +2027,14 @@ impl View for EqView {
                 false
             }
             UiEvent::DoubleClick { pos, .. } => {
+                if let (Some(hot), Some(b)) = (self.hot_at(host, pos), self.selected) {
+                    match hot {
+                        Hot::Ring | Hot::Grip(_) => self.remove_dynamics(host, b),
+                        Hot::Split => Self::set(host, &self.ids[b].ttime, TTIME.default),
+                        Hot::Scope | Hot::Mode(_) | Hot::RemoveDynamics => {}
+                    }
+                    return true;
+                }
                 if in_panel(&self.panel_hits, pos) {
                     let mut changed = false;
                     for k in &mut self.panel_knobs {
@@ -1156,6 +2056,18 @@ impl View for EqView {
                 false
             }
             UiEvent::Wheel { pos, lines, mods } => {
+                if let (Some(Hot::Ring), Some(b)) = (self.hot_at(host, pos), self.selected) {
+                    // The wheel on the ring steps the range.
+                    let s = self.band(host, b);
+                    let from = if s.is_dynamic() { s.dynamics.range_db as f32 } else { 0.0 };
+                    let ids = &self.ids[b];
+                    host.begin_gesture(&ids.range);
+                    host.begin_gesture(&ids.dyn_on);
+                    Self::apply_range(host, ids, f64::from(RANGE.wheel(from, lines, mods.fine())));
+                    host.end_gesture(&ids.dyn_on);
+                    host.end_gesture(&ids.range);
+                    return true;
+                }
                 if in_panel(&self.panel_hits, pos) {
                     let mut changed = false;
                     for k in &mut self.panel_knobs {
@@ -1187,6 +2099,7 @@ impl View for EqView {
             UiEvent::PointerLeft => {
                 self.pointer = None;
                 self.hover = None;
+                self.hot = None;
                 true
             }
             _ => false,
@@ -1197,6 +2110,22 @@ impl View for EqView {
         self.ticks = self.ticks.wrapping_add(1);
         let (l, r) = self.shared.meter.load();
         let mut dirty = self.meter.set_levels(l, r);
+        // Dynamic bands move with the audio.
+        for (last, now) in self.last_dynamic.iter_mut().zip(&self.shared.dynamic) {
+            let now = now.load();
+            if (now - *last).abs() > 0.02 {
+                *last = now;
+                dirty = true;
+            }
+        }
+        // The selected band's level drives its threshold column and scope dot.
+        if let Some(b) = self.selected {
+            let level = self.shared.level[b].load();
+            if (level - self.last_level).abs() > 0.1 {
+                self.last_level = level;
+                dirty = true;
+            }
+        }
         // The analyzer updates every UI tick so motion is as smooth as the display allows.
         dirty |= self.update_spectrum();
         // Host-side changes (automation, presets, undo) since the last frame, checked at frame
@@ -1205,10 +2134,13 @@ impl View for EqView {
             return dirty;
         }
         self.last_signature_check = Instant::now();
-        let mut signature = Vec::with_capacity(1 + BANDS * 7);
+        let mut signature = Vec::with_capacity(1 + BANDS * 13);
         signature.push(host.normalized(OUT_GAIN.id));
         for ids in &self.ids {
-            for id in [&ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo] {
+            for id in [
+                &ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo, &ids.dyn_on, &ids.range,
+                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition,
+            ] {
                 signature.push(host.normalized(id));
             }
         }

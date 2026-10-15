@@ -9,7 +9,7 @@ use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::EqView;
-use mite_eq::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, STEREO, TYPE};
+use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::render::render_view;
@@ -57,7 +57,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_id(leak(band_id(b, GAIN.id)), GAIN)
             .with_id(leak(band_id(b, Q.id)), Q)
             .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default))
-            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0));
+            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0))
+            .with_id(leak(band_id(b, DYN.id)), index_spec("dyn", 2, 0))
+            .with_id(leak(band_id(b, RANGE.id)), RANGE)
+            .with_id(leak(band_id(b, THRESH.id)), THRESH)
+            .with_id(leak(band_id(b, ATTACK.id)), ATTACK)
+            .with_id(leak(band_id(b, RELEASE.id)), RELEASE)
+            .with_id(leak(band_id(b, RATIO.id)), RATIO)
+            .with_id(leak(band_id(b, DMODE.id)), index_spec("dmode", 2, 0))
+            .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
+            .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
+            .with_id(leak(band_id(b, TTIME.id)), TTIME)
+            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION);
     }
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),
@@ -72,9 +83,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(&band_id(b, FREQ.id), freq);
         host.set_plain(&band_id(b, GAIN.id), gain);
         host.set_plain(&band_id(b, Q.id), q);
-        // Bands 2 and 3 on the sides, band 4 on the right channel: shows the per-placement colours.
-        host.set_plain(&band_id(b, STEREO.id), [0.0, 4.0, 4.0, 2.0][b]);
+        // Band 2 on the sides, band 3 in the middle, band 4 on the right channel: shows the
+        // per-placement colours.
+        host.set_plain(&band_id(b, STEREO.id), [0.0, 4.0, 3.0, 2.0][b]);
         settings[b] = BandSettings { enabled: true, kind, freq: f64::from(freq), gain_db: f64::from(gain), q: f64::from(q), slope: 3, ..Default::default() };
+        settings[b].placement = mite_dsp::eq::Placement::from_index([0, 4, 3, 2][b]);
+    }
+    // Band 3 is dynamic (mockup "dynamic band"): ducks up to 6 dB above −40 dBFS. SNAPSHOT_STATIC
+    // leaves it static.
+    if std::env::var_os("SNAPSHOT_STATIC").is_none() {
+        host.set_plain(&band_id(2, DYN.id), 1.0);
+        host.set_plain(&band_id(2, THRESH.id), -40.0);
+        settings[2].dynamics = mite_dsp::eq::Dynamics { enabled: true, threshold_db: -40.0, ..Default::default() };
+        // SNAPSHOT_TRANSIENT shows it as a transient shaper instead: +6 dB attack, −4 dB sustain.
+        if std::env::var_os("SNAPSHOT_TRANSIENT").is_some() {
+            host.set_plain(&band_id(2, DMODE.id), 1.0);
+            // SNAPSHOT_TRANSIENT="attack,sustain[,transition %]" picks other amounts.
+            let values: Vec<f32> =
+                std::env::var("SNAPSHOT_TRANSIENT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
+            let (attack, sustain) = if values.len() >= 2 { (values[0], values[1]) } else { (6.0, -4.0) };
+            let transition = values.get(2).copied().unwrap_or(TRANSITION.default);
+            host.set_plain(&band_id(2, TRANSIENT.id), attack);
+            host.set_plain(&band_id(2, SUSTAIN.id), sustain);
+            host.set_plain(&band_id(2, TRANSITION.id), transition);
+            settings[2].dynamics.transition = f64::from(transition) / 100.0;
+            let d = &mut settings[2].dynamics;
+            (d.mode, d.transient_db, d.sustain_db) = (mite_dsp::eq::DynamicsMode::Transient, f64::from(attack), f64::from(sustain));
+        }
     }
 
     // Pink-ish noise (Paul Kellet's filter) through the real engine feeds both analyzer taps.
@@ -99,6 +134,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut r = block.clone();
         let (pl, pr) = engine.process(&mut [&mut l, &mut r], &settings, 0.0, Some(&shared.pre), Some(&shared.post));
         shared.meter.store(pl, pr);
+        for (slot, db) in shared.dynamic.iter().zip(engine.dynamic_gains()) {
+            slot.store(db);
+        }
+        for (slot, db) in shared.level.iter().zip(engine.detector_levels()) {
+            slot.store(db);
+        }
     }
 
     let mut view = EqView::new(shared);
@@ -125,6 +166,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             view.event(&UiEvent::PointerMove { pos: at, mods }, &host);
             view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
             view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
+        }
+    }
+    // Optional pointer position for hover states, e.g. SNAPSHOT_HOVER="700,470".
+    if let Ok(hover) = std::env::var("SNAPSHOT_HOVER") {
+        if let Some((x, y)) = hover.split_once(',') {
+            render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), 1.0)?;
+            view.event(&UiEvent::PointerMove { pos: Point::new(x.trim().parse()?, y.trim().parse()?), mods }, &host);
         }
     }
 

@@ -16,6 +16,21 @@ pub enum ParamDisplay {
     Number,
     /// Hz below 1 kHz (no decimals), kHz with two decimals above: `160 Hz`, `2.80 kHz`.
     Frequency,
+    /// Milliseconds, one decimal below 10 ms and none from there (`4.5 ms`, `15 ms`), seconds
+    /// with two decimals from 1 s (`1.50 s`). Values snap to that precision (see
+    /// [`ParamSpec::snap`]), so a drag lands on 15 ms exactly.
+    Time,
+}
+
+/// The precision a [`ParamDisplay::Time`] value is shown and snapped to, ms.
+fn time_step(ms: f32) -> f32 {
+    if ms < 10.0 {
+        0.1
+    } else if ms < 1000.0 {
+        1.0
+    } else {
+        10.0
+    }
 }
 
 /// One parameter, independent of any plugin framework.
@@ -63,7 +78,22 @@ impl ParamSpec {
         match self.display {
             ParamDisplay::Frequency if plain >= 1000.0 => (format!("{:.2}", plain / 1000.0), "kHz"),
             ParamDisplay::Frequency => (format!("{:.0}", plain), "Hz"),
+            ParamDisplay::Time if plain >= 1000.0 => (format!("{:.2}", plain / 1000.0), "s"),
+            ParamDisplay::Time if plain < 10.0 => (format!("{:.1}", plain), "ms"),
+            ParamDisplay::Time => (format!("{:.0}", plain), "ms"),
             ParamDisplay::Number => (self.format_number(plain), self.unit),
+        }
+    }
+
+    /// The value as it is shown: [`ParamDisplay::Time`] values round to their displayed
+    /// precision; every other display is returned unchanged.
+    pub fn snap(&self, plain: f32) -> f32 {
+        match self.display {
+            ParamDisplay::Time => {
+                let step = time_step(plain);
+                ((plain / step).round() * step).clamp(self.min, self.max)
+            }
+            _ => plain,
         }
     }
 
@@ -89,8 +119,11 @@ impl ParamSpec {
     pub fn parse(&self, text: &str) -> Option<f32> {
         let t = text.trim().replace('−', "-");
         let lower = t.to_ascii_lowercase();
+        let seconds = self.display == ParamDisplay::Time && lower.ends_with('s') && !lower.ends_with("ms");
         let (num, factor) = if let Some(n) = lower.strip_suffix("khz").or_else(|| lower.strip_suffix('k')) {
             (n.trim().to_owned(), 1000.0)
+        } else if seconds {
+            (lower.trim_end_matches('s').trim().to_owned(), 1000.0)
         } else {
             let unit = self.unit.to_ascii_lowercase();
             let n = if unit.is_empty() { lower.as_str() } else { lower.trim_end_matches(unit.as_str()) };
@@ -107,7 +140,14 @@ impl ParamSpec {
             ParamScale::Linear => plain + notches * step,
             ParamScale::Log => plain * 2f32.powf(notches * step),
         };
-        v.clamp(self.min, self.max)
+        let v = v.clamp(self.min, self.max);
+        // Snapped values must still move: a notch too small to reach the next shown value takes
+        // one display step.
+        let (from, to) = (self.snap(plain), self.snap(v));
+        if to == from && notches != 0.0 && self.display == ParamDisplay::Time {
+            return self.snap(from + time_step(from) * notches.signum());
+        }
+        to
     }
 
     /// One line of the golden manifest. Any change to this line for a released parameter is a
@@ -117,6 +157,39 @@ impl ParamSpec {
             "{} | {} | {} | {} | {} | {:?}",
             self.id, self.unit, self.min, self.max, self.default, self.scale
         )
+    }
+}
+
+/// How a dial feels, separate from the host's normalisation: breakpoints of (dial position
+/// 0…1, plain value), interpolated logarithmically between them. It gives common values more
+/// travel (release 100–300 ms) and rare ones less. Plain values must be > 0 and increasing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DialCurve(pub &'static [(f32, f32)]);
+
+impl DialCurve {
+    /// The plain value at dial position `pos`.
+    pub fn to_plain(&self, pos: f32) -> f32 {
+        let pos = pos.clamp(0.0, 1.0);
+        for w in self.0.windows(2) {
+            let ((p0, v0), (p1, v1)) = (w[0], w[1]);
+            if pos <= p1 {
+                let t = if p1 > p0 { (pos - p0) / (p1 - p0) } else { 1.0 };
+                return v0 * (v1 / v0).powf(t);
+            }
+        }
+        self.0.last().map_or(0.0, |&(_, v)| v)
+    }
+
+    /// The dial position of plain value `plain`.
+    pub fn to_position(&self, plain: f32) -> f32 {
+        for w in self.0.windows(2) {
+            let ((p0, v0), (p1, v1)) = (w[0], w[1]);
+            if plain <= v1 {
+                let t = ((plain.max(v0) / v0).ln() / (v1 / v0).ln()).clamp(0.0, 1.0);
+                return p0 + t * (p1 - p0);
+            }
+        }
+        1.0
     }
 }
 
@@ -203,6 +276,48 @@ mod tests {
                 assert!((back - n).abs() < 1e-5, "{} {n} -> {back}", spec.id);
             }
         }
+    }
+
+    const ATTACK: ParamSpec = ParamSpec {
+        id: "attack",
+        name: "Attack",
+        unit: "ms",
+        min: 0.5,
+        max: 200.0,
+        default: 10.0,
+        scale: ParamScale::Log,
+        smoothing_ms: 0.0,
+        decimals: 1,
+        wheel_step: 1.0 / 12.0,
+        wheel_step_fine: 1.0 / 48.0,
+        display: ParamDisplay::Time,
+    };
+
+    #[test]
+    fn dial_curves_round_trip_and_hit_their_breakpoints() {
+        let release = DialCurve(&[(0.0, 10.0), (0.3, 100.0), (0.75, 300.0), (1.0, 2500.0)]);
+        assert!((release.to_plain(0.3) - 100.0).abs() < 1e-3);
+        assert!((release.to_plain(0.75) - 300.0).abs() < 1e-2);
+        for i in 0..=40 {
+            let pos = i as f32 / 40.0;
+            let back = release.to_position(release.to_plain(pos));
+            assert!((back - pos).abs() < 1e-4, "{pos} -> {back}");
+        }
+    }
+
+    #[test]
+    fn times_show_and_snap_to_readable_values() {
+        assert_eq!(ATTACK.format(4.53), "4.5 ms");
+        assert_eq!(ATTACK.format(15.3), "15 ms");
+        assert_eq!(ATTACK.snap(15.3), 15.0);
+        assert_eq!(ATTACK.snap(4.53), 4.5);
+        let release = ParamSpec { max: 2500.0, ..ATTACK };
+        assert_eq!(release.format(1500.0), "1.50 s");
+        assert_eq!(release.parse("1.5 s"), Some(1500.0));
+        assert_eq!(release.parse("15 ms"), Some(15.0));
+        // A fine wheel notch is smaller than 1 ms at 15 ms, but still moves by one shown step.
+        assert_eq!(ATTACK.wheel(15.0, 1.0, true), 16.0);
+        assert_eq!(ATTACK.wheel(15.0, -1.0, true), 14.0);
     }
 
     #[test]

@@ -6,6 +6,6 @@
 pub mod param;
 pub mod telemetry;
 
-pub use param::{manifest, BoolSpec, ChoiceSpec, ParamDisplay, ParamScale, ParamSpec};
+pub use param::{manifest, BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
 pub use telemetry::SpectrumTap;
 pub use telemetry::{AtomicF32, StereoMeter};

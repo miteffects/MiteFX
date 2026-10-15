@@ -10,7 +10,7 @@ use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, BANDS, FREQ, GAIN, ON, OUT_GAIN, Q, SLOPE, STEREO, TYPE};
+use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::{run_standalone, MemoryParamHost, ThemeKind, View, WindowOptions};
 
@@ -45,7 +45,18 @@ fn main() -> Result<(), String> {
             .with_id(leak(band_id(b, GAIN.id)), GAIN)
             .with_id(leak(band_id(b, Q.id)), Q)
             .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default))
-            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0));
+            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0))
+            .with_id(leak(band_id(b, DYN.id)), index_spec("dyn", 2, 0))
+            .with_id(leak(band_id(b, RANGE.id)), RANGE)
+            .with_id(leak(band_id(b, THRESH.id)), THRESH)
+            .with_id(leak(band_id(b, ATTACK.id)), ATTACK)
+            .with_id(leak(band_id(b, RELEASE.id)), RELEASE)
+            .with_id(leak(band_id(b, RATIO.id)), RATIO)
+            .with_id(leak(band_id(b, DMODE.id)), index_spec("dmode", 2, 0))
+            .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
+            .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
+            .with_id(leak(band_id(b, TTIME.id)), TTIME)
+            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION);
     }
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),

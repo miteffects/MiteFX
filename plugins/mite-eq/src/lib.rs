@@ -22,6 +22,10 @@ pub struct EqShared {
     pub pre: SpectrumTap,
     pub post: SpectrumTap,
     pub sample_rate: AtomicF32,
+    /// Each band's current dynamic gain, dB.
+    pub dynamic: [AtomicF32; BANDS],
+    /// Each band's detected level, dBFS (dynamic bands only).
+    pub level: [AtomicF32; BANDS],
 }
 
 impl EqShared {
@@ -31,6 +35,8 @@ impl EqShared {
             pre: SpectrumTap::new(editor::ANALYZER_SIZE),
             post: SpectrumTap::new(editor::ANALYZER_SIZE),
             sample_rate: AtomicF32::new(48_000.0),
+            dynamic: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            level: std::array::from_fn(|_| AtomicF32::new(-120.0)),
         }
     }
 }
@@ -120,6 +126,12 @@ impl Plugin for MiteEq {
             Some(&self.shared.post),
         );
         self.shared.meter.store(left, right);
+        for (slot, db) in self.shared.dynamic.iter().zip(self.engine.dynamic_gains()) {
+            slot.store(db);
+        }
+        for (slot, db) in self.shared.level.iter().zip(self.engine.detector_levels()) {
+            slot.store(db);
+        }
         ProcessStatus::Normal
     }
 }
