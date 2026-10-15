@@ -226,6 +226,12 @@ pub const RATIO: ParamSpec = ParamSpec {
     display: ParamDisplay::Number,
 };
 
+/// Processing mode (BLUEPRINT §8.2): Zero Latency, Natural Phase or Linear Phase.
+pub const MODE: ChoiceSpec = ChoiceSpec { id: "mode", name: "Processing Mode", choices: &crate::dsp::PhaseMode::NAMES, default: 0 };
+
+/// Linear-phase resolution: kernel length, and with it latency and low-frequency precision.
+pub const LP_RES: ChoiceSpec = ChoiceSpec { id: "lp_res", name: "Linear Phase Resolution", choices: &crate::dsp::LP_RESOLUTIONS, default: 2 };
+
 /// `b03_freq` for band index 2.
 pub fn band_id(band: usize, param: &str) -> String {
     format!("b{:02}_{param}", band + 1)
@@ -233,7 +239,7 @@ pub fn band_id(band: usize, param: &str) -> String {
 
 /// The frozen parameter manifest, in host order.
 pub fn manifest() -> String {
-    let mut lines = vec![OUT_GAIN.manifest_line()];
+    let mut lines = vec![OUT_GAIN.manifest_line(), MODE.manifest_line(), LP_RES.manifest_line()];
     for b in 0..BANDS {
         let prefix = |line: String| format!("b{:02}_{line}", b + 1);
         lines.push(prefix(ON.manifest_line()));
@@ -331,12 +337,19 @@ impl BandParams {
 
 pub struct EqParams {
     pub out_gain: FloatParam,
+    pub mode: IntParam,
+    pub lp_res: IntParam,
     pub bands: [BandParams; BANDS],
 }
 
 impl Default for EqParams {
     fn default() -> Self {
-        Self { out_gain: float_param(&OUT_GAIN), bands: std::array::from_fn(BandParams::new) }
+        Self {
+            out_gain: float_param(&OUT_GAIN),
+            mode: choice_param(&MODE, MODE.name.to_owned()),
+            lp_res: choice_param(&LP_RES, LP_RES.name.to_owned()),
+            bands: std::array::from_fn(BandParams::new),
+        }
     }
 }
 
@@ -344,7 +357,11 @@ impl Default for EqParams {
 // long as it uses the map. The ids match `manifest()` (checked by tests/params.rs).
 unsafe impl Params for EqParams {
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
-        let mut map = vec![(OUT_GAIN.id.to_owned(), self.out_gain.as_ptr(), String::new())];
+        let mut map = vec![
+            (OUT_GAIN.id.to_owned(), self.out_gain.as_ptr(), String::new()),
+            (MODE.id.to_owned(), self.mode.as_ptr(), String::new()),
+            (LP_RES.id.to_owned(), self.lp_res.as_ptr(), String::new()),
+        ];
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
             map.push((band_id(i, ON.id), b.on.as_ptr(), group.clone()));

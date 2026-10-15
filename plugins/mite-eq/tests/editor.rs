@@ -34,7 +34,10 @@ fn leak(s: String) -> &'static str {
 
 /// One enabled bell at 1 kHz, 0 dB: its node sits at (690.2, 362) in design units.
 fn setup() -> (EqView, MemoryParamHost) {
-    let mut host = MemoryParamHost::new().with(OUT_GAIN);
+    let mut host = MemoryParamHost::new()
+        .with(OUT_GAIN)
+        .with_id("mode", index_spec("mode", 3, 0))
+        .with_id("lp_res", index_spec("lp_res", 4, 2));
     for b in 0..BANDS {
         host = host
             .with_id(leak(band_id(b, ON.id)), index_spec("on", 2, 0))
@@ -173,4 +176,21 @@ fn the_transient_scope_sets_the_attack_amount_and_the_sustain() {
     let at = |ms: f64| 272.0 + ((ms / 1000.0 + 0.005) / 0.6).sqrt() * 184.0;
     drag(&mut view, &host, Point::new(at(25.0), 520.0), Point::new(at(100.0), 520.0));
     assert!((plain(&host, TTIME.id) - 100.0).abs() < 0.5, "time {}", plain(&host, TTIME.id));
+}
+
+#[test]
+fn the_footer_picks_linear_phase_and_its_resolution() {
+    let (mut view, host) = setup();
+    let mode = |host: &MemoryParamHost| host.plain("mode", host.normalized("mode"));
+    // Natural Phase is not built yet: clicking it changes nothing.
+    click(&mut view, &host, Point::new(193.0, 732.0));
+    assert_eq!(mode(&host), 0.0);
+    click(&mut view, &host, Point::new(314.0, 732.0));
+    assert_eq!(mode(&host), 2.0);
+    draw(&mut view, &host);
+    // The resolution dropdown opens upwards from the footer; Max is its last item.
+    click(&mut view, &host, Point::new(444.0, 732.0));
+    draw(&mut view, &host);
+    click(&mut view, &host, Point::new(444.0, 691.0));
+    assert_eq!(host.plain("lp_res", host.normalized("lp_res")), 3.0);
 }

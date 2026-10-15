@@ -35,7 +35,10 @@ fn leak(s: String) -> &'static str {
 }
 
 fn main() {
-    let mut host = MemoryParamHost::new().with(OUT_GAIN);
+    let mut host = MemoryParamHost::new()
+        .with(OUT_GAIN)
+        .with_id("mode", index_spec("mode", 3, 0))
+        .with_id("lp_res", index_spec("lp_res", 4, 2));
     for b in 0..BANDS {
         host = host
             .with_id(leak(band_id(b, ON.id)), index_spec("on", 2, 0))

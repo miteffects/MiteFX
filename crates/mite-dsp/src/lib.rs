@@ -4,9 +4,11 @@
 //! path, and nothing here knows about plugin frameworks or UI.
 
 pub mod analyzer;
+pub mod conv;
 pub mod eq;
 pub mod filter;
 pub mod gain;
+pub mod linear_phase;
 pub mod meter;
 pub mod smooth;
 

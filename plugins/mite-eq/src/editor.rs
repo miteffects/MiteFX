@@ -16,7 +16,8 @@ use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
-use crate::params::{band_id, ATTACK, ATTACK_DIAL, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
+use crate::params::{band_id, ATTACK, ATTACK_DIAL, LP_RES, MODE, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use crate::EqShared;
 
 /// Mite EQ wears the EQ accent (tokens.json `color.accent.eq`).
@@ -368,6 +369,8 @@ enum Icon {
     /// A cut type and its slope index.
     Slope(BandType, usize),
     Stereo(Placement),
+    /// A linear-phase resolution: ascending bars, as many lit as the level.
+    Resolution(usize),
 }
 
 fn draw_icon(scene: &mut mite_ui::vello::Scene, icon: Icon, at: Point, color: Color) {
@@ -375,6 +378,14 @@ fn draw_icon(scene: &mut mite_ui::vello::Scene, icon: Icon, at: Point, color: Co
         Icon::Type(kind) => draw_type_icon(scene, kind, at, color),
         Icon::Slope(kind, i) => draw_slope_icon(scene, kind, i, SLOPE.choices.len(), at, color),
         Icon::Stereo(placement) => draw_placement_icon(scene, placement, at, color),
+        Icon::Resolution(level) => {
+            for i in 0..LP_RESOLUTIONS.len() {
+                let h = 4.0 + 2.5 * i as f64;
+                let bar = RoundedRect::new(at.x + 3.0 + 4.5 * i as f64, at.y + 12.0 - h, at.x + 6.0 + 4.5 * i as f64, at.y + 12.0, 1.0);
+                let lit = if i <= level { color } else { color.multiply_alpha(0.3) };
+                scene.fill(Fill::NonZero, Affine::IDENTITY, lit, None, &bar);
+            }
+        }
     }
 }
 
@@ -384,6 +395,8 @@ enum MenuKind {
     Type,
     Slope,
     Stereo,
+    /// The footer's linear-phase resolution (global, not a band setting).
+    Resolution,
 }
 
 /// An open dropdown: its button, its items and the hovered item.
@@ -404,6 +417,7 @@ impl Menu {
             MenuKind::Type => Icon::Type(BandType::from_index(i)),
             MenuKind::Slope => Icon::Slope(self.band_kind, i),
             MenuKind::Stereo => Icon::Stereo(Placement::from_index(i)),
+            MenuKind::Resolution => Icon::Resolution(i),
         }
     }
 
@@ -499,6 +513,11 @@ pub struct EqView {
     knobs_layout: Option<(Point, Option<f64>)>,
     /// The panel's dock: x, and whether it hangs from the bottom of the plot.
     panel_dock: Option<(f64, bool)>,
+    /// Footer: the processing-mode buttons and the resolution dropdown (Linear Phase only), set
+    /// while drawing; the latency last drawn, samples.
+    mode_hits: [Rect; 3],
+    resolution_hit: Option<Rect>,
+    last_latency: f32,
     ticks: u32,
 }
 
@@ -541,6 +560,9 @@ impl EqView {
             hot: None,
             knobs_layout: None,
             panel_dock: None,
+            mode_hits: [Rect::ZERO; 3],
+            resolution_hit: None,
+            last_latency: 0.0,
             ticks: 0,
         }
     }
@@ -1678,7 +1700,7 @@ impl EqView {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 8.0)), bounds, Color::from_rgba8(0, 0, 0, 150), 8.0, 14.0);
         }
         panel(cx.scene, RoundedRect::from_rect(bounds, 8.0), theme.glass.with_alpha(0.98), theme.glass_border);
-        let color = Self::band_color(theme, &self.band(cx.host, menu.band));
+        let color = if menu.kind == MenuKind::Resolution { theme.accent } else { Self::band_color(theme, &self.band(cx.host, menu.band)) };
         for (i, (r, item)) in menu.item_rects().into_iter().zip(menu.items).enumerate() {
             let r = r.inset((-4.0, -1.0));
             let shape = RoundedRect::from_rect(r, 6.0);
@@ -1710,6 +1732,7 @@ impl EqView {
             MenuKind::Type => (&BandType::NAMES, &ids.kind),
             MenuKind::Slope => (SLOPE.choices, &ids.slope),
             MenuKind::Stereo => (&Placement::NAMES, &ids.stereo),
+            MenuKind::Resolution => (&LP_RESOLUTIONS, LP_RES.id),
         };
         let current = Self::plain(host, id).round().max(0.0) as usize;
         let band_kind = BandType::from_index(Self::plain(host, &ids.kind).round().max(0.0) as usize);
@@ -1729,10 +1752,11 @@ impl EqView {
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
                 if let Some(i) = item_at(pos) {
                     let ids = &self.ids[menu.band];
-                    let id = match menu.kind {
+                    let id: &str = match menu.kind {
                         MenuKind::Type => &ids.kind,
                         MenuKind::Slope => &ids.slope,
                         MenuKind::Stereo => &ids.stereo,
+                        MenuKind::Resolution => LP_RES.id,
                     };
                     Self::set(host, id, i as f32);
                     if menu.kind == MenuKind::Type {
@@ -1771,27 +1795,64 @@ impl EqView {
         cx.text.draw(cx.scene, "then drag it · Shift for fine · Alt-drag or wheel for width", c.x, c.y + 20.0, TextStyle::BODY.sized(13.0), theme.text_mid, Align::Center);
     }
 
-    fn draw_footer(&self, cx: &mut DrawCx<'_>) {
+    fn draw_footer(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let top = FOOTER_TOP;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, top, WIDTH, HEIGHT));
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, top + 0.5), (WIDTH, top + 0.5)));
 
-        // Processing mode: only Zero Latency exists in this slice; the others are shown disabled.
+        // Processing mode. Natural Phase is not built yet and shows disabled.
+        let mode = PhaseMode::from_index(Self::plain(cx.host, MODE.id).round().max(0.0) as usize);
         let track = Rect::new(12.0, top + 10.0, 12.0 + 364.0, top + 46.0);
         panel(cx.scene, RoundedRect::from_rect(track, 8.0), theme.well, theme.well_border);
         let mut x = track.x0 + 2.0;
-        for (i, (label, w)) in [("Zero Latency", 118.0), ("Natural Phase", 118.0), ("Linear Phase", 120.0)].iter().enumerate() {
+        for (i, w) in [118.0, 118.0, 120.0].into_iter().enumerate() {
             let r = Rect::new(x, track.y0 + 2.0, x + w, track.y1 - 2.0);
-            if i == 0 {
+            let on = mode as usize == i;
+            let enabled = i != PhaseMode::NaturalPhase as usize;
+            let hovered = enabled && !on && self.pointer.is_some_and(|p| r.contains(p));
+            if on {
                 raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.control, theme.control_border, theme.shadows);
             }
-            let color = if i == 0 { theme.text_strong } else { theme.text_disabled };
-            cx.text.draw(cx.scene, label, r.center().x, r.y0 + 9.0, TextStyle::BODY.weighted(700.0), color, Align::Center);
+            let color = if on {
+                theme.text_strong
+            } else if !enabled {
+                theme.text_disabled
+            } else if hovered {
+                theme.text_hi
+            } else {
+                theme.text_mid
+            };
+            cx.text.draw(cx.scene, PhaseMode::NAMES[i], r.center().x, r.y0 + 9.0, TextStyle::BODY.weighted(700.0), color, Align::Center);
+            self.mode_hits[i] = r;
             x += w + 2.0;
         }
-        cx.text.draw(cx.scene, "LATENCY", 392.0, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
-        cx.text.draw(cx.scene, "0 ms", 392.0, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
+
+        // Linear Phase: its resolution, as a dropdown beside the modes.
+        let mut label_x = 392.0;
+        self.resolution_hit = (mode == PhaseMode::LinearPhase).then(|| {
+            let res = (Self::plain(cx.host, LP_RES.id).round().max(0.0) as usize).min(LP_RESOLUTIONS.len() - 1);
+            let r = Rect::new(388.0, track.y0, 388.0 + 112.0, track.y1);
+            let open = self.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Resolution);
+            raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, if open { theme.accent } else { theme.panel_control_border }, theme.shadows);
+            draw_icon(cx.scene, Icon::Resolution(res), Point::new(r.x0 + 10.0, r.y0 + 12.0), theme.accent);
+            cx.text.draw(cx.scene, LP_RESOLUTIONS[res], r.x0 + 40.0, r.y0 + 11.0, TextStyle::BODY.weighted(600.0), theme.text_hi, Align::Left);
+            let mut chevron = BezPath::new();
+            let (cxr, cy) = (r.x1 - 14.0, r.center().y);
+            chevron.move_to((cxr - 4.0, cy - 2.0));
+            chevron.line_to((cxr, cy + 2.0));
+            chevron.line_to((cxr + 4.0, cy - 2.0));
+            let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+            cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &chevron);
+            label_x = r.x1 + 16.0;
+            r
+        });
+
+        // The latency the engine reports to the host.
+        let latency_ms = f64::from(self.shared.latency.load()) / self.sample_rate() * 1000.0;
+        let latency = if latency_ms < 0.05 { "0 ms".to_owned() } else { format!("{latency_ms:.1} ms") };
+        cx.text.draw(cx.scene, "LATENCY", label_x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, &latency, label_x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
 
         let plain = cx.host.plain(OUT_GAIN.id, cx.host.normalized(OUT_GAIN.id));
         cx.text.draw(cx.scene, "OUTPUT", 1218.0, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
@@ -1927,10 +1988,23 @@ impl View for EqView {
                 let hover = if in_panel(&self.panel_hits, pos) || hot.is_some() { None } else { self.node_at(host, pos) };
                 changed |= hover != self.hover;
                 self.hover = hover;
-                // The help strip follows the pointer over the display.
-                changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP)
+                // The help strip follows the pointer over the display; footer buttons light on hover.
+                changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => {
+                // Footer: processing mode (Natural Phase is not built yet) and resolution.
+                if pos.y > FOOTER_TOP {
+                    if let Some(i) = self.mode_hits.iter().position(|r| r.contains(pos)) {
+                        if i != PhaseMode::NaturalPhase as usize {
+                            Self::set(host, MODE.id, i as f32);
+                        }
+                        return true;
+                    }
+                    if let Some(r) = self.resolution_hit.filter(|r| r.contains(pos)) {
+                        self.toggle_menu(MenuKind::Resolution, 0, r, host);
+                        return true;
+                    }
+                }
                 if let (Some(hot), Some(b)) = (self.hot_at(host, pos), self.selected) {
                     let s = self.band(host, b);
                     let range = if s.is_dynamic() { s.dynamics.range_db } else { 0.0 };
@@ -2118,6 +2192,12 @@ impl View for EqView {
                 dirty = true;
             }
         }
+        // The latency readout follows the engine (it changes once a mode switch completes).
+        let latency = self.shared.latency.load();
+        if latency != self.last_latency {
+            self.last_latency = latency;
+            dirty = true;
+        }
         // The selected band's level drives its threshold column and scope dot.
         if let Some(b) = self.selected {
             let level = self.shared.level[b].load();
@@ -2136,6 +2216,8 @@ impl View for EqView {
         self.last_signature_check = Instant::now();
         let mut signature = Vec::with_capacity(1 + BANDS * 13);
         signature.push(host.normalized(OUT_GAIN.id));
+        signature.push(host.normalized(MODE.id));
+        signature.push(host.normalized(LP_RES.id));
         for ids in &self.ids {
             for id in [
                 &ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo, &ids.dyn_on, &ids.range,

@@ -13,7 +13,7 @@ pub mod dsp;
 pub mod editor;
 pub mod params;
 
-use dsp::EqEngine;
+use dsp::{EqEngine, PhaseMode};
 use params::{EqParams, BANDS};
 
 /// Audio → UI telemetry. Everything is lock-free and allocation-free on the audio side.
@@ -26,6 +26,8 @@ pub struct EqShared {
     pub dynamic: [AtomicF32; BANDS],
     /// Each band's detected level, dBFS (dynamic bands only).
     pub level: [AtomicF32; BANDS],
+    /// The latency the engine runs with, samples.
+    pub latency: AtomicF32,
 }
 
 impl EqShared {
@@ -37,6 +39,7 @@ impl EqShared {
             sample_rate: AtomicF32::new(48_000.0),
             dynamic: std::array::from_fn(|_| AtomicF32::new(0.0)),
             level: std::array::from_fn(|_| AtomicF32::new(-120.0)),
+            latency: AtomicF32::new(0.0),
         }
     }
 }
@@ -51,11 +54,18 @@ pub struct MiteEq {
     params: Arc<EqParams>,
     engine: EqEngine,
     shared: Arc<EqShared>,
+    /// The latency last reported to the host, samples.
+    reported_latency: u32,
 }
 
 impl MiteEq {
     fn settings(&self) -> [BandSettings; BANDS] {
         std::array::from_fn(|i| self.params.bands[i].settings())
+    }
+
+    fn set_mode(&mut self) {
+        let mode = PhaseMode::from_index(self.params.mode.value().max(0) as usize);
+        self.engine.set_mode(mode, self.params.lp_res.value().max(0) as usize);
     }
 }
 
@@ -64,7 +74,7 @@ impl Default for MiteEq {
         let params = Arc::new(EqParams::default());
         let settings = std::array::from_fn(|i| params.bands[i].settings());
         let engine = EqEngine::new(48_000.0, &settings, params.out_gain.value());
-        Self { params, engine, shared: Arc::new(EqShared::new()) }
+        Self { params, engine, shared: Arc::new(EqShared::new()), reported_latency: 0 }
     }
 }
 
@@ -104,10 +114,14 @@ impl Plugin for MiteEq {
         })
     }
 
-    fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, _context: &mut impl InitContext<Self>) -> bool {
+    fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {
         let settings = self.settings();
+        self.set_mode();
         self.engine.prepare(config.sample_rate, &settings, self.params.out_gain.value());
         self.shared.sample_rate.store(config.sample_rate);
+        self.reported_latency = self.engine.latency() as u32;
+        context.set_latency_samples(self.reported_latency);
+        self.shared.latency.store(self.reported_latency as f32);
         true
     }
 
@@ -116,8 +130,9 @@ impl Plugin for MiteEq {
         self.engine.reset(&settings, self.params.out_gain.value());
     }
 
-    fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, _context: &mut impl ProcessContext<Self>) -> ProcessStatus {
+    fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let settings = self.settings();
+        self.set_mode();
         let (left, right) = self.engine.process(
             buffer.as_slice(),
             &settings,
@@ -131,6 +146,13 @@ impl Plugin for MiteEq {
         }
         for (slot, db) in self.shared.level.iter().zip(self.engine.detector_levels()) {
             slot.store(db);
+        }
+        // A mode change switched latency behind its dip: tell the host (signalled, not polled).
+        let latency = self.engine.latency() as u32;
+        if latency != self.reported_latency {
+            self.reported_latency = latency;
+            context.set_latency_samples(latency);
+            self.shared.latency.store(latency as f32);
         }
         ProcessStatus::Normal
     }

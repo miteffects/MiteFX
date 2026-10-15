@@ -1,37 +1,206 @@
-//! The Mite EQ engine: 24 bands in series, output gain, meters and analyzer taps. Free of the
-//! plugin framework so it can be tested directly.
+//! The Mite EQ engine: 24 bands in series, output gain, meters and analyzer taps, in Zero Latency
+//! (IIR) or Linear Phase (partitioned convolution) mode. Free of the plugin framework so it can be
+//! tested directly.
+//!
+//! Linear Phase: a worker thread designs kernels from the latest band settings (sent through a
+//! triple buffer) and hands them over; each new kernel crossfades in. Dynamic bands keep their
+//! static gain in the kernel and move through a gain-only IIR filter after it. Changing mode or
+//! resolution changes the latency, so the output fades out, switches, and fades back in once the
+//! new kernel is in place.
 
-use mite_core::SpectrumTap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use mite_core::{triple_buffer, Handover, SpectrumTap, TripleReader, TripleWriter};
+use mite_dsp::conv::{Convolver, KernelSet};
 use mite_dsp::eq::{BandProcessor, BandSettings};
-use mite_dsp::{db_to_gain, LinearSmoother, PeakMeter};
+use mite_dsp::{db_to_gain, linear_phase, LinearSmoother, PeakMeter};
 
 use crate::params::{BANDS, FREQ, OUT_GAIN};
+
+/// Processing modes, in the order of the `mode` parameter's choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhaseMode {
+    ZeroLatency,
+    NaturalPhase,
+    LinearPhase,
+}
+
+impl PhaseMode {
+    pub const NAMES: [&'static str; 3] = ["Zero Latency", "Natural Phase", "Linear Phase"];
+
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            1 => Self::NaturalPhase,
+            2 => Self::LinearPhase,
+            _ => Self::ZeroLatency,
+        }
+    }
+
+    /// The mode the engine runs for this choice. Natural Phase is not built yet and runs as Zero
+    /// Latency.
+    fn effective(self) -> Self {
+        if self == Self::NaturalPhase { Self::ZeroLatency } else { self }
+    }
+}
+
+/// Linear-phase resolutions (the `lp_res` choices): kernel lengths at 48 kHz.
+pub const LP_RESOLUTIONS: [&str; 4] = ["Low", "Medium", "High", "Max"];
+const LP_LENGTHS_48K: [usize; 4] = [1024, 2048, 4096, 8192];
+/// Convolution partition size at 48 kHz, samples (part of the latency).
+const LP_BLOCK_48K: usize = 128;
+/// Kernel swaps and the mode-switch dip, ms.
+const KERNEL_FADE_MS: f64 = 20.0;
+const SWITCH_FADE_MS: f32 = 10.0;
+/// Chunk size for mono input through the stereo convolver.
+const MONO_CHUNK: usize = 256;
+
+/// The power-of-two multiple of 48 kHz nearest `sample_rate` (1 at 44.1/48, 2 at 88.2/96 …).
+fn rate_ratio(sample_rate: f64) -> usize {
+    ((sample_rate / 48_000.0).round().max(1.0) as usize).next_power_of_two()
+}
+
+/// Kernel length for resolution `lp_res` at `sample_rate`.
+pub fn kernel_len(lp_res: usize, sample_rate: f64) -> usize {
+    LP_LENGTHS_48K[lp_res.min(LP_LENGTHS_48K.len() - 1)] * rate_ratio(sample_rate)
+}
+
+/// Linear Phase latency at `sample_rate`, samples: one convolution block plus half the kernel.
+pub fn linear_phase_latency(lp_res: usize, sample_rate: f64) -> usize {
+    LP_BLOCK_48K * rate_ratio(sample_rate) + kernel_len(lp_res, sample_rate) / 2
+}
+
+/// What the worker designs a kernel for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DesignRequest {
+    bands: [BandSettings; BANDS],
+    sample_rate: f64,
+    len: usize,
+    block: usize,
+}
+
+fn design_kernel(req: &DesignRequest) -> KernelSet {
+    let k = linear_phase::design(&req.bands, req.sample_rate, req.len);
+    KernelSet::new(req.block, k.layout, &k.kernels, k.delay)
+}
+
+/// The kernel-design thread: designs whatever was requested last, hands it over, and frees what
+/// the audio thread retired.
+fn run_designer(mut requests: TripleReader<DesignRequest>, kernels: Arc<Handover<KernelSet>>, stop: Arc<AtomicBool>) {
+    while !stop.load(Ordering::Relaxed) {
+        if let Some(req) = requests.read() {
+            kernels.send(Box::new(design_kernel(&req)));
+        }
+        kernels.collect();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Where a mode or resolution change is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Switch {
+    Steady,
+    /// Fading out before the change.
+    FadingOut,
+    /// Muted, waiting for the new resolution's first kernel.
+    Waiting,
+    /// Muted while the new kernel's delay line fills, so the sound comes back with the fade-in
+    /// instead of starting abruptly once the latency has passed.
+    Filling,
+}
 
 pub struct EqEngine {
     bands: Vec<BandProcessor>,
     out_gain: LinearSmoother,
     meters: [PeakMeter; 2],
+    sample_rate: f64,
+    /// The mode and resolution asked for, and the ones running.
+    wanted: (PhaseMode, usize),
+    active: (PhaseMode, usize),
+    switch: Switch,
+    /// The mode-switch dip (1 = audible).
+    fader: LinearSmoother,
+    conv: Convolver,
+    kernels: Arc<Handover<KernelSet>>,
+    requests: TripleWriter<DesignRequest>,
+    last_request: Option<DesignRequest>,
+    /// Kernels the handover had no room to take back yet (retried every block).
+    pending: [Option<Box<KernelSet>>; 4],
+    stop: Arc<AtomicBool>,
+    designer: Option<JoinHandle<()>>,
+    /// Right-channel stand-in for mono input through the stereo convolver.
+    mono_scratch: Vec<f32>,
+    /// Samples fed to the convolver since it was last cleared.
+    filled: usize,
 }
 
 impl EqEngine {
-    /// Allocates; call off the audio thread.
+    /// Allocates and starts the kernel-design thread; call off the audio thread.
     pub fn new(sample_rate: f32, settings: &[BandSettings; BANDS], out_db: f32) -> Self {
+        let sr = f64::from(sample_rate);
+        let kernels = Arc::new(Handover::new());
+        let stop = Arc::new(AtomicBool::new(false));
+        let initial = DesignRequest { bands: *settings, sample_rate: sr, len: kernel_len(2, sr), block: LP_BLOCK_48K };
+        let (requests, reader) = triple_buffer(initial);
+        let designer = {
+            let (kernels, stop) = (kernels.clone(), stop.clone());
+            std::thread::Builder::new()
+                .name("mite-eq-kernels".into())
+                .spawn(move || run_designer(reader, kernels, stop))
+                .ok()
+        };
         let mut engine = Self {
-            bands: (0..BANDS).map(|_| BandProcessor::new(f64::from(sample_rate), FREQ.smoothing_ms)).collect(),
+            bands: (0..BANDS).map(|_| BandProcessor::new(sr, FREQ.smoothing_ms)).collect(),
             out_gain: LinearSmoother::new(1.0),
             meters: [PeakMeter::new(sample_rate), PeakMeter::new(sample_rate)],
+            sample_rate: sr,
+            wanted: (PhaseMode::ZeroLatency, 2),
+            active: (PhaseMode::ZeroLatency, 2),
+            switch: Switch::Steady,
+            fader: LinearSmoother::new(1.0),
+            conv: Convolver::new(LP_BLOCK_48K, 1, 1),
+            kernels,
+            requests,
+            last_request: None,
+            pending: Default::default(),
+            stop,
+            designer,
+            mono_scratch: vec![0.0; MONO_CHUNK],
+            filled: 0,
         };
         engine.prepare(sample_rate, settings, out_db);
         engine
     }
 
-    /// Off the audio thread: sets the sample rate and jumps to the given settings.
+    /// Asks for a processing mode and linear-phase resolution. A change takes effect through a
+    /// short dip (the latency changes with it). Allocation-free.
+    pub fn set_mode(&mut self, mode: PhaseMode, lp_res: usize) {
+        self.wanted = (mode.effective(), lp_res.min(LP_LENGTHS_48K.len() - 1));
+    }
+
+    /// Off the audio thread: sets the sample rate, sizes the convolver, and jumps to the given
+    /// settings and the mode asked for (designing its kernel here, so it starts at once).
     pub fn prepare(&mut self, sample_rate: f32, settings: &[BandSettings; BANDS], out_db: f32) {
+        let sr = f64::from(sample_rate);
+        self.sample_rate = sr;
         for (band, s) in self.bands.iter_mut().zip(settings) {
-            band.prepare(f64::from(sample_rate), FREQ.smoothing_ms, s);
+            band.prepare(sr, FREQ.smoothing_ms, s);
         }
         self.out_gain.set_ramp(sample_rate, OUT_GAIN.smoothing_ms);
+        self.fader.set_ramp(sample_rate, SWITCH_FADE_MS);
         self.meters = [PeakMeter::new(sample_rate), PeakMeter::new(sample_rate)];
+        let block = self.block();
+        let fade = (KERNEL_FADE_MS * sr / 1000.0) as usize;
+        self.conv = Convolver::new(block, kernel_len(LP_LENGTHS_48K.len() - 1, sr), fade);
+        self.active = self.wanted;
+        self.switch = Switch::Steady;
+        self.last_request = None;
+        if self.active.0 == PhaseMode::LinearPhase {
+            let req = self.request(settings);
+            self.conv.replace(Box::new(design_kernel(&req)));
+        }
         self.reset(settings, out_db);
     }
 
@@ -41,8 +210,118 @@ impl EqEngine {
             band.reset(s);
         }
         self.out_gain.reset(db_to_gain(out_db));
+        self.fader.reset(if self.switch == Switch::Steady { 1.0 } else { 0.0 });
+        self.conv.reset();
         for m in &mut self.meters {
             m.reset();
+        }
+    }
+
+    fn block(&self) -> usize {
+        LP_BLOCK_48K * rate_ratio(self.sample_rate)
+    }
+
+    fn request(&self, settings: &[BandSettings; BANDS]) -> DesignRequest {
+        DesignRequest { bands: *settings, sample_rate: self.sample_rate, len: kernel_len(self.wanted.1, self.sample_rate), block: self.block() }
+    }
+
+    /// The latency the engine runs with now, samples (report it to the host).
+    pub fn latency(&self) -> usize {
+        match self.active.0 {
+            PhaseMode::LinearPhase => self.conv.latency(),
+            _ => 0,
+        }
+    }
+
+    /// Gives a kernel back to the designer to free; never frees on this thread.
+    fn retire(&mut self, kernel: Box<KernelSet>) {
+        if let Err(kernel) = self.kernels.retire(kernel) {
+            match self.pending.iter_mut().find(|slot| slot.is_none()) {
+                Some(slot) => *slot = Some(kernel),
+                // Every slot full: leaking is the only option that keeps the audio thread clean.
+                None => std::mem::forget(kernel),
+            }
+        }
+    }
+
+    /// Once per block: publish design requests, move kernels in and out, and step a mode switch.
+    fn update_mode(&mut self, settings: &[BandSettings; BANDS]) {
+        for i in 0..self.pending.len() {
+            if let Some(k) = self.pending[i].take() {
+                if let Err(k) = self.kernels.retire(k) {
+                    self.pending[i] = Some(k);
+                }
+            }
+        }
+        if let Some(old) = self.conv.retired() {
+            self.retire(old);
+        }
+        if self.wanted.0 == PhaseMode::LinearPhase {
+            let req = self.request(settings);
+            if self.last_request != Some(req) {
+                self.requests.write(req);
+                self.last_request = Some(req);
+            }
+        }
+        let expected_delay = kernel_len(self.active.1, self.sample_rate) / 2;
+        match self.switch {
+            Switch::Steady => {
+                let changed = self.wanted.0 != self.active.0 || (self.wanted.0 == PhaseMode::LinearPhase && self.wanted.1 != self.active.1);
+                if changed {
+                    self.fader.set_target(0.0);
+                    self.switch = Switch::FadingOut;
+                } else if self.active.0 == PhaseMode::LinearPhase && !self.conv.is_fading() {
+                    if let Some(k) = self.kernels.take() {
+                        if k.delay() == expected_delay {
+                            if let Err(k) = self.conv.offer(k) {
+                                self.retire(k);
+                            }
+                        } else {
+                            self.retire(k);
+                        }
+                    }
+                } else if self.active.0 != PhaseMode::LinearPhase {
+                    if let Some(k) = self.kernels.take() {
+                        self.retire(k);
+                    }
+                }
+            }
+            Switch::FadingOut => {
+                if !self.fader.is_smoothing() {
+                    self.active = self.wanted;
+                    for (band, s) in self.bands.iter_mut().zip(settings) {
+                        band.reset(s);
+                    }
+                    self.conv.reset();
+                    self.filled = 0;
+                    self.switch = if self.active.0 == PhaseMode::LinearPhase { Switch::Waiting } else { Switch::Steady };
+                    if self.switch == Switch::Steady {
+                        self.fader.set_target(1.0);
+                    }
+                }
+            }
+            Switch::Waiting => {
+                if let Some(k) = self.kernels.take() {
+                    // A kernel left from before a sample-rate change has another block size.
+                    if k.delay() == expected_delay && k.block() == self.block() {
+                        if let Some(old) = self.conv.replace(k) {
+                            self.retire(old);
+                        }
+                        if let Some(old) = self.conv.retired() {
+                            self.retire(old);
+                        }
+                        self.switch = Switch::Filling;
+                    } else {
+                        self.retire(k);
+                    }
+                }
+            }
+            Switch::Filling => {
+                if self.filled >= self.conv.latency() {
+                    self.switch = Switch::Steady;
+                    self.fader.set_target(1.0);
+                }
+            }
         }
     }
 
@@ -59,16 +338,41 @@ impl EqEngine {
         if let Some(tap) = pre {
             push_mono(tap, channels);
         }
-        for (band, s) in self.bands.iter_mut().zip(settings) {
-            band.set_target(s);
-            band.process(channels);
+        self.update_mode(settings);
+
+        if self.active.0 == PhaseMode::LinearPhase {
+            self.filled = self.filled.saturating_add(channels.first().map_or(0, |c| c.len()));
+            match channels {
+                [l, r, ..] => self.conv.process(l, r),
+                [m] => {
+                    for chunk in m.chunks_mut(MONO_CHUNK) {
+                        let scratch = &mut self.mono_scratch[..chunk.len()];
+                        scratch.copy_from_slice(chunk);
+                        self.conv.process(chunk, scratch);
+                    }
+                }
+                [] => {}
+            }
+            // The kernel holds every band's static curve; dynamic bands add their movement here,
+            // through a filter with no static gain of its own.
+            for (band, s) in self.bands.iter_mut().zip(settings) {
+                if s.is_dynamic() || band.dynamic_gain_db() != 0.0 {
+                    band.set_target(&BandSettings { gain_db: 0.0, ..*s });
+                    band.process(channels);
+                }
+            }
+        } else {
+            for (band, s) in self.bands.iter_mut().zip(settings) {
+                band.set_target(s);
+                band.process(channels);
+            }
         }
 
         self.out_gain.set_target(db_to_gain(out_db));
         let frames = channels.first().map_or(0, |c| c.len());
-        if self.out_gain.is_smoothing() {
+        if self.out_gain.is_smoothing() || self.fader.is_smoothing() || self.fader.current() != 1.0 {
             for i in 0..frames {
-                let g = self.out_gain.next_value();
+                let g = self.out_gain.next_value() * self.fader.next_value();
                 for ch in channels.iter_mut() {
                     ch[i] *= g;
                 }
@@ -103,6 +407,15 @@ impl EqEngine {
     /// Each band's detected level right now, dBFS, for the display.
     pub fn detector_levels(&self) -> impl Iterator<Item = f32> + '_ {
         self.bands.iter().map(|b| b.detector_level_db() as f32)
+    }
+}
+
+impl Drop for EqEngine {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.designer.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -155,6 +468,132 @@ mod tests {
         let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
         let gain = 20.0 * (rms(&buf[24_000..]) / rms(&input[24_000..])).log10();
         assert!((gain - 6.0).abs() < 0.05, "{gain}");
+    }
+
+    fn noise(n: usize, seed: u32) -> Vec<f32> {
+        let mut s = seed;
+        (0..n)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 17;
+                s ^= s << 5;
+                (s as f32 / u32::MAX as f32 - 0.5) * 0.5
+            })
+            .collect()
+    }
+
+    fn bell(gain_db: f64) -> [BandSettings; BANDS] {
+        let mut s = flat();
+        s[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 1000.0, gain_db, q: 1.0, ..Default::default() };
+        s
+    }
+
+    /// An engine already running Linear Phase at `lp_res`.
+    fn linear(settings: &[BandSettings; BANDS], lp_res: usize) -> EqEngine {
+        let mut eq = EqEngine::new(SR, settings, 0.0);
+        eq.set_mode(PhaseMode::LinearPhase, lp_res);
+        eq.prepare(SR, settings, 0.0);
+        eq
+    }
+
+    /// Runs `l`/`r` through in 128-sample blocks, giving the designer thread time between blocks.
+    fn run(eq: &mut EqEngine, settings: &[BandSettings; BANDS], l: &mut [f32], r: &mut [f32], pause: bool) {
+        for (a, b) in l.chunks_mut(128).zip(r.chunks_mut(128)) {
+            eq.process(&mut [a, b], settings, 0.0, None, None);
+            if pause {
+                std::thread::sleep(Duration::from_micros(300));
+            }
+        }
+    }
+
+    #[test]
+    fn linear_phase_with_no_bands_is_a_pure_delay() {
+        let mut eq = linear(&flat(), 0);
+        let latency = eq.latency();
+        assert_eq!(latency, linear_phase_latency(0, f64::from(SR)));
+        let input = noise(8192, 3);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        run(&mut eq, &flat(), &mut l, &mut r, false);
+        // Nulls with the delayed input far below −140 dBFS (f32 output resolution aside).
+        let worst = (0..8192 - latency).map(|n| (l[n + latency] - input[n]).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 1e-7, "residual {worst}");
+    }
+
+    #[test]
+    fn linear_phase_reports_its_true_delay_and_is_symmetric() {
+        let settings = bell(6.0);
+        let mut eq = linear(&settings, 2);
+        let latency = eq.latency();
+        let len = latency * 2 + 512;
+        let (mut l, mut r) = (vec![0.0f32; len], vec![0.0f32; len]);
+        l[0] = 1.0;
+        r[0] = 1.0;
+        run(&mut eq, &settings, &mut l, &mut r, false);
+        // The impulse response is mirror-symmetric about the reported latency: linear phase, and
+        // a group delay that is exactly the latency.
+        let peak = l.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        for i in 1..1500 {
+            assert!((l[latency - i] - l[latency + i]).abs() < 1e-6 * peak, "asymmetric at ±{i}");
+        }
+        assert!(l[latency].abs() > 0.5 * peak);
+    }
+
+    #[test]
+    fn linear_phase_matches_zero_latency_in_magnitude() {
+        let settings = bell(6.0);
+        let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
+        for freq in [300.0, 1000.0, 3000.0] {
+            let input = sine(freq, 48_000);
+            let mut zl = EqEngine::new(SR, &settings, 0.0);
+            let (mut a, mut b) = (input.clone(), input.clone());
+            run(&mut zl, &settings, &mut a, &mut b, false);
+            let mut lp = linear(&settings, 2);
+            let (mut c, mut d) = (input.clone(), input.clone());
+            run(&mut lp, &settings, &mut c, &mut d, false);
+            let diff = 20.0 * (rms(&c[24_000..]) / rms(&a[24_000..])).log10();
+            assert!(diff.abs() < 0.05, "{freq} Hz: linear phase differs by {diff:.3} dB");
+        }
+    }
+
+    #[test]
+    fn switching_to_linear_phase_is_click_free_and_changes_the_latency() {
+        let settings = bell(6.0);
+        let mut eq = EqEngine::new(SR, &settings, 0.0);
+        assert_eq!(eq.latency(), 0);
+        let input = sine(200.0, 48_000);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        eq.set_mode(PhaseMode::LinearPhase, 1);
+        run(&mut eq, &settings, &mut l, &mut r, true);
+        assert_eq!(eq.latency(), linear_phase_latency(1, f64::from(SR)));
+        // A 200 Hz sine at 0.5 (+6 dB at most) moves at most ~0.03 per sample; a click would not.
+        let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(jump < 0.04, "step {jump}");
+        // It ends up playing again, not stuck in the dip.
+        assert!(l[40_000..].iter().any(|v| v.abs() > 0.3));
+        // And back to Zero Latency, just as smoothly.
+        let (mut l, mut r) = (input.clone(), input.clone());
+        eq.set_mode(PhaseMode::ZeroLatency, 1);
+        run(&mut eq, &settings, &mut l, &mut r, true);
+        assert_eq!(eq.latency(), 0);
+        let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(jump < 0.04, "step back {jump}");
+    }
+
+    #[test]
+    fn linear_phase_kernel_updates_crossfade() {
+        let quiet = bell(-12.0);
+        let mut eq = linear(&quiet, 0);
+        let input = sine(1000.0, 48_000);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        // Half a second at −12 dB, then the band drops to 0 dB while playing.
+        let (la, lb) = l.split_at_mut(24_000);
+        let (ra, rb) = r.split_at_mut(24_000);
+        run(&mut eq, &quiet, la, ra, true);
+        run(&mut eq, &bell(0.0), lb, rb, true);
+        let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(jump < 0.07, "step {jump}");
+        let peak = |x: &[f32]| x.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        assert!(peak(&l[20_000..23_000]) < 0.15 && (peak(&l[44_000..47_000]) - 0.5).abs() < 0.01);
     }
 
     #[test]

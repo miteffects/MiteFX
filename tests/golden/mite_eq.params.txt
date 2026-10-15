@@ -1,4 +1,6 @@
 out_gain | dB | -24 | 24 | 0 | Linear
+mode | choice | Zero Latency, Natural Phase, Linear Phase | 0
+lp_res | choice | Low, Medium, High, Max | 2
 b01_on | bool | false
 b01_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
 b01_freq | Hz | 10 | 30000 | 1000 | Log

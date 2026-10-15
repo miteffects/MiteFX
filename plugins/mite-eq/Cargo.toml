@@ -19,5 +19,8 @@ mite-ui.workspace = true
 nih_plug.workspace = true
 
 [dev-dependencies]
+# The allocation guard nih-plug wraps `process()` in (same source as nih-plug's, so it is the same
+# crate and the same global allocator): tests run engine blocks inside it.
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
 baseview.workspace = true
 png = "0.18"

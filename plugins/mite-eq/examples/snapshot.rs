@@ -48,7 +48,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => ThemeKind::Dark,
     };
 
-    let mut host = MemoryParamHost::new().with(OUT_GAIN);
+    let mut host = MemoryParamHost::new()
+        .with(OUT_GAIN)
+        .with_id("mode", index_spec("mode", 3, 0))
+        .with_id("lp_res", index_spec("lp_res", 4, 2));
     for b in 0..BANDS {
         host = host
             .with_id(leak(band_id(b, ON.id)), index_spec("on", 2, 0))
@@ -142,6 +145,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // SNAPSHOT_LP=res shows Linear Phase at that resolution (0 = Low … 3 = Max).
+    if let Some(res) = std::env::var("SNAPSHOT_LP").ok().and_then(|v| v.parse::<usize>().ok()) {
+        host.set_plain("mode", 2.0);
+        host.set_plain("lp_res", res as f32);
+        shared.latency.store(mite_eq::dsp::linear_phase_latency(res, 48_000.0) as f32);
+    }
     let mut view = EqView::new(shared);
     // Let the analyzer's ballistics settle as they would live (~0.5 s of 8 ms ticks).
     for _ in 0..60 {
