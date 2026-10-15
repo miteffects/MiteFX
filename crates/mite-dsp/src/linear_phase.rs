@@ -8,16 +8,8 @@
 use realfft::num_complex::Complex;
 use realfft::RealFftPlanner;
 
-use crate::conv::KernelLayout;
+use crate::conv::{KernelDesign, KernelLayout};
 use crate::eq::{analog_response_db, BandSettings, Placement};
-
-/// Kernels for [`crate::conv::KernelSet::new`]: their layout, the kernels (1, 2 or 4, each `len`
-/// samples), and their delay (`len / 2`).
-pub struct LinearPhaseKernels {
-    pub layout: KernelLayout,
-    pub kernels: Vec<Vec<f64>>,
-    pub delay: usize,
-}
 
 /// A 2×2 real matrix in the L/R basis: `[ll, lr, rl, rr]`.
 type Matrix = [f64; 4];
@@ -42,7 +34,7 @@ fn band_matrix(placement: Placement, g: f64) -> Matrix {
 }
 
 /// The EQ's linear-phase kernels, `len` samples long (a power of two), at `sample_rate`.
-pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> LinearPhaseKernels {
+pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDesign {
     assert!(len.is_power_of_two() && len >= 4, "kernel length must be a power of two");
     let bins = len / 2 + 1;
     // The whole EQ's matrix at every bin, bands applied in order.
@@ -88,7 +80,7 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> LinearPha
                 .collect()
         })
         .collect();
-    LinearPhaseKernels { layout, kernels, delay: half }
+    KernelDesign { layout, kernels, delay: half }
 }
 
 #[cfg(test)]

@@ -377,6 +377,11 @@ impl Sections {
     }
 
     /// Digital response in dB at `w` radians/sample.
+    /// The sections' response at `w` (radians/sample), magnitude and phase.
+    pub fn response(&self, w: f64) -> realfft::num_complex::Complex<f64> {
+        self.as_slice().iter().fold(realfft::num_complex::Complex::new(1.0, 0.0), |h, c| h * c.response(w))
+    }
+
     pub fn response_db(&self, w: f64) -> f64 {
         self.as_slice().iter().map(|c| 10.0 * c.magnitude_sq(w).log10()).sum()
     }
@@ -448,6 +453,16 @@ pub fn design(s: &BandSettings, sample_rate: f64) -> Sections {
         out.push(if proto.is_first_order() { matched(&proto, w0) } else { matched_symmetric(&proto, w0, cut) });
     });
     out
+}
+
+/// The analog target response at `freq`, magnitude and phase (1 for a disabled band).
+pub fn analog_response(s: &BandSettings, freq: f64) -> realfft::num_complex::Complex<f64> {
+    let mut h = realfft::num_complex::Complex::new(1.0, 0.0);
+    if s.enabled {
+        let x = freq / s.freq.clamp(FREQ_MIN, FREQ_MAX);
+        for_each_prototype(s, |proto, _| h *= proto.response(x));
+    }
+    h
 }
 
 /// The analog target response in dB at `freq`, what the band is designed to match.

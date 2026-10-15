@@ -9,6 +9,7 @@ pub mod eq;
 pub mod filter;
 pub mod gain;
 pub mod linear_phase;
+pub mod natural_phase;
 pub mod meter;
 pub mod smooth;
 

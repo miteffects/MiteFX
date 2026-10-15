@@ -145,6 +145,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // SNAPSHOT_NP shows Natural Phase.
+    if std::env::var_os("SNAPSHOT_NP").is_some() {
+        host.set_plain("mode", 1.0);
+        shared.latency.store(mite_eq::dsp::natural_phase_latency(48_000.0) as f32);
+    }
     // SNAPSHOT_LP=res shows Linear Phase at that resolution (0 = Low … 3 = Max).
     if let Some(res) = std::env::var("SNAPSHOT_LP").ok().and_then(|v| v.parse::<usize>().ok()) {
         host.set_plain("mode", 2.0);

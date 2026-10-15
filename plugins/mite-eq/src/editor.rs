@@ -1801,7 +1801,7 @@ impl EqView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, top, WIDTH, HEIGHT));
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, top + 0.5), (WIDTH, top + 0.5)));
 
-        // Processing mode. Natural Phase is not built yet and shows disabled.
+        // Processing mode.
         let mode = PhaseMode::from_index(Self::plain(cx.host, MODE.id).round().max(0.0) as usize);
         let track = Rect::new(12.0, top + 10.0, 12.0 + 364.0, top + 46.0);
         panel(cx.scene, RoundedRect::from_rect(track, 8.0), theme.well, theme.well_border);
@@ -1809,15 +1809,12 @@ impl EqView {
         for (i, w) in [118.0, 118.0, 120.0].into_iter().enumerate() {
             let r = Rect::new(x, track.y0 + 2.0, x + w, track.y1 - 2.0);
             let on = mode as usize == i;
-            let enabled = i != PhaseMode::NaturalPhase as usize;
-            let hovered = enabled && !on && self.pointer.is_some_and(|p| r.contains(p));
+            let hovered = !on && self.pointer.is_some_and(|p| r.contains(p));
             if on {
                 raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.control, theme.control_border, theme.shadows);
             }
             let color = if on {
                 theme.text_strong
-            } else if !enabled {
-                theme.text_disabled
             } else if hovered {
                 theme.text_hi
             } else {
@@ -1992,12 +1989,10 @@ impl View for EqView {
                 changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => {
-                // Footer: processing mode (Natural Phase is not built yet) and resolution.
+                // Footer: processing mode and resolution.
                 if pos.y > FOOTER_TOP {
                     if let Some(i) = self.mode_hits.iter().position(|r| r.contains(pos)) {
-                        if i != PhaseMode::NaturalPhase as usize {
-                            Self::set(host, MODE.id, i as f32);
-                        }
+                        Self::set(host, MODE.id, i as f32);
                         return true;
                     }
                     if let Some(r) = self.resolution_hit.filter(|r| r.contains(pos)) {

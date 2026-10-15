@@ -179,12 +179,12 @@ fn the_transient_scope_sets_the_attack_amount_and_the_sustain() {
 }
 
 #[test]
-fn the_footer_picks_linear_phase_and_its_resolution() {
+fn the_footer_picks_the_processing_mode_and_resolution() {
     let (mut view, host) = setup();
     let mode = |host: &MemoryParamHost| host.plain("mode", host.normalized("mode"));
-    // Natural Phase is not built yet: clicking it changes nothing.
     click(&mut view, &host, Point::new(193.0, 732.0));
-    assert_eq!(mode(&host), 0.0);
+    assert_eq!(mode(&host), 1.0);
+    draw(&mut view, &host);
     click(&mut view, &host, Point::new(314.0, 732.0));
     assert_eq!(mode(&host), 2.0);
     draw(&mut view, &host);

@@ -34,6 +34,14 @@ impl KernelLayout {
     }
 }
 
+/// A designed set of time-domain kernels, before partitioning: their layout, the kernels (1, 2
+/// or 4, all the same length), and their delay in samples.
+pub struct KernelDesign {
+    pub layout: KernelLayout,
+    pub kernels: Vec<Vec<f64>>,
+    pub delay: usize,
+}
+
 /// Kernels cut into block-sized partitions and transformed, ready for a [`Convolver`] with the
 /// same block size. Build it off the audio thread.
 pub struct KernelSet {

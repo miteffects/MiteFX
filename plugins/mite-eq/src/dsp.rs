@@ -1,8 +1,9 @@
 //! The Mite EQ engine: 24 bands in series, output gain, meters and analyzer taps, in Zero Latency
-//! (IIR) or Linear Phase (partitioned convolution) mode. Free of the plugin framework so it can be
+//! (IIR), Natural Phase (IIR plus a short correction FIR that brings magnitude and phase to the
+//! analog prototypes) or Linear Phase (partitioned convolution) mode. Free of the plugin framework so it can be
 //! tested directly.
 //!
-//! Linear Phase: a worker thread designs kernels from the latest band settings (sent through a
+//! Natural and Linear Phase: a worker thread designs kernels from the latest band settings (sent through a
 //! triple buffer) and hands them over; each new kernel crossfades in. Dynamic bands keep their
 //! static gain in the kernel and move through a gain-only IIR filter after it. Changing mode or
 //! resolution changes the latency, so the output fades out, switches, and fades back in once the
@@ -16,7 +17,7 @@ use std::time::Duration;
 use mite_core::{triple_buffer, Handover, SpectrumTap, TripleReader, TripleWriter};
 use mite_dsp::conv::{Convolver, KernelSet};
 use mite_dsp::eq::{BandProcessor, BandSettings};
-use mite_dsp::{db_to_gain, linear_phase, LinearSmoother, PeakMeter};
+use mite_dsp::{db_to_gain, linear_phase, natural_phase, LinearSmoother, PeakMeter};
 
 use crate::params::{BANDS, FREQ, OUT_GAIN};
 
@@ -39,18 +40,19 @@ impl PhaseMode {
         }
     }
 
-    /// The mode the engine runs for this choice. Natural Phase is not built yet and runs as Zero
-    /// Latency.
-    fn effective(self) -> Self {
-        if self == Self::NaturalPhase { Self::ZeroLatency } else { self }
+    /// Whether this mode runs a convolution kernel (and so has latency).
+    fn convolves(self) -> bool {
+        self != Self::ZeroLatency
     }
 }
 
 /// Linear-phase resolutions (the `lp_res` choices): kernel lengths at 48 kHz.
 pub const LP_RESOLUTIONS: [&str; 4] = ["Low", "Medium", "High", "Max"];
 const LP_LENGTHS_48K: [usize; 4] = [1024, 2048, 4096, 8192];
-/// Convolution partition size at 48 kHz, samples (part of the latency).
+/// Convolution partition sizes at 48 kHz, samples (part of the latency). Natural Phase's kernel
+/// is short, so it uses smaller partitions for less latency.
 const LP_BLOCK_48K: usize = 128;
+const NP_BLOCK_48K: usize = 64;
 /// Kernel swaps and the mode-switch dip, ms.
 const KERNEL_FADE_MS: f64 = 20.0;
 const SWITCH_FADE_MS: f32 = 10.0;
@@ -72,9 +74,16 @@ pub fn linear_phase_latency(lp_res: usize, sample_rate: f64) -> usize {
     LP_BLOCK_48K * rate_ratio(sample_rate) + kernel_len(lp_res, sample_rate) / 2
 }
 
-/// What the worker designs a kernel for.
+/// Natural Phase latency at `sample_rate`, samples: one (small) block plus the correction's delay.
+pub fn natural_phase_latency(sample_rate: f64) -> usize {
+    (NP_BLOCK_48K + natural_phase::DELAY_48K) * rate_ratio(sample_rate)
+}
+
+/// What the worker designs a kernel for: Linear Phase at `len` taps, or the Natural Phase
+/// correction (`len` is then its delay).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DesignRequest {
+    mode: PhaseMode,
     bands: [BandSettings; BANDS],
     sample_rate: f64,
     len: usize,
@@ -82,7 +91,11 @@ struct DesignRequest {
 }
 
 fn design_kernel(req: &DesignRequest) -> KernelSet {
-    let k = linear_phase::design(&req.bands, req.sample_rate, req.len);
+    let k = if req.mode == PhaseMode::NaturalPhase {
+        natural_phase::design(&req.bands, req.sample_rate, req.len)
+    } else {
+        linear_phase::design(&req.bands, req.sample_rate, req.len)
+    };
     KernelSet::new(req.block, k.layout, &k.kernels, k.delay)
 }
 
@@ -122,7 +135,9 @@ pub struct EqEngine {
     switch: Switch,
     /// The mode-switch dip (1 = audible).
     fader: LinearSmoother,
+    /// Linear Phase's convolver, and Natural Phase's (smaller blocks, short kernels).
     conv: Convolver,
+    np_conv: Convolver,
     kernels: Arc<Handover<KernelSet>>,
     requests: TripleWriter<DesignRequest>,
     last_request: Option<DesignRequest>,
@@ -142,7 +157,7 @@ impl EqEngine {
         let sr = f64::from(sample_rate);
         let kernels = Arc::new(Handover::new());
         let stop = Arc::new(AtomicBool::new(false));
-        let initial = DesignRequest { bands: *settings, sample_rate: sr, len: kernel_len(2, sr), block: LP_BLOCK_48K };
+        let initial = DesignRequest { mode: PhaseMode::LinearPhase, bands: *settings, sample_rate: sr, len: kernel_len(2, sr), block: LP_BLOCK_48K };
         let (requests, reader) = triple_buffer(initial);
         let designer = {
             let (kernels, stop) = (kernels.clone(), stop.clone());
@@ -161,6 +176,7 @@ impl EqEngine {
             switch: Switch::Steady,
             fader: LinearSmoother::new(1.0),
             conv: Convolver::new(LP_BLOCK_48K, 1, 1),
+            np_conv: Convolver::new(NP_BLOCK_48K, 1, 1),
             kernels,
             requests,
             last_request: None,
@@ -177,7 +193,7 @@ impl EqEngine {
     /// Asks for a processing mode and linear-phase resolution. A change takes effect through a
     /// short dip (the latency changes with it). Allocation-free.
     pub fn set_mode(&mut self, mode: PhaseMode, lp_res: usize) {
-        self.wanted = (mode.effective(), lp_res.min(LP_LENGTHS_48K.len() - 1));
+        self.wanted = (mode, lp_res.min(LP_LENGTHS_48K.len() - 1));
     }
 
     /// Off the audio thread: sets the sample rate, sizes the convolver, and jumps to the given
@@ -191,15 +207,17 @@ impl EqEngine {
         self.out_gain.set_ramp(sample_rate, OUT_GAIN.smoothing_ms);
         self.fader.set_ramp(sample_rate, SWITCH_FADE_MS);
         self.meters = [PeakMeter::new(sample_rate), PeakMeter::new(sample_rate)];
-        let block = self.block();
+        let ratio = rate_ratio(sr);
         let fade = (KERNEL_FADE_MS * sr / 1000.0) as usize;
-        self.conv = Convolver::new(block, kernel_len(LP_LENGTHS_48K.len() - 1, sr), fade);
+        self.conv = Convolver::new(LP_BLOCK_48K * ratio, kernel_len(LP_LENGTHS_48K.len() - 1, sr), fade);
+        self.np_conv = Convolver::new(NP_BLOCK_48K * ratio, 2 * natural_phase::DELAY_48K * ratio, fade);
         self.active = self.wanted;
         self.switch = Switch::Steady;
         self.last_request = None;
-        if self.active.0 == PhaseMode::LinearPhase {
+        if self.active.0.convolves() {
             let req = self.request(settings);
-            self.conv.replace(Box::new(design_kernel(&req)));
+            let kernel = Box::new(design_kernel(&req));
+            self.convolver(self.active.0).replace(kernel);
         }
         self.reset(settings, out_db);
     }
@@ -212,24 +230,38 @@ impl EqEngine {
         self.out_gain.reset(db_to_gain(out_db));
         self.fader.reset(if self.switch == Switch::Steady { 1.0 } else { 0.0 });
         self.conv.reset();
+        self.np_conv.reset();
         for m in &mut self.meters {
             m.reset();
         }
     }
 
-    fn block(&self) -> usize {
-        LP_BLOCK_48K * rate_ratio(self.sample_rate)
+    /// The convolver a convolving mode runs.
+    fn convolver(&mut self, mode: PhaseMode) -> &mut Convolver {
+        if mode == PhaseMode::NaturalPhase { &mut self.np_conv } else { &mut self.conv }
+    }
+
+    /// The block size and kernel delay a mode's kernels have, at `lp_res` for Linear Phase.
+    fn kernel_shape(&self, mode: PhaseMode, lp_res: usize) -> (usize, usize) {
+        let ratio = rate_ratio(self.sample_rate);
+        match mode {
+            PhaseMode::NaturalPhase => (NP_BLOCK_48K * ratio, natural_phase::DELAY_48K * ratio),
+            _ => (LP_BLOCK_48K * ratio, kernel_len(lp_res, self.sample_rate) / 2),
+        }
     }
 
     fn request(&self, settings: &[BandSettings; BANDS]) -> DesignRequest {
-        DesignRequest { bands: *settings, sample_rate: self.sample_rate, len: kernel_len(self.wanted.1, self.sample_rate), block: self.block() }
+        let (block, delay) = self.kernel_shape(self.wanted.0, self.wanted.1);
+        let len = if self.wanted.0 == PhaseMode::NaturalPhase { delay } else { 2 * delay };
+        DesignRequest { mode: self.wanted.0, bands: *settings, sample_rate: self.sample_rate, len, block }
     }
 
     /// The latency the engine runs with now, samples (report it to the host).
     pub fn latency(&self) -> usize {
         match self.active.0 {
             PhaseMode::LinearPhase => self.conv.latency(),
-            _ => 0,
+            PhaseMode::NaturalPhase => self.np_conv.latency(),
+            PhaseMode::ZeroLatency => 0,
         }
     }
 
@@ -253,34 +285,40 @@ impl EqEngine {
                 }
             }
         }
-        if let Some(old) = self.conv.retired() {
-            self.retire(old);
+        for mode in [PhaseMode::LinearPhase, PhaseMode::NaturalPhase] {
+            if let Some(old) = self.convolver(mode).retired() {
+                self.retire(old);
+            }
         }
-        if self.wanted.0 == PhaseMode::LinearPhase {
+        if self.wanted.0.convolves() {
             let req = self.request(settings);
             if self.last_request != Some(req) {
                 self.requests.write(req);
                 self.last_request = Some(req);
             }
         }
-        let expected_delay = kernel_len(self.active.1, self.sample_rate) / 2;
+        let mode = self.active.0;
+        // A kernel fits the running mode if it has its block size and delay (a kernel left from
+        // another mode, resolution or sample rate does not).
+        let (block, delay) = self.kernel_shape(mode, self.active.1);
+        let fits = |k: &KernelSet| k.block() == block && k.delay() == delay;
         match self.switch {
             Switch::Steady => {
                 let changed = self.wanted.0 != self.active.0 || (self.wanted.0 == PhaseMode::LinearPhase && self.wanted.1 != self.active.1);
                 if changed {
                     self.fader.set_target(0.0);
                     self.switch = Switch::FadingOut;
-                } else if self.active.0 == PhaseMode::LinearPhase && !self.conv.is_fading() {
+                } else if mode.convolves() && !self.convolver(mode).is_fading() {
                     if let Some(k) = self.kernels.take() {
-                        if k.delay() == expected_delay {
-                            if let Err(k) = self.conv.offer(k) {
+                        if fits(&k) {
+                            if let Err(k) = self.convolver(mode).offer(k) {
                                 self.retire(k);
                             }
                         } else {
                             self.retire(k);
                         }
                     }
-                } else if self.active.0 != PhaseMode::LinearPhase {
+                } else if !mode.convolves() {
                     if let Some(k) = self.kernels.take() {
                         self.retire(k);
                     }
@@ -293,8 +331,9 @@ impl EqEngine {
                         band.reset(s);
                     }
                     self.conv.reset();
+                    self.np_conv.reset();
                     self.filled = 0;
-                    self.switch = if self.active.0 == PhaseMode::LinearPhase { Switch::Waiting } else { Switch::Steady };
+                    self.switch = if self.active.0.convolves() { Switch::Waiting } else { Switch::Steady };
                     if self.switch == Switch::Steady {
                         self.fader.set_target(1.0);
                     }
@@ -302,12 +341,11 @@ impl EqEngine {
             }
             Switch::Waiting => {
                 if let Some(k) = self.kernels.take() {
-                    // A kernel left from before a sample-rate change has another block size.
-                    if k.delay() == expected_delay && k.block() == self.block() {
-                        if let Some(old) = self.conv.replace(k) {
+                    if fits(&k) {
+                        if let Some(old) = self.convolver(mode).replace(k) {
                             self.retire(old);
                         }
-                        if let Some(old) = self.conv.retired() {
+                        if let Some(old) = self.convolver(mode).retired() {
                             self.retire(old);
                         }
                         self.switch = Switch::Filling;
@@ -317,7 +355,7 @@ impl EqEngine {
                 }
             }
             Switch::Filling => {
-                if self.filled >= self.conv.latency() {
+                if self.filled >= self.latency() {
                     self.switch = Switch::Steady;
                     self.fader.set_target(1.0);
                 }
@@ -340,19 +378,11 @@ impl EqEngine {
         }
         self.update_mode(settings);
 
-        if self.active.0 == PhaseMode::LinearPhase {
+        if self.active.0.convolves() {
             self.filled = self.filled.saturating_add(channels.first().map_or(0, |c| c.len()));
-            match channels {
-                [l, r, ..] => self.conv.process(l, r),
-                [m] => {
-                    for chunk in m.chunks_mut(MONO_CHUNK) {
-                        let scratch = &mut self.mono_scratch[..chunk.len()];
-                        scratch.copy_from_slice(chunk);
-                        self.conv.process(chunk, scratch);
-                    }
-                }
-                [] => {}
-            }
+        }
+        if self.active.0 == PhaseMode::LinearPhase {
+            self.convolve(PhaseMode::LinearPhase, channels);
             // The kernel holds every band's static curve; dynamic bands add their movement here,
             // through a filter with no static gain of its own.
             for (band, s) in self.bands.iter_mut().zip(settings) {
@@ -365,6 +395,11 @@ impl EqEngine {
             for (band, s) in self.bands.iter_mut().zip(settings) {
                 band.set_target(s);
                 band.process(channels);
+            }
+            // Natural Phase: the correction after the IIR sections (designed for their static
+            // settings; dynamic movement passes through the IIR sections as in Zero Latency).
+            if self.active.0 == PhaseMode::NaturalPhase {
+                self.convolve(PhaseMode::NaturalPhase, channels);
             }
         }
 
@@ -392,6 +427,22 @@ impl EqEngine {
         let left = channels.first().map_or(mite_dsp::MINUS_INFINITY_DB, |c| self.meters[0].process(c));
         let right = channels.get(1).map_or(left, |c| self.meters[1].process(c));
         (left, right)
+    }
+
+    /// Runs a convolving mode's convolver over the channels (mono through a scratch right channel).
+    fn convolve(&mut self, mode: PhaseMode, channels: &mut [&mut [f32]]) {
+        let conv = if mode == PhaseMode::NaturalPhase { &mut self.np_conv } else { &mut self.conv };
+        match channels {
+            [l, r, ..] => conv.process(l, r),
+            [m] => {
+                for chunk in m.chunks_mut(MONO_CHUNK) {
+                    let scratch = &mut self.mono_scratch[..chunk.len()];
+                    scratch.copy_from_slice(chunk);
+                    conv.process(chunk, scratch);
+                }
+            }
+            [] => {}
+        }
     }
 
     /// What each band is producing right now (smoothed values), for the display.
@@ -594,6 +645,73 @@ mod tests {
         assert!(jump < 0.07, "step {jump}");
         let peak = |x: &[f32]| x.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
         assert!(peak(&l[20_000..23_000]) < 0.15 && (peak(&l[44_000..47_000]) - 0.5).abs() < 0.01);
+    }
+
+    /// An engine already running `mode` at `sr`.
+    fn engine_in(mode: PhaseMode, sr: f32, settings: &[BandSettings; BANDS]) -> EqEngine {
+        let mut eq = EqEngine::new(sr, settings, 0.0);
+        eq.set_mode(mode, 2);
+        eq.prepare(sr, settings, 0.0);
+        eq
+    }
+
+    #[test]
+    fn natural_phase_with_no_bands_is_a_pure_delay() {
+        let mut eq = engine_in(PhaseMode::NaturalPhase, SR, &flat());
+        let latency = eq.latency();
+        assert_eq!(latency, natural_phase_latency(f64::from(SR)));
+        assert!((latency as f64 / f64::from(SR) * 1000.0) < 5.0, "Natural Phase should stay under 5 ms");
+        let input = noise(8192, 5);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        run(&mut eq, &flat(), &mut l, &mut r, false);
+        let worst = (0..8192 - latency).map(|n| (l[n + latency] - input[n]).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 1e-7, "residual {worst}");
+    }
+
+    #[test]
+    fn natural_phase_reaches_the_analog_curve_near_nyquist() {
+        // At 44.1 kHz a 12 kHz bell's matched IIR drifts from the analog curve near Nyquist;
+        // Natural Phase's correction brings it back within 0.1 dB.
+        let sr = 44_100.0_f32;
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 12_000.0, gain_db: 9.0, q: 1.5, ..Default::default() };
+        let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
+        let mut worst_zl: f64 = 0.0;
+        for freq in [8_000.0, 12_000.0, 16_000.0, 19_000.0] {
+            let input: Vec<f32> = (0..44_100).map(|n| (0.25 * (2.0 * PI * freq * n as f64 / f64::from(sr)).sin()) as f32).collect();
+            let analog = mite_dsp::eq::analog_response_db(&settings[0], freq);
+            let gain = |mode| {
+                let mut eq = engine_in(mode, sr, &settings);
+                let (mut l, mut r) = (input.clone(), input.clone());
+                run(&mut eq, &settings, &mut l, &mut r, false);
+                20.0 * (rms(&l[22_050..]) / rms(&input[22_050..])).log10()
+            };
+            let np = gain(PhaseMode::NaturalPhase) - analog;
+            assert!(np.abs() < 0.1, "{freq} Hz: Natural Phase {np:+.3} dB off the analog curve");
+            worst_zl = worst_zl.max((gain(PhaseMode::ZeroLatency) - analog).abs());
+        }
+        assert!(worst_zl > 0.2, "the test should cover a region where Zero Latency drifts ({worst_zl:.3} dB)");
+    }
+
+    #[test]
+    fn switching_through_every_mode_is_click_free() {
+        let settings = bell(6.0);
+        let mut eq = EqEngine::new(SR, &settings, 0.0);
+        for (mode, latency) in [
+            (PhaseMode::NaturalPhase, natural_phase_latency(f64::from(SR))),
+            (PhaseMode::LinearPhase, linear_phase_latency(2, f64::from(SR))),
+            (PhaseMode::NaturalPhase, natural_phase_latency(f64::from(SR))),
+            (PhaseMode::ZeroLatency, 0),
+        ] {
+            let input = sine(200.0, 24_000);
+            let (mut l, mut r) = (input.clone(), input.clone());
+            eq.set_mode(mode, 2);
+            run(&mut eq, &settings, &mut l, &mut r, true);
+            assert_eq!(eq.latency(), latency, "{mode:?}");
+            let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+            assert!(jump < 0.04, "{mode:?}: step {jump}");
+            assert!(l[18_000..].iter().any(|v| v.abs() > 0.3), "{mode:?}: still muted");
+        }
     }
 
     #[test]

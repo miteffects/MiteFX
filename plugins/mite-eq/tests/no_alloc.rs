@@ -20,7 +20,13 @@ fn engine_process_never_allocates_in_any_mode() {
     let mut eq = EqEngine::new(sr, &settings, 0.0);
     let (mut l, mut r) = (vec![0.1f32; 128], vec![-0.1f32; 128]);
     let mut blocks = 0;
-    for (mode, res) in [(PhaseMode::LinearPhase, 2), (PhaseMode::LinearPhase, 0), (PhaseMode::ZeroLatency, 0), (PhaseMode::LinearPhase, 3)] {
+    for (mode, res) in [
+        (PhaseMode::LinearPhase, 2),
+        (PhaseMode::NaturalPhase, 2),
+        (PhaseMode::LinearPhase, 0),
+        (PhaseMode::ZeroLatency, 0),
+        (PhaseMode::LinearPhase, 3),
+    ] {
         eq.set_mode(mode, res);
         for i in 0..600 {
             // Keep the bands moving so kernels are redesigned and swapped all along.
@@ -33,7 +39,7 @@ fn engine_process_never_allocates_in_any_mode() {
             std::thread::sleep(Duration::from_micros(200));
         }
     }
-    assert_eq!(blocks, 2400);
+    assert_eq!(blocks, 3000);
     assert_eq!(eq.latency(), mite_eq::dsp::linear_phase_latency(3, f64::from(sr)));
 }
 

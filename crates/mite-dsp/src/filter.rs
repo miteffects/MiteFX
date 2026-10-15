@@ -13,6 +13,8 @@
 
 use std::f64::consts::PI;
 
+use realfft::num_complex::Complex;
+
 /// Normalised analog prototype `(n2·s² + n1·s + n0) / (d2·s² + d1·s + d0)`, where `s` is in
 /// units of the band frequency (s = jΩ/Ω0). A first-order section has `n2 = d2 = 0`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,6 +47,12 @@ impl Analog {
         let den = poly(&self.d);
         if den == 0.0 { f64::INFINITY } else { poly(&self.n) / den }
     }
+
+    /// H(jx), magnitude and phase, at normalised frequency `x = Ω/Ω0`.
+    pub fn response(&self, x: f64) -> Complex<f64> {
+        let poly = |c: &[f64; 3]| Complex::new(c[0] - c[2] * x * x, c[1] * x);
+        poly(&self.n) / poly(&self.d)
+    }
 }
 
 /// Direct-form coefficients, `a0` normalised to 1.
@@ -70,6 +78,13 @@ impl Coeffs {
             - 4.0 * self.b0 * self.b2 * phi2;
         let den = (1.0 + self.a1 + self.a2).powi(2) * phi0 + (1.0 - self.a1 + self.a2).powi(2) * phi1 - 4.0 * self.a2 * phi2;
         num / den
+    }
+
+    /// H(e^jω), magnitude and phase, of the digital section.
+    pub fn response(&self, w: f64) -> Complex<f64> {
+        let z1 = Complex::from_polar(1.0, -w);
+        let z2 = z1 * z1;
+        (self.b0 + z1 * self.b1 + z2 * self.b2) / (1.0 + z1 * self.a1 + z2 * self.a2)
     }
 }
 
