@@ -11,7 +11,9 @@ pub mod gain;
 pub mod linear_phase;
 pub mod natural_phase;
 pub mod meter;
+pub mod resonance;
 pub mod smooth;
+pub mod stft;
 
 pub use gain::{db_to_gain, gain_to_db, MINUS_INFINITY_DB};
 pub use meter::PeakMeter;

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_dsp::analyzer::Analyzer;
-use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
+use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Dynamics, DynamicsMode, Placement, ResonanceSettings, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
@@ -17,7 +17,7 @@ use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
-use crate::params::{band_id, ATTACK, ATTACK_DIAL, LP_RES, MODE, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use crate::params::{band_id, ATTACK, ATTACK_DIAL, LP_RES, MODE, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, RDEPTH, RSHARP, RSELECT, RSPEED, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use crate::EqShared;
 
 /// Mite EQ wears the EQ accent (tokens.json `color.accent.eq`).
@@ -147,6 +147,11 @@ struct BandIds {
     transient: String,
     ttime: String,
     transition: String,
+    spectral: String,
+    rdepth: String,
+    rsharp: String,
+    rselect: String,
+    rspeed: String,
 }
 
 impl BandIds {
@@ -170,6 +175,11 @@ impl BandIds {
             transient: band_id(b, TRANSIENT.id),
             ttime: band_id(b, TTIME.id),
             transition: band_id(b, TRANSITION.id),
+            spectral: band_id(b, SPECTRAL.id),
+            rdepth: band_id(b, RDEPTH.id),
+            rsharp: band_id(b, RSHARP.id),
+            rselect: band_id(b, RSELECT.id),
+            rspeed: band_id(b, RSPEED.id),
         }
     }
 }
@@ -307,6 +317,15 @@ fn draw_type_icon(scene: &mut mite_ui::vello::Scene, kind: BandType, at: Point, 
         BandType::TiltShelf => {
             p.move_to(pt(0.0, 10.0));
             p.curve_to(pt(9.0, 10.0), pt(13.0, 2.0), pt(22.0, 2.0));
+        }
+        // A jagged spectrum with one peak shaved off.
+        BandType::Resonance => {
+            p.move_to(pt(0.0, 9.0));
+            for (x, y) in [(3.0, 6.0), (5.0, 9.0), (8.0, 5.0), (10.0, 8.0), (13.0, 6.5), (15.0, 9.0), (18.0, 6.0), (20.0, 8.5), (22.0, 7.0)] {
+                p.line_to(pt(x, y));
+            }
+            p.move_to(pt(9.0, 2.5));
+            p.line_to(pt(13.0, 2.5));
         }
     }
     let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
@@ -593,6 +612,13 @@ impl EqView {
                 attack_ms: f64::from(Self::plain(host, &ids.attack)),
                 release_ms: f64::from(Self::plain(host, &ids.release)),
                 ratio: f64::from(Self::plain(host, &ids.ratio)),
+                spectral: Self::plain(host, &ids.spectral) >= 0.5,
+            },
+            resonance: ResonanceSettings {
+                depth_db: f64::from(Self::plain(host, &ids.rdepth)),
+                sharpness: f64::from(Self::plain(host, &ids.rsharp)) / 100.0,
+                selectivity: f64::from(Self::plain(host, &ids.rselect)) / 100.0,
+                speed: f64::from(Self::plain(host, &ids.rspeed)) / 100.0,
             },
         }
     }
@@ -2216,7 +2242,7 @@ impl View for EqView {
         for ids in &self.ids {
             for id in [
                 &ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo, &ids.dyn_on, &ids.range,
-                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition,
+                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition, &ids.spectral, &ids.rdepth, &ids.rsharp, &ids.rselect, &ids.rspeed,
             ] {
                 signature.push(host.normalized(id));
             }

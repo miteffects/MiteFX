@@ -147,8 +147,10 @@ pub struct EqEngine {
     designer: Option<JoinHandle<()>>,
     /// Right-channel stand-in for mono input through the stereo convolver.
     mono_scratch: Vec<f32>,
-    /// Samples fed to the convolver since it was last cleared.
+    /// Samples fed to the convolver since it was last cleared, and samples spent waiting muted
+    /// for a kernel.
     filled: usize,
+    waited: usize,
 }
 
 impl EqEngine {
@@ -185,6 +187,7 @@ impl EqEngine {
             designer,
             mono_scratch: vec![0.0; MONO_CHUNK],
             filled: 0,
+            waited: 0,
         };
         engine.prepare(sample_rate, settings, out_db);
         engine
@@ -333,6 +336,10 @@ impl EqEngine {
                     self.conv.reset();
                     self.np_conv.reset();
                     self.filled = 0;
+                    self.waited = 0;
+                    // Always ask for the new mode's kernel: one designed earlier for the same
+                    // bands may have been thrown away while it was not needed.
+                    self.last_request = None;
                     self.switch = if self.active.0.convolves() { Switch::Waiting } else { Switch::Steady };
                     if self.switch == Switch::Steady {
                         self.fader.set_target(1.0);
@@ -340,6 +347,11 @@ impl EqEngine {
                 }
             }
             Switch::Waiting => {
+                // Never stay muted for good: if no fitting kernel came, ask again.
+                if self.waited > (0.25 * self.sample_rate) as usize {
+                    self.waited = 0;
+                    self.last_request = None;
+                }
                 if let Some(k) = self.kernels.take() {
                     if fits(&k) {
                         if let Some(old) = self.convolver(mode).replace(k) {
@@ -378,8 +390,12 @@ impl EqEngine {
         }
         self.update_mode(settings);
 
+        let frames = channels.first().map_or(0, |c| c.len());
         if self.active.0.convolves() {
-            self.filled = self.filled.saturating_add(channels.first().map_or(0, |c| c.len()));
+            self.filled = self.filled.saturating_add(frames);
+        }
+        if self.switch == Switch::Waiting {
+            self.waited = self.waited.saturating_add(frames);
         }
         if self.active.0 == PhaseMode::LinearPhase {
             self.convolve(PhaseMode::LinearPhase, channels);
@@ -711,6 +727,21 @@ mod tests {
             let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
             assert!(jump < 0.04, "{mode:?}: step {jump}");
             assert!(l[18_000..].iter().any(|v| v.abs() > 0.3), "{mode:?}: still muted");
+        }
+    }
+
+    #[test]
+    fn going_back_to_a_mode_with_unchanged_bands_plays_again() {
+        // Linear Phase → Zero Latency → Linear Phase without touching any band: the second switch
+        // must still get a kernel and come back out of the dip.
+        let settings = bell(6.0);
+        let mut eq = EqEngine::new(SR, &settings, 0.0);
+        for mode in [PhaseMode::LinearPhase, PhaseMode::ZeroLatency, PhaseMode::LinearPhase, PhaseMode::NaturalPhase, PhaseMode::ZeroLatency, PhaseMode::NaturalPhase] {
+            eq.set_mode(mode, 2);
+            let input = sine(200.0, 24_000);
+            let (mut l, mut r) = (input.clone(), input.clone());
+            run(&mut eq, &settings, &mut l, &mut r, true);
+            assert!(l[18_000..].iter().any(|v| v.abs() > 0.3), "{mode:?}: stuck muted");
         }
     }
 

@@ -2,7 +2,7 @@ out_gain | dB | -24 | 24 | 0 | Linear
 mode | choice | Zero Latency, Natural Phase, Linear Phase | 0
 lp_res | choice | Low, Medium, High, Max | 2
 b01_on | bool | false
-b01_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b01_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b01_freq | Hz | 10 | 30000 | 1000 | Log
 b01_gain | dB | -30 | 30 | 0 | Linear
 b01_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -19,8 +19,13 @@ b01_sustain | dB | -12 | 12 | 0 | Linear
 b01_transient | dB | -12 | 12 | 0 | Linear
 b01_ttime | ms | 5 | 200 | 25 | Log
 b01_transition | % | 0 | 200 | 100 | Linear
+b01_spectral | bool | false
+b01_rdepth | dB | 0 | 24 | 6 | Linear
+b01_rsharp | % | 0 | 100 | 50 | Linear
+b01_rselect | % | 0 | 100 | 50 | Linear
+b01_rspeed | % | 0 | 100 | 50 | Linear
 b02_on | bool | false
-b02_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b02_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b02_freq | Hz | 10 | 30000 | 1000 | Log
 b02_gain | dB | -30 | 30 | 0 | Linear
 b02_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -37,8 +42,13 @@ b02_sustain | dB | -12 | 12 | 0 | Linear
 b02_transient | dB | -12 | 12 | 0 | Linear
 b02_ttime | ms | 5 | 200 | 25 | Log
 b02_transition | % | 0 | 200 | 100 | Linear
+b02_spectral | bool | false
+b02_rdepth | dB | 0 | 24 | 6 | Linear
+b02_rsharp | % | 0 | 100 | 50 | Linear
+b02_rselect | % | 0 | 100 | 50 | Linear
+b02_rspeed | % | 0 | 100 | 50 | Linear
 b03_on | bool | false
-b03_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b03_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b03_freq | Hz | 10 | 30000 | 1000 | Log
 b03_gain | dB | -30 | 30 | 0 | Linear
 b03_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -55,8 +65,13 @@ b03_sustain | dB | -12 | 12 | 0 | Linear
 b03_transient | dB | -12 | 12 | 0 | Linear
 b03_ttime | ms | 5 | 200 | 25 | Log
 b03_transition | % | 0 | 200 | 100 | Linear
+b03_spectral | bool | false
+b03_rdepth | dB | 0 | 24 | 6 | Linear
+b03_rsharp | % | 0 | 100 | 50 | Linear
+b03_rselect | % | 0 | 100 | 50 | Linear
+b03_rspeed | % | 0 | 100 | 50 | Linear
 b04_on | bool | false
-b04_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b04_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b04_freq | Hz | 10 | 30000 | 1000 | Log
 b04_gain | dB | -30 | 30 | 0 | Linear
 b04_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -73,8 +88,13 @@ b04_sustain | dB | -12 | 12 | 0 | Linear
 b04_transient | dB | -12 | 12 | 0 | Linear
 b04_ttime | ms | 5 | 200 | 25 | Log
 b04_transition | % | 0 | 200 | 100 | Linear
+b04_spectral | bool | false
+b04_rdepth | dB | 0 | 24 | 6 | Linear
+b04_rsharp | % | 0 | 100 | 50 | Linear
+b04_rselect | % | 0 | 100 | 50 | Linear
+b04_rspeed | % | 0 | 100 | 50 | Linear
 b05_on | bool | false
-b05_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b05_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b05_freq | Hz | 10 | 30000 | 1000 | Log
 b05_gain | dB | -30 | 30 | 0 | Linear
 b05_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -91,8 +111,13 @@ b05_sustain | dB | -12 | 12 | 0 | Linear
 b05_transient | dB | -12 | 12 | 0 | Linear
 b05_ttime | ms | 5 | 200 | 25 | Log
 b05_transition | % | 0 | 200 | 100 | Linear
+b05_spectral | bool | false
+b05_rdepth | dB | 0 | 24 | 6 | Linear
+b05_rsharp | % | 0 | 100 | 50 | Linear
+b05_rselect | % | 0 | 100 | 50 | Linear
+b05_rspeed | % | 0 | 100 | 50 | Linear
 b06_on | bool | false
-b06_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b06_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b06_freq | Hz | 10 | 30000 | 1000 | Log
 b06_gain | dB | -30 | 30 | 0 | Linear
 b06_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -109,8 +134,13 @@ b06_sustain | dB | -12 | 12 | 0 | Linear
 b06_transient | dB | -12 | 12 | 0 | Linear
 b06_ttime | ms | 5 | 200 | 25 | Log
 b06_transition | % | 0 | 200 | 100 | Linear
+b06_spectral | bool | false
+b06_rdepth | dB | 0 | 24 | 6 | Linear
+b06_rsharp | % | 0 | 100 | 50 | Linear
+b06_rselect | % | 0 | 100 | 50 | Linear
+b06_rspeed | % | 0 | 100 | 50 | Linear
 b07_on | bool | false
-b07_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b07_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b07_freq | Hz | 10 | 30000 | 1000 | Log
 b07_gain | dB | -30 | 30 | 0 | Linear
 b07_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -127,8 +157,13 @@ b07_sustain | dB | -12 | 12 | 0 | Linear
 b07_transient | dB | -12 | 12 | 0 | Linear
 b07_ttime | ms | 5 | 200 | 25 | Log
 b07_transition | % | 0 | 200 | 100 | Linear
+b07_spectral | bool | false
+b07_rdepth | dB | 0 | 24 | 6 | Linear
+b07_rsharp | % | 0 | 100 | 50 | Linear
+b07_rselect | % | 0 | 100 | 50 | Linear
+b07_rspeed | % | 0 | 100 | 50 | Linear
 b08_on | bool | false
-b08_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b08_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b08_freq | Hz | 10 | 30000 | 1000 | Log
 b08_gain | dB | -30 | 30 | 0 | Linear
 b08_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -145,8 +180,13 @@ b08_sustain | dB | -12 | 12 | 0 | Linear
 b08_transient | dB | -12 | 12 | 0 | Linear
 b08_ttime | ms | 5 | 200 | 25 | Log
 b08_transition | % | 0 | 200 | 100 | Linear
+b08_spectral | bool | false
+b08_rdepth | dB | 0 | 24 | 6 | Linear
+b08_rsharp | % | 0 | 100 | 50 | Linear
+b08_rselect | % | 0 | 100 | 50 | Linear
+b08_rspeed | % | 0 | 100 | 50 | Linear
 b09_on | bool | false
-b09_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b09_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b09_freq | Hz | 10 | 30000 | 1000 | Log
 b09_gain | dB | -30 | 30 | 0 | Linear
 b09_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -163,8 +203,13 @@ b09_sustain | dB | -12 | 12 | 0 | Linear
 b09_transient | dB | -12 | 12 | 0 | Linear
 b09_ttime | ms | 5 | 200 | 25 | Log
 b09_transition | % | 0 | 200 | 100 | Linear
+b09_spectral | bool | false
+b09_rdepth | dB | 0 | 24 | 6 | Linear
+b09_rsharp | % | 0 | 100 | 50 | Linear
+b09_rselect | % | 0 | 100 | 50 | Linear
+b09_rspeed | % | 0 | 100 | 50 | Linear
 b10_on | bool | false
-b10_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b10_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b10_freq | Hz | 10 | 30000 | 1000 | Log
 b10_gain | dB | -30 | 30 | 0 | Linear
 b10_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -181,8 +226,13 @@ b10_sustain | dB | -12 | 12 | 0 | Linear
 b10_transient | dB | -12 | 12 | 0 | Linear
 b10_ttime | ms | 5 | 200 | 25 | Log
 b10_transition | % | 0 | 200 | 100 | Linear
+b10_spectral | bool | false
+b10_rdepth | dB | 0 | 24 | 6 | Linear
+b10_rsharp | % | 0 | 100 | 50 | Linear
+b10_rselect | % | 0 | 100 | 50 | Linear
+b10_rspeed | % | 0 | 100 | 50 | Linear
 b11_on | bool | false
-b11_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b11_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b11_freq | Hz | 10 | 30000 | 1000 | Log
 b11_gain | dB | -30 | 30 | 0 | Linear
 b11_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -199,8 +249,13 @@ b11_sustain | dB | -12 | 12 | 0 | Linear
 b11_transient | dB | -12 | 12 | 0 | Linear
 b11_ttime | ms | 5 | 200 | 25 | Log
 b11_transition | % | 0 | 200 | 100 | Linear
+b11_spectral | bool | false
+b11_rdepth | dB | 0 | 24 | 6 | Linear
+b11_rsharp | % | 0 | 100 | 50 | Linear
+b11_rselect | % | 0 | 100 | 50 | Linear
+b11_rspeed | % | 0 | 100 | 50 | Linear
 b12_on | bool | false
-b12_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b12_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b12_freq | Hz | 10 | 30000 | 1000 | Log
 b12_gain | dB | -30 | 30 | 0 | Linear
 b12_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -217,8 +272,13 @@ b12_sustain | dB | -12 | 12 | 0 | Linear
 b12_transient | dB | -12 | 12 | 0 | Linear
 b12_ttime | ms | 5 | 200 | 25 | Log
 b12_transition | % | 0 | 200 | 100 | Linear
+b12_spectral | bool | false
+b12_rdepth | dB | 0 | 24 | 6 | Linear
+b12_rsharp | % | 0 | 100 | 50 | Linear
+b12_rselect | % | 0 | 100 | 50 | Linear
+b12_rspeed | % | 0 | 100 | 50 | Linear
 b13_on | bool | false
-b13_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b13_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b13_freq | Hz | 10 | 30000 | 1000 | Log
 b13_gain | dB | -30 | 30 | 0 | Linear
 b13_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -235,8 +295,13 @@ b13_sustain | dB | -12 | 12 | 0 | Linear
 b13_transient | dB | -12 | 12 | 0 | Linear
 b13_ttime | ms | 5 | 200 | 25 | Log
 b13_transition | % | 0 | 200 | 100 | Linear
+b13_spectral | bool | false
+b13_rdepth | dB | 0 | 24 | 6 | Linear
+b13_rsharp | % | 0 | 100 | 50 | Linear
+b13_rselect | % | 0 | 100 | 50 | Linear
+b13_rspeed | % | 0 | 100 | 50 | Linear
 b14_on | bool | false
-b14_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b14_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b14_freq | Hz | 10 | 30000 | 1000 | Log
 b14_gain | dB | -30 | 30 | 0 | Linear
 b14_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -253,8 +318,13 @@ b14_sustain | dB | -12 | 12 | 0 | Linear
 b14_transient | dB | -12 | 12 | 0 | Linear
 b14_ttime | ms | 5 | 200 | 25 | Log
 b14_transition | % | 0 | 200 | 100 | Linear
+b14_spectral | bool | false
+b14_rdepth | dB | 0 | 24 | 6 | Linear
+b14_rsharp | % | 0 | 100 | 50 | Linear
+b14_rselect | % | 0 | 100 | 50 | Linear
+b14_rspeed | % | 0 | 100 | 50 | Linear
 b15_on | bool | false
-b15_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b15_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b15_freq | Hz | 10 | 30000 | 1000 | Log
 b15_gain | dB | -30 | 30 | 0 | Linear
 b15_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -271,8 +341,13 @@ b15_sustain | dB | -12 | 12 | 0 | Linear
 b15_transient | dB | -12 | 12 | 0 | Linear
 b15_ttime | ms | 5 | 200 | 25 | Log
 b15_transition | % | 0 | 200 | 100 | Linear
+b15_spectral | bool | false
+b15_rdepth | dB | 0 | 24 | 6 | Linear
+b15_rsharp | % | 0 | 100 | 50 | Linear
+b15_rselect | % | 0 | 100 | 50 | Linear
+b15_rspeed | % | 0 | 100 | 50 | Linear
 b16_on | bool | false
-b16_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b16_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b16_freq | Hz | 10 | 30000 | 1000 | Log
 b16_gain | dB | -30 | 30 | 0 | Linear
 b16_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -289,8 +364,13 @@ b16_sustain | dB | -12 | 12 | 0 | Linear
 b16_transient | dB | -12 | 12 | 0 | Linear
 b16_ttime | ms | 5 | 200 | 25 | Log
 b16_transition | % | 0 | 200 | 100 | Linear
+b16_spectral | bool | false
+b16_rdepth | dB | 0 | 24 | 6 | Linear
+b16_rsharp | % | 0 | 100 | 50 | Linear
+b16_rselect | % | 0 | 100 | 50 | Linear
+b16_rspeed | % | 0 | 100 | 50 | Linear
 b17_on | bool | false
-b17_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b17_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b17_freq | Hz | 10 | 30000 | 1000 | Log
 b17_gain | dB | -30 | 30 | 0 | Linear
 b17_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -307,8 +387,13 @@ b17_sustain | dB | -12 | 12 | 0 | Linear
 b17_transient | dB | -12 | 12 | 0 | Linear
 b17_ttime | ms | 5 | 200 | 25 | Log
 b17_transition | % | 0 | 200 | 100 | Linear
+b17_spectral | bool | false
+b17_rdepth | dB | 0 | 24 | 6 | Linear
+b17_rsharp | % | 0 | 100 | 50 | Linear
+b17_rselect | % | 0 | 100 | 50 | Linear
+b17_rspeed | % | 0 | 100 | 50 | Linear
 b18_on | bool | false
-b18_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b18_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b18_freq | Hz | 10 | 30000 | 1000 | Log
 b18_gain | dB | -30 | 30 | 0 | Linear
 b18_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -325,8 +410,13 @@ b18_sustain | dB | -12 | 12 | 0 | Linear
 b18_transient | dB | -12 | 12 | 0 | Linear
 b18_ttime | ms | 5 | 200 | 25 | Log
 b18_transition | % | 0 | 200 | 100 | Linear
+b18_spectral | bool | false
+b18_rdepth | dB | 0 | 24 | 6 | Linear
+b18_rsharp | % | 0 | 100 | 50 | Linear
+b18_rselect | % | 0 | 100 | 50 | Linear
+b18_rspeed | % | 0 | 100 | 50 | Linear
 b19_on | bool | false
-b19_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b19_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b19_freq | Hz | 10 | 30000 | 1000 | Log
 b19_gain | dB | -30 | 30 | 0 | Linear
 b19_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -343,8 +433,13 @@ b19_sustain | dB | -12 | 12 | 0 | Linear
 b19_transient | dB | -12 | 12 | 0 | Linear
 b19_ttime | ms | 5 | 200 | 25 | Log
 b19_transition | % | 0 | 200 | 100 | Linear
+b19_spectral | bool | false
+b19_rdepth | dB | 0 | 24 | 6 | Linear
+b19_rsharp | % | 0 | 100 | 50 | Linear
+b19_rselect | % | 0 | 100 | 50 | Linear
+b19_rspeed | % | 0 | 100 | 50 | Linear
 b20_on | bool | false
-b20_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b20_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b20_freq | Hz | 10 | 30000 | 1000 | Log
 b20_gain | dB | -30 | 30 | 0 | Linear
 b20_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -361,8 +456,13 @@ b20_sustain | dB | -12 | 12 | 0 | Linear
 b20_transient | dB | -12 | 12 | 0 | Linear
 b20_ttime | ms | 5 | 200 | 25 | Log
 b20_transition | % | 0 | 200 | 100 | Linear
+b20_spectral | bool | false
+b20_rdepth | dB | 0 | 24 | 6 | Linear
+b20_rsharp | % | 0 | 100 | 50 | Linear
+b20_rselect | % | 0 | 100 | 50 | Linear
+b20_rspeed | % | 0 | 100 | 50 | Linear
 b21_on | bool | false
-b21_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b21_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b21_freq | Hz | 10 | 30000 | 1000 | Log
 b21_gain | dB | -30 | 30 | 0 | Linear
 b21_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -379,8 +479,13 @@ b21_sustain | dB | -12 | 12 | 0 | Linear
 b21_transient | dB | -12 | 12 | 0 | Linear
 b21_ttime | ms | 5 | 200 | 25 | Log
 b21_transition | % | 0 | 200 | 100 | Linear
+b21_spectral | bool | false
+b21_rdepth | dB | 0 | 24 | 6 | Linear
+b21_rsharp | % | 0 | 100 | 50 | Linear
+b21_rselect | % | 0 | 100 | 50 | Linear
+b21_rspeed | % | 0 | 100 | 50 | Linear
 b22_on | bool | false
-b22_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b22_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b22_freq | Hz | 10 | 30000 | 1000 | Log
 b22_gain | dB | -30 | 30 | 0 | Linear
 b22_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -397,8 +502,13 @@ b22_sustain | dB | -12 | 12 | 0 | Linear
 b22_transient | dB | -12 | 12 | 0 | Linear
 b22_ttime | ms | 5 | 200 | 25 | Log
 b22_transition | % | 0 | 200 | 100 | Linear
+b22_spectral | bool | false
+b22_rdepth | dB | 0 | 24 | 6 | Linear
+b22_rsharp | % | 0 | 100 | 50 | Linear
+b22_rselect | % | 0 | 100 | 50 | Linear
+b22_rspeed | % | 0 | 100 | 50 | Linear
 b23_on | bool | false
-b23_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b23_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b23_freq | Hz | 10 | 30000 | 1000 | Log
 b23_gain | dB | -30 | 30 | 0 | Linear
 b23_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -415,8 +525,13 @@ b23_sustain | dB | -12 | 12 | 0 | Linear
 b23_transient | dB | -12 | 12 | 0 | Linear
 b23_ttime | ms | 5 | 200 | 25 | Log
 b23_transition | % | 0 | 200 | 100 | Linear
+b23_spectral | bool | false
+b23_rdepth | dB | 0 | 24 | 6 | Linear
+b23_rsharp | % | 0 | 100 | 50 | Linear
+b23_rselect | % | 0 | 100 | 50 | Linear
+b23_rspeed | % | 0 | 100 | 50 | Linear
 b24_on | bool | false
-b24_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b24_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Resonance | 0
 b24_freq | Hz | 10 | 30000 | 1000 | Log
 b24_gain | dB | -30 | 30 | 0 | Linear
 b24_q |  | 0.025 | 40 | 0.70710677 | Log
@@ -433,3 +548,8 @@ b24_sustain | dB | -12 | 12 | 0 | Linear
 b24_transient | dB | -12 | 12 | 0 | Linear
 b24_ttime | ms | 5 | 200 | 25 | Log
 b24_transition | % | 0 | 200 | 100 | Linear
+b24_spectral | bool | false
+b24_rdepth | dB | 0 | 24 | 6 | Linear
+b24_rsharp | % | 0 | 100 | 50 | Linear
+b24_rselect | % | 0 | 100 | 50 | Linear
+b24_rspeed | % | 0 | 100 | 50 | Linear

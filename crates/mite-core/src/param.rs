@@ -78,9 +78,11 @@ impl ParamSpec {
         match self.display {
             ParamDisplay::Frequency if plain >= 1000.0 => (format!("{:.2}", plain / 1000.0), "kHz"),
             ParamDisplay::Frequency => (format!("{:.0}", plain), "Hz"),
-            ParamDisplay::Time if plain >= 1000.0 => (format!("{:.2}", plain / 1000.0), "s"),
-            ParamDisplay::Time if plain < 10.0 => (format!("{:.1}", plain), "ms"),
-            ParamDisplay::Time => (format!("{:.0}", plain), "ms"),
+            // The format follows the *rounded* value, so a time just under a boundary (9.97 ms)
+            // reads like the boundary does ("10 ms") and survives a text round trip.
+            ParamDisplay::Time if (plain * 10.0).round() < 100.0 => (format!("{:.1}", plain), "ms"),
+            ParamDisplay::Time if plain.round() < 1000.0 => (format!("{:.0}", plain), "ms"),
+            ParamDisplay::Time => (format!("{:.2}", plain / 1000.0), "s"),
             ParamDisplay::Number => (self.format_number(plain), self.unit),
         }
     }
@@ -315,6 +317,14 @@ mod tests {
         assert_eq!(release.format(1500.0), "1.50 s");
         assert_eq!(release.parse("1.5 s"), Some(1500.0));
         assert_eq!(release.parse("15 ms"), Some(15.0));
+        // Values just under a format boundary read like the boundary and round-trip as text.
+        let release = ParamSpec { max: 2500.0, ..ATTACK };
+        for v in [9.96f32, 9.9999, 999.6, 999.9999] {
+            let text = release.format(v);
+            let back = release.parse(&text).expect("parses");
+            assert_eq!(release.format(back), text, "{v} -> {text}");
+        }
+        assert_eq!(release.format(999.7), "1.00 s");
         // A fine wheel notch is smaller than 1 ms at 15 ms, but still moves by one shown step.
         assert_eq!(ATTACK.wheel(15.0, 1.0, true), 16.0);
         assert_eq!(ATTACK.wheel(15.0, -1.0, true), 14.0);

@@ -20,10 +20,12 @@ pub enum BandType {
     Notch,
     BandPass,
     TiltShelf,
+    /// Soothe-style resonance suppression inside the band's range (spectral; no static curve).
+    Resonance,
 }
 
 impl BandType {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Bell,
         Self::LowShelf,
         Self::HighShelf,
@@ -32,9 +34,10 @@ impl BandType {
         Self::Notch,
         Self::BandPass,
         Self::TiltShelf,
+        Self::Resonance,
     ];
-    pub const NAMES: [&'static str; 8] =
-        ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf"];
+    pub const NAMES: [&'static str; 9] =
+        ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf", "Resonance"];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -105,6 +108,9 @@ pub struct Dynamics {
     /// Transient mode: how wide the crossfade from attack to sustain is, as a share (0…2) of the
     /// transient time, centred on it.
     pub transition: f64,
+    /// Compressor mode: work per frequency bin inside the band's range (spectral dynamics)
+    /// instead of moving the whole band.
+    pub spectral: bool,
     pub threshold_db: f64,
     pub attack_ms: f64,
     pub release_ms: f64,
@@ -121,6 +127,7 @@ impl Default for Dynamics {
             sustain_db: 0.0,
             transient_ms: DEFAULT_TRANSIENT_MS,
             transition: DEFAULT_TRANSITION,
+            spectral: false,
             threshold_db: -30.0,
             attack_ms: 10.0,
             release_ms: 150.0,
@@ -319,6 +326,26 @@ impl Dynamics {
     }
 }
 
+/// A resonance band's settings (soothe-style suppression).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResonanceSettings {
+    /// The most a resonance is cut, dB (positive).
+    pub depth_db: f64,
+    /// 0…1: how narrow the resonances it goes after are (higher = only the narrowest).
+    pub sharpness: f64,
+    /// 0…1: how far a resonance must stick out of its surroundings to be cut (higher = only the
+    /// most prominent).
+    pub selectivity: f64,
+    /// 0…1: how fast the cuts follow the sound (higher = faster attack and release).
+    pub speed: f64,
+}
+
+impl Default for ResonanceSettings {
+    fn default() -> Self {
+        Self { depth_db: 6.0, sharpness: 0.5, selectivity: 0.5, speed: 0.5 }
+    }
+}
+
 /// One band's settings, as the host parameters describe them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandSettings {
@@ -331,11 +358,12 @@ pub struct BandSettings {
     pub slope: usize,
     pub placement: Placement,
     pub dynamics: Dynamics,
+    pub resonance: ResonanceSettings,
 }
 
 impl Default for BandSettings {
     fn default() -> Self {
-        Self { enabled: false, kind: BandType::Bell, freq: 1000.0, gain_db: 0.0, q: FRAC_1_SQRT_2, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default() }
+        Self { enabled: false, kind: BandType::Bell, freq: 1000.0, gain_db: 0.0, q: FRAC_1_SQRT_2, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default(), resonance: ResonanceSettings::default() }
     }
 }
 
@@ -343,6 +371,16 @@ impl BandSettings {
     /// Whether the band is running dynamically (only types with a gain can).
     pub fn is_dynamic(&self) -> bool {
         self.dynamics.enabled && self.kind.has_gain()
+    }
+
+    /// Whether the band's dynamics work per frequency bin (spectral compressor mode).
+    pub fn is_spectral(&self) -> bool {
+        self.is_dynamic() && self.dynamics.mode == DynamicsMode::Compressor && self.dynamics.spectral
+    }
+
+    /// Whether the band needs the spectral stage: a spectral compressor or a resonance band.
+    pub fn uses_spectrum(&self) -> bool {
+        self.enabled && (self.is_spectral() || self.kind == BandType::Resonance)
     }
 
     /// Whether `other` needs a different filter structure (a crossfade instead of smoothing).
@@ -413,6 +451,8 @@ fn for_each_prototype(s: &BandSettings, mut f: impl FnMut(Analog, bool)) {
             // First-order tilt pivoting on f0: −g/2 at DC, +g/2 at the top, unity at f0.
             f(Analog::first(a, 1.0, 1.0, a), false);
         }
+        // No static curve: a resonance band works entirely in the spectral stage.
+        BandType::Resonance => {}
         BandType::Notch => f(Analog::second(1.0, 0.0, 1.0, 1.0, 1.0 / q, 1.0), false),
         BandType::BandPass => f(Analog::second(0.0, 1.0 / q, 0.0, 1.0, 1.0 / q, 1.0), false),
         BandType::LowCut | BandType::HighCut => {
@@ -636,8 +676,9 @@ impl BandProcessor {
     }
 
     /// Whether the detector runs: dynamics on for a type with gain.
+    /// (Not for spectral dynamics: those work per bin in the spectral stage, not in this filter.)
     fn detecting(&self) -> bool {
-        self.target.dynamics.enabled && self.active.kind.has_gain() && self.target.kind == self.active.kind
+        self.target.dynamics.enabled && self.active.kind.has_gain() && self.target.kind == self.active.kind && !self.target.is_spectral()
     }
 
     /// The dynamic gain the band applies right now, dB (0 when not dynamic).
@@ -812,7 +853,7 @@ mod tests {
     }
 
     fn band(kind: BandType, freq: f64, gain_db: f64, q: f64) -> BandSettings {
-        BandSettings { enabled: true, kind, freq, gain_db, q, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default() }
+        BandSettings { enabled: true, kind, freq, gain_db, q, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default(), resonance: ResonanceSettings::default() }
     }
 
     #[test]

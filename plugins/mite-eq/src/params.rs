@@ -4,7 +4,7 @@
 //! `b{NN}_{param}` with all 24 bands pre-declared because hosts need static parameter lists.
 
 use mite_core::{BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::eq::{BandSettings, BandType, Dynamics, DynamicsMode, Placement, DEFAULT_SLOPE, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION, SLOPE_NAMES};
+use mite_dsp::eq::{BandSettings, BandType, Dynamics, DynamicsMode, Placement, ResonanceSettings, DEFAULT_SLOPE, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION, SLOPE_NAMES};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
@@ -206,6 +206,72 @@ pub const TRANSITION: ParamSpec = ParamSpec {
     display: ParamDisplay::Number,
 };
 
+/// Compressor mode: work per frequency bin inside the band's range.
+pub const SPECTRAL: BoolSpec = BoolSpec { id: "spectral", name: "Spectral", default: false };
+
+/// Resonance bands: the largest cut.
+pub const RDEPTH: ParamSpec = ParamSpec {
+    id: "rdepth",
+    name: "Resonance Depth",
+    unit: "dB",
+    min: 0.0,
+    max: 24.0,
+    default: 6.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 1,
+    wheel_step: 0.5,
+    wheel_step_fine: 0.1,
+    display: ParamDisplay::Number,
+};
+
+/// Resonance bands: how narrow the resonances they go after are, how far one must stick out, and
+/// how fast the cuts follow.
+pub const RSHARP: ParamSpec = ParamSpec {
+    id: "rsharp",
+    name: "Resonance Sharpness",
+    unit: "%",
+    min: 0.0,
+    max: 100.0,
+    default: 50.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+
+pub const RSELECT: ParamSpec = ParamSpec {
+    id: "rselect",
+    name: "Resonance Selectivity",
+    unit: "%",
+    min: 0.0,
+    max: 100.0,
+    default: 50.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+
+pub const RSPEED: ParamSpec = ParamSpec {
+    id: "rspeed",
+    name: "Resonance Speed",
+    unit: "%",
+    min: 0.0,
+    max: 100.0,
+    default: 50.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+
 /// How the attack and release dials feel: common times get most of the travel (attack up to
 /// 50 ms, release 100–300 ms); the rarely used ends move faster.
 pub const ATTACK_DIAL: DialCurve = DialCurve(&[(0.0, 0.5), (0.12, 2.0), (0.3, 10.0), (0.75, 50.0), (1.0, 200.0)]);
@@ -258,6 +324,10 @@ pub fn manifest() -> String {
         lines.push(prefix(TRANSIENT.manifest_line()));
         lines.push(prefix(TTIME.manifest_line()));
         lines.push(prefix(TRANSITION.manifest_line()));
+        lines.push(prefix(SPECTRAL.manifest_line()));
+        for spec in [RDEPTH, RSHARP, RSELECT, RSPEED] {
+            lines.push(prefix(spec.manifest_line()));
+        }
     }
     lines.join("\n") + "\n"
 }
@@ -281,6 +351,11 @@ pub struct BandParams {
     pub transient: FloatParam,
     pub ttime: FloatParam,
     pub transition: FloatParam,
+    pub spectral: BoolParam,
+    pub rdepth: FloatParam,
+    pub rsharp: FloatParam,
+    pub rselect: FloatParam,
+    pub rspeed: FloatParam,
 }
 
 impl BandParams {
@@ -305,6 +380,11 @@ impl BandParams {
             transient: float_param_named(&TRANSIENT, name("Transient Attack")),
             ttime: float_param_named(&TTIME, name("Transient Time")),
             transition: float_param_named(&TRANSITION, name("Transition")),
+            spectral: bool_param(&SPECTRAL, name("Spectral")),
+            rdepth: float_param_named(&RDEPTH, name("Resonance Depth")),
+            rsharp: float_param_named(&RSHARP, name("Resonance Sharpness")),
+            rselect: float_param_named(&RSELECT, name("Resonance Selectivity")),
+            rspeed: float_param_named(&RSPEED, name("Resonance Speed")),
         }
     }
 
@@ -330,6 +410,13 @@ impl BandParams {
                 attack_ms: f64::from(self.attack.value()),
                 release_ms: f64::from(self.release.value()),
                 ratio: f64::from(self.ratio.value()),
+                spectral: self.spectral.value(),
+            },
+            resonance: ResonanceSettings {
+                depth_db: f64::from(self.rdepth.value()),
+                sharpness: f64::from(self.rsharp.value()) / 100.0,
+                selectivity: f64::from(self.rselect.value()) / 100.0,
+                speed: f64::from(self.rspeed.value()) / 100.0,
             },
         }
     }
@@ -381,7 +468,12 @@ unsafe impl Params for EqParams {
             map.push((band_id(i, SUSTAIN.id), b.sustain.as_ptr(), group.clone()));
             map.push((band_id(i, TRANSIENT.id), b.transient.as_ptr(), group.clone()));
             map.push((band_id(i, TTIME.id), b.ttime.as_ptr(), group.clone()));
-            map.push((band_id(i, TRANSITION.id), b.transition.as_ptr(), group));
+            map.push((band_id(i, TRANSITION.id), b.transition.as_ptr(), group.clone()));
+            map.push((band_id(i, SPECTRAL.id), b.spectral.as_ptr(), group.clone()));
+            map.push((band_id(i, RDEPTH.id), b.rdepth.as_ptr(), group.clone()));
+            map.push((band_id(i, RSHARP.id), b.rsharp.as_ptr(), group.clone()));
+            map.push((band_id(i, RSELECT.id), b.rselect.as_ptr(), group.clone()));
+            map.push((band_id(i, RSPEED.id), b.rspeed.as_ptr(), group));
         }
         map
     }
