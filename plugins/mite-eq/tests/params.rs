@@ -24,7 +24,7 @@ fn host_ids_match_manifest() {
 #[test]
 fn ids_follow_the_blueprint_scheme() {
     let ids: Vec<String> = EqParams::default().param_map().into_iter().map(|(id, _, _)| id).collect();
-    assert_eq!(ids.len(), 8 + 24 * 23);
+    assert_eq!(ids.len(), 8 + 24 * 24);
     assert!(ids.contains(&"b01_freq".to_owned()));
     assert!(ids.contains(&"b24_slope".to_owned()));
     assert!(ids.contains(&"b24_stereo".to_owned()));
@@ -37,6 +37,7 @@ fn ids_follow_the_blueprint_scheme() {
     assert!(ids.contains(&"b24_spectral".to_owned()));
     assert!(ids.contains(&"b24_rthresh".to_owned()));
     assert!(ids.contains(&"b24_solo".to_owned()));
+    assert!(ids.contains(&"b24_dsrc".to_owned()));
     for id in ["out_pan", "mix", "auto_gain", "delta", "bypass"] {
         assert!(ids.contains(&id.to_owned()), "{id}");
     }
@@ -56,7 +57,7 @@ fn snapshots_are_saved_with_the_state_and_restored() {
     assert_eq!(restored.snapshots.slot(2), Some(stored));
     // The active slot is saved as the parameters were (every band parameter, normalized).
     let active = restored.snapshots.slot(1).expect("the active slot is saved");
-    assert_eq!(active.len(), 24 * 22);
+    assert_eq!(active.len(), 24 * 23);
     assert_eq!(active.get("b01_freq").copied(), Some(params.bands[0].freq.default_normalized_value()));
 }
 

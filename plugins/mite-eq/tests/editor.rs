@@ -509,3 +509,34 @@ fn save_as_types_a_name_and_writes_a_user_preset() {
     assert_eq!(saved[0].values.get("b01_gain").copied(), Some(5.0));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The bell from `setup`, made a compressor band through its gain ring.
+fn dynamic() -> (EqView, MemoryParamHost) {
+    let (mut view, host) = setup();
+    let ring = Point::new(762.0 - 35.0, 606.0);
+    drag(&mut view, &host, ring, Point::new(ring.x - 40.0, ring.y));
+    draw(&mut view, &host);
+    assert_eq!(plain(&host, DYN.id), 1.0);
+    (view, host)
+}
+
+
+#[test]
+fn the_detection_dropdown_offers_the_sidechain_and_the_bands_that_are_on() {
+    let (mut view, host) = dynamic();
+    host.set_plain(&band_id(4, ON.id), 1.0);
+    draw(&mut view, &host);
+    // Left of the remove button: own, sidechain, then band 5 (the only other band on).
+    let button = Point::new(849.0, 500.0);
+    click(&mut view, &host, button);
+    draw(&mut view, &host);
+    let first = Point::new(860.0, 534.0);
+    let row = 30.0;
+    click(&mut view, &host, Point::new(first.x, first.y + row));
+    assert_eq!(plain(&host, "dsrc"), 1.0, "sidechain");
+    draw(&mut view, &host);
+    click(&mut view, &host, button);
+    draw(&mut view, &host);
+    click(&mut view, &host, Point::new(first.x, first.y + 2.0 * row));
+    assert_eq!(plain(&host, "dsrc"), 6.0, "band 5 (choice 2 + 4)");
+}

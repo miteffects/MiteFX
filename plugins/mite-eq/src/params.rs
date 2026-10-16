@@ -4,7 +4,7 @@
 //! `b{NN}_{param}` with all 24 bands pre-declared because hosts need static parameter lists.
 
 use mite_core::{BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::eq::{BandSettings, BandType, Dynamics, DynamicsMode, Placement, DEFAULT_SLOPE, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION, SLOPE_NAMES};
+use mite_dsp::eq::{BandSettings, BandType, DetectSource, Dynamics, DynamicsMode, Placement, DEFAULT_SLOPE, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION, SLOPE_NAMES};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
@@ -245,6 +245,11 @@ pub const TRANSITION: ParamSpec = ParamSpec {
     display: ParamDisplay::Number,
 };
 
+/// What a dynamic band's detector listens to: its own region, the sidechain, or another band's
+/// region (`mite_dsp::eq::DetectSource` order).
+pub const DETECT_NAMES: [&str; 26] = ["Own", "Sidechain", "Band 1", "Band 2", "Band 3", "Band 4", "Band 5", "Band 6", "Band 7", "Band 8", "Band 9", "Band 10", "Band 11", "Band 12", "Band 13", "Band 14", "Band 15", "Band 16", "Band 17", "Band 18", "Band 19", "Band 20", "Band 21", "Band 22", "Band 23", "Band 24"];
+pub const DSRC: ChoiceSpec = ChoiceSpec { id: "dsrc", name: "Detection", choices: &DETECT_NAMES, default: 0 };
+
 /// Listen to this band's region alone (one band at a time).
 pub const SOLO: BoolSpec = BoolSpec { id: "solo", name: "Solo", default: false };
 
@@ -318,9 +323,9 @@ pub const SNAPSHOTS_KEY: &str = "snapshots";
 pub const PRESET_KEY: &str = "preset";
 
 /// The per-band parameters a snapshot holds (every one but solo, which is an audition).
-pub const SNAPSHOT_PARAMS: [&str; 22] = [
+pub const SNAPSHOT_PARAMS: [&str; 23] = [
     ON.id, TYPE.id, FREQ.id, GAIN.id, Q.id, SLOPE.id, STEREO.id, DYN.id, RANGE.id, THRESH.id, ATTACK.id, RELEASE.id, RATIO.id, DMODE.id, SUSTAIN.id,
-    TRANSIENT.id, TTIME.id, TRANSITION.id, SPECTRAL.id, SSMOOTH.id, SREL.id, RTHRESH.id,
+    TRANSIENT.id, TTIME.id, TRANSITION.id, SPECTRAL.id, SSMOOTH.id, SREL.id, RTHRESH.id, DSRC.id,
 ];
 
 /// `b03_freq` for band index 2.
@@ -363,6 +368,7 @@ pub fn manifest() -> String {
         lines.push(prefix(SREL.manifest_line()));
         lines.push(prefix(RTHRESH.manifest_line()));
         lines.push(prefix(SOLO.manifest_line()));
+        lines.push(prefix(DSRC.manifest_line()));
     }
     lines.join("\n") + "\n"
 }
@@ -391,6 +397,7 @@ pub struct BandParams {
     pub srel: BoolParam,
     pub rthresh: FloatParam,
     pub solo: BoolParam,
+    pub dsrc: IntParam,
 }
 
 impl BandParams {
@@ -420,6 +427,7 @@ impl BandParams {
             srel: bool_param(&SREL, name("Spectral Relative")),
             rthresh: float_param_named(&RTHRESH, name("Relative Threshold")),
             solo: bool_param(&SOLO, name("Solo")),
+            dsrc: choice_param(&DSRC, name("Detection")),
         }
     }
 
@@ -449,6 +457,7 @@ impl BandParams {
                 smoothing: f64::from(self.ssmooth.value()) / 100.0,
                 relative: self.srel.value(),
                 relative_db: f64::from(self.rthresh.value()),
+                source: DetectSource::from_index(self.dsrc.value().max(0) as usize),
             },
         }
     }
@@ -552,7 +561,8 @@ unsafe impl Params for EqParams {
             map.push((band_id(i, SSMOOTH.id), b.ssmooth.as_ptr(), group.clone()));
             map.push((band_id(i, SREL.id), b.srel.as_ptr(), group.clone()));
             map.push((band_id(i, RTHRESH.id), b.rthresh.as_ptr(), group.clone()));
-            map.push((band_id(i, SOLO.id), b.solo.as_ptr(), group));
+            map.push((band_id(i, SOLO.id), b.solo.as_ptr(), group.clone()));
+            map.push((band_id(i, DSRC.id), b.dsrc.as_ptr(), group));
         }
         map
     }

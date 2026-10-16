@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_dsp::analyzer::{Analyzer, LogSpectrum, SPECTRUM_POINTS};
-use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
+use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, DetectSource, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
@@ -19,7 +19,7 @@ use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, TextStyle, UiEvent, Vi
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
 use crate::params::{
-    band_id, ATTACK, ATTACK_DIAL, AUTO_GAIN, BANDS, BYPASS, DELTA, DMODE, DYN, FREQ, GAIN, LP_RES, MIX, MODE, ON, OUT_GAIN, OUT_PAN, Q, RANGE, RATIO, RELEASE,
+    band_id, ATTACK, ATTACK_DIAL, AUTO_GAIN, BANDS, BYPASS, DELTA, DETECT_NAMES, DMODE, DSRC, DYN, FREQ, GAIN, LP_RES, MIX, MODE, ON, OUT_GAIN, OUT_PAN, Q, RANGE, RATIO, RELEASE,
     RELEASE_DIAL, RTHRESH, SLOPE, SOLO, SPECTRAL, SREL, SSMOOTH, STEREO, SUSTAIN, THRESH, TRANSIENT, TRANSITION, TTIME, TYPE,
 };
 use crate::presets::{preset_ids, Preset, PresetValues};
@@ -83,7 +83,8 @@ pub fn memory_host() -> mite_ui::MemoryParamHost {
             .with_id(id(SSMOOTH.id), SSMOOTH)
             .with_id(id(SREL.id), boolean(&SREL))
             .with_id(id(RTHRESH.id), RTHRESH)
-            .with_id(id(SOLO.id), boolean(&SOLO));
+            .with_id(id(SOLO.id), boolean(&SOLO))
+            .with_id(id(DSRC.id), choice(&DSRC));
     }
     host
 }
@@ -310,6 +311,7 @@ struct BandIds {
     rthresh: String,
     ssmooth: String,
     solo: String,
+    dsrc: String,
 }
 
 impl BandIds {
@@ -338,6 +340,7 @@ impl BandIds {
             rthresh: band_id(b, RTHRESH.id),
             ssmooth: band_id(b, SSMOOTH.id),
             solo: band_id(b, SOLO.id),
+            dsrc: band_id(b, DSRC.id),
         }
     }
 }
@@ -433,27 +436,13 @@ fn grid_x(i: usize) -> f64 {
     i as f64 * PLOT_W / (POINTS - 1) as f64
 }
 
-/// A band's response in dB at `f`, as drawn. Up to half Nyquist it is the digital filter's.
-/// From there it blends smoothly into the analog shape, which continues above Nyquist (the plot
-/// runs to 30 kHz), as FabFilter draws it. A digital response always flattens at Nyquist, so
-/// splicing the analog curve on there kinked the line; the matched filters track the analog shape
-/// closely, so the blend moves the line only slightly.
-fn band_db(sections: &Sections, s: &BandSettings, f: f64, fs: f64) -> f64 {
-    let floor = |db: f64| if db.is_nan() { -300.0 } else { db.max(-300.0) };
-    let nyquist = 0.5 * fs;
-    let start = 0.5 * nyquist;
-    if f <= start {
-        return sections.response_db(2.0 * std::f64::consts::PI * f / fs);
-    }
-    let analog = floor(analog_response_db(s, f));
-    if f >= nyquist {
-        return analog;
-    }
-    let digital = floor(sections.response_db(2.0 * std::f64::consts::PI * f / fs));
-    // Smoothstep over the octave in log frequency: no step and no kink at either end.
-    let t = (f / start).log2();
-    let t = t * t * (3.0 - 2.0 * t);
-    digital + t * (analog - digital)
+/// A band's response in dB at `f`, as drawn: its analog prototype, which is what every mode
+/// plays (Zero Latency through its minimum-phase correction, Natural Phase through its complex
+/// one, Linear Phase by design), above half Nyquist included. The sections stay in the signature
+/// for the cache.
+fn band_db(_sections: &Sections, s: &BandSettings, f: f64, _fs: f64) -> f64 {
+    let db = analog_response_db(s, f);
+    if db.is_nan() { -300.0 } else { db.max(-300.0) }
 }
 
 /// Draws a band type's response shape as a 22 × 12 icon with its top-left at `at`.
@@ -569,6 +558,8 @@ enum Icon {
     Stereo(Placement),
     /// A linear-phase resolution: ascending bars, as many lit as the level.
     Resolution(usize),
+    /// A detection source.
+    Source(DetectSource),
 }
 
 /// Every icon button looks and answers alike: raised on `fill`, its border lit in `color` while
@@ -609,6 +600,29 @@ fn draw_bin(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
     bin.move_to((c.x + 1.5, c.y));
     bin.line_to((c.x + 1.3, c.y + 4.0));
     scene.stroke(&round, Affine::IDENTITY, color, None, &bin);
+}
+
+/// A detection source as a 22 × 12 icon at `at`: the band's own bump, a sidechain plug coming
+/// in, or another band (a ring).
+fn draw_source_icon(scene: &mut mite_ui::vello::Scene, source: DetectSource, at: Point, color: Color) {
+    let round = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+    match source {
+        DetectSource::Own => draw_type_icon(scene, BandType::Bell, at, color),
+        DetectSource::Sidechain => {
+            let mut plug = BezPath::new();
+            plug.move_to((at.x + 1.0, at.y + 6.0));
+            plug.line_to((at.x + 12.0, at.y + 6.0));
+            plug.move_to((at.x + 8.0, at.y + 2.5));
+            plug.line_to((at.x + 12.0, at.y + 6.0));
+            plug.line_to((at.x + 8.0, at.y + 9.5));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &plug);
+            scene.stroke(&round, Affine::IDENTITY, color, None, &Line::new((at.x + 16.0, at.y + 1.0), (at.x + 16.0, at.y + 11.0)));
+        }
+        DetectSource::Band(_) => {
+            scene.stroke(&round, Affine::IDENTITY, color, None, &Circle::new((at.x + 11.0, at.y + 6.0), 4.5));
+            scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new((at.x + 11.0, at.y + 6.0), 1.8));
+        }
+    }
 }
 
 /// Headphones centred on `c`: the solo glyph.
@@ -664,6 +678,7 @@ fn draw_icon(scene: &mut mite_ui::vello::Scene, icon: Icon, at: Point, color: Co
         Icon::Type(kind) => draw_type_icon(scene, kind, at, color),
         Icon::Slope(kind, i) => draw_slope_icon(scene, kind, i, SLOPE.choices.len(), at, color),
         Icon::Stereo(placement) => draw_placement_icon(scene, placement, at, color),
+        Icon::Source(source) => draw_source_icon(scene, source, at, color),
         Icon::Resolution(level) => {
             for i in 0..LP_RESOLUTIONS.len() {
                 let h = 4.0 + 2.5 * i as f64;
@@ -683,6 +698,8 @@ enum MenuKind {
     Stereo,
     /// The footer's linear-phase resolution (global, not a band setting).
     Resolution,
+    /// What a dynamic band's detector listens to.
+    Source,
 }
 
 /// An open dropdown: its button, its items and the hovered item.
@@ -693,6 +710,8 @@ struct Menu {
     band_kind: BandType,
     anchor: Rect,
     items: &'static [&'static str],
+    /// The choices offered, in order (indices into `items`; not every source is on offer).
+    shown: Vec<usize>,
     current: usize,
     hover: Option<usize>,
 }
@@ -704,19 +723,30 @@ impl Menu {
             MenuKind::Slope => Icon::Slope(self.band_kind, i),
             MenuKind::Stereo => Icon::Stereo(Placement::from_index(i)),
             MenuKind::Resolution => Icon::Resolution(i),
+            MenuKind::Source => Icon::Source(DetectSource::from_index(i)),
         }
     }
 
     /// Item rectangles: below the button when they fit inside the display, otherwise above.
+    /// Item rectangles (one per shown choice): below the button when they fit inside the
+    /// display, otherwise above; rows get shorter when a long list would not fit at all.
     fn item_rects(&self) -> Vec<Rect> {
-        let n = self.items.len() as f64;
+        let count = self.shown.len();
         let w = self.anchor.width().max(if self.kind == MenuKind::Type { 184.0 } else { 150.0 });
-        let h = n * MENU_ITEM_H + 8.0;
-        let top = if self.anchor.y1 + 4.0 + h <= HELP_TOP { self.anchor.y1 + 4.0 } else { self.anchor.y0 - 4.0 - h };
-        (0..self.items.len())
+        let room = (HELP_TOP - DISPLAY_TOP - 20.0).max(self.anchor.y0 - DISPLAY_TOP - 10.0);
+        let row = MENU_ITEM_H.min((room - 8.0) / count.max(1) as f64);
+        let h = count as f64 * row + 8.0;
+        let top = if self.anchor.y1 + 4.0 + h <= HELP_TOP {
+            self.anchor.y1 + 4.0
+        } else if self.anchor.y0 - 4.0 - h >= DISPLAY_TOP {
+            self.anchor.y0 - 4.0 - h
+        } else {
+            DISPLAY_TOP + 10.0
+        };
+        (0..count)
             .map(|i| {
-                let y = top + 4.0 + i as f64 * MENU_ITEM_H;
-                Rect::new(self.anchor.x0, y, self.anchor.x0 + w, y + MENU_ITEM_H)
+                let y = top + 4.0 + i as f64 * row;
+                Rect::new(self.anchor.x0, y, self.anchor.x0 + w, y + row)
             })
             .collect()
     }
@@ -743,6 +773,8 @@ struct PanelHits {
     remove_dynamics: Option<Rect>,
     /// The spectral compressor's fixed/relative threshold toggle.
     relative: Option<Rect>,
+    /// The compressor's source dropdown.
+    source: Option<Rect>,
     /// Listen to the band alone (not for a tilt, which reaches everything).
     solo: Option<Rect>,
     /// Removes the band.
@@ -983,6 +1015,7 @@ impl EqView {
                 smoothing: f64::from(Self::plain(host, &ids.ssmooth)) / 100.0,
                 relative: Self::plain(host, &ids.srel) >= 0.5,
                 relative_db: f64::from(Self::plain(host, &ids.rthresh)),
+                source: DetectSource::from_index(Self::plain(host, &ids.dsrc).round().max(0.0) as usize),
             },
         }
     }
@@ -1163,6 +1196,14 @@ impl EqView {
                 }
                 if h.remove.contains(p) {
                     return Help::default().text(format!("Band {} — remove", b + 1));
+                }
+                if h.source.is_some_and(|r| r.contains(p)) {
+                    let heard = match self.band(host, b).dynamics.source {
+                        DetectSource::Own => "its own region".to_owned(),
+                        DetectSource::Sidechain => "its region of the sidechain".to_owned(),
+                        DetectSource::Band(n) => format!("band {}'s region", n + 1),
+                    };
+                    return Help::default().text(format!("Band {} listens to {heard} — click to choose", b + 1));
                 }
                 if h.close.contains(p) {
                     return Help::default().text("Close the panel");
@@ -1737,7 +1778,7 @@ impl EqView {
             let mut col = 0.0;
             let x0 = origin.x + 14.0 + SCOPE_W + 12.0 + 30.0 + 52.0;
             // Five dials (spectral compressor) sit closer together than four.
-            let step = if s.is_spectral() { 70.0 } else { 82.0 };
+            let step = if s.dynamics.mode == DynamicsMode::Compressor { 70.0 } else { 82.0 };
             let mut small = |spec, label, kind, id: &str| {
                 let k = Knob::new(spec, label, kind, Point::new(x0 + col * step, dyn_top + 38.0), 48.0)
                     .with_id(id);
@@ -2743,7 +2784,7 @@ impl EqView {
             r
         });
 
-        let (scope, modes, remove_dynamics, relative) = if let Some(top) = dyn_top {
+        let (scope, modes, remove_dynamics, relative, source) = if let Some(top) = dyn_top {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((origin.x + 14.0, divider), (origin.x + PANEL_W - 14.0, divider)));
             let scope = Rect::new(origin.x + 14.0, top + 8.0, origin.x + 14.0 + SCOPE_W, top + 8.0 + SCOPE_H);
             self.draw_scope(cx, scope, b, &s, color);
@@ -2800,9 +2841,28 @@ impl EqView {
                 cx.scene.stroke(&stroke, Affine::IDENTITY, ink, None, &line);
                 r
             });
-            (Some(scope), Some(modes), Some(remove), relative)
+            // Plain compressor: what the detector listens to, right of the dials.
+            let plain = s.dynamics.mode == DynamicsMode::Compressor && !s.is_spectral();
+            let source = plain.then(|| {
+                let r = Rect::new(remove.x0 - 106.0, top + 22.0, remove.x0 - 8.0, top + 54.0);
+                let open = self.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Source);
+                let hot = self.pointer.is_some_and(|p| r.contains(p));
+                raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, if open || hot { color } else { theme.panel_control_border }, theme.shadows);
+                let label = DETECT_NAMES[s.dynamics.source.index().min(DETECT_NAMES.len() - 1)];
+                draw_source_icon(cx.scene, s.dynamics.source, Point::new(r.x0 + 6.0, r.center().y - 6.0), color);
+                cx.text.draw(cx.scene, label, r.x0 + 30.0, r.y0 + 9.0, TextStyle::BODY.sized(11.0).weighted(600.0), theme.text_hi, Align::Left);
+                let mut chevron = BezPath::new();
+                let (cxr, cy) = (r.x1 - 12.0, r.center().y);
+                chevron.move_to((cxr - 3.5, cy - 1.5));
+                chevron.line_to((cxr, cy + 2.0));
+                chevron.line_to((cxr + 3.5, cy - 1.5));
+                let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+                cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &chevron);
+                r
+            });
+            (Some(scope), Some(modes), Some(remove), relative, source)
         } else {
-            (None, None, None, None)
+            (None, None, None, None, None)
         };
 
         // Right: remove the band, under close.
@@ -2829,7 +2889,7 @@ impl EqView {
         if let Some(c) = ring {
             self.draw_ring(cx, c, b, &s, color);
         }
-        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, relative, solo, remove, close });
+        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, relative, source, solo, remove, close });
     }
 
     /// The open dropdown, drawn over everything.
@@ -2842,11 +2902,13 @@ impl EqView {
         }
         panel(cx.scene, RoundedRect::from_rect(bounds, 8.0), theme.glass.with_alpha(0.98), theme.glass_border);
         let color = if menu.kind == MenuKind::Resolution { theme.accent } else { Self::band_color(theme, &self.band(cx.host, menu.band)) };
-        for (i, (r, item)) in menu.item_rects().into_iter().zip(menu.items).enumerate() {
+        for (k, r) in menu.item_rects().into_iter().enumerate() {
+            let i = menu.shown[k];
+            let item = menu.items[i];
             let r = r.inset((-4.0, -1.0));
             let shape = RoundedRect::from_rect(r, 6.0);
             let current = i == menu.current;
-            let hovered = menu.hover == Some(i);
+            let hovered = menu.hover == Some(k);
             // The current choice glows in the band's colour; hover is a quiet lift.
             if current {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if hovered { 0.24 } else { 0.16 }), None, &shape);
@@ -2855,10 +2917,11 @@ impl EqView {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &shape);
             }
             let icon = if current { color } else if hovered { theme.text_hi } else { theme.text_mid };
-            draw_icon(cx.scene, menu.icon(i), Point::new(r.x0 + 12.0, r.y0 + 8.0), icon);
+            let mid = r.center().y;
+            draw_icon(cx.scene, menu.icon(i), Point::new(r.x0 + 12.0, mid - 6.0), icon);
             let text = if current { theme.text_strong } else { theme.text_hi };
             let style = TextStyle::BODY.weighted(if current { 700.0 } else { 500.0 });
-            cx.text.draw(cx.scene, item, r.x0 + 44.0, r.y0 + 7.0, style, text, Align::Left);
+            cx.text.draw(cx.scene, item, r.x0 + 44.0, mid - 8.0, style, text, Align::Left);
         }
     }
 
@@ -2874,10 +2937,22 @@ impl EqView {
             MenuKind::Slope => (SLOPE.choices, &ids.slope),
             MenuKind::Stereo => (&Placement::NAMES, &ids.stereo),
             MenuKind::Resolution => (&LP_RESOLUTIONS, LP_RES.id),
+            MenuKind::Source => (&DETECT_NAMES, &ids.dsrc),
         };
         let current = Self::plain(host, id).round().max(0.0) as usize;
         let band_kind = BandType::from_index(Self::plain(host, &ids.kind).round().max(0.0) as usize);
-        self.menu = Some(Menu { kind, band, band_kind, anchor, items, current, hover: None });
+        // Sources: own, sidechain, and the other bands that are on (and the current one).
+        let shown = if kind == MenuKind::Source {
+            (0..items.len())
+                .filter(|&i| match DetectSource::from_index(i) {
+                    DetectSource::Band(n) => n != band && (self.band(host, n).enabled || i == current),
+                    _ => true,
+                })
+                .collect()
+        } else {
+            (0..items.len()).collect()
+        };
+        self.menu = Some(Menu { kind, band, band_kind, anchor, items, shown, current, hover: None });
     }
 
     /// Routes an event to the open dropdown. It is modal: everything is consumed, and a click
@@ -2891,13 +2966,14 @@ impl EqView {
                 self.pointer = Some(pos);
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
-                if let Some(i) = item_at(pos) {
+                if let Some(i) = item_at(pos).map(|k| menu.shown[k]) {
                     let ids = &self.ids[menu.band];
                     let id: &str = match menu.kind {
                         MenuKind::Type => &ids.kind,
                         MenuKind::Slope => &ids.slope,
                         MenuKind::Stereo => &ids.stereo,
                         MenuKind::Resolution => LP_RES.id,
+                        MenuKind::Source => &ids.dsrc,
                     };
                     Self::set(host, id, i as f32);
                     if menu.kind == MenuKind::Type {
@@ -3542,6 +3618,8 @@ impl EqView {
                             self.toggle_menu(MenuKind::Slope, b, r, host);
                         } else if hits.stereo.contains(pos) {
                             self.toggle_menu(MenuKind::Stereo, b, hits.stereo, host);
+                        } else if let Some(r) = hits.source.filter(|r| r.contains(pos)) {
+                            self.toggle_menu(MenuKind::Source, b, r, host);
                         } else if hits.solo.is_some_and(|r| r.contains(pos)) {
                             // One band at a time: soloing this one ends any other solo.
                             let on = Self::plain(host, &ids.solo) < 0.5;

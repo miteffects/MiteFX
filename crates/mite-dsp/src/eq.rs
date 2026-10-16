@@ -119,6 +119,8 @@ pub struct Dynamics {
     pub attack_ms: f64,
     pub release_ms: f64,
     pub ratio: f64,
+    /// What the detector listens to.
+    pub source: DetectSource,
 }
 
 impl Default for Dynamics {
@@ -139,6 +141,7 @@ impl Default for Dynamics {
             attack_ms: 10.0,
             release_ms: 150.0,
             ratio: 3.0,
+            source: DetectSource::Own,
         }
     }
 }
@@ -158,6 +161,37 @@ impl DynamicsMode {
 
     pub fn from_index(i: usize) -> Self {
         if i == 1 { Self::Transient } else { Self::Compressor }
+    }
+}
+
+/// What a dynamic band listens to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetectSource {
+    /// Its own region of the signal it processes.
+    #[default]
+    Own,
+    /// Its region of the external sidechain.
+    Sidechain,
+    /// Another band's region (by index) of the signal this band processes.
+    Band(usize),
+}
+
+impl DetectSource {
+    /// The parameter's choices: own, sidechain, then bands 1–24.
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            0 => Self::Own,
+            1 => Self::Sidechain,
+            n => Self::Band(n - 2),
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Own => 0,
+            Self::Sidechain => 1,
+            Self::Band(n) => n + 2,
+        }
     }
 }
 
@@ -544,6 +578,22 @@ fn detector_design(s: &BandSettings, sample_rate: f64) -> Coeffs {
     matched(&proto, w0)
 }
 
+/// The detector's rectified output for one sample, `x(c)` being channel `c`'s input (`stereo`:
+/// there are two): the louder side for a stereo band, its own side or mid/side otherwise.
+#[inline(always)]
+fn detector_level(det: &Coeffs, state: &mut [Tdf2; 2], placement: Placement, stereo: bool, x: impl Fn(usize) -> f64) -> f64 {
+    match placement {
+        Placement::Stereo if stereo => state[0].process(det, x(0)).abs().max(state[1].process(det, x(1)).abs()),
+        Placement::Stereo => state[0].process(det, x(0)).abs(),
+        Placement::Left => state[0].process(det, x(0)).abs(),
+        Placement::Right => state[0].process(det, x(1)).abs(),
+        Placement::Mid | Placement::Side => {
+            let (l, r) = (x(0), x(1));
+            state[0].process(det, if placement == Placement::Mid { 0.5 * (l + r) } else { 0.5 * (l - r) }).abs()
+        }
+    }
+}
+
 /// Samples between coefficient redesigns while a parameter is moving.
 const CONTROL_INTERVAL: u32 = 16;
 /// While only the dynamic gain moves: the envelope is already smooth, so 0.7 ms at 48 kHz.
@@ -586,6 +636,8 @@ pub struct BandProcessor {
     /// Samples since the previous control update (the interval last scheduled).
     interval: u32,
     detector_key: (f64, f64, BandType),
+    /// The region the detector listens through when it is another band's (its settings).
+    detect_region: Option<BandSettings>,
 }
 
 impl BandProcessor {
@@ -612,6 +664,7 @@ impl BandProcessor {
             designed_dynamic_db: 0.0,
             interval: CONTROL_INTERVAL,
             detector_key: (0.0, 0.0, BandType::Bell),
+            detect_region: None,
         };
         p.prepare(sample_rate, smoothing_ms, &BandSettings::default());
         p
@@ -687,9 +740,11 @@ impl BandProcessor {
         };
         self.sections = design(&settings, self.sample_rate);
         self.designed_dynamic_db = self.dynamic_db;
-        let key = (settings.freq, settings.q, settings.kind);
+        // The detector listens through this band's region, or another band's.
+        let region = self.detect_region.unwrap_or(settings);
+        let key = (region.freq, region.q, region.kind);
         if self.detecting() && key != self.detector_key {
-            self.detector = detector_design(&settings, self.sample_rate);
+            self.detector = detector_design(&region, self.sample_rate);
             self.detector_key = key;
         }
     }
@@ -698,6 +753,20 @@ impl BandProcessor {
     /// (Not for spectral dynamics: those work per bin in the spectral stage, not in this filter.)
     fn detecting(&self) -> bool {
         self.target.dynamics.enabled && self.active.kind.has_gain() && self.target.kind == self.active.kind && !self.target.is_spectral()
+    }
+
+    /// Makes the detector listen through `region` (another band's settings), or the band's own
+    /// region with `None`. The engine sets it each block for bands that detect from another one.
+    pub fn set_detect_region(&mut self, region: Option<BandSettings>) {
+        let region = region.map(|r| BandSettings { enabled: true, ..r });
+        if region != self.detect_region {
+            self.detect_region = region;
+            // Redesigned at the next control update.
+            self.detector_key = (0.0, 0.0, BandType::Bell);
+            if self.detecting() {
+                self.redesign();
+            }
+        }
     }
 
     /// The dynamic gain the band applies right now, dB (0 when not dynamic).
@@ -825,6 +894,12 @@ impl BandProcessor {
 
     /// Processes up to two channels in place. With one channel every placement processes it.
     pub fn process(&mut self, channels: &mut [&mut [f32]]) {
+        self.process_detecting(channels, None);
+    }
+
+    /// [`Self::process`], with the detector listening to `detect` (the sidechain, as long as the
+    /// channels; one channel serves both sides) instead of the channels themselves.
+    pub fn process_detecting(&mut self, channels: &mut [&mut [f32]], detect: Option<&[&[f32]]>) {
         if self.is_idle() {
             return;
         }
@@ -840,21 +915,14 @@ impl BandProcessor {
         let placement = if channels.len() >= 2 { self.active.placement } else { Placement::Stereo };
         for i in 0..frames {
             if self.detecting() {
-                // Peak envelope of the band's region of the input it processes.
-                let det = &self.detector;
-                let level = match placement {
-                    Placement::Stereo => channels
-                        .iter()
-                        .zip(self.detector_state.iter_mut())
-                        .map(|(ch, st)| st.process(det, f64::from(ch[i])).abs())
-                        .fold(0.0, f64::max),
-                    Placement::Left => self.detector_state[0].process(det, f64::from(channels[0][i])).abs(),
-                    Placement::Right => self.detector_state[0].process(det, f64::from(channels[1][i])).abs(),
-                    Placement::Mid | Placement::Side => {
-                        let (l, r) = (f64::from(channels[0][i]), f64::from(channels[1][i]));
-                        let x = if placement == Placement::Mid { 0.5 * (l + r) } else { 0.5 * (l - r) };
-                        self.detector_state[0].process(det, x).abs()
+                // Peak envelope of the band's region of the input it processes (or the sidechain).
+                let level = match detect {
+                    Some(d) => {
+                        let last = d.len().max(1) - 1;
+                        let get = |c: usize| d.get(c.min(last)).map_or(0.0, |ch| f64::from(ch[i]));
+                        detector_level(&self.detector, &mut self.detector_state, placement, d.len() >= 2, get)
                     }
+                    None => detector_level(&self.detector, &mut self.detector_state, placement, channels.len() >= 2, |c| f64::from(channels[c][i])),
                 };
                 if self.target.dynamics.mode == DynamicsMode::Compressor {
                     let k = if level > self.envelope { self.attack } else { self.release };
@@ -960,6 +1028,50 @@ mod tests {
                 (last, slope) = (g.abs(), next);
             }
         }
+    }
+
+    /// The level change of a 1 kHz band (`range` −12 dB) on `main`, its detector listening to
+    /// `detect` (or to `main` itself) and, optionally, through `region`.
+    fn ducking(main: &[f32], detect: Option<&[f32]>, region: Option<BandSettings>) -> f64 {
+        let mut s = band(BandType::Bell, 1000.0, 0.0, 1.0);
+        s.dynamics = Dynamics { enabled: true, threshold_db: -20.0, ratio: 10.0, range_db: -12.0, ..Default::default() };
+        let mut p = BandProcessor::new(FS, 20.0);
+        p.reset(&s);
+        p.set_detect_region(region);
+        let mut buf = main.to_vec();
+        match detect {
+            Some(d) => p.process_detecting(&mut [&mut buf], Some(&[d])),
+            None => p.process(&mut [&mut buf]),
+        }
+        20.0 * (rms(&buf[24_000..]) / rms(&main[24_000..])).log10()
+    }
+
+    #[test]
+    fn the_sidechain_drives_the_band() {
+        let quiet: Vec<f32> = sine(1000.0, 48_000).iter().map(|v| v * 0.01).collect();
+        let loud = sine(1000.0, 48_000);
+        let silence = vec![0.0; 48_000];
+        // The main signal is far below the threshold; a loud sidechain still ducks the band.
+        assert!(ducking(&quiet, None, None).abs() < 0.1);
+        assert!(ducking(&quiet, Some(&loud), None) < -10.0);
+        // And a silent sidechain leaves a loud signal alone.
+        assert!(ducking(&loud, Some(&silence), None).abs() < 0.1);
+    }
+
+    #[test]
+    fn a_band_can_listen_through_another_bands_region() {
+        // The band works at 1 kHz but listens at 8 kHz: a loud 1 kHz tone alone (about −30 dB
+        // through the 8 kHz region, under the −20 dB threshold) does not move it; with loud 8 kHz
+        // content as well, it ducks.
+        let region = Some(band(BandType::Bell, 8000.0, 0.0, 2.0));
+        let tone = sine(1000.0, 48_000);
+        // The 8 kHz part (about −12 dBFS, over the threshold) passes untouched, so it is kept
+        // smaller than the tone to leave the duck readable in the overall level.
+        let both: Vec<f32> = tone.iter().zip(sine(8000.0, 48_000)).map(|(a, b)| a + 0.5 * b).collect();
+        assert!(ducking(&tone, None, region).abs() < 0.3, "{}", ducking(&tone, None, region));
+        assert!(ducking(&both, None, region) < -3.0, "{}", ducking(&both, None, region));
+        // Without the region the band hears its own 1 kHz and ducks the tone.
+        assert!(ducking(&tone, None, None) < -10.0);
     }
 
     #[test]

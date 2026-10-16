@@ -9,6 +9,10 @@
 //! resolution changes the latency, so the output fades out, switches, and fades back in once the
 //! new kernel is in place.
 //!
+//! Zero Latency correction: the same worker designs a minimum-phase FIR (no delay) that brings the
+//! matched IIR bands' magnitude to the analog prototypes up to Nyquist (magnitude only; the phase
+//! stays minimum phase); it crossfades in after the bands whenever their static settings change.
+//!
 //! Spectral stage: while any band works per frequency bin (a spectral compressor), an STFT runs after the EQ chain and adds its frame length to the latency. Turning it on
 //! or off goes through the same dip as a mode change.
 //!
@@ -23,7 +27,8 @@ use std::time::Duration;
 
 use mite_core::{triple_buffer, Handover, SpectrumTap, TripleReader, TripleWriter};
 use mite_dsp::conv::{Convolver, KernelSet};
-use mite_dsp::eq::{BandProcessor, BandSettings, Placement};
+use mite_dsp::eq::{BandProcessor, BandSettings, DetectSource, Placement};
+use mite_dsp::min_phase::{max_taps, zero_latency_correction, Correction, CorrectionFilter, TAPS_48K};
 use mite_dsp::output::{balance, isolate, loudness_change_db, solo_filter, DryDelay};
 use mite_dsp::analyzer::{spectrum_point_freq, SPECTRUM_POINTS};
 use mite_dsp::spectral::SpectralBands;
@@ -170,14 +175,41 @@ fn design_kernel(req: &DesignRequest) -> KernelSet {
     KernelSet::new(req.block, k.layout, &k.kernels, k.delay)
 }
 
-/// The kernel-design thread: designs whatever was requested last, hands it over, and frees what
-/// the audio thread retired.
-fn run_designer(mut requests: TripleReader<DesignRequest>, kernels: Arc<Handover<KernelSet>>, stop: Arc<AtomicBool>) {
+/// What the worker designs the Zero Latency correction for: the bands' static settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CorrectionRequest {
+    bands: [BandSettings; BANDS],
+    sample_rate: f64,
+    mono: bool,
+}
+
+/// Design grid for the correction at 48 kHz, points (scaled with the sample rate).
+const CORRECTION_FFT_48K: usize = 8192;
+
+fn design_correction(req: &CorrectionRequest) -> Correction {
+    let ratio = rate_ratio(req.sample_rate);
+    let lengths = TAPS_48K.map(|t| t * ratio);
+    zero_latency_correction(&req.bands, req.sample_rate, &lengths, CORRECTION_FFT_48K * ratio, req.mono).unwrap_or_else(Correction::identity)
+}
+
+/// The kernel-design thread: designs whatever was requested last (convolution kernels and the
+/// Zero Latency correction), hands it over, and frees what the audio thread retired.
+fn run_designer(
+    mut requests: TripleReader<DesignRequest>,
+    kernels: Arc<Handover<KernelSet>>,
+    mut corrections_in: TripleReader<CorrectionRequest>,
+    corrections: Arc<Handover<Correction>>,
+    stop: Arc<AtomicBool>,
+) {
     while !stop.load(Ordering::Relaxed) {
         if let Some(req) = requests.read() {
             kernels.send(Box::new(design_kernel(&req)));
         }
+        if let Some(req) = corrections_in.read() {
+            corrections.send(Box::new(design_correction(&req)));
+        }
         kernels.collect();
+        corrections.collect();
         std::thread::sleep(Duration::from_millis(2));
     }
 }
@@ -242,6 +274,18 @@ pub struct EqEngine {
     solo_placement: Placement,
     solo: LinearSmoother,
     solo_scratch: [Vec<f32>; 2],
+    /// Zero Latency correction: the filter, where its kernels come from and go back to, the
+    /// request last sent, kernels waiting to be given back, and whether the input is mono.
+    correction: CorrectionFilter,
+    corrections: Arc<Handover<Correction>>,
+    correction_requests: TripleWriter<CorrectionRequest>,
+    last_correction: Option<CorrectionRequest>,
+    correction_pending: [Option<Box<Correction>>; 4],
+    mono: bool,
+    /// The sidechain, delayed to line up with what the bands' detectors hear (Linear Phase runs
+    /// the bands after its kernel), and the delayed chunk.
+    sc_delay: DryDelay,
+    sc_scratch: [Vec<f32>; 2],
 }
 
 impl EqEngine {
@@ -252,11 +296,13 @@ impl EqEngine {
         let stop = Arc::new(AtomicBool::new(false));
         let initial = DesignRequest { mode: PhaseMode::LinearPhase, bands: *settings, sample_rate: sr, len: kernel_len(2, sr), block: LP_BLOCK_48K };
         let (requests, reader) = triple_buffer(initial);
+        let corrections = Arc::new(Handover::new());
+        let (correction_requests, correction_reader) = triple_buffer(CorrectionRequest { bands: *settings, sample_rate: sr, mono: false });
         let designer = {
-            let (kernels, stop) = (kernels.clone(), stop.clone());
+            let (kernels, corrections, stop) = (kernels.clone(), corrections.clone(), stop.clone());
             std::thread::Builder::new()
                 .name("mite-eq-kernels".into())
-                .spawn(move || run_designer(reader, kernels, stop))
+                .spawn(move || run_designer(reader, kernels, correction_reader, corrections, stop))
                 .ok()
         };
         let mut engine = Self {
@@ -294,6 +340,14 @@ impl EqEngine {
             solo_placement: Placement::Stereo,
             solo: LinearSmoother::new(0.0),
             solo_scratch: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
+            correction: CorrectionFilter::new(1, 1),
+            corrections,
+            correction_requests,
+            last_correction: None,
+            correction_pending: Default::default(),
+            mono: false,
+            sc_delay: DryDelay::new(0, CHUNK),
+            sc_scratch: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
         };
         engine.prepare(sample_rate, settings, out_db);
         engine
@@ -331,6 +385,11 @@ impl EqEngine {
         self.spectral = SpectralBands::new(BANDS, self.stft.size(), sr);
         let max_latency = linear_phase_latency(LP_LENGTHS_48K.len() - 1, sr).max(natural_phase_latency(sr)) + spectral_latency(sr);
         self.dry = DryDelay::new(max_latency, CHUNK);
+        self.sc_delay = DryDelay::new(linear_phase_latency(LP_LENGTHS_48K.len() - 1, sr), CHUNK);
+        // The correction is designed off the audio thread here, so Zero Latency starts corrected.
+        self.correction = CorrectionFilter::new(max_taps(ratio), fade);
+        self.last_correction = Some(CorrectionRequest { bands: *settings, sample_rate: sr, mono: self.mono });
+        let _ = self.correction.offer(Box::new(design_correction(&CorrectionRequest { bands: *settings, sample_rate: sr, mono: self.mono })));
         let [pan_l, pan_r] = &mut self.pan;
         for s in [&mut self.mix, pan_l, pan_r] {
             s.set_ramp(sample_rate, crate::params::MIX.smoothing_ms);
@@ -367,6 +426,8 @@ impl EqEngine {
             m.reset();
         }
         self.dry.reset();
+        self.sc_delay.reset();
+        self.correction.reset();
         let o = self.output;
         let (pl, pr) = balance(o.pan);
         self.mix.reset(o.mix.clamp(0.0, 1.0));
@@ -409,6 +470,46 @@ impl EqEngine {
         phase + if self.active.spectral { self.stft.latency() } else { 0 }
     }
 
+    /// Once per block, Zero Latency: asks for the correction of the bands' static settings when
+    /// they change, takes a finished one in (crossfading), and gives retired ones back.
+    fn update_correction(&mut self, settings: &[BandSettings; BANDS]) {
+        for i in 0..self.correction_pending.len() {
+            if let Some(k) = self.correction_pending[i].take() {
+                if let Err(k) = self.corrections.retire(k) {
+                    self.correction_pending[i] = Some(k);
+                }
+            }
+        }
+        if let Some(old) = self.correction.retired() {
+            self.retire_correction(old);
+        }
+        if self.wanted.mode != PhaseMode::ZeroLatency {
+            return;
+        }
+        let req = CorrectionRequest { bands: *settings, sample_rate: self.sample_rate, mono: self.mono };
+        if self.last_correction != Some(req) {
+            self.correction_requests.write(req);
+            self.last_correction = Some(req);
+        }
+        if !self.correction.is_fading() {
+            if let Some(k) = self.corrections.take() {
+                if let Some(back) = self.correction.offer(k) {
+                    self.retire_correction(back);
+                }
+            }
+        }
+    }
+
+    fn retire_correction(&mut self, kernel: Box<Correction>) {
+        if let Err(kernel) = self.corrections.retire(kernel) {
+            match self.correction_pending.iter_mut().find(|slot| slot.is_none()) {
+                Some(slot) => *slot = Some(kernel),
+                // Every slot full: leaking is the only option that keeps the audio thread clean.
+                None => std::mem::forget(kernel),
+            }
+        }
+    }
+
     /// Gives a kernel back to the designer to free; never frees on this thread.
     fn retire(&mut self, kernel: Box<KernelSet>) {
         if let Err(kernel) = self.kernels.retire(kernel) {
@@ -435,6 +536,7 @@ impl EqEngine {
             }
         }
         self.wanted.spectral = needs_spectrum(settings);
+        self.update_correction(settings);
         if self.wanted.mode.convolves() {
             let req = self.request(settings);
             if self.last_request != Some(req) {
@@ -476,6 +578,7 @@ impl EqEngine {
                     }
                     self.conv.reset();
                     self.np_conv.reset();
+                    self.correction.reset();
                     self.stft.reset();
                     self.spectral.reset();
                     self.filled = 0;
@@ -535,6 +638,21 @@ impl EqEngine {
         pre: Option<&SpectrumTap>,
         post: Option<&SpectrumTap>,
     ) -> (f32, f32) {
+        self.process_sidechain(channels, None, settings, out_db, pre, post)
+    }
+
+    /// [`Self::process`] with an external sidechain (one or two channels, as long as the main
+    /// ones), which bands detecting from the sidechain listen to. Without one they hear silence.
+    pub fn process_sidechain(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        sidechain: Option<&[&[f32]]>,
+        settings: &[BandSettings; BANDS],
+        out_db: f32,
+        pre: Option<&SpectrumTap>,
+        post: Option<&SpectrumTap>,
+    ) -> (f32, f32) {
+        self.mono = channels.len() == 1;
         self.update_mode(settings);
         self.update_output(settings, channels.len() == 1, out_db);
 
@@ -543,9 +661,13 @@ impl EqEngine {
         let mut start = 0;
         while start < frames {
             let end = (start + CHUNK).min(frames);
+            let sc = sidechain.map(|sc| {
+                let at = |c: usize| sc.get(c.min(sc.len().saturating_sub(1))).map_or(&[][..], |ch| &ch[start.min(ch.len())..end.min(ch.len())]);
+                [at(0), at(1)]
+            });
             match channels {
-                [l, r, ..] => self.process_chunk(&mut [&mut l[start..end], &mut r[start..end]], settings, pre),
-                [m] => self.process_chunk(&mut [&mut m[start..end]], settings, pre),
+                [l, r, ..] => self.process_chunk(&mut [&mut l[start..end], &mut r[start..end]], settings, pre, sc),
+                [m] => self.process_chunk(&mut [&mut m[start..end]], settings, pre, sc),
                 [] => {}
             }
             start = end;
@@ -602,8 +724,30 @@ impl EqEngine {
     }
 
     /// One chunk of at most [`CHUNK`] samples.
-    fn process_chunk(&mut self, channels: &mut [&mut [f32]], settings: &[BandSettings; BANDS], pre: Option<&SpectrumTap>) {
+    fn process_chunk(&mut self, channels: &mut [&mut [f32]], settings: &[BandSettings; BANDS], pre: Option<&SpectrumTap>, sidechain: Option<[&[f32]; 2]>) {
         let frames = channels.first().map_or(0, |c| c.len());
+        // The sidechain chunk as the bands' detectors need it: delayed by the kernel in Linear
+        // Phase (the bands run after it), silence where none is connected or it is short.
+        let wants_sidechain = settings.iter().any(|s| s.enabled && s.is_dynamic() && !s.is_spectral() && s.dynamics.source == DetectSource::Sidechain);
+        if wants_sidechain {
+            let delay = if self.active.mode == PhaseMode::LinearPhase { self.conv.latency() } else { 0 };
+            self.sc_delay.set_delay(delay);
+            let [l, r] = sidechain.unwrap_or([&[], &[]]);
+            let fill = |src: &[f32], dst: &mut [f32]| {
+                let n = src.len().min(dst.len());
+                dst[..n].copy_from_slice(&src[..n]);
+                dst[n..].fill(0.0);
+            };
+            let [a, b] = &mut self.sc_scratch;
+            fill(l, &mut a[..frames]);
+            fill(r, &mut b[..frames]);
+            self.sc_delay.write(&a[..frames], Some(&b[..frames]));
+            for i in 0..frames {
+                a[i] = self.sc_delay.read(0, i);
+                b[i] = self.sc_delay.read(1, i);
+            }
+            self.sc_delay.advance(frames);
+        }
         self.dry.set_delay(self.latency());
         match &*channels {
             [l, r, ..] => self.dry.write(l, Some(r)),
@@ -623,21 +767,26 @@ impl EqEngine {
             self.convolve(PhaseMode::LinearPhase, channels);
             // The kernel holds every band's static curve; dynamic bands add their movement here,
             // through a filter with no static gain of its own (spectral ones move in the STFT).
+            let detect = [&self.sc_scratch[0][..frames], &self.sc_scratch[1][..frames]];
             for (band, s) in self.bands.iter_mut().zip(settings) {
                 if (s.is_dynamic() && !s.is_spectral()) || band.dynamic_gain_db() != 0.0 {
                     band.set_target(&BandSettings { gain_db: 0.0, ..*s });
-                    band.process(channels);
+                    route(band, s, settings, channels, &detect);
                 }
             }
         } else {
+            let detect = [&self.sc_scratch[0][..frames], &self.sc_scratch[1][..frames]];
             for (band, s) in self.bands.iter_mut().zip(settings) {
                 band.set_target(s);
-                band.process(channels);
+                route(band, s, settings, channels, &detect);
             }
             // Natural Phase: the correction after the IIR sections (designed for their static
             // settings; dynamic movement passes through the IIR sections as in Zero Latency).
-            if self.active.mode == PhaseMode::NaturalPhase {
-                self.convolve(PhaseMode::NaturalPhase, channels);
+            // Zero Latency: the minimum-phase magnitude correction (no delay).
+            match self.active.mode {
+                PhaseMode::NaturalPhase => self.convolve(PhaseMode::NaturalPhase, channels),
+                PhaseMode::ZeroLatency => self.correction.process(channels),
+                PhaseMode::LinearPhase => {}
             }
         }
         if self.active.spectral {
@@ -810,6 +959,21 @@ impl EqEngine {
     /// Each band's detected level right now, dBFS, for the display.
     pub fn detector_levels(&self) -> impl Iterator<Item = f32> + '_ {
         self.bands.iter().map(|b| b.detector_level_db() as f32)
+    }
+}
+
+/// Runs `band` (settings `s`) over `channels` with its detector on the right source: its own
+/// region, another band's region (`settings[n]`), or the sidechain chunk `sidechain`.
+fn route(band: &mut BandProcessor, s: &BandSettings, settings: &[BandSettings; BANDS], channels: &mut [&mut [f32]], sidechain: &[&[f32]; 2]) {
+    let source = if s.is_dynamic() && !s.is_spectral() { s.dynamics.source } else { DetectSource::Own };
+    match source {
+        DetectSource::Band(n) if n < BANDS => band.set_detect_region(Some(settings[n])),
+        _ => band.set_detect_region(None),
+    }
+    if source == DetectSource::Sidechain {
+        band.process_detecting(channels, Some(&sidechain[..channels.len().clamp(1, 2)]));
+    } else {
+        band.process(channels);
     }
 }
 
@@ -1062,14 +1226,16 @@ mod tests {
     }
 
     #[test]
-    fn natural_phase_reaches_the_analog_curve_near_nyquist() {
-        // At 44.1 kHz a 12 kHz bell's matched IIR drifts from the analog curve near Nyquist;
-        // Natural Phase's correction brings it back within 0.1 dB.
+    fn both_iir_modes_reach_the_analog_curve_near_nyquist() {
+        // At 44.1 kHz a 12 kHz bell's matched IIR drifts from the analog curve near Nyquist.
+        // Natural Phase's correction (complex, 4 ms) and Zero Latency's (minimum phase, no delay)
+        // both bring it back within 0.1 dB.
         let sr = 44_100.0_f32;
         let mut settings = flat();
         settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 12_000.0, gain_db: 9.0, q: 1.5, ..Default::default() };
         let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
-        let mut worst_zl: f64 = 0.0;
+        let sections = mite_dsp::eq::design(&settings[0], f64::from(sr));
+        let mut worst_iir: f64 = 0.0;
         for freq in [8_000.0, 12_000.0, 16_000.0, 19_000.0] {
             let input: Vec<f32> = (0..44_100).map(|n| (0.25 * (2.0 * PI * freq * n as f64 / f64::from(sr)).sin()) as f32).collect();
             let analog = mite_dsp::eq::analog_response_db(&settings[0], freq);
@@ -1079,11 +1245,14 @@ mod tests {
                 run(&mut eq, &settings, &mut l, &mut r, false);
                 20.0 * (rms(&l[22_050..]) / rms(&input[22_050..])).log10()
             };
-            let np = gain(PhaseMode::NaturalPhase) - analog;
-            assert!(np.abs() < 0.1, "{freq} Hz: Natural Phase {np:+.3} dB off the analog curve");
-            worst_zl = worst_zl.max((gain(PhaseMode::ZeroLatency) - analog).abs());
+            for mode in [PhaseMode::NaturalPhase, PhaseMode::ZeroLatency] {
+                let off = gain(mode) - analog;
+                assert!(off.abs() < 0.1, "{freq} Hz: {mode:?} {off:+.3} dB off the analog curve");
+            }
+            let iir = sections.response_db(2.0 * PI * freq / f64::from(sr));
+            worst_iir = worst_iir.max((iir - analog).abs());
         }
-        assert!(worst_zl > 0.2, "the test should cover a region where Zero Latency drifts ({worst_zl:.3} dB)");
+        assert!(worst_iir > 0.2, "the test should cover a region where the matched IIR drifts ({worst_iir:.3} dB)");
     }
 
     #[test]
@@ -1286,6 +1455,113 @@ mod tests {
                 .fold(0.0f32, f32::max);
             assert!(worst < 0.2, "{mode:?}: pre and post differ by {worst:.2} dB below the band");
         }
+    }
+
+    /// A 1 kHz compressor band (−12 dB, fast) listening to `source`.
+    fn sidechain_band(source: DetectSource) -> [BandSettings; BANDS] {
+        let mut s = flat();
+        s[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 1000.0, q: 1.0, ..Default::default() };
+        s[0].dynamics = mite_dsp::eq::Dynamics { enabled: true, threshold_db: -20.0, ratio: 10.0, range_db: -12.0, attack_ms: 0.5, release_ms: 50.0, source, ..Default::default() };
+        s
+    }
+
+    #[test]
+    fn the_sidechain_ducks_a_band_in_time_in_every_mode() {
+        // A steady tone; the sidechain is silent, then loud from sample `at`. The band must duck
+        // where the output shows that moment: `at` plus the latency (Linear Phase delays the
+        // signal, so the sidechain is delayed with it).
+        let settings = sidechain_band(DetectSource::Sidechain);
+        let at = 24_000;
+        for mode in [PhaseMode::ZeroLatency, PhaseMode::LinearPhase] {
+            let mut eq = engine_in(mode, SR, &settings);
+            let latency = eq.latency();
+            let tone = sine(1000.0, 48_000);
+            let key: Vec<f32> = (0..48_000).map(|n| if n >= at { tone[n] } else { 0.0 }).collect();
+            let (mut l, mut r) = (tone.clone(), tone.clone());
+            for (i, (a, b)) in l.chunks_mut(128).zip(r.chunks_mut(128)).enumerate() {
+                let k = &key[i * 128..i * 128 + a.len()];
+                eq.process_sidechain(&mut [a, b], Some(&[k, k]), &settings, 0.0, None, None);
+            }
+            // Peak over each 1 ms: full before the key, ducked after it.
+            let peak = |from: usize| l[from..from + 48].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            let steady = peak(at + latency - 2_000);
+            assert!(steady > 0.45, "{mode:?}: {steady}");
+            let first = (at + latency - 2_000..48_000 - 48).find(|&n| peak(n) < 0.8 * steady).expect("it ducks");
+            let lag = first as i64 - (at + latency) as i64;
+            assert!((-48..=480).contains(&lag), "{mode:?}: ducks {lag} samples off the key");
+            assert!(peak(47_000) < 0.35, "{mode:?}: ducked to {}", peak(47_000));
+        }
+    }
+
+    #[test]
+    fn a_band_listening_to_another_bands_region_ducks_through_the_engine() {
+        // Band 1 works at 1 kHz but listens to band 2's region (8 kHz, a flat bell).
+        let mut settings = sidechain_band(DetectSource::Band(1));
+        settings[1] = BandSettings { enabled: true, kind: BandType::Bell, freq: 8000.0, q: 2.0, ..Default::default() };
+        let tone = sine(1000.0, 48_000);
+        let level = |input: &[f32]| {
+            let mut eq = EqEngine::new(SR, &settings, 0.0);
+            let (mut l, mut r) = (input.to_vec(), input.to_vec());
+            run(&mut eq, &settings, &mut l, &mut r, false);
+            20.0 * (rms(&l[24_000..]) / rms(&input[24_000..])).log10()
+        };
+        assert!(level(&tone).abs() < 0.3, "{}", level(&tone));
+        let both: Vec<f32> = tone.iter().zip(sine(8000.0, 48_000)).map(|(a, b)| a + 0.5 * b).collect();
+        assert!(level(&both) < -3.0, "{}", level(&both));
+    }
+
+    #[test]
+    fn zero_latency_stays_zero_latency_and_matches_the_analog_magnitude() {
+        // A 14 kHz bell at 44.1 kHz: corrected, it is still causal from the first sample (an
+        // impulse comes out where it went in, nothing before) and its magnitude is the analog
+        // prototype's. The phase stays minimum phase: within a few degrees of the prototype's in
+        // the mids and about 15° near Nyquist (as the IIR alone; Natural Phase matches it).
+        let sr = 44_100.0_f32;
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 14_000.0, gain_db: 8.0, q: 1.2, ..Default::default() };
+        let mut eq = engine_in(PhaseMode::ZeroLatency, sr, &settings);
+        assert_eq!(eq.latency(), 0);
+        let n = 8192;
+        let at = 1000;
+        let mut l = vec![0.0f32; n];
+        l[at] = 1.0;
+        let mut r = l.clone();
+        run(&mut eq, &settings, &mut l, &mut r, false);
+        assert!(l[..at].iter().all(|&v| v == 0.0), "output before the impulse");
+        let h = &l[at..];
+        for f in [2_000.0, 8_000.0, 12_000.0, 16_000.0, 19_000.0] {
+            let w = 2.0 * PI * f / f64::from(sr);
+            let (re, im) = h.iter().enumerate().fold((0.0f64, 0.0f64), |(re, im), (k, &v)| {
+                let (sin, cos) = (w * k as f64).sin_cos();
+                (re + f64::from(v) * cos, im - f64::from(v) * sin)
+            });
+            let analog = mite_dsp::eq::analog_response(&settings[0], f);
+            let db: f64 = 20.0 * (re.hypot(im) / analog.norm()).log10();
+            let mut deg: f64 = (im.atan2(re) - analog.im.atan2(analog.re)).to_degrees();
+            deg = (deg + 180.0).rem_euclid(360.0) - 180.0;
+            assert!(db.abs() < 0.1, "{f} Hz: {db:+.3} dB");
+            assert!(deg.abs() < 20.0, "{f} Hz: phase {deg:+.1}° off the analog prototype");
+        }
+    }
+
+    #[test]
+    fn zero_latency_corrections_crossfade_without_clicks() {
+        // A high bell whose gain is automated: its correction is redesigned and crossfaded in
+        // again and again, under a tone near it.
+        let sr = 44_100.0_f32;
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 15_000.0, gain_db: 0.0, q: 1.0, ..Default::default() };
+        let mut eq = EqEngine::new(sr, &settings, 0.0);
+        let input: Vec<f32> = (0..88_200).map(|n| (0.25 * (2.0 * PI * 3_000.0 * n as f64 / f64::from(sr)).sin()) as f32).collect();
+        let (mut l, mut r) = (input.clone(), input.clone());
+        for (i, (a, b)) in l.chunks_mut(128).zip(r.chunks_mut(128)).enumerate() {
+            settings[0].gain_db = 12.0 * ((i / 30) % 2) as f64;
+            eq.process(&mut [a, b], &settings, 0.0, None, None);
+            std::thread::sleep(Duration::from_micros(300));
+        }
+        // A 3 kHz sine at 0.25 moves at most about 0.11 per sample; the bell barely touches it.
+        let step = largest_step(&l);
+        assert!(step < 0.13, "step {step}");
     }
 
     #[test]

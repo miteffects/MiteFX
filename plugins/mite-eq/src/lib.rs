@@ -133,14 +133,19 @@ impl Plugin for MiteEq {
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        // A sidechain input for dynamic bands that detect from it (silent when unconnected).
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(2),
             main_output_channels: NonZeroU32::new(2),
+            aux_input_ports: &[new_nonzero_u32(2)],
+            names: PortNames { aux_inputs: &["Sidechain"], ..PortNames::const_default() },
             ..AudioIOLayout::const_default()
         },
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(1),
             main_output_channels: NonZeroU32::new(1),
+            aux_input_ports: &[new_nonzero_u32(1)],
+            names: PortNames { aux_inputs: &["Sidechain"], ..PortNames::const_default() },
             ..AudioIOLayout::const_default()
         },
     ];
@@ -179,12 +184,21 @@ impl Plugin for MiteEq {
         self.engine.reset(&settings, self.params.out_gain.value());
     }
 
-    fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
+    fn process(&mut self, buffer: &mut Buffer, aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let settings = self.settings();
         self.set_mode();
         self.engine.set_output(self.output());
-        let (left, right) = self.engine.process(
+        let mut sidechain: [&[f32]; 2] = [&[], &[]];
+        let mut sc_channels = 0;
+        if let Some(sc) = aux.inputs.first_mut() {
+            for (slot, ch) in sidechain.iter_mut().zip(sc.as_slice_immutable()) {
+                *slot = ch;
+                sc_channels += 1;
+            }
+        }
+        let (left, right) = self.engine.process_sidechain(
             buffer.as_slice(),
+            (sc_channels > 0).then_some(&sidechain[..sc_channels]),
             &settings,
             self.params.out_gain.value(),
             Some(&self.shared.pre),

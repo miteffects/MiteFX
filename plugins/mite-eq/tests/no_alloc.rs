@@ -20,6 +20,12 @@ fn engine_process_never_allocates_in_any_mode() {
     // A relative spectral band that comes and goes, so the spectral stage switches on and off.
     settings[2] = BandSettings { enabled: true, kind: BandType::Bell, freq: 3000.0, q: 0.5, ..Default::default() };
     settings[2].dynamics = mite_dsp::eq::Dynamics { enabled: true, spectral: true, relative: true, ..Default::default() };
+    // Band 4 listens to the sidechain, band 5 to band 1's region.
+    settings[3] = BandSettings { enabled: true, kind: BandType::Bell, freq: 500.0, q: 1.0, ..Default::default() };
+    settings[3].dynamics = mite_dsp::eq::Dynamics { enabled: true, source: mite_dsp::eq::DetectSource::Sidechain, ..Default::default() };
+    settings[4] = BandSettings { enabled: true, kind: BandType::LowShelf, freq: 120.0, q: 0.7, ..Default::default() };
+    settings[4].dynamics = mite_dsp::eq::Dynamics { enabled: true, source: mite_dsp::eq::DetectSource::Band(0), ..Default::default() };
+    let key = vec![0.3f32; 128];
     let mut eq = EqEngine::new(sr, &settings, 0.0);
     let (mut l, mut r) = (vec![0.1f32; 128], vec![-0.1f32; 128]);
     let mut blocks = 0;
@@ -52,7 +58,7 @@ fn engine_process_never_allocates_in_any_mode() {
             // Fresh input every block (feeding the output back in would stack the EQ on itself).
             l.fill(0.1);
             r.fill(-0.1);
-            process_wrapper(|| eq.process(&mut [&mut l, &mut r], &settings, 0.0, None, None));
+            process_wrapper(|| eq.process_sidechain(&mut [&mut l, &mut r], Some(&[&key[..], &key[..]]), &settings, 0.0, None, None));
             blocks += 1;
             std::thread::sleep(Duration::from_micros(200));
         }

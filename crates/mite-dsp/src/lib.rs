@@ -12,6 +12,7 @@ pub mod linear_phase;
 pub mod natural_phase;
 pub mod output;
 pub mod meter;
+pub mod min_phase;
 pub mod spectral;
 pub mod smooth;
 pub mod stft;
