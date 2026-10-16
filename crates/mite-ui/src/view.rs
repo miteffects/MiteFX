@@ -40,6 +40,17 @@ pub enum UiEvent {
     /// Positive `lines` = wheel up / away from the user.
     Wheel { pos: Point, lines: f32, mods: Modifiers },
     PointerLeft,
+    /// A key pressed while the editor has focus. A view that does not use it returns `false`
+    /// from [`View::event`], and the key goes on to the host (transport shortcuts keep working).
+    KeyDown { key: Key, mods: Modifiers },
+}
+
+/// The keys views listen for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Escape,
+    Delete,
+    Character(char),
 }
 
 /// Everything a view needs to paint one frame.

@@ -176,11 +176,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
         }
     }
+    // Optional press-and-move without release, e.g. SNAPSHOT_DRAG="490,372;540,430" (a drag in
+    // progress, such as the ghost Bell of a grabbed peak).
+    if let Ok(drag) = std::env::var("SNAPSHOT_DRAG") {
+        let points: Vec<Point> = drag
+            .split(';')
+            .filter_map(|p| p.split_once(',').and_then(|(x, y)| Some(Point::new(x.trim().parse().ok()?, y.trim().parse().ok()?))))
+            .collect();
+        if let [from, to] = points[..] {
+            render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), 1.0)?;
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                view.tick(&host);
+            }
+            view.event(&UiEvent::PointerMove { pos: from, mods }, &host);
+            view.event(&UiEvent::PointerDown { pos: from, button: MouseButton::Left, mods }, &host);
+            view.event(&UiEvent::PointerMove { pos: to, mods }, &host);
+        }
+    }
     // Optional pointer position for hover states, e.g. SNAPSHOT_HOVER="700,470".
     if let Ok(hover) = std::env::var("SNAPSHOT_HOVER") {
         if let Some((x, y)) = hover.split_once(',') {
             render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), 1.0)?;
             view.event(&UiEvent::PointerMove { pos: Point::new(x.trim().parse()?, y.trim().parse()?), mods }, &host);
+            // Hover states that fade in (the peak marker, peak hold after 300 ms) need live ticks.
+            for _ in 0..45 {
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                view.tick(&host);
+            }
         }
     }
 

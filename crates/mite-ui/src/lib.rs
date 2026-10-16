@@ -21,7 +21,7 @@ pub mod window;
 pub use host::{MemoryParamHost, ParamHost};
 pub use text::{Align, TextStyle, Typesetter};
 pub use tokens::{Theme, ThemeKind};
-pub use view::{DrawCx, Modifiers, MouseButton, UiEvent, View};
+pub use view::{DrawCx, Key, Modifiers, MouseButton, UiEvent, View};
 pub use window::{open_parented, pack_size, run_standalone, HostResize, ResizeRequest, WindowOptions, MAX_ZOOM, MIN_ZOOM};
 
 pub use vello;

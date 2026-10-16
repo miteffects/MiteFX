@@ -22,7 +22,7 @@ use crate::host::ParamHost;
 use crate::present::{Offscreen, PresentMode, Presenter};
 use crate::text::Typesetter;
 use crate::tokens::{Theme, ThemeKind};
-use crate::view::{DrawCx, Modifiers, MouseButton, UiEvent, View};
+use crate::view::{DrawCx, Key, Modifiers, MouseButton, UiEvent, View};
 
 /// UI tick. Cheap when nothing is due; it only decides whether an animation frame is due, so
 /// animation frames land within one tick of the display's rhythm. Input renders immediately.
@@ -259,6 +259,34 @@ impl UiWindow {
 }
 
 impl UiWindow {
+    /// A key press: the view's if it uses it, otherwise the host's.
+    fn key_event(&self, event: &keyboard_types::KeyboardEvent) -> EventStatus {
+        if event.state != keyboard_types::KeyState::Down {
+            return EventStatus::Ignored;
+        }
+        let key = match &event.key {
+            keyboard_types::Key::Named(keyboard_types::NamedKey::Escape) => Key::Escape,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::Delete | keyboard_types::NamedKey::Backspace) => Key::Delete,
+            keyboard_types::Key::Character(s) => match s.chars().next() {
+                Some(c) => Key::Character(c),
+                None => return EventStatus::Ignored,
+            },
+            _ => return EventStatus::Ignored,
+        };
+        let mut st = self.state.borrow_mut();
+        let State { view, host, .. } = &mut *st;
+        let used = view.event(&UiEvent::KeyDown { key, mods: mods(event.modifiers) }, host.as_ref());
+        drop(st);
+        if !used {
+            return EventStatus::Ignored;
+        }
+        self.dirty.set(true);
+        if let Err(e) = self.render() {
+            trace(&format!("render failed: {e}"));
+        }
+        EventStatus::Captured
+    }
+
     /// The corner resize grip. Returns `Some` when it consumed the event.
     fn grip_event(&self, mouse: &MouseEvent, dpi: f64, window: (f64, f64)) -> Option<EventStatus> {
         match *mouse {
@@ -424,7 +452,11 @@ impl WindowHandler for UiWindow {
     }
 
     fn on_event(&self, event: Event) -> EventStatus {
-        let Event::Mouse(mouse) = event else { return EventStatus::Ignored };
+        let mouse = match event {
+            Event::Mouse(mouse) => mouse,
+            Event::Keyboard(key) => return self.key_event(&key),
+            _ => return EventStatus::Ignored,
+        };
         if tracing() {
             trace(&format!("t={:.6} event {:?}", wall_clock(), std::mem::discriminant(&mouse)));
         }

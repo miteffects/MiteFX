@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use mite_dsp::eq::BandType;
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, DMODE, DYN, SUSTAIN, TRANSIENT, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, RANGE, THRESH, TYPE};
+use mite_eq::params::{band_id, DMODE, DYN, SUSTAIN, TRANSIENT, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, Q, RANGE, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::vello::Scene;
-use mite_ui::{DrawCx, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, Typesetter, UiEvent, View};
+use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, Typesetter, UiEvent, View};
 
 /// One enabled bell at 1 kHz, 0 dB: its node sits at (690.2, 362) in design units.
 fn setup() -> (EqView, MemoryParamHost) {
@@ -284,3 +284,104 @@ fn solo_listens_to_one_band_until_its_panel_closes() {
     assert_eq!(plain(&host, "solo"), 0.0);
 }
 
+
+/// A view whose spectrum shows a 1 kHz tone at −6 dBFS (about −17.6 dB on the analyzer's scale;
+/// the drawn line, through the plot's grid points either side, tops out near y 202), with the
+/// bell from `setup` deselected.
+fn with_a_peak() -> (EqView, MemoryParamHost) {
+    let shared = Arc::new(EqShared::new());
+    let tone: Vec<f32> = (0..mite_eq::editor::ANALYZER_SIZE).map(|n| (std::f32::consts::TAU * 1000.0 * n as f32 / 48_000.0).sin() * 0.5).collect();
+    let (mut view, host) = setup_with(shared.clone());
+    // Rest under the tone's peak (inside the spectrum), clear of the bell's node.
+    click(&mut view, &host, REST);
+    // The analyzer runs at most every 15.5 ms and eases in; give it time to settle.
+    for _ in 0..40 {
+        shared.pre.push(tone.iter().copied());
+        shared.post.push(tone.iter().copied());
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        view.tick(&host);
+    }
+    draw(&mut view, &host);
+    (view, host)
+}
+
+/// Just under the tip of the tone's peak.
+const PEAK: Point = Point::new(690.2, 205.0);
+const REST: Point = Point::new(690.2, 430.0);
+
+fn band_plain(host: &MemoryParamHost, b: usize, param: &str) -> f32 {
+    let id = band_id(b, param);
+    host.plain(&id, host.normalized(&id))
+}
+
+#[test]
+fn dragging_a_spectrum_peak_shapes_a_new_bell_on_it() {
+    let (mut view, host) = with_a_peak();
+    // Sideways movement is ignored: the bell stays on the peak; only the gain follows.
+    drag(&mut view, &host, PEAK, Point::new(PEAK.x + 50.0, PEAK.y + 60.0));
+    assert_eq!(band_plain(&host, 1, ON.id), 1.0, "a band was added");
+    let freq = band_plain(&host, 1, FREQ.id);
+    assert!((freq / 1000.0 - 1.0).abs() < 0.02, "freq {freq}");
+    let gain = band_plain(&host, 1, GAIN.id);
+    assert!((gain + 60.0 * 18.0 / 264.0).abs() < 0.1, "gain {gain}");
+    assert!((band_plain(&host, 1, Q.id) - 3.0).abs() < 0.01);
+}
+
+#[test]
+fn resting_over_the_plot_holds_the_peaks_after_the_sound_has_gone() {
+    // The pointer rests under the spectrum while the tone plays: peak hold
+    // collects it. The tone then stops and the live spectrum falls away, but the held peak can
+    // still be grabbed.
+    let shared = Arc::new(EqShared::new());
+    let tone: Vec<f32> = (0..mite_eq::editor::ANALYZER_SIZE).map(|n| (std::f32::consts::TAU * 1000.0 * n as f32 / 48_000.0).sin() * 0.5).collect();
+    let (mut view, host) = setup_with(shared.clone());
+    // Rest under the tone's peak (inside the spectrum), clear of the bell's node.
+    click(&mut view, &host, REST);
+    for i in 0..100 {
+        let block: Vec<f32> = if i < 40 { tone.clone() } else { vec![0.0; tone.len()] };
+        shared.pre.push(block.iter().copied());
+        shared.post.push(block.iter().copied());
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        view.tick(&host);
+    }
+    draw(&mut view, &host);
+    drag(&mut view, &host, PEAK, Point::new(PEAK.x, PEAK.y + 30.0));
+    assert_eq!(band_plain(&host, 1, ON.id), 1.0, "the held peak was grabbed");
+    assert!((band_plain(&host, 1, FREQ.id) / 1000.0 - 1.0).abs() < 0.02);
+}
+
+#[test]
+fn escape_drops_a_grabbed_peak() {
+    let (mut view, host) = with_a_peak();
+    view.event(&UiEvent::PointerMove { pos: PEAK, mods: mods() }, &host);
+    view.event(&UiEvent::PointerDown { pos: PEAK, button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::PointerMove { pos: Point::new(PEAK.x, PEAK.y + 80.0), mods: mods() }, &host);
+    assert!(view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host));
+    view.event(&UiEvent::PointerUp { pos: Point::new(PEAK.x, PEAK.y + 80.0), button: MouseButton::Left, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, ON.id), 0.0, "nothing added");
+    // Other keys are the host's.
+    assert!(!view.event(&UiEvent::KeyDown { key: Key::Character(' '), mods: mods() }, &host));
+}
+
+#[test]
+fn double_clicking_a_peak_cuts_it_with_a_narrow_bell() {
+    let (mut view, host) = with_a_peak();
+    view.event(&UiEvent::PointerMove { pos: PEAK, mods: mods() }, &host);
+    view.event(&UiEvent::DoubleClick { pos: PEAK, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, ON.id), 1.0);
+    assert!((band_plain(&host, 1, FREQ.id) / 1000.0 - 1.0).abs() < 0.02, "freq {}", band_plain(&host, 1, FREQ.id));
+    assert!((band_plain(&host, 1, GAIN.id) + 3.0).abs() < 0.01);
+    assert!((band_plain(&host, 1, Q.id) - 3.0).abs() < 0.01);
+}
+
+#[test]
+fn above_the_spectrum_the_pointer_ignores_its_peaks() {
+    let (mut view, host) = with_a_peak();
+    // About 12 px above the tip of the tone's peak: within reach of it, but over the line, not
+    // under it. A double-click there adds an ordinary bell at the pointer (Q 1), not one on the peak.
+    let above = Point::new(PEAK.x + 6.0, PEAK.y - 15.0);
+    view.event(&UiEvent::PointerMove { pos: above, mods: mods() }, &host);
+    view.event(&UiEvent::DoubleClick { pos: above, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, ON.id), 1.0);
+    assert!((band_plain(&host, 1, Q.id) - 1.0).abs() < 0.01, "q {}", band_plain(&host, 1, Q.id));
+}

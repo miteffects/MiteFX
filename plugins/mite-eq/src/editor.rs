@@ -14,7 +14,7 @@ use mite_ui::paint::{glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
-use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
+use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
 use crate::params::{
@@ -302,6 +302,41 @@ struct NodeDrag {
 /// time constant each, s. One stage alone turns block-rate telemetry into a ramp that restarts at
 /// every block (speed jumps); two make the speed change smoothly as well.
 const LIVE_EASE_S: f64 = 0.012;
+
+/// Spectrum grab (interaction.md, "Spectrum peak"): a peak counts when it stands this far above
+/// the lowest point within a third of an octave on both sides, dB; the pointer finds it within
+/// this distance, px; a grabbed or double-clicked peak becomes a Bell of this Q, and a
+/// double-click cuts it by this much, dB. The marker fades with this time constant, s.
+const PEAK_PROMINENCE_DB: f64 = 3.0;
+const PEAK_REACH: f64 = 18.0;
+/// How far above the spectrum line still counts as under it, px (the line's own width and a
+/// little give).
+const SPECTRUM_EDGE: f64 = 4.0;
+const PEAK_Q: f64 = 3.0;
+const PEAK_CUT_DB: f64 = -3.0;
+const PEAK_FADE_S: f64 = 0.05;
+/// Peak hold (Pro-Q's spectrum grab): after the pointer has rested under the spectrum this long, s,
+/// the spectrum's maxima accumulate into a held curve, which fades in and out with this time
+/// constant, s.
+const HOLD_AFTER_S: f64 = 0.3;
+const HOLD_FADE_S: f64 = 0.08;
+
+/// A spectrum peak: its frequency and level (dB on the analyzer's scale).
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Peak {
+    freq: f64,
+    db: f64,
+}
+
+/// A peak being dragged: the Bell it will become (a ghost until release). It stays on the
+/// peak's frequency; the drag sets only its gain.
+struct Grab {
+    freq: f64,
+    gain: f64,
+    start: Point,
+    last: Point,
+    moved: bool,
+}
 
 /// Analyzer motion: time constants of the rise and of the fall, s.
 const SPECTRUM_RISE_S: f64 = 0.06;
@@ -708,6 +743,17 @@ pub struct EqView {
     last_scope: Instant,
     /// When the live gains were last eased.
     last_live: Instant,
+    /// Spectrum grab: the peak under the pointer, the marker as drawn (eased position and
+    /// opacity), and a peak being dragged.
+    peak: Option<Peak>,
+    peak_marker: (Point, f32),
+    grab: Option<Grab>,
+    /// Peak hold: the accumulated maxima of the spectrum (dB per grid point), since when the
+    /// pointer has rested over the plot, whether it is collecting, and its opacity as drawn.
+    held: Vec<f64>,
+    hold_since: Option<Instant>,
+    holding: bool,
+    hold_alpha: f32,
     hot: Option<Hot>,
     /// Origin the panel dials were laid out for, and whether the dynamics row was included.
     knobs_layout: Option<(Point, Option<f64>)>,
@@ -777,6 +823,13 @@ impl EqView {
             scope_threshold: [-150.0; SPECTRAL_POINTS],
             last_scope: Instant::now(),
             last_live: Instant::now(),
+            peak: None,
+            peak_marker: (Point::ZERO, 0.0),
+            grab: None,
+            held: vec![-150.0; POINTS],
+            hold_since: None,
+            holding: false,
+            hold_alpha: 0.0,
             hot: None,
             knobs_layout: None,
             panel_dock: None,
@@ -998,11 +1051,29 @@ impl EqView {
                 }
             }
         }
+        if let Some(g) = &self.grab {
+            return Help::default()
+                .text("New bell ")
+                .slot(FREQ.format(g.freq as f32), "20.00 kHz")
+                .text(" · ")
+                .slot(GAIN.format(g.gain as f32), "−30.0 dB")
+                .text(" — release to add it, Esc cancels");
+        }
         if let Some(d) = &self.drag {
             return band_line(d.band);
         }
         if let Some(b) = self.hover {
             return band_line(b);
+        }
+        if let Some(peak) = self.peak {
+            return Help::default()
+                .text("Peak ")
+                .slot(FREQ.format(peak.freq as f32), "20.00 kHz")
+                .text(" · ")
+                .slot(note_name(peak.freq), "C#10 −50 ct")
+                .text(" · ")
+                .slot(format!("{:.1} dB", peak.db).replace('-', "−"), "−90.0 dB")
+                .text(" — drag up or down to shape a bell on it; double-click cuts it 3 dB");
         }
         if let Some(p) = self.pointer.filter(|p| p.x < PLOT_W && p.y > PLOT_TOP && p.y < PLOT_BOT) {
             let f = xf(p.x);
@@ -1082,14 +1153,92 @@ impl EqView {
     }
 
     fn add_band(&mut self, host: &dyn ParamHost, p: Point) {
+        self.add_bell(host, xf(p.x), yg(p.y).clamp(-18.0, 18.0), 1.0);
+    }
+
+    /// Adds a Bell in the first free band and selects it.
+    fn add_bell(&mut self, host: &dyn ParamHost, freq: f64, gain: f64, q: f64) {
         let Some(b) = (0..BANDS).find(|&b| !self.band(host, b).enabled) else { return };
         let ids = &self.ids[b];
         Self::set(host, &ids.kind, 0.0);
-        Self::set(host, &ids.freq, xf(p.x).clamp(FREQ_MIN, FREQ_MAX) as f32);
-        Self::set(host, &ids.gain, yg(p.y).clamp(-18.0, 18.0) as f32);
-        Self::set(host, &ids.q, 1.0);
+        Self::set(host, &ids.freq, freq.clamp(FREQ_MIN, FREQ_MAX) as f32);
+        Self::set(host, &ids.gain, gain.clamp(-30.0, 30.0) as f32);
+        Self::set(host, &ids.q, q as f32);
         Self::set(host, &ids.on, 1.0);
         self.select(Some(b));
+    }
+
+    /// The colour the next added band will wear (a stereo band).
+    fn new_band_color(theme: &mite_ui::Theme) -> Color {
+        theme.band_ramp[Placement::Stereo as usize % theme.band_ramp.len()]
+    }
+
+    /// The spectrum peaks are found on: the held curve while peak hold is on, otherwise the
+    /// spectrum as drawn (post).
+    fn grab_curve(&self) -> &[f64] {
+        if self.holding { &self.held } else { &self.post }
+    }
+
+    /// Curve `v` (dB per grid point) at `x` as [`Self::curve_path`] draws it: the same uniform
+    /// Catmull-Rom spline, so what the pointer meets is the line on screen.
+    fn drawn_at(v: &[f64], x: f64) -> f64 {
+        let last = v.len() - 1;
+        let pos = (x / grid_x(1)).clamp(0.0, last as f64);
+        let k = (pos as usize).min(last - 1);
+        let t = pos - k as f64;
+        let (p0, p1, p2, p3) = (v[k.saturating_sub(1)], v[k], v[k + 1], v[(k + 2).min(last)]);
+        0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t)
+    }
+
+    /// The peaks of curve `v` (dB per grid point): local maxima standing out by
+    /// [`PEAK_PROMINENCE_DB`], each placed between grid points by a parabola through its
+    /// neighbours, at the level the drawn line has there (so its marker sits on the line).
+    fn peaks(v: &[f64]) -> Vec<Peak> {
+        let last = v.len() - 1;
+        // A third of an octave in grid points.
+        let third = ((last as f64) / (FREQ_MAX / FREQ_MIN).log2() / 3.0).round() as usize;
+        let mut out = Vec::new();
+        for i in 1..last {
+            if v[i] < v[i - 1] || v[i] < v[i + 1] || v[i] < -80.0 {
+                continue;
+            }
+            let left = v[i.saturating_sub(third)..i].iter().cloned().fold(f64::INFINITY, f64::min);
+            let right = v[i + 1..(i + 1 + third).min(last + 1)].iter().cloned().fold(f64::INFINITY, f64::min);
+            if v[i] - left.max(right) < PEAK_PROMINENCE_DB {
+                continue;
+            }
+            let (a, b, c) = (v[i - 1], v[i], v[i + 1]);
+            let curve = a - 2.0 * b + c;
+            let d = if curve < 0.0 { (0.5 * (a - c) / curve).clamp(-0.5, 0.5) } else { 0.0 };
+            let x = grid_x(i) + d * grid_x(1);
+            out.push(Peak { freq: xf(x), db: Self::drawn_at(v, x) });
+        }
+        out
+    }
+
+    /// Whether `p` is under the spectrum: inside its filled area, below the line (the held line
+    /// while peak hold is on, so the pointer can sit between it and the live one). Only there
+    /// does the spectrum answer the pointer (peak hold, peak markers, grabbing).
+    fn under_spectrum(&self, p: Point) -> bool {
+        if p.x < 0.0 || p.x >= PLOT_W || p.y < PLOT_TOP || p.y >= HELP_TOP {
+            return false;
+        }
+        let db = Self::drawn_at(self.grab_curve(), p.x);
+        // Silence draws no spectrum, so there is nothing to be under.
+        db > -88.0 && p.y >= sy(db.clamp(-90.0, 6.0)) - SPECTRUM_EDGE
+    }
+
+    /// The peak nearest `p`, within [`PEAK_REACH`], while `p` is under the spectrum.
+    fn find_peak(&self, p: Point) -> Option<Peak> {
+        if !self.under_spectrum(p) {
+            return None;
+        }
+        Self::peaks(self.grab_curve())
+            .into_iter()
+            .map(|peak| (Point::new(fx(peak.freq), sy(peak.db)).distance(p), peak))
+            .filter(|(d, _)| *d <= PEAK_REACH)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, peak)| peak)
     }
 
     /// Lays out the panel dials: the core row at `origin`, the dynamics row (if shown) from `dyn_top`.
@@ -1587,6 +1736,42 @@ impl EqView {
             flat
         };
         glow_stroke(cx.scene, &curve, 2.2, theme.curve, theme.curve, 5.0);
+    }
+
+    /// Spectrum grab: the marker on the peak under the pointer, and the ghost Bell being dragged
+    /// out of one.
+    fn draw_grab(&self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
+        // Peak hold: the accumulated maxima, a faint dot on each peak.
+        let a = f64::from(self.hold_alpha);
+        if a > 0.01 {
+            let held = Self::curve_path(&self.held, |db: f64| sy(db.clamp(-90.0, 6.0)));
+            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.needle.multiply_alpha((0.45 * a) as f32), None, &held);
+            for peak in Self::peaks(&self.held) {
+                let dot = Circle::new((fx(peak.freq), sy(peak.db)), 2.5);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.needle.multiply_alpha((0.55 * a) as f32), None, &dot);
+            }
+        }
+        let (p, alpha) = self.peak_marker;
+        if alpha > 0.01 {
+            glow_stroke(cx.scene, &Circle::new(p, 5.0), 1.5, theme.needle.multiply_alpha(alpha), theme.accent.multiply_alpha(alpha), 6.0);
+        }
+        let Some(g) = &self.grab else { return };
+        let s = BandSettings { enabled: true, kind: BandType::Bell, freq: g.freq, gain_db: g.gain, q: PEAK_Q, ..Default::default() };
+        let color = Self::new_band_color(theme);
+        let xs: Vec<(f64, Option<usize>)> = (0..POINTS).map(|i| (grid_x(i), None)).collect();
+        let values = Self::curve_at(&s, &xs, self.sample_rate());
+        let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
+        let curve = Self::xy_path(&xs, &values, clamp);
+        let mut fill = curve.clone();
+        fill.line_to((PLOT_W, MID));
+        fill.line_to((0.0, MID));
+        fill.close_path();
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.12), None, &fill);
+        cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, color.multiply_alpha(0.7), None, &curve);
+        let node = Point::new(fx(s.freq), gy(g.gain.clamp(-18.0, 18.0)));
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.6), None, &Circle::new(node, 7.0));
+        glow_stroke(cx.scene, &Circle::new(node, 7.0), 1.6, color.multiply_alpha(0.8), color, 4.0);
     }
 
     /// A band's drawn response at `xs`, designed fresh (not cached).
@@ -2264,7 +2449,6 @@ impl EqView {
         true
     }
 
-    /// Empty state (mockup "EqEmpty"): an invitation in the middle of the display.
     fn draw_footer(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let top = FOOTER_TOP;
@@ -2385,6 +2569,7 @@ impl View for EqView {
         cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, DISPLAY_TOP, PLOT_W, HELP_TOP));
         self.draw_spectrum(cx);
         self.draw_curves(cx, &bands);
+        self.draw_grab(cx);
         cx.scene.pop_layer();
         self.draw_nodes(cx, &bands);
         self.meter.draw(cx);
@@ -2400,6 +2585,16 @@ impl View for EqView {
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        // Keys: Esc closes an open menu or drops a grabbed peak; the rest go to the host.
+        if let UiEvent::KeyDown { key, .. } = *event {
+            if key != Key::Escape {
+                return false;
+            }
+            if self.menu.take().is_some() {
+                return true;
+            }
+            return self.grab.take().is_some();
+        }
         if self.menu.is_some() {
             return self.menu_event(event, host);
         }
@@ -2414,6 +2609,15 @@ impl View for EqView {
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
+                if let Some(g) = &mut self.grab {
+                    // The ghost Bell stays on the peak; up and down set its gain.
+                    let factor = if mods.fine() { 0.1 } else { 1.0 };
+                    let dy = pos.y - g.last.y;
+                    g.last = pos;
+                    g.moved |= pos.distance(g.start) > 3.0;
+                    g.gain = (g.gain - dy * factor / PX_PER_DB).clamp(-30.0, 30.0);
+                    return true;
+                }
                 if let Some(d) = &mut self.drag {
                     let factor = if mods.fine() { 0.1 } else { 1.0 };
                     let (dx, dy) = (pos.x - d.last.x, pos.y - d.last.y);
@@ -2491,6 +2695,10 @@ impl View for EqView {
                 let hover = if in_panel(&self.panel_hits, pos) || hot.is_some() { None } else { self.node_at(host, pos) };
                 changed |= hover != self.hover;
                 self.hover = hover;
+                // Nodes and controls win over the spectrum underneath them.
+                let peak = if hover.is_none() && hot.is_none() && !in_panel(&self.panel_hits, pos) { self.find_peak(pos) } else { None };
+                changed |= peak != self.peak;
+                self.peak = peak;
                 // The help strip follows the pointer over the display; footer buttons light on hover.
                 changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP
             }
@@ -2586,6 +2794,10 @@ impl View for EqView {
                     self.begin_drag(host, b, mode, pos, 0.0);
                     return true;
                 }
+                if let Some(peak) = self.find_peak(pos) {
+                    self.grab = Some(Grab { freq: peak.freq, gain: 0.0, start: pos, last: pos, moved: false });
+                    return true;
+                }
                 if pos.y > DISPLAY_TOP && pos.y < HELP_TOP && self.selected.is_some() {
                     self.select(None);
                     return true;
@@ -2593,6 +2805,17 @@ impl View for EqView {
                 false
             }
             UiEvent::PointerUp { button: MouseButton::Left, .. } => {
+                if let Some(g) = self.grab.take() {
+                    // Released after a drag: the ghost becomes a band. A plain click on a peak
+                    // is a click on the display (clears the selection).
+                    if g.moved {
+                        self.add_bell(host, g.freq, g.gain, PEAK_Q);
+                    } else {
+                        self.select(None);
+                    }
+                    self.peak = None;
+                    return true;
+                }
                 if let Some(d) = self.drag.take() {
                     let ids = &self.ids[d.band];
                     let kind = BandType::from_index(Self::plain(host, &ids.kind).round() as usize);
@@ -2643,6 +2866,11 @@ impl View for EqView {
                     let ids = &self.ids[b];
                     Self::set(host, &ids.gain, 0.0);
                     Self::set(host, &ids.q, std::f32::consts::FRAC_1_SQRT_2);
+                    return true;
+                }
+                if let Some(peak) = self.find_peak(pos) {
+                    self.add_bell(host, peak.freq, PEAK_CUT_DB, PEAK_Q);
+                    self.peak = None;
                     return true;
                 }
                 if pos.x < PLOT_W && pos.y > PLOT_TOP && pos.y < PLOT_BOT {
@@ -2696,6 +2924,7 @@ impl View for EqView {
                 self.pointer = None;
                 self.hover = None;
                 self.hot = None;
+                self.peak = None;
                 true
             }
             _ => false,
@@ -2735,6 +2964,57 @@ impl View for EqView {
             }
             ease(&mut self.last_level, &mut self.mid_level, level);
         }
+        // Peak hold: resting under the spectrum (not on a node, a control or the panel) for a moment
+        // starts collecting the spectrum's maxima; a grab keeps the held curve still.
+        let over_plot = self.pointer.is_some_and(|p| self.under_spectrum(p) && !self.panel_hits.is_some_and(|h| h.panel.contains(p)))
+            && self.hover.is_none()
+            && self.hot.is_none()
+            && self.drag.is_none();
+        if over_plot || self.grab.is_some() {
+            let since = *self.hold_since.get_or_insert_with(Instant::now);
+            if !self.holding && since.elapsed().as_secs_f64() >= HOLD_AFTER_S {
+                self.holding = true;
+                self.held.copy_from_slice(&self.post);
+            }
+        } else {
+            self.hold_since = None;
+            self.holding = false;
+        }
+        if self.holding && self.grab.is_none() {
+            for (held, &now) in self.held.iter_mut().zip(&self.post) {
+                if now > *held {
+                    *held = now;
+                    dirty = true;
+                }
+            }
+        }
+        let k = (1.0 - (-dt / HOLD_FADE_S).exp()) as f32;
+        let target = if self.holding { 1.0 } else { 0.0 };
+        let next = self.hold_alpha + (target - self.hold_alpha) * k;
+        let next = if (next - target).abs() < 0.005 { target } else { next };
+        dirty |= (next - self.hold_alpha).abs() > 0.001;
+        self.hold_alpha = next;
+        // The peak under a resting pointer follows the moving spectrum; its marker glides and fades.
+        if self.grab.is_none() && self.drag.is_none() && self.hover.is_none() && self.hot.is_none() {
+            let resting = self.pointer.filter(|&p| !self.panel_hits.is_some_and(|h| h.panel.contains(p)));
+            let peak = resting.and_then(|p| self.find_peak(p));
+            if peak != self.peak {
+                self.peak = peak;
+                dirty = true;
+            }
+        }
+        let fade = (1.0 - (-dt / PEAK_FADE_S).exp()) as f32;
+        let (pos, alpha) = &mut self.peak_marker;
+        let target = if self.grab.is_none() { self.peak.map(|pk| Point::new(fx(pk.freq), sy(pk.db))) } else { None };
+        if let Some(t) = target {
+            let next = if *alpha < 0.02 { t } else { pos.lerp(t, f64::from(fade)) };
+            dirty |= next.distance(*pos) > 0.05;
+            *pos = next;
+        }
+        let next = *alpha + (if target.is_some() { 1.0 } else { 0.0 } - *alpha) * fade;
+        let next = if next < 0.005 { 0.0 } else if next > 0.995 { 1.0 } else { next };
+        dirty |= (next - *alpha).abs() > 0.002;
+        *alpha = next;
         // The selected band's per-bin detail (spectral scope): ask the engine for it, follow it.
         let focus = self.selected.filter(|&b| self.band(host, b).is_spectral());
         self.shared.focus.store(focus.map_or(-1.0, |b| b as f32));
