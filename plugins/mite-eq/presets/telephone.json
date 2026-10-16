@@ -1,0 +1,5 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "Telephone", "params": {
+  "b01_on": 1, "b01_type": 3, "b01_freq": 400, "b01_slope": 3,
+  "b02_on": 1, "b02_type": 4, "b02_freq": 3500, "b02_slope": 3,
+  "b03_on": 1, "b03_type": 0, "b03_freq": 1500, "b03_gain": 4, "b03_q": 1.0
+} }

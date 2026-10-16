@@ -266,7 +266,9 @@ impl UiWindow {
         }
         let key = match &event.key {
             keyboard_types::Key::Named(keyboard_types::NamedKey::Escape) => Key::Escape,
-            keyboard_types::Key::Named(keyboard_types::NamedKey::Delete | keyboard_types::NamedKey::Backspace) => Key::Delete,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::Delete) => Key::Delete,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::Backspace) => Key::Backspace,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::Enter) => Key::Enter,
             keyboard_types::Key::Character(s) => match s.chars().next() {
                 Some(c) => Key::Character(c),
                 None => return EventStatus::Ignored,

@@ -1,0 +1,6 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "Kick: tight low end", "params": {
+  "b01_on": 1, "b01_type": 3, "b01_freq": 30, "b01_slope": 3,
+  "b02_on": 1, "b02_type": 0, "b02_freq": 60, "b02_gain": 3, "b02_q": 1.4,
+  "b03_on": 1, "b03_type": 0, "b03_freq": 350, "b03_gain": -4, "b03_q": 1.5,
+  "b04_on": 1, "b04_type": 0, "b04_freq": 4000, "b04_gain": 2.5, "b04_q": 1.2
+} }

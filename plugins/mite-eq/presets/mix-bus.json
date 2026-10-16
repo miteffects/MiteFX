@@ -1,0 +1,6 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "Mix bus polish", "params": {
+  "auto_gain": 1,
+  "b01_on": 1, "b01_type": 1, "b01_freq": 80, "b01_gain": 1, "b01_q": 0.7,
+  "b02_on": 1, "b02_type": 0, "b02_freq": 250, "b02_gain": -1, "b02_q": 0.8,
+  "b03_on": 1, "b03_type": 2, "b03_freq": 12000, "b03_gain": 1.5, "b03_q": 0.7
+} }

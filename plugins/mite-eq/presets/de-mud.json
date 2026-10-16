@@ -1,0 +1,4 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "De-mud (dynamic)", "params": {
+  "b01_on": 1, "b01_type": 0, "b01_freq": 300, "b01_q": 1.0,
+  "b01_dyn": 1, "b01_range": -4, "b01_thresh": -35, "b01_ratio": 3
+} }

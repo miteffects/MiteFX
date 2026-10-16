@@ -1,0 +1,6 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "Vocal presence and air", "params": {
+  "b01_on": 1, "b01_type": 3, "b01_freq": 90, "b01_slope": 3,
+  "b02_on": 1, "b02_type": 0, "b02_freq": 300, "b02_gain": -2.5, "b02_q": 1.2,
+  "b03_on": 1, "b03_type": 0, "b03_freq": 3200, "b03_gain": 2, "b03_q": 0.9,
+  "b04_on": 1, "b04_type": 2, "b04_freq": 10000, "b04_gain": 2.5, "b04_q": 0.7
+} }

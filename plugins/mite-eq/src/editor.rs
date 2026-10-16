@@ -3,6 +3,7 @@
 //!
 //! Gestures follow docs/design/interaction.md, "Main display gestures".
 
+use std::cell::Cell;
 use std::f64::consts::LN_2;
 use std::sync::Arc;
 use std::time::Instant;
@@ -21,6 +22,7 @@ use crate::params::{
     band_id, ATTACK, ATTACK_DIAL, AUTO_GAIN, BANDS, BYPASS, DELTA, DMODE, DYN, FREQ, GAIN, LP_RES, MIX, MODE, ON, OUT_GAIN, OUT_PAN, Q, RANGE, RATIO, RELEASE,
     RELEASE_DIAL, RTHRESH, SLOPE, SOLO, SPECTRAL, SREL, SSMOOTH, STEREO, SUSTAIN, THRESH, TRANSIENT, TRANSITION, TTIME, TYPE,
 };
+use crate::presets::{preset_ids, Preset, PresetValues};
 use crate::snapshots::{snapshot_ids, Values, NAMES as SLOT_NAMES, SLOTS};
 use crate::{EqShared, SPECTRAL_POINTS};
 
@@ -120,11 +122,23 @@ const PANEL_DIAL: f64 = 56.0;
 const PANEL_LAST_DIAL_X: f64 = 596.0;
 const PANEL_DIAL_STEP: f64 = 84.0;
 const MENU_ITEM_H: f64 = 30.0;
-/// Footer snapshot letters: the first one's centre x, the distance between centres, and their size.
-const SLOT_X0: f64 = 680.0;
+/// Header (interaction.md: presets ‹ › → undo → redo → snapshots): controls 32 px tall, the
+/// preset arrows and name, undo and redo, and the snapshot letters (first centre, spacing, size).
+const HEADER_ROW: (f64, f64) = (12.0, 44.0);
+const PRESET_PREV: (f64, f64) = (150.0, 182.0);
+const PRESET_NAME: (f64, f64) = (186.0, 436.0);
+const PRESET_NEXT: (f64, f64) = (440.0, 472.0);
+const UNDO_X: (f64, f64) = (492.0, 524.0);
+const REDO_X: (f64, f64) = (528.0, 560.0);
+const SLOT_X0: f64 = 604.0;
 const SLOT_STEP: f64 = 38.0;
 const SLOT_W: f64 = 32.0;
-const SLOT_H: f64 = 30.0;
+/// The preset list: its width, row height and the rows shown at once (the wheel scrolls).
+const PRESET_MENU_W: f64 = 320.0;
+const PRESET_ROW_H: f64 = 28.0;
+const PRESET_ROWS: usize = 18;
+/// Undo steps kept.
+const UNDO_DEPTH: usize = 100;
 
 /// Footer: the distance between dial centres, and the toggles' size.
 const FOOTER_DIAL_STEP: f64 = 92.0;
@@ -194,6 +208,64 @@ fn note_name(freq: f64) -> String {
     let idx = (n as i32).rem_euclid(12) as usize;
     let octave = (n as i32).div_euclid(12) - 1;
     format!("{}{} {}{} ct", NAMES[idx], octave, if cents < 0 { "−" } else { "+" }, cents.abs())
+}
+
+/// The host as the editor's own events see it: everything passes through, and a write is noted,
+/// so the edit can become an undo step (automation and host changes never pass through here).
+struct Recording<'a> {
+    inner: &'a dyn ParamHost,
+    wrote: Cell<bool>,
+}
+
+impl ParamHost for Recording<'_> {
+    fn normalized(&self, id: &str) -> f32 {
+        self.inner.normalized(id)
+    }
+    fn plain(&self, id: &str, normalized: f32) -> f32 {
+        self.inner.plain(id, normalized)
+    }
+    fn normalize(&self, id: &str, plain: f32) -> f32 {
+        self.inner.normalize(id, plain)
+    }
+    fn default_normalized(&self, id: &str) -> f32 {
+        self.inner.default_normalized(id)
+    }
+    fn begin_gesture(&self, id: &str) {
+        self.inner.begin_gesture(id);
+    }
+    fn set_normalized(&self, id: &str, normalized: f32) {
+        self.wrote.set(true);
+        self.inner.set_normalized(id, normalized);
+    }
+    fn end_gesture(&self, id: &str) {
+        self.inner.end_gesture(id);
+    }
+}
+
+/// One undo step: the sound parameters (normalized, in [`preset_ids`] order), the snapshots and
+/// the current preset's name.
+#[derive(Clone, PartialEq)]
+struct UndoState {
+    params: Vec<f32>,
+    snapshots: crate::snapshots::State,
+    preset: Option<String>,
+}
+
+/// A row of the preset list.
+#[derive(Clone, Copy, PartialEq)]
+enum PresetRow {
+    /// "Save as…", or the name being typed.
+    Save,
+    Section(&'static str),
+    /// Index into factory ++ user.
+    Preset(usize),
+}
+
+/// The open preset list: the hovered row, the first row shown, and a name being typed.
+struct PresetMenu {
+    hover: Option<usize>,
+    scroll: usize,
+    naming: Option<String>,
 }
 
 /// One line of the help strip: plain text, and values in slots as wide as the widest value they
@@ -711,9 +783,23 @@ pub struct EqView {
     toggle_hits: [Rect; 3],
     /// The band being listened to alone, as last drawn.
     soloed: Option<usize>,
-    /// Footer snapshot letters (set while drawing), and a letter being pressed.
+    /// Header snapshot letters (set while drawing), and a letter being pressed.
     slot_hits: [Rect; SLOTS],
     slot_press: Option<usize>,
+    /// Presets: the factory and user lists, the open list, and the values (normalized by id) of
+    /// the preset last loaded or saved, to show when the sound has moved on from it.
+    factory: Vec<Preset>,
+    user: Vec<Preset>,
+    preset_dir: Option<std::path::PathBuf>,
+    preset_menu: Option<PresetMenu>,
+    loaded: Option<std::collections::HashMap<String, f32>>,
+    /// Undo: the parameters it covers, the steps back and forward, the state the last step
+    /// ended in, and whether an edit of the editor's own is waiting to become a step.
+    history_ids: Vec<String>,
+    undo: Vec<UndoState>,
+    redo: Vec<UndoState>,
+    committed: Option<UndoState>,
+    edited: bool,
     meter: LevelMeter,
     analyzer: Analyzer,
     samples: Vec<f32>,
@@ -806,6 +892,16 @@ impl EqView {
             soloed: None,
             slot_hits: [Rect::ZERO; SLOTS],
             slot_press: None,
+            factory: crate::presets::factory(),
+            user: crate::presets::user_dir().map(|d| crate::presets::user_in(&d)).unwrap_or_default(),
+            preset_dir: crate::presets::user_dir(),
+            preset_menu: None,
+            loaded: None,
+            history_ids: preset_ids(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            committed: None,
+            edited: false,
             meter: LevelMeter::new(Rect::new(1233.5, DISPLAY_TOP + 19.5, 1266.5, DISPLAY_TOP + 592.5)),
             analyzer,
             samples: vec![0.0; ANALYZER_SIZE],
@@ -1223,6 +1319,307 @@ impl EqView {
             self.panel_knobs.clear();
         }
         store.store(to, values);
+    }
+
+    // ---- undo ---------------------------------------------------------------------------
+
+    fn undo_state(&self, host: &dyn ParamHost) -> UndoState {
+        UndoState {
+            params: self.history_ids.iter().map(|id| host.normalized(id)).collect(),
+            snapshots: self.shared.snapshots.export(),
+            preset: self.shared.preset.get(),
+        }
+    }
+
+    /// Whether a gesture is still under way (a drag becomes one undo step when it ends).
+    fn busy(&self) -> bool {
+        self.drag.is_some()
+            || self.grab.is_some()
+            || self.slot_press.is_some()
+            || self.panel_knobs.iter().any(Knob::is_dragging)
+            || self.footer_knobs.iter().any(Knob::is_dragging)
+    }
+
+    /// Ends an edit: the state before it becomes an undo step.
+    fn commit(&mut self, host: &dyn ParamHost) {
+        let now = self.undo_state(host);
+        if let Some(before) = self.committed.take() {
+            if before != now {
+                self.undo.push(before);
+                if self.undo.len() > UNDO_DEPTH {
+                    self.undo.remove(0);
+                }
+                self.redo.clear();
+            }
+        }
+        self.committed = Some(now);
+        self.edited = false;
+    }
+
+    /// Puts `state` back: the parameters that differ (as gestures), the snapshots, the preset.
+    fn apply(&mut self, host: &dyn ParamHost, state: &UndoState) {
+        for (id, &v) in self.history_ids.iter().zip(&state.params) {
+            if (host.normalized(id) - v).abs() > 1e-7 {
+                host.begin_gesture(id);
+                host.set_normalized(id, v);
+                host.end_gesture(id);
+            }
+        }
+        self.shared.snapshots.import(state.snapshots.clone());
+        self.shared.preset.set(state.preset.clone());
+        self.loaded = state.preset.as_deref().and_then(|name| self.preset_values(host, name));
+        self.committed = Some(state.clone());
+        if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
+            self.select(None);
+        }
+        self.panel_knobs.clear();
+    }
+
+    fn undo(&mut self, host: &dyn ParamHost) {
+        let Some(state) = self.undo.pop() else { return };
+        self.redo.push(self.undo_state(host));
+        self.apply(host, &state);
+    }
+
+    fn redo(&mut self, host: &dyn ParamHost) {
+        let Some(state) = self.redo.pop() else { return };
+        self.undo.push(self.undo_state(host));
+        self.apply(host, &state);
+    }
+
+    // ---- presets ------------------------------------------------------------------------
+
+    /// Keeps the user's presets in `dir` instead of the settings folder (tests, a portable setup).
+    pub fn with_preset_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.preset_dir = Some(dir);
+        self.reload_user_presets();
+        self
+    }
+
+    fn reload_user_presets(&mut self) {
+        self.user = self.preset_dir.as_deref().map(crate::presets::user_in).unwrap_or_default();
+    }
+
+    /// Factory presets, then the user's.
+    fn preset(&self, i: usize) -> Option<&Preset> {
+        self.factory.get(i).or_else(|| self.user.get(i - self.factory.len().min(i)))
+    }
+
+    fn preset_count(&self) -> usize {
+        self.factory.len() + self.user.len()
+    }
+
+    /// Where the current preset is in the list (Init until one is loaded, as the header says).
+    fn preset_index(&self) -> Option<usize> {
+        let Some(name) = self.shared.preset.get() else { return (!self.factory.is_empty()).then_some(0) };
+        // A user preset of the same name shadows a factory one.
+        (0..self.preset_count()).rev().find(|&i| self.preset(i).is_some_and(|p| p.name == name))
+    }
+
+    /// The normalized values preset `name` sets, every sound parameter included (what it leaves
+    /// out is at its default).
+    fn preset_values(&self, host: &dyn ParamHost, name: &str) -> Option<std::collections::HashMap<String, f32>> {
+        let preset = (0..self.preset_count()).rev().filter_map(|i| self.preset(i)).find(|p| p.name == name)?;
+        Some(
+            self.history_ids
+                .iter()
+                .map(|id| {
+                    let v = preset.values.get(id).map_or_else(|| host.default_normalized(id), |&plain| host.normalize(id, plain));
+                    (id.clone(), v)
+                })
+                .collect(),
+        )
+    }
+
+    /// Loads preset `i` into the snapshot being edited.
+    fn load_preset(&mut self, host: &dyn ParamHost, i: usize) {
+        let Some(name) = self.preset(i).map(|p| p.name.clone()) else { return };
+        let Some(values) = self.preset_values(host, &name) else { return };
+        for id in &self.history_ids {
+            let v = values[id];
+            if (host.normalized(id) - v).abs() > 1e-7 {
+                host.begin_gesture(id);
+                host.set_normalized(id, v);
+                host.end_gesture(id);
+            }
+        }
+        self.shared.preset.set(Some(name));
+        self.loaded = Some(values);
+        self.edited = true;
+        if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
+            self.select(None);
+        }
+        self.panel_knobs.clear();
+    }
+
+    /// Steps to the previous (-1) or next (+1) preset, wrapping.
+    fn step_preset(&mut self, host: &dyn ParamHost, by: isize) {
+        let n = self.preset_count() as isize;
+        if n == 0 {
+            return;
+        }
+        let i = self.preset_index().map_or(if by > 0 { 0 } else { n - 1 }, |i| (i as isize + by).rem_euclid(n));
+        self.load_preset(host, i as usize);
+    }
+
+    /// Saves the sound now as user preset `name` (only what differs from the defaults).
+    fn save_preset(&mut self, host: &dyn ParamHost, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let values: PresetValues = self
+            .history_ids
+            .iter()
+            .filter(|id| (host.normalized(id) - host.default_normalized(id)).abs() > 1e-7)
+            .map(|id| (id.clone(), host.plain(id, host.normalized(id))))
+            .collect();
+        let Some(dir) = self.preset_dir.clone() else { return };
+        if crate::presets::save_in(&dir, name, &values).is_ok() {
+            self.reload_user_presets();
+            self.shared.preset.set(Some(name.to_owned()));
+            self.loaded = self.preset_values(host, name);
+            self.edited = true;
+        }
+    }
+
+    /// Whether the sound has moved on from the preset last loaded or saved.
+    fn preset_modified(&self, host: &dyn ParamHost) -> bool {
+        self.loaded.as_ref().is_some_and(|values| self.history_ids.iter().any(|id| (host.normalized(id) - values[id]).abs() > 1e-6))
+    }
+
+    /// The preset list's rows.
+    fn preset_rows(&self) -> Vec<PresetRow> {
+        let mut rows = vec![PresetRow::Save, PresetRow::Section("FACTORY")];
+        rows.extend((0..self.factory.len()).map(PresetRow::Preset));
+        if !self.user.is_empty() {
+            rows.push(PresetRow::Section("YOURS"));
+            rows.extend((self.factory.len()..self.preset_count()).map(PresetRow::Preset));
+        }
+        rows
+    }
+
+    /// The rectangle of visible row `k` of the list.
+    fn preset_row_rect(k: usize) -> Rect {
+        let y = HEADER_ROW.1 + 6.0 + k as f64 * PRESET_ROW_H;
+        Rect::new(PRESET_NAME.0, y, PRESET_NAME.0 + PRESET_MENU_W, y + PRESET_ROW_H)
+    }
+
+    fn preset_menu_bounds(&self) -> Rect {
+        let n = self.preset_rows().len().min(PRESET_ROWS);
+        let (first, last) = (Self::preset_row_rect(0), Self::preset_row_rect(n.saturating_sub(1)));
+        Rect::new(first.x0, first.y0 - 4.0, first.x1, last.y1 + 4.0)
+    }
+
+    /// The row under `p`, as an index into [`Self::preset_rows`].
+    fn preset_row_at(&self, p: Point) -> Option<usize> {
+        let menu = self.preset_menu.as_ref()?;
+        let rows = self.preset_rows();
+        (0..rows.len().saturating_sub(menu.scroll).min(PRESET_ROWS)).find(|&k| Self::preset_row_rect(k).contains(p)).map(|k| k + menu.scroll)
+    }
+
+    /// Events while the preset list is open.
+    fn preset_menu_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        match *event {
+            UiEvent::PointerMove { pos, .. } => {
+                self.pointer = Some(pos);
+                let hover = self.preset_row_at(pos);
+                if let Some(m) = &mut self.preset_menu {
+                    m.hover = hover;
+                }
+                true
+            }
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
+                let rows = self.preset_rows();
+                match self.preset_row_at(pos).map(|i| rows[i]) {
+                    Some(PresetRow::Save) => {
+                        let typed = self.preset_menu.as_ref().and_then(|m| m.naming.clone());
+                        match typed {
+                            // Clicking the row again (its tick) saves.
+                            Some(name) => {
+                                self.save_preset(host, &name);
+                                self.preset_menu = None;
+                            }
+                            None => {
+                                let n = self.user.len() + 1;
+                                let suggested = self.shared.preset.get().filter(|_| self.preset_index().is_some_and(|i| i >= self.factory.len())).unwrap_or(format!("My preset {n}"));
+                                if let Some(m) = &mut self.preset_menu {
+                                    m.naming = Some(suggested);
+                                }
+                            }
+                        }
+                    }
+                    Some(PresetRow::Preset(i)) => {
+                        self.load_preset(host, i);
+                        self.preset_menu = None;
+                    }
+                    Some(PresetRow::Section(_)) => {}
+                    None => self.preset_menu = None,
+                }
+                true
+            }
+            UiEvent::Wheel { lines, .. } => {
+                let max = self.preset_rows().len().saturating_sub(PRESET_ROWS);
+                if let Some(m) = &mut self.preset_menu {
+                    m.scroll = (m.scroll as isize - lines.round() as isize).clamp(0, max as isize) as usize;
+                }
+                true
+            }
+            UiEvent::PointerLeft => {
+                if let Some(m) = &mut self.preset_menu {
+                    m.hover = None;
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    /// Keys: typing a preset name, Esc, undo and redo. Others go to the host.
+    fn key_event(&mut self, key: Key, mods: mite_ui::Modifiers, host: &dyn ParamHost) -> bool {
+        if let Some(name) = self.preset_menu.as_mut().and_then(|m| m.naming.as_mut()) {
+            match key {
+                Key::Character(c) if !(mods.ctrl || mods.meta) => {
+                    if name.chars().count() < 48 {
+                        name.push(c);
+                    }
+                }
+                Key::Backspace => {
+                    name.pop();
+                }
+                Key::Enter => {
+                    let name = name.clone();
+                    self.save_preset(host, &name);
+                    self.preset_menu = None;
+                }
+                Key::Escape => {
+                    if let Some(m) = &mut self.preset_menu {
+                        m.naming = None;
+                    }
+                }
+                _ => return false,
+            }
+            return true;
+        }
+        match key {
+            Key::Escape => self.preset_menu.take().is_some() || self.menu.take().is_some() || self.grab.take().is_some(),
+            Key::Character(c) if mods.ctrl || mods.meta => match c.to_ascii_lowercase() {
+                'z' if mods.shift => {
+                    self.redo(host);
+                    true
+                }
+                'z' => {
+                    self.undo(host);
+                    true
+                }
+                'y' => {
+                    self.redo(host);
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     fn add_band(&mut self, host: &dyn ParamHost, p: Point) {
@@ -2579,19 +2976,6 @@ impl EqView {
         cx.text.draw(cx.scene, "LATENCY", label_x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
         cx.text.draw(cx.scene, &latency, label_x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
 
-        // Snapshots: the letters A–D, the edited one lit, empty ones dim.
-        let active = self.shared.snapshots.active();
-        for (i, name) in SLOT_NAMES.iter().enumerate() {
-            let c = SLOT_X0 + SLOT_STEP * i as f64;
-            let r = Rect::new(c - SLOT_W / 2.0, top + 13.0, c + SLOT_W / 2.0, top + 13.0 + SLOT_H);
-            let target = self.slot_press.is_some_and(|from| from != i) && self.pointer.is_some_and(|p| r.contains(p));
-            let hot = target || self.pointer.is_some_and(|p| r.contains(p));
-            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, active == i, theme.accent);
-            let ink = if active != i && !hot && !self.shared.snapshots.filled(i) { theme.text_lo } else { ink };
-            cx.text.draw(cx.scene, name, c, r.y0 + 8.0, TextStyle::LABEL.sized(11.0), ink, Align::Center);
-            self.slot_hits[i] = r;
-        }
-
         // Auto gain, delta and bypass: icon toggles, lit while on.
         let first_dial = self.footer_knobs[0].center.x;
         for (i, id) in TOGGLES.into_iter().enumerate() {
@@ -2613,12 +2997,124 @@ impl EqView {
         }
     }
 
-    fn draw_header(&self, cx: &mut DrawCx<'_>) {
+    fn draw_header(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, 0.0, WIDTH, HEADER));
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HEADER - 0.5), (WIDTH, HEADER - 0.5)));
         draw_mark(cx, 16.0, 15.0, 26.0);
         draw_title(cx, 52.0, 18.0, "EQ");
+        let (y0, y1) = HEADER_ROW;
+        let hot = |r: Rect| self.pointer.is_some_and(|p| r.contains(p));
+        let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+
+        // Presets: ‹ name ›.
+        let open = self.preset_menu.is_some();
+        for (x, dir) in [(PRESET_PREV, -1.0), (PRESET_NEXT, 1.0)] {
+            let r = Rect::new(x.0, y0, x.1, y1);
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), false, theme.accent);
+            let c = r.center();
+            let mut chevron = BezPath::new();
+            chevron.move_to((c.x - 2.0 * dir, c.y - 5.0));
+            chevron.line_to((c.x + 2.5 * dir, c.y));
+            chevron.line_to((c.x - 2.0 * dir, c.y + 5.0));
+            cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &chevron);
+        }
+        let name_rect = Rect::new(PRESET_NAME.0, y0, PRESET_NAME.1, y1);
+        let ink = icon_button(cx.scene, theme, name_rect, theme.panel_control, hot(name_rect), open, theme.accent);
+        let lens = Point::new(name_rect.x0 + 16.0, name_rect.center().y - 1.0);
+        cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, ink, None, &Circle::new(lens, 4.0));
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &Line::new(lens + (2.9, 2.9), lens + (6.0, 6.0)));
+        let name = self.shared.preset.get().unwrap_or_else(|| "Init".to_owned());
+        let width = cx.text.draw(cx.scene, &name, name_rect.x0 + 30.0, y0 + 9.0, TextStyle::BODY.weighted(600.0), theme.text_hi, Align::Left);
+        if self.preset_modified(cx.host) {
+            // The sound has moved on from the preset: a dot after its name.
+            let dot = Point::new(name_rect.x0 + 30.0 + f64::from(width) + 7.0, name_rect.center().y);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent, None, &Circle::new(dot, 2.5));
+        }
+
+        // Undo and redo: curved arrows, dim when there is nothing to go back or forward to.
+        // `dir` is the side the arrow's tip points to: left for undo, right for redo.
+        for (x, dir, has) in [(UNDO_X, 1.0, !self.undo.is_empty()), (REDO_X, -1.0, !self.redo.is_empty())] {
+            let r = Rect::new(x.0, y0, x.1, y1);
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, has && hot(r), false, theme.accent);
+            let ink = if has { ink } else { theme.text_disabled };
+            let c = r.center();
+            let mut arrow = BezPath::new();
+            arrow.move_to((c.x + 5.0 * dir, c.y + 5.0));
+            arrow.curve_to((c.x + 6.0 * dir, c.y - 3.0), (c.x - 1.0 * dir, c.y - 5.0), (c.x - 5.0 * dir, c.y - 2.0));
+            arrow.move_to((c.x - 5.0 * dir, c.y - 6.5));
+            arrow.line_to((c.x - 5.0 * dir, c.y - 2.0));
+            arrow.line_to((c.x - 0.5 * dir, c.y - 1.5));
+            cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &arrow);
+        }
+
+        // Snapshots: the letters A–D, the edited one lit, empty ones dim.
+        let active = self.shared.snapshots.active();
+        for (i, name) in SLOT_NAMES.iter().enumerate() {
+            let c = SLOT_X0 + SLOT_STEP * i as f64;
+            let r = Rect::new(c - SLOT_W / 2.0, y0, c + SLOT_W / 2.0, y1);
+            let target = self.slot_press.is_some_and(|from| from != i) && hot(r);
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, target || hot(r), active == i, theme.accent);
+            let ink = if active != i && !hot(r) && !self.shared.snapshots.filled(i) { theme.text_lo } else { ink };
+            cx.text.draw(cx.scene, name, c, y0 + 9.0, TextStyle::LABEL.sized(11.0), ink, Align::Center);
+            self.slot_hits[i] = r;
+        }
+    }
+
+    /// The open preset list, drawn over everything: "Save as…" (or the name being typed), then
+    /// the factory presets and the user's.
+    fn draw_preset_menu(&self, cx: &mut DrawCx<'_>) {
+        let Some(menu) = &self.preset_menu else { return };
+        let theme = cx.theme;
+        let bounds = self.preset_menu_bounds();
+        if theme.shadows {
+            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 10.0)), bounds, Color::from_rgba8(0, 0, 0, 140), 10.0, 16.0);
+        }
+        panel(cx.scene, RoundedRect::from_rect(bounds, 10.0), theme.glass.with_alpha(0.97), theme.glass_border);
+        let current = self.preset_index();
+        let rows = self.preset_rows();
+        for (k, row) in rows.iter().enumerate().skip(menu.scroll).take(PRESET_ROWS) {
+            let r = Self::preset_row_rect(k - menu.scroll).inset((-4.0, 0.0));
+            let hovered = menu.hover == Some(k);
+            match *row {
+                PresetRow::Save => {
+                    let shape = RoundedRect::from_rect(r.inset((0.0, -2.0)), 6.0);
+                    if let Some(name) = &menu.naming {
+                        // The name field: the text, a caret, and a tick that saves.
+                        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &shape);
+                        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent, None, &shape);
+                        let w = cx.text.draw(cx.scene, name, r.x0 + 10.0, r.y0 + 7.0, TextStyle::BODY, theme.text_strong, Align::Left);
+                        let caret = r.x0 + 11.0 + f64::from(w);
+                        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.accent, None, &Line::new((caret, r.y0 + 7.0), (caret, r.y1 - 7.0)));
+                        let k = Point::new(r.x1 - 16.0, r.center().y);
+                        let mut tick = BezPath::new();
+                        tick.move_to((k.x - 5.0, k.y));
+                        tick.line_to((k.x - 1.5, k.y + 3.5));
+                        tick.line_to((k.x + 5.0, k.y - 3.5));
+                        let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+                        cx.scene.stroke(&stroke, Affine::IDENTITY, theme.accent, None, &tick);
+                    } else {
+                        if hovered {
+                            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.16), None, &shape);
+                        }
+                        cx.text.draw(cx.scene, "Save as…", r.x0 + 10.0, r.y0 + 7.0, TextStyle::BODY.weighted(600.0), if hovered { theme.text_hi } else { theme.text_mid }, Align::Left);
+                    }
+                }
+                PresetRow::Section(label) => {
+                    cx.text.draw(cx.scene, label, r.x0 + 10.0, r.y0 + 10.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
+                }
+                PresetRow::Preset(i) => {
+                    let Some(p) = self.preset(i) else { continue };
+                    let on = current == Some(i);
+                    let shape = RoundedRect::from_rect(r.inset((0.0, -2.0)), 6.0);
+                    if on || hovered {
+                        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(if on { 0.2 } else { 0.12 }), None, &shape);
+                    }
+                    let ink = if on { theme.text_strong } else if hovered { theme.text_hi } else { theme.text_mid };
+                    cx.text.draw(cx.scene, &p.name, r.x0 + 10.0, r.y0 + 7.0, TextStyle::BODY, ink, Align::Left);
+                }
+            }
+        }
     }
 
     fn draw_help(&self, cx: &mut DrawCx<'_>) {
@@ -2668,18 +3164,190 @@ impl View for EqView {
             k.draw(cx);
         }
         self.draw_menu(cx);
+        self.draw_preset_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
-        // Keys: Esc closes an open menu or drops a grabbed peak; the rest go to the host.
-        if let UiEvent::KeyDown { key, .. } = *event {
-            if key != Key::Escape {
-                return false;
+        // The editor's own writes are noted; once nothing is being dragged, they become one undo
+        // step.
+        if self.committed.is_none() {
+            self.committed = Some(self.undo_state(host));
+        }
+        let recording = Recording { inner: host, wrote: Cell::new(false) };
+        let changed = self.handle_event(event, &recording);
+        if recording.wrote.get() {
+            self.edited = true;
+        }
+        if self.edited && !self.busy() {
+            self.commit(host);
+        }
+        changed
+    }
+
+    fn tick(&mut self, host: &dyn ParamHost) -> bool {
+        self.ticks = self.ticks.wrapping_add(1);
+        // Changes from outside the editor (automation, the host's own undo, a state load) are
+        // not undo steps: the history just follows them.
+        if !self.edited && !self.busy() {
+            match &mut self.committed {
+                Some(c) => {
+                    for (v, id) in c.params.iter_mut().zip(&self.history_ids) {
+                        *v = host.normalized(id);
+                    }
+                }
+                None => self.committed = Some(self.undo_state(host)),
             }
-            if self.menu.take().is_some() {
-                return true;
+        }
+        if self.loaded.is_none() {
+            if let Some(name) = self.shared.preset.get() {
+                self.loaded = self.preset_values(host, &name);
             }
-            return self.grab.take().is_some();
+        }
+        let (l, r) = self.shared.meter.load();
+        let mut dirty = self.meter.set_levels(l, r);
+        // Dynamic bands and the spectral stage move with the audio. Their telemetry arrives once
+        // per host block (which can be 20 ms), so the drawing eases towards each new value at the
+        // frame rate instead of stepping from block to block.
+        let dt = self.last_live.elapsed().as_secs_f64().min(0.1);
+        self.last_live = Instant::now();
+        let k = (1.0 - (-dt / LIVE_EASE_S).exp()) as f32;
+        let mut ease = |shown: &mut f32, mid: &mut f32, now: f32| {
+            *mid += (now - *mid) * k;
+            let next = *shown + (*mid - *shown) * k;
+            let next = if (now - next).abs() < 0.002 && (now - *mid).abs() < 0.002 { now } else { next };
+            if (next - *shown).abs() > 0.001 {
+                dirty = true;
+            }
+            *shown = next;
+        };
+        for ((shown, mid), now) in self.last_dynamic.iter_mut().zip(&mut self.mid_dynamic).zip(&self.shared.dynamic) {
+            ease(shown, mid, now.load());
+        }
+        for ((shown, mid), now) in self.last_spectral.iter_mut().zip(self.mid_spectral.iter_mut()).zip(&self.shared.spectral) {
+            ease(shown, mid, now.load());
+        }
+        // The selected band's level drives its scope dot.
+        if let Some(b) = self.selected {
+            let level = self.shared.level[b].load();
+            if self.last_level <= -119.0 {
+                (self.last_level, self.mid_level) = (level, level);
+            }
+            ease(&mut self.last_level, &mut self.mid_level, level);
+        }
+        // Peak hold: resting under the spectrum (not on a node, a control or the panel) for a moment
+        // starts collecting the spectrum's maxima; a grab keeps the held curve still.
+        let over_plot = self.pointer.is_some_and(|p| self.under_spectrum(p) && !self.panel_hits.is_some_and(|h| h.panel.contains(p)))
+            && self.hover.is_none()
+            && self.hot.is_none()
+            && self.drag.is_none();
+        if over_plot || self.grab.is_some() {
+            let since = *self.hold_since.get_or_insert_with(Instant::now);
+            if !self.holding && since.elapsed().as_secs_f64() >= HOLD_AFTER_S {
+                self.holding = true;
+                self.held.copy_from_slice(&self.post);
+            }
+        } else {
+            self.hold_since = None;
+            self.holding = false;
+        }
+        if self.holding && self.grab.is_none() {
+            for (held, &now) in self.held.iter_mut().zip(&self.post) {
+                if now > *held {
+                    *held = now;
+                    dirty = true;
+                }
+            }
+        }
+        let k = (1.0 - (-dt / HOLD_FADE_S).exp()) as f32;
+        let target = if self.holding { 1.0 } else { 0.0 };
+        let next = self.hold_alpha + (target - self.hold_alpha) * k;
+        let next = if (next - target).abs() < 0.005 { target } else { next };
+        dirty |= (next - self.hold_alpha).abs() > 0.001;
+        self.hold_alpha = next;
+        // The peak under a resting pointer follows the moving spectrum; its marker glides and fades.
+        if self.grab.is_none() && self.drag.is_none() && self.hover.is_none() && self.hot.is_none() {
+            let resting = self.pointer.filter(|&p| !self.panel_hits.is_some_and(|h| h.panel.contains(p)));
+            let peak = resting.and_then(|p| self.find_peak(p));
+            if peak != self.peak {
+                self.peak = peak;
+                dirty = true;
+            }
+        }
+        let fade = (1.0 - (-dt / PEAK_FADE_S).exp()) as f32;
+        let (pos, alpha) = &mut self.peak_marker;
+        let target = if self.grab.is_none() { self.peak.map(|pk| Point::new(fx(pk.freq), sy(pk.db))) } else { None };
+        if let Some(t) = target {
+            let next = if *alpha < 0.02 { t } else { pos.lerp(t, f64::from(fade)) };
+            dirty |= next.distance(*pos) > 0.05;
+            *pos = next;
+        }
+        let next = *alpha + (if target.is_some() { 1.0 } else { 0.0 } - *alpha) * fade;
+        let next = if next < 0.005 { 0.0 } else if next > 0.995 { 1.0 } else { next };
+        dirty |= (next - *alpha).abs() > 0.002;
+        *alpha = next;
+        // The selected band's per-bin detail (spectral scope): ask the engine for it, follow it.
+        let focus = self.selected.filter(|&b| self.band(host, b).is_spectral());
+        self.shared.focus.store(focus.map_or(-1.0, |b| b as f32));
+        if focus.is_some() {
+            for (i, (level, gain)) in self.focus_level.iter_mut().zip(self.focus_gain.iter_mut()).enumerate() {
+                let (l, g) = (self.shared.focus_level[i].load(), self.shared.focus_gain[i].load());
+                let t = self.shared.focus_threshold[i].load();
+                if (l - *level).abs() > 0.05 || (g - *gain).abs() > 0.02 || (t - self.focus_threshold[i]).abs() > 0.05 {
+                    dirty = true;
+                }
+                (*level, *gain, self.focus_threshold[i]) = (l, g, t);
+            }
+            dirty |= self.update_scope();
+        }
+        // A solo lasts while its band is selected: closing the panel or picking another band ends it.
+        for b in (0..BANDS).filter(|&b| self.selected != Some(b)) {
+            if Self::plain(host, &self.ids[b].solo) >= 0.5 {
+                Self::set(host, &self.ids[b].solo, 0.0);
+                dirty = true;
+            }
+        }
+        // The latency readout follows the engine (it changes once a mode switch completes).
+        let latency = self.shared.latency.load();
+        if latency != self.last_latency {
+            self.last_latency = latency;
+            dirty = true;
+        }
+        // The analyzer updates every UI tick so motion is as smooth as the display allows.
+        dirty |= self.update_spectrum();
+        // Host-side changes (automation, presets, undo) since the last frame, checked at frame
+        // rate rather than every tick.
+        if self.last_signature_check.elapsed() < std::time::Duration::from_millis(16) {
+            return dirty;
+        }
+        self.last_signature_check = Instant::now();
+        let mut signature = Vec::with_capacity(1 + BANDS * 13);
+        signature.push(host.normalized(OUT_GAIN.id));
+        signature.push(host.normalized(MODE.id));
+        signature.push(host.normalized(LP_RES.id));
+        for ids in &self.ids {
+            for id in [
+                &ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo, &ids.dyn_on, &ids.range,
+                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition, &ids.spectral, &ids.ssmooth, &ids.srel, &ids.rthresh,
+            ] {
+                signature.push(host.normalized(id));
+            }
+        }
+        if signature != self.signature {
+            self.signature = signature;
+            dirty = true;
+        }
+        dirty
+    }
+}
+
+impl EqView {
+    /// Every event, with the editor's writes going through `host` (a [`Recording`]).
+    fn handle_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        if let UiEvent::KeyDown { key, mods } = *event {
+            return self.key_event(key, mods, host);
+        }
+        if self.preset_menu.is_some() {
+            return self.preset_menu_event(event, host);
         }
         if self.menu.is_some() {
             return self.menu_event(event, host);
@@ -2789,9 +3457,30 @@ impl View for EqView {
                 changed |= peak != self.peak;
                 self.peak = peak;
                 // The help strip follows the pointer over the display; footer buttons light on hover.
-                changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP
+                changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP || pos.y < HEADER
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => {
+                // Header: presets, undo and redo, snapshot letters.
+                if pos.y < HEADER {
+                    let (y0, y1) = HEADER_ROW;
+                    let at = |x: (f64, f64)| Rect::new(x.0, y0, x.1, y1).contains(pos);
+                    if at(PRESET_PREV) {
+                        self.step_preset(host, -1);
+                    } else if at(PRESET_NEXT) {
+                        self.step_preset(host, 1);
+                    } else if at(PRESET_NAME) {
+                        self.reload_user_presets();
+                        let scroll = self.preset_index().map_or(0, |i| (i + 3).saturating_sub(PRESET_ROWS / 2)).min(self.preset_rows().len().saturating_sub(PRESET_ROWS));
+                        self.preset_menu = Some(PresetMenu { hover: None, scroll, naming: None });
+                    } else if at(UNDO_X) {
+                        self.undo(host);
+                    } else if at(REDO_X) {
+                        self.redo(host);
+                    } else if let Some(i) = self.slot_hits.iter().position(|r| r.contains(pos)) {
+                        self.slot_press = Some(i);
+                    }
+                    return true;
+                }
                 // Footer: processing mode and resolution.
                 if pos.y > FOOTER_TOP {
                     if let Some(i) = self.mode_hits.iter().position(|r| r.contains(pos)) {
@@ -2800,10 +3489,6 @@ impl View for EqView {
                     }
                     if let Some(r) = self.resolution_hit.filter(|r| r.contains(pos)) {
                         self.toggle_menu(MenuKind::Resolution, 0, r, host);
-                        return true;
-                    }
-                    if let Some(i) = self.slot_hits.iter().position(|r| r.contains(pos)) {
-                        self.slot_press = Some(i);
                         return true;
                     }
                     if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(pos)) {
@@ -3032,141 +3717,4 @@ impl View for EqView {
         }
     }
 
-    fn tick(&mut self, host: &dyn ParamHost) -> bool {
-        self.ticks = self.ticks.wrapping_add(1);
-        let (l, r) = self.shared.meter.load();
-        let mut dirty = self.meter.set_levels(l, r);
-        // Dynamic bands and the spectral stage move with the audio. Their telemetry arrives once
-        // per host block (which can be 20 ms), so the drawing eases towards each new value at the
-        // frame rate instead of stepping from block to block.
-        let dt = self.last_live.elapsed().as_secs_f64().min(0.1);
-        self.last_live = Instant::now();
-        let k = (1.0 - (-dt / LIVE_EASE_S).exp()) as f32;
-        let mut ease = |shown: &mut f32, mid: &mut f32, now: f32| {
-            *mid += (now - *mid) * k;
-            let next = *shown + (*mid - *shown) * k;
-            let next = if (now - next).abs() < 0.002 && (now - *mid).abs() < 0.002 { now } else { next };
-            if (next - *shown).abs() > 0.001 {
-                dirty = true;
-            }
-            *shown = next;
-        };
-        for ((shown, mid), now) in self.last_dynamic.iter_mut().zip(&mut self.mid_dynamic).zip(&self.shared.dynamic) {
-            ease(shown, mid, now.load());
-        }
-        for ((shown, mid), now) in self.last_spectral.iter_mut().zip(self.mid_spectral.iter_mut()).zip(&self.shared.spectral) {
-            ease(shown, mid, now.load());
-        }
-        // The selected band's level drives its scope dot.
-        if let Some(b) = self.selected {
-            let level = self.shared.level[b].load();
-            if self.last_level <= -119.0 {
-                (self.last_level, self.mid_level) = (level, level);
-            }
-            ease(&mut self.last_level, &mut self.mid_level, level);
-        }
-        // Peak hold: resting under the spectrum (not on a node, a control or the panel) for a moment
-        // starts collecting the spectrum's maxima; a grab keeps the held curve still.
-        let over_plot = self.pointer.is_some_and(|p| self.under_spectrum(p) && !self.panel_hits.is_some_and(|h| h.panel.contains(p)))
-            && self.hover.is_none()
-            && self.hot.is_none()
-            && self.drag.is_none();
-        if over_plot || self.grab.is_some() {
-            let since = *self.hold_since.get_or_insert_with(Instant::now);
-            if !self.holding && since.elapsed().as_secs_f64() >= HOLD_AFTER_S {
-                self.holding = true;
-                self.held.copy_from_slice(&self.post);
-            }
-        } else {
-            self.hold_since = None;
-            self.holding = false;
-        }
-        if self.holding && self.grab.is_none() {
-            for (held, &now) in self.held.iter_mut().zip(&self.post) {
-                if now > *held {
-                    *held = now;
-                    dirty = true;
-                }
-            }
-        }
-        let k = (1.0 - (-dt / HOLD_FADE_S).exp()) as f32;
-        let target = if self.holding { 1.0 } else { 0.0 };
-        let next = self.hold_alpha + (target - self.hold_alpha) * k;
-        let next = if (next - target).abs() < 0.005 { target } else { next };
-        dirty |= (next - self.hold_alpha).abs() > 0.001;
-        self.hold_alpha = next;
-        // The peak under a resting pointer follows the moving spectrum; its marker glides and fades.
-        if self.grab.is_none() && self.drag.is_none() && self.hover.is_none() && self.hot.is_none() {
-            let resting = self.pointer.filter(|&p| !self.panel_hits.is_some_and(|h| h.panel.contains(p)));
-            let peak = resting.and_then(|p| self.find_peak(p));
-            if peak != self.peak {
-                self.peak = peak;
-                dirty = true;
-            }
-        }
-        let fade = (1.0 - (-dt / PEAK_FADE_S).exp()) as f32;
-        let (pos, alpha) = &mut self.peak_marker;
-        let target = if self.grab.is_none() { self.peak.map(|pk| Point::new(fx(pk.freq), sy(pk.db))) } else { None };
-        if let Some(t) = target {
-            let next = if *alpha < 0.02 { t } else { pos.lerp(t, f64::from(fade)) };
-            dirty |= next.distance(*pos) > 0.05;
-            *pos = next;
-        }
-        let next = *alpha + (if target.is_some() { 1.0 } else { 0.0 } - *alpha) * fade;
-        let next = if next < 0.005 { 0.0 } else if next > 0.995 { 1.0 } else { next };
-        dirty |= (next - *alpha).abs() > 0.002;
-        *alpha = next;
-        // The selected band's per-bin detail (spectral scope): ask the engine for it, follow it.
-        let focus = self.selected.filter(|&b| self.band(host, b).is_spectral());
-        self.shared.focus.store(focus.map_or(-1.0, |b| b as f32));
-        if focus.is_some() {
-            for (i, (level, gain)) in self.focus_level.iter_mut().zip(self.focus_gain.iter_mut()).enumerate() {
-                let (l, g) = (self.shared.focus_level[i].load(), self.shared.focus_gain[i].load());
-                let t = self.shared.focus_threshold[i].load();
-                if (l - *level).abs() > 0.05 || (g - *gain).abs() > 0.02 || (t - self.focus_threshold[i]).abs() > 0.05 {
-                    dirty = true;
-                }
-                (*level, *gain, self.focus_threshold[i]) = (l, g, t);
-            }
-            dirty |= self.update_scope();
-        }
-        // A solo lasts while its band is selected: closing the panel or picking another band ends it.
-        for b in (0..BANDS).filter(|&b| self.selected != Some(b)) {
-            if Self::plain(host, &self.ids[b].solo) >= 0.5 {
-                Self::set(host, &self.ids[b].solo, 0.0);
-                dirty = true;
-            }
-        }
-        // The latency readout follows the engine (it changes once a mode switch completes).
-        let latency = self.shared.latency.load();
-        if latency != self.last_latency {
-            self.last_latency = latency;
-            dirty = true;
-        }
-        // The analyzer updates every UI tick so motion is as smooth as the display allows.
-        dirty |= self.update_spectrum();
-        // Host-side changes (automation, presets, undo) since the last frame, checked at frame
-        // rate rather than every tick.
-        if self.last_signature_check.elapsed() < std::time::Duration::from_millis(16) {
-            return dirty;
-        }
-        self.last_signature_check = Instant::now();
-        let mut signature = Vec::with_capacity(1 + BANDS * 13);
-        signature.push(host.normalized(OUT_GAIN.id));
-        signature.push(host.normalized(MODE.id));
-        signature.push(host.normalized(LP_RES.id));
-        for ids in &self.ids {
-            for id in [
-                &ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo, &ids.dyn_on, &ids.range,
-                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition, &ids.spectral, &ids.ssmooth, &ids.srel, &ids.rthresh,
-            ] {
-                signature.push(host.normalized(id));
-            }
-        }
-        if signature != self.signature {
-            self.signature = signature;
-            dirty = true;
-        }
-        dirty
-    }
 }

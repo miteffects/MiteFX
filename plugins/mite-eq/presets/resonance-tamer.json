@@ -1,0 +1,4 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "Resonance tamer (spectral)", "params": {
+  "b01_on": 1, "b01_type": 0, "b01_freq": 3000, "b01_q": 0.4,
+  "b01_dyn": 1, "b01_spectral": 1, "b01_srel": 1, "b01_rthresh": 6, "b01_range": -6
+} }

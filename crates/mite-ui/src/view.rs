@@ -50,6 +50,8 @@ pub enum UiEvent {
 pub enum Key {
     Escape,
     Delete,
+    Backspace,
+    Enter,
     Character(char),
 }
 

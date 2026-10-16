@@ -24,9 +24,9 @@ pub fn snapshot_ids() -> impl Iterator<Item = String> {
     (0..BANDS).flat_map(|b| SNAPSHOT_PARAMS.iter().map(move |p| band_id(b, p)))
 }
 
-/// The saved form of the snapshots.
-#[derive(Default, Clone, Serialize, Deserialize)]
-struct State {
+/// The saved form of the snapshots (also what undo keeps).
+#[derive(Default, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct State {
     active: usize,
     slots: [Option<Values>; SLOTS],
 }
@@ -65,6 +65,15 @@ impl Snapshots {
 
     pub fn set_active(&self, slot: usize) {
         self.state().active = slot.min(SLOTS - 1);
+    }
+
+    /// Everything stored, for undo.
+    pub fn export(&self) -> State {
+        self.state().clone()
+    }
+
+    pub fn import(&self, state: State) {
+        *self.state() = state;
     }
 
     /// The saved form, with `live` (the band parameters now) as the active slot.

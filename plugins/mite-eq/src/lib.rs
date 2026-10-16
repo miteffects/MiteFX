@@ -12,6 +12,7 @@ use nih_plug::prelude::*;
 pub mod dsp;
 pub mod editor;
 pub mod params;
+pub mod presets;
 pub mod snapshots;
 
 use dsp::{EqEngine, Output, PhaseMode};
@@ -45,19 +46,21 @@ pub struct EqShared {
     pub focus_level: [AtomicF32; SPECTRAL_POINTS],
     pub focus_threshold: [AtomicF32; SPECTRAL_POINTS],
     pub focus_gain: [AtomicF32; SPECTRAL_POINTS],
-    /// Snapshots A–D (the parameters' store, shared with the editor).
+    /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
     pub snapshots: Arc<snapshots::Snapshots>,
+    pub preset: Arc<presets::CurrentPreset>,
 }
 
 impl EqShared {
     pub fn new() -> Self {
-        Self::with_snapshots(Arc::new(snapshots::Snapshots::new()))
+        Self::with_stores(Arc::new(snapshots::Snapshots::new()), Arc::new(presets::CurrentPreset::default()))
     }
 
-    /// Telemetry around the parameters' snapshot store.
-    pub fn with_snapshots(snapshots: Arc<snapshots::Snapshots>) -> Self {
+    /// Telemetry around the parameters' snapshot and preset stores.
+    pub fn with_stores(snapshots: Arc<snapshots::Snapshots>, preset: Arc<presets::CurrentPreset>) -> Self {
         Self {
             snapshots,
+            preset,
             meter: StereoMeter::new(MINUS_INFINITY_DB),
             pre: SpectrumTap::new(editor::ANALYZER_SIZE),
             post: SpectrumTap::new(editor::ANALYZER_SIZE),
@@ -117,7 +120,7 @@ impl Default for MiteEq {
         let params = Arc::new(EqParams::default());
         let settings = std::array::from_fn(|i| params.bands[i].settings());
         let engine = EqEngine::new(48_000.0, &settings, params.out_gain.value());
-        let shared = Arc::new(EqShared::with_snapshots(params.snapshots.clone()));
+        let shared = Arc::new(EqShared::with_stores(params.snapshots.clone(), params.preset.clone()));
         Self { params, engine, shared, reported_latency: 0 }
     }
 }

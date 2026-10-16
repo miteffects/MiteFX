@@ -1,0 +1,4 @@
+{ "plugin": "Mite EQ", "version": 1, "name": "De-ess (dynamic)", "params": {
+  "b01_on": 1, "b01_type": 0, "b01_freq": 7000, "b01_q": 2.0,
+  "b01_dyn": 1, "b01_range": -6, "b01_thresh": -30, "b01_attack": 1, "b01_release": 60, "b01_ratio": 4
+} }

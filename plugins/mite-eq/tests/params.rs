@@ -59,3 +59,12 @@ fn snapshots_are_saved_with_the_state_and_restored() {
     assert_eq!(active.len(), 24 * 22);
     assert_eq!(active.get("b01_freq").copied(), Some(params.bands[0].freq.default_normalized_value()));
 }
+
+#[test]
+fn the_current_preset_name_is_saved_with_the_state() {
+    let params = EqParams::default();
+    params.preset.set(Some("Mix bus polish".to_owned()));
+    let restored = EqParams::default();
+    restored.deserialize_fields(&params.serialize_fields());
+    assert_eq!(restored.preset.get().as_deref(), Some("Mix bus polish"));
+}

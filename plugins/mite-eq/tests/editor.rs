@@ -386,9 +386,9 @@ fn above_the_spectrum_the_pointer_ignores_its_peaks() {
     assert!((band_plain(&host, 1, Q.id) - 1.0).abs() < 0.01, "q {}", band_plain(&host, 1, Q.id));
 }
 
-/// The footer's snapshot letters A–D.
+/// The header's snapshot letters A–D.
 fn slot(i: usize) -> Point {
-    Point::new(680.0 + 38.0 * i as f64, 732.0)
+    Point::new(604.0 + 38.0 * i as f64, 28.0)
 }
 
 #[test]
@@ -420,3 +420,92 @@ fn dragging_a_letter_onto_another_copies_that_snapshot() {
     assert!((plain(&host, GAIN.id) - 9.0).abs() < 0.01, "C {}", plain(&host, GAIN.id));
 }
 
+
+const UNDO: Point = Point::new(508.0, 28.0);
+const REDO: Point = Point::new(544.0, 28.0);
+const PRESET_NAME: Point = Point::new(311.0, 28.0);
+const PRESET_NEXT: Point = Point::new(456.0, 28.0);
+
+/// Row `k` of the open preset list (0: "Save as…", 1: the factory heading, 2: Init, 3: …).
+fn preset_row(k: usize) -> Point {
+    Point::new(300.0, 64.0 + 28.0 * k as f64)
+}
+
+fn key(view: &mut EqView, host: &MemoryParamHost, key: Key, ctrl: bool, shift: bool) -> bool {
+    let mods = Modifiers { ctrl, shift, ..Modifiers::default() };
+    view.event(&UiEvent::KeyDown { key, mods }, host)
+}
+
+#[test]
+fn undo_and_redo_step_through_the_editors_own_edits() {
+    let (mut view, host) = setup();
+    // One drag is one step.
+    drag(&mut view, &host, NODE, Point::new(NODE.x, NODE.y - 88.0));
+    let raised = plain(&host, GAIN.id);
+    assert!(raised > 5.0, "{raised}");
+    click(&mut view, &host, UNDO);
+    assert!(plain(&host, GAIN.id).abs() < 0.01, "undone {}", plain(&host, GAIN.id));
+    draw(&mut view, &host);
+    click(&mut view, &host, REDO);
+    assert!((plain(&host, GAIN.id) - raised).abs() < 0.01);
+    // The keys do the same.
+    assert!(key(&mut view, &host, Key::Character('z'), true, false));
+    assert!(plain(&host, GAIN.id).abs() < 0.01);
+    assert!(key(&mut view, &host, Key::Character('Z'), true, true));
+    assert!((plain(&host, GAIN.id) - raised).abs() < 0.01);
+}
+
+#[test]
+fn automation_is_not_an_undo_step() {
+    let (mut view, host) = setup();
+    view.tick(&host);
+    // The host moves the gain (automation): nothing to undo.
+    host.set_plain(&band_id(0, GAIN.id), 7.0);
+    view.tick(&host);
+    click(&mut view, &host, UNDO);
+    assert_eq!(plain(&host, GAIN.id), 7.0);
+}
+
+#[test]
+fn presets_load_from_the_list_and_step_with_the_arrows() {
+    let (mut view, host) = setup();
+    click(&mut view, &host, PRESET_NAME);
+    draw(&mut view, &host);
+    // Row 3: the first factory preset after Init (vocal: a low cut at 90 Hz in band 1).
+    click(&mut view, &host, preset_row(3));
+    assert_eq!(band_plain(&host, 0, TYPE.id), 3.0, "a low cut");
+    assert!((band_plain(&host, 0, FREQ.id) - 90.0).abs() < 0.5);
+    assert_eq!(band_plain(&host, 3, ON.id), 1.0);
+    draw(&mut view, &host);
+    // The next one replaces it completely (what it leaves out goes back to its default).
+    click(&mut view, &host, PRESET_NEXT);
+    assert!((band_plain(&host, 0, FREQ.id) - 30.0).abs() < 0.5, "kick preset {}", band_plain(&host, 0, FREQ.id));
+    // Loading a preset is an undo step.
+    draw(&mut view, &host);
+    click(&mut view, &host, UNDO);
+    assert!((band_plain(&host, 0, FREQ.id) - 90.0).abs() < 0.5);
+}
+
+#[test]
+fn save_as_types_a_name_and_writes_a_user_preset() {
+    let dir = std::env::temp_dir().join(format!("mitefx-editor-presets-{}", std::process::id()));
+    let (view, host) = setup();
+    let mut view = view.with_preset_dir(dir.clone());
+    host.set_plain(&band_id(0, GAIN.id), 5.0);
+    click(&mut view, &host, PRESET_NAME);
+    draw(&mut view, &host);
+    click(&mut view, &host, preset_row(0));
+    // The suggested name cleared, then "Bright".
+    for _ in 0..12 {
+        key(&mut view, &host, Key::Backspace, false, false);
+    }
+    for c in "Bright".chars() {
+        key(&mut view, &host, Key::Character(c), false, false);
+    }
+    assert!(key(&mut view, &host, Key::Enter, false, false));
+    let saved = mite_eq::presets::user_in(&dir);
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert_eq!(saved[0].name, "Bright");
+    assert_eq!(saved[0].values.get("b01_gain").copied(), Some(5.0));
+    let _ = std::fs::remove_dir_all(&dir);
+}

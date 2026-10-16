@@ -314,6 +314,8 @@ pub const LP_RES: ChoiceSpec = ChoiceSpec { id: "lp_res", name: "Linear Phase Re
 
 /// The key the snapshots are saved under in the plugin state (frozen, like the parameter ids).
 pub const SNAPSHOTS_KEY: &str = "snapshots";
+/// The key the current preset's name is saved under.
+pub const PRESET_KEY: &str = "preset";
 
 /// The per-band parameters a snapshot holds (every one but solo, which is an audition).
 pub const SNAPSHOT_PARAMS: [&str; 22] = [
@@ -461,8 +463,10 @@ pub struct EqParams {
     pub auto_gain: BoolParam,
     pub delta: BoolParam,
     pub bypass: BoolParam,
-    /// Snapshots A–D (not parameters: saved with the state through `serialize_fields`).
+    /// Snapshots A–D and the current preset's name (not parameters: saved with the state
+    /// through `serialize_fields`).
     pub snapshots: std::sync::Arc<crate::snapshots::Snapshots>,
+    pub preset: std::sync::Arc<crate::presets::CurrentPreset>,
     pub bands: [BandParams; BANDS],
 }
 
@@ -478,6 +482,7 @@ impl Default for EqParams {
             delta: bool_param(&DELTA, DELTA.name.to_owned()),
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()).make_bypass(),
             snapshots: std::sync::Arc::new(crate::snapshots::Snapshots::new()),
+            preset: std::sync::Arc::new(crate::presets::CurrentPreset::default()),
             bands: std::array::from_fn(BandParams::new),
         }
     }
@@ -498,13 +503,18 @@ unsafe impl Params for EqParams {
         let ptrs = self.ptrs();
         // SAFETY: the pointers point into `self` (see above).
         let live = crate::snapshots::snapshot_ids().filter_map(|id| ptrs.get(&id).map(|p| (id.clone(), unsafe { p.unmodulated_normalized_value() }))).collect();
-        [(SNAPSHOTS_KEY.to_owned(), self.snapshots.to_json(live))].into_iter().collect()
+        let mut out: std::collections::BTreeMap<String, String> = [(SNAPSHOTS_KEY.to_owned(), self.snapshots.to_json(live))].into_iter().collect();
+        if let Some(name) = self.preset.get() {
+            out.insert(PRESET_KEY.to_owned(), name);
+        }
+        out
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
         if let Some(json) = serialized.get(SNAPSHOTS_KEY) {
             self.snapshots.load_json(json);
         }
+        self.preset.set(serialized.get(PRESET_KEY).cloned());
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
