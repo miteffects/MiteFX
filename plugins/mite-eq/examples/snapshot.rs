@@ -5,37 +5,14 @@
 
 use std::sync::Arc;
 
-use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::EqView;
-use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use mite_eq::params::{band_id, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, SPECTRAL, SREL, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::render::render_view;
-use mite_ui::{MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
-
-/// Stand-in spec for choice/bool parameters in the in-memory host: 0 … n−1, linear.
-fn index_spec(id: &'static str, count: usize, default: usize) -> ParamSpec {
-    ParamSpec {
-        id,
-        name: id,
-        unit: "",
-        min: 0.0,
-        max: (count - 1) as f32,
-        default: default as f32,
-        scale: ParamScale::Linear,
-        smoothing_ms: 0.0,
-        decimals: 0,
-        wheel_step: 1.0,
-        wheel_step_fine: 1.0,
-        display: ParamDisplay::Number,
-    }
-}
-
-fn leak(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
-}
+use mite_ui::{Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
@@ -48,35 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => ThemeKind::Dark,
     };
 
-    let mut host = MemoryParamHost::new()
-        .with(OUT_GAIN)
-        .with_id("mode", index_spec("mode", 3, 0))
-        .with_id("lp_res", index_spec("lp_res", 4, 2));
-    for b in 0..BANDS {
-        host = host
-            .with_id(leak(band_id(b, ON.id)), index_spec("on", 2, 0))
-            .with_id(leak(band_id(b, TYPE.id)), index_spec("type", TYPE.choices.len(), 0))
-            .with_id(leak(band_id(b, FREQ.id)), FREQ)
-            .with_id(leak(band_id(b, GAIN.id)), GAIN)
-            .with_id(leak(band_id(b, Q.id)), Q)
-            .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default))
-            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0))
-            .with_id(leak(band_id(b, DYN.id)), index_spec("dyn", 2, 0))
-            .with_id(leak(band_id(b, RANGE.id)), RANGE)
-            .with_id(leak(band_id(b, THRESH.id)), THRESH)
-            .with_id(leak(band_id(b, ATTACK.id)), ATTACK)
-            .with_id(leak(band_id(b, RELEASE.id)), RELEASE)
-            .with_id(leak(band_id(b, RATIO.id)), RATIO)
-            .with_id(leak(band_id(b, DMODE.id)), index_spec("dmode", 2, 0))
-            .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
-            .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
-            .with_id(leak(band_id(b, TTIME.id)), TTIME)
-            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION)
-            .with_id(leak(band_id(b, SPECTRAL.id)), index_spec("spectral", 2, 0))
-            .with_id(leak(band_id(b, SSMOOTH.id)), SSMOOTH)
-            .with_id(leak(band_id(b, SREL.id)), index_spec("srel", 2, 0))
-            .with_id(leak(band_id(b, RTHRESH.id)), RTHRESH);
-    }
+    let host = mite_eq::editor::memory_host();
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),
         (BandType::Bell, 160.0, 3.5, 0.9),

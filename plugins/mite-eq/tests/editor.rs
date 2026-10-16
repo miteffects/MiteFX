@@ -2,35 +2,13 @@
 
 use std::sync::Arc;
 
-use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::BandType;
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use mite_eq::params::{band_id, DMODE, DYN, SUSTAIN, TRANSIENT, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, RANGE, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::vello::Scene;
 use mite_ui::{DrawCx, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, Typesetter, UiEvent, View};
-
-fn index_spec(id: &'static str, count: usize, default: usize) -> ParamSpec {
-    ParamSpec {
-        id,
-        name: id,
-        unit: "",
-        min: 0.0,
-        max: (count - 1) as f32,
-        default: default as f32,
-        scale: ParamScale::Linear,
-        smoothing_ms: 0.0,
-        decimals: 0,
-        wheel_step: 1.0,
-        wheel_step_fine: 1.0,
-        display: ParamDisplay::Number,
-    }
-}
-
-fn leak(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
-}
 
 /// One enabled bell at 1 kHz, 0 dB: its node sits at (690.2, 362) in design units.
 fn setup() -> (EqView, MemoryParamHost) {
@@ -38,35 +16,7 @@ fn setup() -> (EqView, MemoryParamHost) {
 }
 
 fn setup_with(shared: Arc<EqShared>) -> (EqView, MemoryParamHost) {
-    let mut host = MemoryParamHost::new()
-        .with(OUT_GAIN)
-        .with_id("mode", index_spec("mode", 3, 0))
-        .with_id("lp_res", index_spec("lp_res", 4, 2));
-    for b in 0..BANDS {
-        host = host
-            .with_id(leak(band_id(b, ON.id)), index_spec("on", 2, 0))
-            .with_id(leak(band_id(b, TYPE.id)), index_spec("type", TYPE.choices.len(), 0))
-            .with_id(leak(band_id(b, FREQ.id)), FREQ)
-            .with_id(leak(band_id(b, GAIN.id)), GAIN)
-            .with_id(leak(band_id(b, Q.id)), Q)
-            .with_id(leak(band_id(b, SLOPE.id)), index_spec("slope", SLOPE.choices.len(), SLOPE.default))
-            .with_id(leak(band_id(b, STEREO.id)), index_spec("stereo", STEREO.choices.len(), 0))
-            .with_id(leak(band_id(b, DYN.id)), index_spec("dyn", 2, 0))
-            .with_id(leak(band_id(b, RANGE.id)), RANGE)
-            .with_id(leak(band_id(b, THRESH.id)), THRESH)
-            .with_id(leak(band_id(b, ATTACK.id)), ATTACK)
-            .with_id(leak(band_id(b, RELEASE.id)), RELEASE)
-            .with_id(leak(band_id(b, RATIO.id)), RATIO)
-            .with_id(leak(band_id(b, DMODE.id)), index_spec("dmode", 2, 0))
-            .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
-            .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
-            .with_id(leak(band_id(b, TTIME.id)), TTIME)
-            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION)
-            .with_id(leak(band_id(b, SPECTRAL.id)), index_spec("spectral", 2, 0))
-            .with_id(leak(band_id(b, SSMOOTH.id)), SSMOOTH)
-            .with_id(leak(band_id(b, SREL.id)), index_spec("srel", 2, 0))
-            .with_id(leak(band_id(b, RTHRESH.id)), RTHRESH);
-    }
+    let host = mite_eq::editor::memory_host();
     host.set_plain(&band_id(0, ON.id), 1.0);
     host.set_plain(&band_id(0, TYPE.id), BandType::Bell as usize as f32);
     host.set_plain(&band_id(0, FREQ.id), 1000.0);
@@ -287,3 +237,50 @@ fn live_spectral_cuts_draw_on_the_plot() {
     assert!(view.tick(&host));
     draw(&mut view, &host);
 }
+
+fn global(host: &MemoryParamHost, id: &str) -> f32 {
+    host.plain(id, host.normalized(id))
+}
+
+#[test]
+fn the_footer_toggles_auto_gain_delta_and_bypass() {
+    let (mut view, host) = setup();
+    // Three icon toggles left of the dials (x 852…966).
+    for (x, id) in [(869.0, "auto_gain"), (909.0, "delta"), (949.0, "bypass")] {
+        click(&mut view, &host, Point::new(x, 732.0));
+        assert_eq!(global(&host, id), 1.0, "{id} on");
+        draw(&mut view, &host);
+        click(&mut view, &host, Point::new(x, 732.0));
+        assert_eq!(global(&host, id), 0.0, "{id} off");
+        draw(&mut view, &host);
+    }
+}
+
+#[test]
+fn the_footer_mix_dial_drags_down_to_dry() {
+    let (mut view, host) = setup();
+    // Dials at x 1012 (mix), 1104 (pan), 1196 (output).
+    drag(&mut view, &host, Point::new(1012.0, 732.0), Point::new(1012.0, 832.0));
+    let mix = global(&host, "mix");
+    assert!(mix < 60.0, "mix {mix}");
+}
+
+#[test]
+fn solo_listens_to_one_band_until_its_panel_closes() {
+    let (mut view, host) = setup();
+    // The solo button sits right of the stereo dropdown in the selected band's panel.
+    let solo = Point::new(564.0, 632.0);
+    click(&mut view, &host, solo);
+    assert_eq!(plain(&host, "solo"), 1.0);
+    draw(&mut view, &host);
+    click(&mut view, &host, solo);
+    assert_eq!(plain(&host, "solo"), 0.0);
+    draw(&mut view, &host);
+    click(&mut view, &host, solo);
+    draw(&mut view, &host);
+    // Closing the panel (clicking empty plot) ends the solo.
+    click(&mut view, &host, Point::new(200.0, 200.0));
+    view.tick(&host);
+    assert_eq!(plain(&host, "solo"), 0.0);
+}
+

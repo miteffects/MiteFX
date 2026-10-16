@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use mite_dsp::eq::{BandSettings, BandType};
-use mite_eq::dsp::{EqEngine, PhaseMode};
+use mite_eq::dsp::{EqEngine, Output, PhaseMode};
 use mite_eq::params::BANDS;
 use assert_no_alloc::assert_no_alloc as process_wrapper;
 
@@ -40,6 +40,15 @@ fn engine_process_never_allocates_in_any_mode() {
             settings[2].enabled = (i / 150) % 2 == 0;
             // The shelf's dynamics go spectral in every other mode.
             settings[1].dynamics.spectral = m % 2 == 1;
+            // The output stage switching all along: mix, delta, bypass, auto gain, balance and solo.
+            eq.set_output(Output {
+                mix: if (i / 50) % 2 == 0 { 1.0 } else { 0.4 },
+                delta: (i / 70) % 2 == 1,
+                bypass: (i / 110) % 2 == 1,
+                auto_gain: (i / 60) % 2 == 0,
+                pan: if (i / 80) % 2 == 0 { 0.0 } else { -0.5 },
+                solo: if (i / 130) % 2 == 1 { Some(0) } else { None },
+            });
             // Fresh input every block (feeding the output back in would stack the EQ on itself).
             l.fill(0.1);
             r.fill(-0.1);

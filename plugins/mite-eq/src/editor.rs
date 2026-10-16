@@ -17,8 +17,73 @@ use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
-use crate::params::{band_id, ATTACK, ATTACK_DIAL, LP_RES, MODE, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use crate::params::{
+    band_id, ATTACK, ATTACK_DIAL, AUTO_GAIN, BANDS, BYPASS, DELTA, DMODE, DYN, FREQ, GAIN, LP_RES, MIX, MODE, ON, OUT_GAIN, OUT_PAN, Q, RANGE, RATIO, RELEASE,
+    RELEASE_DIAL, RTHRESH, SLOPE, SOLO, SPECTRAL, SREL, SSMOOTH, STEREO, SUSTAIN, THRESH, TRANSIENT, TRANSITION, TTIME, TYPE,
+};
 use crate::{EqShared, SPECTRAL_POINTS};
+
+/// A stand-in host holding every Mite EQ parameter at its default, for tests, the standalone
+/// preview and benchmarks.
+pub fn memory_host() -> mite_ui::MemoryParamHost {
+    use mite_core::{BoolSpec, ChoiceSpec, ParamDisplay, ParamScale, ParamSpec};
+    fn leak(s: String) -> &'static str {
+        Box::leak(s.into_boxed_str())
+    }
+    let index = |id: &'static str, count: usize, default: usize| ParamSpec {
+        id,
+        name: id,
+        unit: "",
+        min: 0.0,
+        max: (count - 1) as f32,
+        default: default as f32,
+        scale: ParamScale::Linear,
+        smoothing_ms: 0.0,
+        decimals: 0,
+        wheel_step: 1.0,
+        wheel_step_fine: 1.0,
+        display: ParamDisplay::Number,
+    };
+    let choice = |c: &ChoiceSpec| index(c.id, c.choices.len(), c.default);
+    let boolean = |b: &BoolSpec| index(b.id, 2, usize::from(b.default));
+    let mut host = mite_ui::MemoryParamHost::new()
+        .with(OUT_GAIN)
+        .with(choice(&MODE))
+        .with(choice(&LP_RES))
+        .with(OUT_PAN)
+        .with(MIX)
+        .with(boolean(&AUTO_GAIN))
+        .with(boolean(&DELTA))
+        .with(boolean(&BYPASS));
+    for b in 0..BANDS {
+        let id = |param: &str| leak(band_id(b, param));
+        host = host
+            .with_id(id(ON.id), boolean(&ON))
+            .with_id(id(TYPE.id), choice(&TYPE))
+            .with_id(id(FREQ.id), FREQ)
+            .with_id(id(GAIN.id), GAIN)
+            .with_id(id(Q.id), Q)
+            .with_id(id(SLOPE.id), choice(&SLOPE))
+            .with_id(id(STEREO.id), choice(&STEREO))
+            .with_id(id(DYN.id), boolean(&DYN))
+            .with_id(id(RANGE.id), RANGE)
+            .with_id(id(THRESH.id), THRESH)
+            .with_id(id(ATTACK.id), ATTACK)
+            .with_id(id(RELEASE.id), RELEASE)
+            .with_id(id(RATIO.id), RATIO)
+            .with_id(id(DMODE.id), choice(&DMODE))
+            .with_id(id(SUSTAIN.id), SUSTAIN)
+            .with_id(id(TRANSIENT.id), TRANSIENT)
+            .with_id(id(TTIME.id), TTIME)
+            .with_id(id(TRANSITION.id), TRANSITION)
+            .with_id(id(SPECTRAL.id), boolean(&SPECTRAL))
+            .with_id(id(SSMOOTH.id), SSMOOTH)
+            .with_id(id(SREL.id), boolean(&SREL))
+            .with_id(id(RTHRESH.id), RTHRESH)
+            .with_id(id(SOLO.id), boolean(&SOLO));
+    }
+    host
+}
 
 /// Mite EQ wears the EQ accent (tokens.json `color.accent.eq`).
 pub const ACCENT: &str = "eq";
@@ -49,11 +114,14 @@ const PANEL_H: f64 = 104.0;
 /// Extra height of the dynamics row (dynamic bands only).
 const PANEL_DYN_H: f64 = 104.0;
 /// Panel dials: diameter, and the x of the rightmost dial's centre relative to the panel (clear
-/// of the close and bypass buttons).
+/// of the close and remove buttons).
 const PANEL_DIAL: f64 = 56.0;
 const PANEL_LAST_DIAL_X: f64 = 596.0;
 const PANEL_DIAL_STEP: f64 = 84.0;
 const MENU_ITEM_H: f64 = 30.0;
+/// Footer: the distance between dial centres, and the toggles' size.
+const FOOTER_DIAL_STEP: f64 = 92.0;
+const TOGGLE: f64 = 34.0;
 /// The gain dial's dynamics ring: its radius, and the radial band that grabs it.
 const RING_R: f64 = PANEL_DIAL / 2.0 + 7.0;
 const RING_HIT: (f64, f64) = (PANEL_DIAL / 2.0 + 1.0, PANEL_DIAL / 2.0 + 14.0);
@@ -121,6 +189,23 @@ fn note_name(freq: f64) -> String {
     format!("{}{} {}{} ct", NAMES[idx], octave, if cents < 0 { "−" } else { "+" }, cents.abs())
 }
 
+/// One line of the help strip: plain text, and values in slots as wide as the widest value they
+/// can hold (the template), so moving the pointer changes the numbers without moving the words.
+#[derive(Default)]
+struct Help(Vec<(String, Option<String>)>);
+
+impl Help {
+    fn text(mut self, text: impl Into<String>) -> Self {
+        self.0.push((text.into(), None));
+        self
+    }
+
+    fn slot(mut self, value: impl Into<String>, widest: impl Into<String>) -> Self {
+        self.0.push((value.into(), Some(widest.into())));
+        self
+    }
+}
+
 /// Host ids for one band, built once.
 struct BandIds {
     on: String,
@@ -145,6 +230,7 @@ struct BandIds {
     srel: String,
     rthresh: String,
     ssmooth: String,
+    solo: String,
 }
 
 impl BandIds {
@@ -172,6 +258,7 @@ impl BandIds {
             srel: band_id(b, SREL.id),
             rthresh: band_id(b, RTHRESH.id),
             ssmooth: band_id(b, SSMOOTH.id),
+            solo: band_id(b, SOLO.id),
         }
     }
 }
@@ -210,6 +297,11 @@ struct NodeDrag {
     /// Relative spectral threshold, dB over the surroundings.
     relative: f64,
 }
+
+/// Live dynamic gains and levels on the plot follow the engine through two eased stages of this
+/// time constant each, s. One stage alone turns block-rate telemetry into a ramp that restarts at
+/// every block (speed jumps); two make the speed change smoothly as well.
+const LIVE_EASE_S: f64 = 0.012;
 
 /// Analyzer motion: time constants of the rise and of the fall, s.
 const SPECTRUM_RISE_S: f64 = 0.06;
@@ -365,6 +457,94 @@ enum Icon {
     Resolution(usize),
 }
 
+/// Every icon button looks and answers alike: raised on `fill`, its border lit in `color` while
+/// hovered or on, tinted while on. Returns the ink for its glyph.
+fn icon_button(scene: &mut mite_ui::vello::Scene, theme: &mite_ui::Theme, r: Rect, fill: Color, hot: bool, on: bool, color: Color) -> Color {
+    let shape = RoundedRect::from_rect(r, 6.0);
+    raised(scene, shape, fill, if hot || on { color } else { theme.panel_control_border }, theme.shadows);
+    if on {
+        scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
+    }
+    if on {
+        color
+    } else if hot {
+        theme.text_hi
+    } else {
+        theme.text_mid
+    }
+}
+
+/// A bin centred on `c`: removes the band.
+fn draw_bin(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
+    let round = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+    let mut bin = BezPath::new();
+    // Lid and handle.
+    bin.move_to((c.x - 6.5, c.y - 4.0));
+    bin.line_to((c.x + 6.5, c.y - 4.0));
+    bin.move_to((c.x - 2.0, c.y - 4.0));
+    bin.line_to((c.x - 2.0, c.y - 6.0));
+    bin.line_to((c.x + 2.0, c.y - 6.0));
+    bin.line_to((c.x + 2.0, c.y - 4.0));
+    // Body, narrowing to the bottom, with two ribs.
+    bin.move_to((c.x - 5.0, c.y - 2.0));
+    bin.line_to((c.x - 4.0, c.y + 6.5));
+    bin.line_to((c.x + 4.0, c.y + 6.5));
+    bin.line_to((c.x + 5.0, c.y - 2.0));
+    bin.move_to((c.x - 1.5, c.y));
+    bin.line_to((c.x - 1.3, c.y + 4.0));
+    bin.move_to((c.x + 1.5, c.y));
+    bin.line_to((c.x + 1.3, c.y + 4.0));
+    scene.stroke(&round, Affine::IDENTITY, color, None, &bin);
+}
+
+/// Headphones centred on `c`: the solo glyph.
+fn draw_headphones(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
+    let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
+    let band = mite_ui::kurbo::Arc::new(c + (0.0, 1.5), (6.0, 6.0), std::f64::consts::PI, std::f64::consts::PI, 0.0);
+    scene.stroke(&round, Affine::IDENTITY, color, None, &band);
+    for dx in [-6.0, 6.0] {
+        let cup = RoundedRect::new(c.x + dx - 2.0, c.y + 1.0, c.x + dx + 2.0, c.y + 7.0, 1.5);
+        scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &cup);
+    }
+}
+
+/// The footer toggles' glyphs centred on `c`: auto gain (a boost brought back to the line),
+/// delta (Δ), bypass (power).
+fn draw_toggle_glyph(scene: &mut mite_ui::vello::Scene, which: usize, c: Point, color: Color) {
+    let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+    match which {
+        0 => {
+            let mut bump = BezPath::new();
+            bump.move_to((c.x - 8.0, c.y + 1.0));
+            bump.curve_to((c.x - 3.0, c.y + 1.0), (c.x - 3.0, c.y - 7.0), (c.x, c.y - 7.0));
+            bump.curve_to((c.x + 3.0, c.y - 7.0), (c.x + 3.0, c.y + 1.0), (c.x + 8.0, c.y + 1.0));
+            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.5), None, &bump);
+            let mut line = BezPath::new();
+            line.move_to((c.x - 8.0, c.y + 6.0));
+            line.line_to((c.x + 8.0, c.y + 6.0));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &line);
+        }
+        1 => {
+            let mut delta = BezPath::new();
+            delta.move_to((c.x, c.y - 6.5));
+            delta.line_to((c.x + 7.0, c.y + 5.5));
+            delta.line_to((c.x - 7.0, c.y + 5.5));
+            delta.close_path();
+            scene.stroke(&round, Affine::IDENTITY, color, None, &delta);
+        }
+        _ => {
+            let mut stem = BezPath::new();
+            stem.move_to((c.x, c.y - 6.5));
+            stem.line_to((c.x, c.y - 1.0));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &stem);
+            scene.stroke(&round, Affine::IDENTITY, color, None, &mite_ui::kurbo::Arc::new(c + (0.0, 0.5), (5.5, 5.5), -1.0, 5.3, 0.0));
+        }
+    }
+}
+
+/// The footer toggles' parameters, in their order.
+const TOGGLES: [&str; 3] = [AUTO_GAIN.id, DELTA.id, BYPASS.id];
+
 fn draw_icon(scene: &mut mite_ui::vello::Scene, icon: Icon, at: Point, color: Color) {
     match icon {
         Icon::Type(kind) => draw_type_icon(scene, kind, at, color),
@@ -449,7 +629,10 @@ struct PanelHits {
     remove_dynamics: Option<Rect>,
     /// The spectral compressor's fixed/relative threshold toggle.
     relative: Option<Rect>,
-    bypass: Rect,
+    /// Listen to the band alone (not for a tilt, which reaches everything).
+    solo: Option<Rect>,
+    /// Removes the band.
+    remove: Rect,
     close: Rect,
 }
 
@@ -480,7 +663,12 @@ pub struct EqView {
     panel_knobs: Vec<Knob>,
     panel_hits: Option<PanelHits>,
     menu: Option<Menu>,
-    out_knob: Knob,
+    /// Footer dials: mix, balance, output.
+    footer_knobs: Vec<Knob>,
+    /// Footer toggles, set while drawing: auto gain, delta, bypass.
+    toggle_hits: [Rect; 3],
+    /// The band being listened to alone, as last drawn.
+    soloed: Option<usize>,
     meter: LevelMeter,
     analyzer: Analyzer,
     samples: Vec<f32>,
@@ -500,6 +688,10 @@ pub struct EqView {
     slope_wheel: f32,
     /// Dynamic gains last drawn, dB.
     last_dynamic: [f32; BANDS],
+    /// The first easing stage of the live gains and the selected band's level.
+    mid_dynamic: [f32; BANDS],
+    mid_spectral: [f32; SPECTRAL_POINTS],
+    mid_level: f32,
     /// The selected band's detected level last drawn, dBFS.
     last_level: f32,
     /// The spectral stage's gain curve last drawn, dB, and the selected band's per-bin level
@@ -514,6 +706,8 @@ pub struct EqView {
     scope_out: [f32; SPECTRAL_POINTS],
     scope_threshold: [f32; SPECTRAL_POINTS],
     last_scope: Instant,
+    /// When the live gains were last eased.
+    last_live: Instant,
     hot: Option<Hot>,
     /// Origin the panel dials were laid out for, and whether the dynamics row was included.
     knobs_layout: Option<(Point, Option<f64>)>,
@@ -531,8 +725,16 @@ impl EqView {
     pub fn new(shared: Arc<EqShared>) -> Self {
         let analyzer = Analyzer::new(ANALYZER_SIZE);
         let bins = analyzer.bins();
-        let mut out_knob = Knob::new(OUT_GAIN, "", KnobKind::Bipolar, Point::new(1196.0, FOOTER_TOP + 28.0), 34.0);
-        out_knob.value_inside = false;
+        // Footer dials, right to left from the output; each has its label and value beside it.
+        let footer_knobs = [(MIX, KnobKind::Unipolar), (OUT_PAN, KnobKind::Bipolar), (OUT_GAIN, KnobKind::Bipolar)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (spec, kind))| {
+                let mut k = Knob::new(spec, "", kind, Point::new(1196.0 - FOOTER_DIAL_STEP * (2 - i) as f64, FOOTER_TOP + 28.0), 34.0);
+                k.value_inside = false;
+                k
+            })
+            .collect();
         Self {
             shared,
             ids: (0..BANDS).map(BandIds::new).collect(),
@@ -543,7 +745,9 @@ impl EqView {
             panel_knobs: Vec::new(),
             panel_hits: None,
             menu: None,
-            out_knob,
+            footer_knobs,
+            toggle_hits: [Rect::ZERO; 3],
+            soloed: None,
             meter: LevelMeter::new(Rect::new(1233.5, DISPLAY_TOP + 19.5, 1266.5, DISPLAY_TOP + 592.5)),
             analyzer,
             samples: vec![0.0; ANALYZER_SIZE],
@@ -560,6 +764,9 @@ impl EqView {
             last_signature_check: Instant::now(),
             slope_wheel: 0.0,
             last_dynamic: [0.0; BANDS],
+            mid_dynamic: [0.0; BANDS],
+            mid_spectral: [0.0; SPECTRAL_POINTS],
+            mid_level: -120.0,
             last_level: -120.0,
             last_spectral: [0.0; SPECTRAL_POINTS],
             focus_level: [-150.0; SPECTRAL_POINTS],
@@ -569,6 +776,7 @@ impl EqView {
             scope_out: [-150.0; SPECTRAL_POINTS],
             scope_threshold: [-150.0; SPECTRAL_POINTS],
             last_scope: Instant::now(),
+            last_live: Instant::now(),
             hot: None,
             knobs_layout: None,
             panel_dock: None,
@@ -581,6 +789,11 @@ impl EqView {
 
     fn plain(host: &dyn ParamHost, id: &str) -> f32 {
         host.plain(id, host.normalized(id))
+    }
+
+    /// The band soloed now: the first enabled band with solo on.
+    fn soloed_band(&self, host: &dyn ParamHost) -> Option<usize> {
+        (0..BANDS).find(|&b| Self::plain(host, &self.ids[b].solo) >= 0.5 && Self::plain(host, &self.ids[b].on) >= 0.5)
     }
 
     fn band(&self, host: &dyn ParamHost, b: usize) -> BandSettings {
@@ -731,21 +944,59 @@ impl EqView {
         moved
     }
 
-    fn help_text(&self, host: &dyn ParamHost) -> String {
+    fn help_text(&self, host: &dyn ParamHost) -> Help {
         let band_line = |b: usize| {
             let s = self.band(host, b);
-            let mut t = format!("Band {} · {} · {}", b + 1, BandType::NAMES[s.kind as usize], FREQ.format(s.freq as f32));
+            let mut h = Help::default()
+                .slot(format!("Band {}", b + 1), "Band 24")
+                .text(" · ")
+                .slot(BandType::NAMES[s.kind as usize], "High Shelf")
+                .text(" · ")
+                .slot(FREQ.format(s.freq as f32), "20.00 kHz");
             if s.kind.has_gain() {
-                t += &format!(" · {}", GAIN.format(s.gain_db as f32));
+                h = h.text(" · ").slot(GAIN.format(s.gain_db as f32), "−30.0 dB");
             }
             if s.is_dynamic() {
-                t += &format!(" · {}", Self::dynamics_words(&s));
+                h = Self::dynamics_words(h.text(" · "), &s);
             }
             let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
-            t + " — drag to move, Shift for fine, " + wheel + ", double-click resets, right-click deletes"
+            h.text(" — drag to move, Shift for fine, ").text(wheel).text(", double-click resets, right-click deletes")
         };
-        if let Some(text) = self.dynamics_help(host) {
-            return text;
+        if let Some(help) = self.dynamics_help(host) {
+            return help;
+        }
+        if let Some(p) = self.pointer {
+            const WORDS: [&str; 3] = [
+                "Auto gain — keeps the loudness as the curve changes (worked out from the curve, so it never pumps)",
+                "Delta — hear only what the EQ changes",
+                "Bypass — the whole EQ, latency kept",
+            ];
+            if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(p)) {
+                let on = Self::plain(host, TOGGLES[i]) >= 0.5;
+                return Help::default().text(WORDS[i]).text(if on { " · on" } else { "" });
+            }
+            if let Some(k) = self.footer_knobs.iter().find(|k| k.bounds().contains(p)) {
+                let what = match k.spec.id {
+                    id if id == MIX.id => "Mix — the EQ against the dry signal, delay-compensated",
+                    id if id == OUT_PAN.id => "Output balance",
+                    _ => "Output gain",
+                };
+                // The slot fits the widest value the dial can show.
+                let (lo, hi) = (k.spec.format(k.spec.min), k.spec.format(k.spec.max));
+                let widest = if lo.chars().count() >= hi.chars().count() { lo } else { hi };
+                return Help::default().text(what).text(" · ").slot(k.spec.format(Self::plain(host, k.spec.id)), widest).text(" — drag; double-click resets");
+            }
+            if let (Some(b), Some(h)) = (self.selected, self.panel_hits) {
+                if h.solo.is_some_and(|r| r.contains(p)) {
+                    return Help::default().text(format!("Band {} solo — listen to its region alone, until the panel closes", b + 1));
+                }
+                if h.remove.contains(p) {
+                    return Help::default().text(format!("Band {} — remove", b + 1));
+                }
+                if h.close.contains(p) {
+                    return Help::default().text("Close the panel");
+                }
+            }
         }
         if let Some(d) = &self.drag {
             return band_line(d.band);
@@ -755,33 +1006,42 @@ impl EqView {
         }
         if let Some(p) = self.pointer.filter(|p| p.x < PLOT_W && p.y > PLOT_TOP && p.y < PLOT_BOT) {
             let f = xf(p.x);
-            return format!("{} · {} · {:+.1} dB — double-click to add a band", FREQ.format(f as f32), note_name(f), yg(p.y));
+            return Help::default()
+                .slot(FREQ.format(f as f32), "20.00 kHz")
+                .text(" · ")
+                .slot(note_name(f), "C#10 −50 ct")
+                .text(" · ")
+                .slot(format!("{:+.1} dB", yg(p.y)).replace('-', "−"), "+30.0 dB")
+                .text(" — double-click to add a band");
         }
         if let Some(b) = self.selected {
             return band_line(b);
         }
         if (0..BANDS).any(|b| self.band(host, b).enabled) {
-            "Click a band to edit it. Double-click empty space to add one.".into()
+            Help::default().text("Click a band to edit it. Double-click empty space to add one.")
         } else {
-            "No bands yet — the plugin is passing audio unchanged. Double-click anywhere to add a band.".into()
+            Help::default().text("No bands — the audio passes unchanged. Double-click the display to add a band.")
         }
     }
 
-    /// "dynamic −6.0 dB", "attack +6.0 dB · sustain −3.0 dB", or "static".
-    fn dynamics_words(s: &BandSettings) -> String {
+    /// Appends "dynamic −6.0 dB", "spectral −6.0 dB", "attack +6.0 dB · sustain −3.0 dB", or
+    /// "static", with the numbers in fixed slots.
+    fn dynamics_words(h: Help, s: &BandSettings) -> Help {
         let d = &s.dynamics;
         match (s.is_dynamic(), d.mode) {
-            (false, _) => "static".into(),
-            (true, DynamicsMode::Compressor) if d.spectral => format!("spectral {}", RANGE.format(d.range_db as f32)),
-            (true, DynamicsMode::Compressor) => format!("dynamic {}", RANGE.format(d.range_db as f32)),
-            (true, DynamicsMode::Transient) => {
-                format!("attack {} · sustain {}", TRANSIENT.format(d.transient_db as f32), SUSTAIN.format(d.sustain_db as f32))
-            }
+            (false, _) => h.text("static"),
+            (true, DynamicsMode::Compressor) if d.spectral => h.text("spectral ").slot(RANGE.format(d.range_db as f32), "−30.0 dB"),
+            (true, DynamicsMode::Compressor) => h.text("dynamic ").slot(RANGE.format(d.range_db as f32), "−30.0 dB"),
+            (true, DynamicsMode::Transient) => h
+                .text("attack ")
+                .slot(TRANSIENT.format(d.transient_db as f32), "−12.0 dB")
+                .text(" · sustain ")
+                .slot(SUSTAIN.format(d.sustain_db as f32), "−12.0 dB"),
         }
     }
 
     /// Help for the dynamics control being dragged or pointed at.
-    fn dynamics_help(&self, host: &dyn ParamHost) -> Option<String> {
+    fn dynamics_help(&self, host: &dyn ParamHost) -> Option<Help> {
         let hot = match self.drag.as_ref().map(|d| d.mode) {
             Some(DragMode::Range) => Hot::Grip(Point::ZERO),
             Some(DragMode::TransientAttack | DragMode::Sustain) => Hot::Scope,
@@ -793,28 +1053,31 @@ impl EqView {
         };
         let b = self.selected?;
         let s = self.band(host, b);
-        let n = b + 1;
-        let words = Self::dynamics_words(&s);
+        let band = || Help::default().slot(format!("Band {}", b + 1), "Band 24").text(" ");
+        let words = || Self::dynamics_words(band(), &s);
         Some(match hot {
-            Hot::Grip(_) if s.is_dynamic() => format!("Band {n} {words} — drag; double-click removes"),
-            Hot::Grip(_) => format!("Band {n} — drag to make dynamic"),
-            Hot::Ring => format!("Band {n} {words} — drag the ring; double-click removes"),
-            Hot::Scope if s.dynamics.mode == DynamicsMode::Transient => format!("Band {n} {words} — drag"),
-            Hot::Scope if s.is_spectral() && s.dynamics.relative => format!(
-                "Band {n} {words} · threshold {} over the surroundings — what sticks out above the line is compressed; drag the line",
-                RTHRESH.format(s.dynamics.relative_db as f32)
-            ),
-            Hot::Scope if s.is_spectral() => {
-                format!("Band {n} {words} · threshold {} — each frequency above the line is compressed on its own; drag the line", THRESH.format(s.dynamics.threshold_db as f32))
+            Hot::Grip(_) if s.is_dynamic() => words().text(" — drag; double-click removes"),
+            Hot::Grip(_) => band().text("— drag to make dynamic"),
+            Hot::Ring => words().text(" — drag the ring; double-click removes"),
+            Hot::Scope if s.dynamics.mode == DynamicsMode::Transient => words().text(" — drag"),
+            Hot::Scope if s.is_spectral() && s.dynamics.relative => words()
+                .text(" · threshold ")
+                .slot(RTHRESH.format(s.dynamics.relative_db as f32), "24.0 dB")
+                .text(" over the surroundings — what sticks out above the line is compressed; drag the line"),
+            Hot::Scope if s.is_spectral() => words()
+                .text(" · threshold ")
+                .slot(THRESH.format(s.dynamics.threshold_db as f32), "−80.0 dB")
+                .text(" — each frequency above the line is compressed on its own; drag the line"),
+            Hot::Relative if s.dynamics.relative => {
+                Help::default().text("Threshold follows the surroundings: catches what sticks out, however loud — click for a fixed level")
             }
-            Hot::Relative if s.dynamics.relative => "Threshold follows the surroundings: catches what sticks out, however loud — click for a fixed level".into(),
-            Hot::Relative => "Fixed threshold level — click to follow the surroundings instead (catches what sticks out, however loud)".into(),
-            Hot::Scope => format!("Band {n} {words} · threshold {} — drag", THRESH.format(s.dynamics.threshold_db as f32)),
-            Hot::Split => format!("Band {n} transient time {} — drag; double-click resets", TTIME.format(s.dynamics.transient_ms as f32)),
-            Hot::Mode(0) => "Compressor".into(),
-            Hot::Mode(1) => "Spectral compressor: only the loud frequencies inside the band move".into(),
-            Hot::Mode(_) => "Transient shaper".into(),
-            Hot::RemoveDynamics => format!("Band {n} — make static"),
+            Hot::Relative => Help::default().text("Fixed threshold level — click to follow the surroundings instead (catches what sticks out, however loud)"),
+            Hot::Scope => words().text(" · threshold ").slot(THRESH.format(s.dynamics.threshold_db as f32), "−80.0 dB").text(" — drag"),
+            Hot::Split => band().text("transient time ").slot(TTIME.format(s.dynamics.transient_ms as f32), "200 ms").text(" — drag; double-click resets"),
+            Hot::Mode(0) => Help::default().text("Compressor"),
+            Hot::Mode(1) => Help::default().text("Spectral compressor: only the loud frequencies inside the band move"),
+            Hot::Mode(_) => Help::default().text("Transient shaper"),
+            Hot::RemoveDynamics => band().text("— make static"),
         })
     }
 
@@ -942,7 +1205,7 @@ impl EqView {
     /// The band's live dynamic gain, dB (0 when not dynamic). For a spectral compressor, its
     /// strongest per-bin gain.
     fn dynamic_now(&self, b: usize, s: &BandSettings) -> f64 {
-        if s.is_dynamic() || s.uses_spectrum() { f64::from(self.shared.dynamic[b].load()) } else { 0.0 }
+        if s.is_dynamic() || s.uses_spectrum() { f64::from(self.last_dynamic[b]) } else { 0.0 }
     }
 
     /// The spectral stage's live gain at `f`, dB: Catmull-Rom through the engine's log-spaced points.
@@ -1251,7 +1514,9 @@ impl EqView {
                 continue;
             }
             any = true;
-            let color = Self::band_color(theme, s);
+            // While a band is soloed the others fade back.
+            let dim = if self.soloed.is_some_and(|o| o != b) { 0.35 } else { 1.0 };
+            let color = Self::band_color(theme, s).multiply_alpha(dim);
             let selected = self.selected == Some(b);
             if s.is_dynamic() && !Self::is_transient(s) {
                 // Where the dynamics can take the band: from the static curve to static + range.
@@ -1342,10 +1607,15 @@ impl EqView {
             if !s.enabled {
                 continue;
             }
-            let color = Self::band_color(theme, s);
+            let dim = if self.soloed.is_some_and(|o| o != b) { 0.35 } else { 1.0 };
+            let color = Self::band_color(theme, s).multiply_alpha(dim);
             let p = Self::node_pos(s);
             let selected = self.selected == Some(b);
             let hovered = self.hover == Some(b);
+            if self.soloed == Some(b) {
+                // The soloed band wears a white ring.
+                glow_stroke(cx.scene, &Circle::new(p, 13.0), 1.6, theme.needle, theme.needle, 5.0);
+            }
             let r = if selected { 9.0 } else if hovered { 8.0 } else { 7.0 };
             if s.is_dynamic() {
                 // A track from the node to where the range ends, filled as far as the band has
@@ -1531,7 +1801,7 @@ impl EqView {
         fill.close_path();
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.18), None, &fill);
         glow_stroke(cx.scene, &curve, 1.8, color, color, 3.0);
-        let level = f64::from(self.shared.level[b].load());
+        let level = f64::from(self.last_level);
         if s.is_dynamic() && level > SCOPE_FLOOR_DB {
             let lx = x_of(level);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.5), None, &RoundedRect::new(r.x0 + 3.0, r.y1 - 5.0, lx, r.y1 - 3.0, 1.0));
@@ -1781,9 +2051,10 @@ impl EqView {
 
         let row_y = origin.y + 54.0;
         let open = self.menu.as_ref().map(|m| m.kind);
+        let pointer = self.pointer;
         let dropdown = |cx: &mut DrawCx<'_>, x: f64, w: f64, text: &str, icon: Icon, active: bool| -> Rect {
             let r = Rect::new(x, row_y, x + w, row_y + 32.0);
-            let border = if active { color } else { cx.theme.panel_control_border };
+            let border = if active || pointer.is_some_and(|p| r.contains(p)) { color } else { cx.theme.panel_control_border };
             raised(cx.scene, RoundedRect::from_rect(r, 6.0), cx.theme.panel_control, border, cx.theme.shadows);
             draw_icon(cx.scene, icon, Point::new(x + 10.0, row_y + 10.0), color);
             cx.text.draw(cx.scene, text, x + 40.0, row_y + 9.0, TextStyle::BODY.weighted(600.0), cx.theme.text_hi, Align::Left);
@@ -1806,6 +2077,16 @@ impl EqView {
             r
         });
         let stereo = dropdown(cx, x, 118.0, Placement::NAMES[s.placement as usize], Icon::Stereo(s.placement), open == Some(MenuKind::Stereo));
+        // Solo: listen to the band's region alone (a tilt reaches everything, so has none).
+        let solo = (s.kind != BandType::TiltShelf).then(|| {
+            let r = Rect::new(stereo.x1 + 8.0, row_y, stereo.x1 + 40.0, row_y + 32.0);
+            let on = self.soloed == Some(b);
+            let hot = self.pointer.is_some_and(|p| r.contains(p));
+            // Lit white while on (the soloed node's ring is white too).
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, on, if on { theme.needle } else { color });
+            draw_headphones(cx.scene, r.center(), ink);
+            r
+        });
 
         let (scope, modes, remove_dynamics, relative) = if let Some(top) = dyn_top {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((origin.x + 14.0, divider), (origin.x + PANEL_W - 14.0, divider)));
@@ -1822,17 +2103,11 @@ impl EqView {
             for (i, m) in modes.iter().enumerate() {
                 let on = current == i;
                 let hot = self.hot == Some(Hot::Mode(i));
-                let shape = RoundedRect::from_rect(*m, 6.0);
-                raised(cx.scene, shape, theme.panel_control, if on { color } else { theme.panel_control_border }, theme.shadows);
-                if on {
-                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
-                }
-                let icon = if on { color } else if hot { theme.text_hi } else { theme.text_mid };
+                let icon = icon_button(cx.scene, theme, *m, theme.panel_control, hot, on, color);
                 Self::draw_mode_icon(cx.scene, i, m.center() - (8.0, 8.0), icon);
             }
             let remove = Rect::new(origin.x + PANEL_W - 44.0, top + 23.0, origin.x + PANEL_W - 14.0, top + 53.0);
-            let hot = self.hot == Some(Hot::RemoveDynamics);
-            raised(cx.scene, RoundedRect::from_rect(remove, 6.0), theme.panel_control, if hot { color } else { theme.panel_control_border }, theme.shadows);
+            let ink = icon_button(cx.scene, theme, remove, theme.panel_control, self.hot == Some(Hot::RemoveDynamics), false, color);
             // A level line with its range arrow struck through: "no dynamics".
             let k = remove.center();
             let mut glyph = BezPath::new();
@@ -1846,19 +2121,13 @@ impl EqView {
             glyph.move_to((k.x - 6.0, k.y - 6.0));
             glyph.line_to((k.x + 6.0, k.y + 6.0));
             let stroke = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
-            cx.scene.stroke(&stroke, Affine::IDENTITY, if hot { theme.text_hi } else { theme.text_mid }, None, &glyph);
+            cx.scene.stroke(&stroke, Affine::IDENTITY, ink, None, &glyph);
             // Spectral: below it, the threshold's kind — a fixed level, or following the
             // surroundings (lit). Its icon: a line riding the tops of the bins.
             let relative = s.is_spectral().then(|| {
                 let r = Rect::new(remove.x0, top + 58.0, remove.x1, top + 88.0);
                 let on = s.dynamics.relative;
-                let hot = self.hot == Some(Hot::Relative);
-                let shape = RoundedRect::from_rect(r, 6.0);
-                raised(cx.scene, shape, theme.panel_control, if on || hot { color } else { theme.panel_control_border }, theme.shadows);
-                if on {
-                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
-                }
-                let ink = if on { color } else if hot { theme.text_hi } else { theme.text_mid };
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, self.hot == Some(Hot::Relative), on, color);
                 let k = r.center();
                 let mut bars = BezPath::new();
                 let tops = [3.0, -2.0, 1.5, -4.0, 2.0];
@@ -1881,27 +2150,21 @@ impl EqView {
             (None, None, None, None)
         };
 
-        // Right: bypass over close.
+        // Right: remove the band, under close.
         let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
         let close = Rect::new(origin.x + PANEL_W - 44.0, origin.y + 12.0, origin.x + PANEL_W - 14.0, origin.y + 42.0);
-        let bypass = Rect::new(close.x0, origin.y + 58.0, close.x1, origin.y + 88.0);
-        for r in [close, bypass] {
-            raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, theme.panel_control_border, theme.shadows);
-        }
-        let c = bypass.center();
-        let mut glyph = BezPath::new();
-        glyph.move_to((c.x, c.y - 5.5));
-        glyph.line_to((c.x, c.y - 0.5));
-        let arc = mite_ui::kurbo::Arc::new(c + (0.0, 1.0), (4.5, 4.5), -1.0, 5.3, 0.0);
-        cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &glyph);
-        cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &arc);
+        let remove = Rect::new(close.x0, origin.y + 58.0, close.x1, origin.y + 88.0);
+        let hot = |r: Rect| self.pointer.is_some_and(|p| r.contains(p));
+        let ink = icon_button(cx.scene, theme, remove, theme.panel_control, hot(remove), false, color);
+        draw_bin(cx.scene, remove.center(), ink);
+        let close_ink = icon_button(cx.scene, theme, close, theme.panel_control, hot(close), false, color);
         let mut cross = BezPath::new();
         let k = close.center();
         cross.move_to((k.x - 3.0, k.y - 3.0));
         cross.line_to((k.x + 3.0, k.y + 3.0));
         cross.move_to((k.x + 3.0, k.y - 3.0));
         cross.line_to((k.x - 3.0, k.y + 3.0));
-        cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &cross);
+        cx.scene.stroke(&round, Affine::IDENTITY, close_ink, None, &cross);
 
         for knob in &mut self.panel_knobs {
             knob.color = Some(color);
@@ -1911,7 +2174,7 @@ impl EqView {
         if let Some(c) = ring {
             self.draw_ring(cx, c, b, &s, color);
         }
-        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, relative, bypass, close });
+        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, relative, solo, remove, close });
     }
 
     /// The open dropdown, drawn over everything.
@@ -2002,22 +2265,6 @@ impl EqView {
     }
 
     /// Empty state (mockup "EqEmpty"): an invitation in the middle of the display.
-    fn draw_empty_state(&self, cx: &mut DrawCx<'_>) {
-        let theme = cx.theme;
-        let c = Point::new(PLOT_W / 2.0, DISPLAY_TOP + 290.0);
-        let mut icon = BezPath::new();
-        icon.move_to((c.x - 30.0, c.y - 22.0));
-        icon.curve_to((c.x - 12.0, c.y - 22.0), (c.x - 8.0, c.y - 44.0), (c.x, c.y - 44.0));
-        icon.curve_to((c.x + 8.0, c.y - 44.0), (c.x + 12.0, c.y - 22.0), (c.x + 30.0, c.y - 22.0));
-        let dashed = Stroke::new(2.4).with_caps(mite_ui::kurbo::Cap::Round).with_dashes(0.0, [5.0, 5.0]);
-        if theme.shadows {
-            cx.scene.stroke(&dashed.clone().with_dashes(0.0, [5.0, 5.0]), Affine::IDENTITY, theme.accent.multiply_alpha(0.25), None, &icon);
-        }
-        cx.scene.stroke(&dashed, Affine::IDENTITY, theme.accent, None, &icon);
-        cx.text.draw(cx.scene, "Double-click anywhere to add a band", c.x, c.y - 8.0, TextStyle::TITLE.sized(18.0), theme.text_hi, Align::Center);
-        cx.text.draw(cx.scene, "then drag it · Shift for fine · Alt-drag or wheel for width", c.x, c.y + 20.0, TextStyle::BODY.sized(13.0), theme.text_mid, Align::Center);
-    }
-
     fn draw_footer(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let top = FOOTER_TOP;
@@ -2054,7 +2301,8 @@ impl EqView {
             let res = (Self::plain(cx.host, LP_RES.id).round().max(0.0) as usize).min(LP_RESOLUTIONS.len() - 1);
             let r = Rect::new(388.0, track.y0, 388.0 + 112.0, track.y1);
             let open = self.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Resolution);
-            raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, if open { theme.accent } else { theme.panel_control_border }, theme.shadows);
+            let hot = self.pointer.is_some_and(|p| r.contains(p));
+            raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, if open || hot { theme.accent } else { theme.panel_control_border }, theme.shadows);
             draw_icon(cx.scene, Icon::Resolution(res), Point::new(r.x0 + 10.0, r.y0 + 12.0), theme.accent);
             cx.text.draw(cx.scene, LP_RESOLUTIONS[res], r.x0 + 40.0, r.y0 + 11.0, TextStyle::BODY.weighted(600.0), theme.text_hi, Align::Left);
             let mut chevron = BezPath::new();
@@ -2074,9 +2322,25 @@ impl EqView {
         cx.text.draw(cx.scene, "LATENCY", label_x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
         cx.text.draw(cx.scene, &latency, label_x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
 
-        let plain = cx.host.plain(OUT_GAIN.id, cx.host.normalized(OUT_GAIN.id));
-        cx.text.draw(cx.scene, "OUTPUT", 1218.0, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
-        cx.text.draw(cx.scene, &OUT_GAIN.format(plain), 1218.0, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
+        // Auto gain, delta and bypass: icon toggles, lit while on.
+        let first_dial = self.footer_knobs[0].center.x;
+        for (i, id) in TOGGLES.into_iter().enumerate() {
+            let x = first_dial - 40.0 - (3 - i) as f64 * (TOGGLE + 6.0);
+            let r = Rect::new(x, top + 11.0, x + TOGGLE, top + 11.0 + TOGGLE);
+            let on = Self::plain(cx.host, id) >= 0.5;
+            let hot = self.pointer.is_some_and(|p| r.contains(p));
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, on, theme.accent);
+            draw_toggle_glyph(cx.scene, i, r.center(), ink);
+            self.toggle_hits[i] = r;
+        }
+
+        // Each dial's name and value beside it.
+        for (k, name) in self.footer_knobs.iter().zip(["MIX", "PAN", "OUTPUT"]) {
+            let plain = cx.host.plain(k.spec.id, cx.host.normalized(k.spec.id));
+            let x = k.center.x + 22.0;
+            cx.text.draw(cx.scene, name, x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
+            cx.text.draw(cx.scene, &k.spec.format(plain), x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
+        }
     }
 
     fn draw_header(&self, cx: &mut DrawCx<'_>) {
@@ -2091,8 +2355,14 @@ impl EqView {
         let theme = cx.theme;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.help_strip, None, &Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HELP_TOP + 0.5), (WIDTH, HELP_TOP + 0.5)));
-        let text = self.help_text(cx.host);
-        cx.text.draw(cx.scene, &text, 14.0, HELP_TOP + 7.0, TextStyle::BODY.sized(11.0), theme.text_mid, Align::Left);
+        // Tabular digits, so every number in a slot takes the same width.
+        let style = TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0) };
+        let mut x = 14.0;
+        for (text, widest) in self.help_text(cx.host).0 {
+            let width = cx.text.draw(cx.scene, &text, x, HELP_TOP + 7.0, style, theme.text_mid, Align::Left);
+            let slot = widest.map_or(0.0, |w| cx.text.measure(&w, style));
+            x += f64::from(width.max(slot));
+        }
     }
 }
 
@@ -2108,6 +2378,7 @@ impl View for EqView {
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let bands: Vec<BandSettings> = (0..BANDS).map(|b| self.band(cx.host, b)).collect();
+        self.soloed = self.soloed_band(cx.host);
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
         self.draw_grid(cx);
@@ -2116,16 +2387,15 @@ impl View for EqView {
         self.draw_curves(cx, &bands);
         cx.scene.pop_layer();
         self.draw_nodes(cx, &bands);
-        if !bands.iter().any(|b| b.enabled) {
-            self.draw_empty_state(cx);
-        }
         self.meter.draw(cx);
         let r = self.meter.rect;
         cx.text.draw(cx.scene, "OUT", r.center().x, DISPLAY_TOP + 596.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Center);
         self.draw_panel(cx, &bands);
         self.draw_help(cx);
         self.draw_footer(cx);
-        self.out_knob.draw(cx);
+        for k in &self.footer_knobs {
+            k.draw(cx);
+        }
         self.draw_menu(cx);
     }
 
@@ -2133,9 +2403,11 @@ impl View for EqView {
         if self.menu.is_some() {
             return self.menu_event(event, host);
         }
-        // Footer output dial.
-        if self.out_knob.event(event, host) {
-            return true;
+        // Footer dials.
+        for k in &mut self.footer_knobs {
+            if k.event(event, host) {
+                return true;
+            }
         }
         let in_panel = |hits: &Option<PanelHits>, p: Point| hits.is_some_and(|h| h.panel.contains(p));
 
@@ -2233,6 +2505,11 @@ impl View for EqView {
                         self.toggle_menu(MenuKind::Resolution, 0, r, host);
                         return true;
                     }
+                    if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(pos)) {
+                        let id = TOGGLES[i];
+                        Self::set(host, id, if Self::plain(host, id) >= 0.5 { 0.0 } else { 1.0 });
+                        return true;
+                    }
                 }
                 if let (Some(hot), Some(b)) = (self.hot_at(host, pos), self.selected) {
                     let s = self.band(host, b);
@@ -2279,7 +2556,16 @@ impl View for EqView {
                             self.toggle_menu(MenuKind::Slope, b, r, host);
                         } else if hits.stereo.contains(pos) {
                             self.toggle_menu(MenuKind::Stereo, b, hits.stereo, host);
-                        } else if hits.bypass.contains(pos) {
+                        } else if hits.solo.is_some_and(|r| r.contains(pos)) {
+                            // One band at a time: soloing this one ends any other solo.
+                            let on = Self::plain(host, &ids.solo) < 0.5;
+                            for other in (0..BANDS).filter(|&o| o != b) {
+                                if Self::plain(host, &self.ids[other].solo) >= 0.5 {
+                                    Self::set(host, &self.ids[other].solo, 0.0);
+                                }
+                            }
+                            Self::set(host, &self.ids[b].solo, if on { 1.0 } else { 0.0 });
+                        } else if hits.remove.contains(pos) {
                             Self::set(host, &ids.on, 0.0);
                             self.select(None);
                         } else if hits.close.contains(pos) {
@@ -2420,21 +2706,34 @@ impl View for EqView {
         self.ticks = self.ticks.wrapping_add(1);
         let (l, r) = self.shared.meter.load();
         let mut dirty = self.meter.set_levels(l, r);
-        // Dynamic bands move with the audio.
-        for (last, now) in self.last_dynamic.iter_mut().zip(&self.shared.dynamic) {
-            let now = now.load();
-            if (now - *last).abs() > 0.02 {
-                *last = now;
+        // Dynamic bands and the spectral stage move with the audio. Their telemetry arrives once
+        // per host block (which can be 20 ms), so the drawing eases towards each new value at the
+        // frame rate instead of stepping from block to block.
+        let dt = self.last_live.elapsed().as_secs_f64().min(0.1);
+        self.last_live = Instant::now();
+        let k = (1.0 - (-dt / LIVE_EASE_S).exp()) as f32;
+        let mut ease = |shown: &mut f32, mid: &mut f32, now: f32| {
+            *mid += (now - *mid) * k;
+            let next = *shown + (*mid - *shown) * k;
+            let next = if (now - next).abs() < 0.002 && (now - *mid).abs() < 0.002 { now } else { next };
+            if (next - *shown).abs() > 0.001 {
                 dirty = true;
             }
+            *shown = next;
+        };
+        for ((shown, mid), now) in self.last_dynamic.iter_mut().zip(&mut self.mid_dynamic).zip(&self.shared.dynamic) {
+            ease(shown, mid, now.load());
         }
-        // The spectral stage's live cuts.
-        for (last, now) in self.last_spectral.iter_mut().zip(&self.shared.spectral) {
-            let now = now.load();
-            if (now - *last).abs() > 0.02 {
-                *last = now;
-                dirty = true;
+        for ((shown, mid), now) in self.last_spectral.iter_mut().zip(self.mid_spectral.iter_mut()).zip(&self.shared.spectral) {
+            ease(shown, mid, now.load());
+        }
+        // The selected band's level drives its scope dot.
+        if let Some(b) = self.selected {
+            let level = self.shared.level[b].load();
+            if self.last_level <= -119.0 {
+                (self.last_level, self.mid_level) = (level, level);
             }
+            ease(&mut self.last_level, &mut self.mid_level, level);
         }
         // The selected band's per-bin detail (spectral scope): ask the engine for it, follow it.
         let focus = self.selected.filter(|&b| self.band(host, b).is_spectral());
@@ -2450,19 +2749,18 @@ impl View for EqView {
             }
             dirty |= self.update_scope();
         }
+        // A solo lasts while its band is selected: closing the panel or picking another band ends it.
+        for b in (0..BANDS).filter(|&b| self.selected != Some(b)) {
+            if Self::plain(host, &self.ids[b].solo) >= 0.5 {
+                Self::set(host, &self.ids[b].solo, 0.0);
+                dirty = true;
+            }
+        }
         // The latency readout follows the engine (it changes once a mode switch completes).
         let latency = self.shared.latency.load();
         if latency != self.last_latency {
             self.last_latency = latency;
             dirty = true;
-        }
-        // The selected band's level drives its threshold column and scope dot.
-        if let Some(b) = self.selected {
-            let level = self.shared.level[b].load();
-            if (level - self.last_level).abs() > 0.1 {
-                self.last_level = level;
-                dirty = true;
-            }
         }
         // The analyzer updates every UI tick so motion is as smooth as the display allows.
         dirty |= self.update_spectrum();

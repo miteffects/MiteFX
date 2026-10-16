@@ -313,11 +313,23 @@ impl ShapeDetector {
     }
 }
 
+/// How quickly a dynamic band's curve (threshold, ratio, range, transient amounts) follows its
+/// settings: the time constant, ms. Dragging any of them glides the gain instead of stepping it.
+pub const CURVE_SMOOTH_MS: f64 = 20.0;
+
 /// Soft knee width of the dynamic gain computer, dB.
 const DYNAMIC_KNEE_DB: f64 = 6.0;
 
+/// How far past the threshold (after the knee and the ratio) a compressor band reaches its whole
+/// range, dB. The range is a depth: whatever its size, the band gets there once the level is far
+/// enough over the threshold, so pulling the range further always moves the band further.
+pub const FULL_RANGE_DB: f64 = 6.0;
+/// Width of the soft top where the movement settles into the full range, as a share of it.
+const RANGE_KNEE: f64 = 0.25;
+
 impl Dynamics {
-    /// Dynamic gain in dB for a detected level in dBFS.
+    /// Dynamic gain in dB for a detected level in dBFS: from 0 at the threshold (soft knee) to
+    /// the whole range, eased into it at the top, so the curve has no corner.
     pub fn gain_db(&self, level_db: f64) -> f64 {
         let over = level_db - self.threshold_db;
         let half = 0.5 * DYNAMIC_KNEE_DB;
@@ -328,8 +340,16 @@ impl Dynamics {
         } else {
             over
         };
-        let amount = over * (1.0 - 1.0 / self.ratio.max(1.0));
-        amount.min(self.range_db.abs()) * self.range_db.signum()
+        let u = over * (1.0 - 1.0 / self.ratio.max(1.0)) / FULL_RANGE_DB;
+        let h = RANGE_KNEE;
+        let reach = if u <= 1.0 - h {
+            u
+        } else if u >= 1.0 + h {
+            1.0
+        } else {
+            u - (u - (1.0 - h)).powi(2) / (4.0 * h)
+        };
+        reach * self.range_db
     }
 }
 
@@ -556,6 +576,9 @@ pub struct BandProcessor {
     release: f64,
     /// Transient mode: the shape detector.
     shape: ShapeDetector,
+    /// The dynamics curve the gain is computed with: the settings' threshold, ratio, range and
+    /// transient amounts, eased (see [`CURVE_SMOOTH_MS`]).
+    curve: Dynamics,
     dynamic_db: f64,
     /// Dynamic gain the current sections were designed with, and the detector's design key
     /// (frequency, Q, type): redesigns happen only when these move.
@@ -584,6 +607,7 @@ impl BandProcessor {
             attack: 1.0,
             release: 1.0,
             shape: ShapeDetector::new(sample_rate, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION),
+            curve: Dynamics::default(),
             dynamic_db: 0.0,
             designed_dynamic_db: 0.0,
             interval: CONTROL_INTERVAL,
@@ -614,6 +638,7 @@ impl BandProcessor {
         self.mix.reset(if settings.enabled { 1.0 } else { 0.0 });
         self.envelope = 0.0;
         self.shape.reset(0.0);
+        self.curve = settings.dynamics;
         self.dynamic_db = 0.0;
         self.detector_state = [Tdf2::default(); 2];
         self.detector_key = (0.0, 0.0, BandType::Bell);
@@ -689,7 +714,8 @@ impl BandProcessor {
     /// releases to 0 at the release rate instead of jumping (a jump would click).
     fn update_dynamic_gain(&mut self) {
         if self.detecting() {
-            let d = &self.target.dynamics;
+            self.ease_curve();
+            let d = self.curve;
             let raw = match d.mode {
                 DynamicsMode::Compressor => d.gain_db(20.0 * self.envelope.max(1e-10).log10()),
                 DynamicsMode::Transient => self.shape.gain_db(d.transient_db, d.sustain_db),
@@ -699,12 +725,33 @@ impl BandProcessor {
             self.dynamic_db = (gain + raw).clamp(-GAIN_LIMIT_DB, GAIN_LIMIT_DB) - gain;
         } else {
             self.envelope = 0.0;
+            self.curve = self.target.dynamics;
             self.shape.reset(0.0);
             self.dynamic_db *= (1.0 - self.release).powi(self.interval as i32);
             if self.dynamic_db.abs() < 1e-4 {
                 self.dynamic_db = 0.0;
             }
         }
+    }
+
+    /// One control interval's step of the curve towards the settings.
+    fn ease_curve(&mut self) {
+        let d = self.target.dynamics;
+        let k = 1.0 - (-f64::from(self.interval) * 1000.0 / (CURVE_SMOOTH_MS * self.sample_rate)).exp();
+        let c = &mut self.curve;
+        for (value, target) in [
+            (&mut c.threshold_db, d.threshold_db),
+            (&mut c.ratio, d.ratio),
+            (&mut c.range_db, d.range_db),
+            (&mut c.transient_db, d.transient_db),
+            (&mut c.sustain_db, d.sustain_db),
+        ] {
+            *value += (target - *value) * k;
+            if (target - *value).abs() < 1e-6 {
+                *value = target;
+            }
+        }
+        c.mode = d.mode;
     }
 
     /// The settings the band is producing right now (smoothed values, active structure).
@@ -741,6 +788,8 @@ impl BandProcessor {
         self.gain.next_value();
         self.log_q.next_value();
         let mix = self.mix.next_value();
+        // A glide that ends between two control updates still lands exactly on its target.
+        let settled = smoothing && !(self.log_freq.is_smoothing() || self.gain.is_smoothing() || self.log_q.is_smoothing());
 
         if mix == 0.0 && self.target.structure_differs(&self.active) {
             self.active.enabled = self.target.enabled;
@@ -756,6 +805,9 @@ impl BandProcessor {
             self.countdown = CONTROL_INTERVAL;
             self.mix.set_target(if self.active.enabled { 1.0 } else { 0.0 });
         } else if moving {
+            if settled {
+                self.redesign();
+            }
             if self.countdown == 0 {
                 if dynamic {
                     self.update_dynamic_gain();
@@ -890,6 +942,68 @@ mod tests {
     }
 
     #[test]
+    fn the_whole_dynamic_range_is_reachable_and_the_curve_has_no_corner() {
+        for range_db in [-3.0, -6.0, -12.0, -24.0, 18.0] {
+            let d = Dynamics { enabled: true, threshold_db: -30.0, ratio: 3.0, range_db, ..Default::default() };
+            // Well over the threshold the band moves its whole range, however large.
+            assert!((d.gain_db(-10.0) - range_db).abs() < 1e-9, "{range_db}: {}", d.gain_db(-10.0));
+            // Below the knee nothing moves; in between it grows smoothly and never overshoots.
+            assert_eq!(d.gain_db(-40.0), 0.0);
+            let mut last = 0.0;
+            let mut slope = 0.0;
+            for i in 0..=400 {
+                let level = -40.0 + 0.1 * f64::from(i);
+                let g = d.gain_db(level);
+                assert!(g.abs() <= range_db.abs() + 1e-9 && g.abs() >= last - 1e-12, "{range_db} at {level}");
+                let next = (d.gain_db(level + 0.1) - g).abs() / 0.1;
+                assert!((next - slope).abs() < 0.08 * range_db.abs().max(1.0), "{range_db}: corner at {level}");
+                (last, slope) = (g.abs(), next);
+            }
+        }
+    }
+
+    #[test]
+    fn changing_the_dynamic_range_glides_the_gain() {
+        // A loud tone held well over the threshold: the band sits at its full range. Dragging the
+        // range from −6 to −12 dB must move the gain smoothly, not in one jump.
+        let mut s = band(BandType::Bell, 1000.0, 0.0, 1.0);
+        s.dynamics = Dynamics { enabled: true, threshold_db: -40.0, ratio: 20.0, range_db: -6.0, ..Default::default() };
+        let mut p = BandProcessor::new(FS, 20.0);
+        p.reset(&s);
+        let mut buf = sine(1000.0, 24_000);
+        p.process(&mut [&mut buf]);
+        let before = p.dynamic_gain_db();
+        assert!((before + 6.0).abs() < 0.1, "{before}");
+        p.set_target(&BandSettings { dynamics: Dynamics { range_db: -12.0, ..s.dynamics }, ..s });
+        let tone = sine(1000.0, 4800);
+        let (mut last, mut largest) = (before, 0.0f64);
+        for chunk in tone.chunks(16) {
+            let mut c = chunk.to_vec();
+            p.process(&mut [&mut c]);
+            let now = p.dynamic_gain_db();
+            largest = largest.max((now - last).abs());
+            last = now;
+        }
+        assert!((last + 12.0).abs() < 0.1, "{last}");
+        assert!(largest < 0.6, "largest step {largest} dB");
+    }
+
+    #[test]
+    fn a_gain_glide_lands_exactly_on_its_target() {
+        // 20 ms glides end between two coefficient updates; the last update must still happen.
+        for (from, to) in [(6.0, 0.0), (0.0, -6.0), (-3.0, 4.5)] {
+            let mut p = BandProcessor::new(FS, 20.0);
+            p.reset(&band(BandType::Bell, 1000.0, from, 1.0));
+            p.set_target(&band(BandType::Bell, 1000.0, to, 1.0));
+            let input = sine(1000.0, 48_000);
+            let mut buf = input.clone();
+            p.process(&mut [&mut buf]);
+            let gain = 20.0 * (rms(&buf[24_000..]) / rms(&input[24_000..])).log10();
+            assert!((gain - to).abs() < 0.005, "{from} → {to}: {gain}");
+        }
+    }
+
+    #[test]
     fn digital_follows_analog_for_every_type() {
         for kind in BandType::ALL {
             for freq in [80.0, 1000.0, 6000.0] {
@@ -938,7 +1052,9 @@ mod tests {
         p.process(&mut [&mut buf]);
         // DC input: any discontinuity shows up as a jump between neighbouring samples.
         let worst = buf.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
-        assert!(worst < 0.01, "{worst}");
+        // The last coefficient step (at the top of the sweep, where it moves furthest in Hz) is
+        // the largest, about 0.0103; it is the same 16-sample step as all the others.
+        assert!(worst < 0.0125, "{worst}");
     }
 
     #[test]

@@ -21,7 +21,7 @@
 use realfft::num_complex::Complex;
 
 use crate::analyzer::{spectrum_point_freq, spectrum_point_oct, Analyzer, LogSpectrum, ANALYZER_SIZE, SPECTRUM_POINTS};
-use crate::eq::{BandSettings, BandType, Dynamics, Placement, FREQ_MAX, FREQ_MIN, RELATIVE_WIDTH_OCT, SMOOTHING_MAX_OCT};
+use crate::eq::{BandSettings, BandType, Dynamics, Placement, CURVE_SMOOTH_MS, FREQ_MAX, FREQ_MIN, RELATIVE_WIDTH_OCT, SMOOTHING_MAX_OCT};
 use crate::filter::Analog;
 use crate::stft::Stft;
 
@@ -32,9 +32,6 @@ const FLOOR_DB: f64 = -140.0;
 const WEIGHT_MIN: f64 = 1e-2;
 /// Gains below this, dB, have settled to nothing.
 const GAIN_EPSILON_DB: f64 = 1e-6;
-/// How quickly the spectral curve follows its settings: the time constant, ms (the band's own
-/// parameter smoothing).
-const CURVE_SMOOTH_MS: f64 = 20.0;
 /// Detection runs every this many STFT frames.
 const DETECT_EVERY_FRAMES: usize = 2;
 
@@ -525,9 +522,11 @@ pub fn weight(s: &BandSettings, f: f64) -> f64 {
     ((region(s, f) - WEIGHT_MIN) / (1.0 - WEIGHT_MIN)).max(0.0)
 }
 
-/// The shape of a band's range at `f` (0…1). Bells,
-/// notches and band passes use a band-pass around their frequency at their Q;
-/// shelves a low- or high-pass at their frequency; a tilt the whole spectrum.
+/// The shape of a band's range at `f` (0…1). Bells, notches and band passes use a band-pass
+/// around their frequency at their Q; shelves a low- or high-pass at their frequency; a tilt the
+/// whole spectrum. It is the filter's power, not its amplitude: that is how a bell's own gain
+/// spreads over frequency, so the band works where its curve does (an amplitude skirt falls only
+/// 6 dB/oct and reached frequencies the bell leaves alone).
 pub fn region(s: &BandSettings, f: f64) -> f64 {
     let x = f / s.freq.clamp(FREQ_MIN, FREQ_MAX);
     let q = s.q.clamp(0.025, 40.0);
@@ -537,7 +536,7 @@ pub fn region(s: &BandSettings, f: f64) -> f64 {
         BandType::HighShelf | BandType::HighCut => Analog::second(1.0, 0.0, 0.0, 1.0, std::f64::consts::SQRT_2, 1.0),
         BandType::TiltShelf => return 1.0,
     };
-    proto.magnitude_sq(x).sqrt().min(1.0)
+    proto.magnitude_sq(x).min(1.0)
 }
 
 #[cfg(test)]
@@ -635,8 +634,9 @@ mod tests {
 
     #[test]
     fn moving_the_threshold_glides_the_cut_instead_of_stepping() {
-        // A loud steady tone under a compressor; once settled the threshold jumps 30 dB. The cut
-        // follows over several frames (eased like the band's other parameters), not at once.
+        // A loud steady tone (−17.6 dB on the analyzer's scale) under a compressor; once settled
+        // the threshold jumps from far below it to above it. The cut follows over several frames
+        // (eased like the band's other parameters), not at once.
         let input = mix(&[&tone(48_000, 1_500.0, 0.5)]);
         let mut band = BandSettings { enabled: true, kind: BandType::Bell, freq: 1_500.0, q: 0.5, ..Default::default() };
         band.dynamics = Dynamics { enabled: true, mode: DynamicsMode::Compressor, spectral: true, smoothing: 0.0, threshold_db: -60.0, ratio: 4.0, range_db: -24.0, ..Dynamics::default() };
@@ -646,7 +646,7 @@ mod tests {
         let mut peaks = Vec::new();
         for (i, (a, b)) in l.chunks_mut(256).zip(r.chunks_mut(256)).enumerate() {
             if i == 120 {
-                band.dynamics.threshold_db = -30.0;
+                band.dynamics.threshold_db = -15.0;
             }
             engine.process(&mut stft, a, b, &[band]);
             peaks.push(engine.band_peaks()[0]);

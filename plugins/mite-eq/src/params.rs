@@ -25,6 +25,45 @@ pub const OUT_GAIN: ParamSpec = ParamSpec {
     display: ParamDisplay::Number,
 };
 
+/// Output balance, % (−100 left … 100 right).
+pub const OUT_PAN: ParamSpec = ParamSpec {
+    id: "out_pan",
+    name: "Output Pan",
+    unit: "%",
+    min: -100.0,
+    max: 100.0,
+    default: 0.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 20.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+
+/// Global dry/wet, %. The dry path is delayed by the latency, so any mix is phase-aligned.
+pub const MIX: ParamSpec = ParamSpec {
+    id: "mix",
+    name: "Mix",
+    unit: "%",
+    min: 0.0,
+    max: 100.0,
+    default: 100.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 20.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+
+/// Loudness-based gain compensation for the static curve.
+pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: false };
+/// Listen to what the EQ changes (wet minus dry) instead of the result.
+pub const DELTA: BoolSpec = BoolSpec { id: "delta", name: "Delta", default: false };
+/// The whole plugin, latency kept (the host's bypass maps here).
+pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
+
 pub const ON: BoolSpec = BoolSpec { id: "on", name: "On", default: false };
 pub const TYPE: ChoiceSpec = ChoiceSpec { id: "type", name: "Type", choices: &BandType::NAMES, default: 0 };
 
@@ -206,6 +245,9 @@ pub const TRANSITION: ParamSpec = ParamSpec {
     display: ParamDisplay::Number,
 };
 
+/// Listen to this band's region alone (one band at a time).
+pub const SOLO: BoolSpec = BoolSpec { id: "solo", name: "Solo", default: false };
+
 /// Compressor mode: work per frequency bin inside the band's range.
 pub const SPECTRAL: BoolSpec = BoolSpec { id: "spectral", name: "Spectral", default: false };
 
@@ -277,7 +319,16 @@ pub fn band_id(band: usize, param: &str) -> String {
 
 /// The frozen parameter manifest, in host order.
 pub fn manifest() -> String {
-    let mut lines = vec![OUT_GAIN.manifest_line(), MODE.manifest_line(), LP_RES.manifest_line()];
+    let mut lines = vec![
+        OUT_GAIN.manifest_line(),
+        MODE.manifest_line(),
+        LP_RES.manifest_line(),
+        OUT_PAN.manifest_line(),
+        MIX.manifest_line(),
+        AUTO_GAIN.manifest_line(),
+        DELTA.manifest_line(),
+        BYPASS.manifest_line(),
+    ];
     for b in 0..BANDS {
         let prefix = |line: String| format!("b{:02}_{line}", b + 1);
         lines.push(prefix(ON.manifest_line()));
@@ -300,6 +351,7 @@ pub fn manifest() -> String {
         lines.push(prefix(SSMOOTH.manifest_line()));
         lines.push(prefix(SREL.manifest_line()));
         lines.push(prefix(RTHRESH.manifest_line()));
+        lines.push(prefix(SOLO.manifest_line()));
     }
     lines.join("\n") + "\n"
 }
@@ -327,6 +379,7 @@ pub struct BandParams {
     pub ssmooth: FloatParam,
     pub srel: BoolParam,
     pub rthresh: FloatParam,
+    pub solo: BoolParam,
 }
 
 impl BandParams {
@@ -355,6 +408,7 @@ impl BandParams {
             ssmooth: float_param_named(&SSMOOTH, name("Spectral Smoothing")),
             srel: bool_param(&SREL, name("Spectral Relative")),
             rthresh: float_param_named(&RTHRESH, name("Relative Threshold")),
+            solo: bool_param(&SOLO, name("Solo")),
         }
     }
 
@@ -393,6 +447,11 @@ pub struct EqParams {
     pub out_gain: FloatParam,
     pub mode: IntParam,
     pub lp_res: IntParam,
+    pub out_pan: FloatParam,
+    pub mix: FloatParam,
+    pub auto_gain: BoolParam,
+    pub delta: BoolParam,
+    pub bypass: BoolParam,
     pub bands: [BandParams; BANDS],
 }
 
@@ -402,6 +461,11 @@ impl Default for EqParams {
             out_gain: float_param(&OUT_GAIN),
             mode: choice_param(&MODE, MODE.name.to_owned()),
             lp_res: choice_param(&LP_RES, LP_RES.name.to_owned()),
+            out_pan: float_param(&OUT_PAN),
+            mix: float_param(&MIX),
+            auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
+            delta: bool_param(&DELTA, DELTA.name.to_owned()),
+            bypass: bool_param(&BYPASS, BYPASS.name.to_owned()).make_bypass(),
             bands: std::array::from_fn(BandParams::new),
         }
     }
@@ -415,6 +479,11 @@ unsafe impl Params for EqParams {
             (OUT_GAIN.id.to_owned(), self.out_gain.as_ptr(), String::new()),
             (MODE.id.to_owned(), self.mode.as_ptr(), String::new()),
             (LP_RES.id.to_owned(), self.lp_res.as_ptr(), String::new()),
+            (OUT_PAN.id.to_owned(), self.out_pan.as_ptr(), String::new()),
+            (MIX.id.to_owned(), self.mix.as_ptr(), String::new()),
+            (AUTO_GAIN.id.to_owned(), self.auto_gain.as_ptr(), String::new()),
+            (DELTA.id.to_owned(), self.delta.as_ptr(), String::new()),
+            (BYPASS.id.to_owned(), self.bypass.as_ptr(), String::new()),
         ];
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
@@ -439,7 +508,8 @@ unsafe impl Params for EqParams {
             map.push((band_id(i, SPECTRAL.id), b.spectral.as_ptr(), group.clone()));
             map.push((band_id(i, SSMOOTH.id), b.ssmooth.as_ptr(), group.clone()));
             map.push((band_id(i, SREL.id), b.srel.as_ptr(), group.clone()));
-            map.push((band_id(i, RTHRESH.id), b.rthresh.as_ptr(), group));
+            map.push((band_id(i, RTHRESH.id), b.rthresh.as_ptr(), group.clone()));
+            map.push((band_id(i, SOLO.id), b.solo.as_ptr(), group));
         }
         map
     }

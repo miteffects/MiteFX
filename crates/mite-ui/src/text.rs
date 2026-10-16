@@ -107,21 +107,7 @@ impl Typesetter {
         color: Color,
         align: Align,
     ) -> f32 {
-        let key = ShapeKey {
-            text: text.to_owned(),
-            size: style.size.to_bits(),
-            weight: style.weight.to_bits(),
-            tracking: style.tracking.to_bits(),
-            tabular: style.tabular,
-        };
-        if !self.cache.contains_key(&key) {
-            if self.cache.len() >= CACHE_LIMIT {
-                self.cache.clear();
-            }
-            let shaped = self.shape(text, style);
-            self.cache.insert(key.clone(), shaped);
-        }
-        let shaped = &self.cache[&key];
+        let shaped = self.shaped(text, style);
         let dx = match align {
             Align::Left => 0.0,
             Align::Center => -f64::from(shaped.width) / 2.0,
@@ -139,6 +125,30 @@ impl Typesetter {
                 .draw(Fill::NonZero, run.glyphs.iter().copied());
         }
         shaped.width
+    }
+
+    /// The advance width `text` would take in `style`, without drawing it.
+    pub fn measure(&mut self, text: &str, style: TextStyle) -> f32 {
+        self.shaped(text, style).width
+    }
+
+    /// `text` shaped in `style`, from the cache.
+    fn shaped(&mut self, text: &str, style: TextStyle) -> &Shaped {
+        let key = ShapeKey {
+            text: text.to_owned(),
+            size: style.size.to_bits(),
+            weight: style.weight.to_bits(),
+            tracking: style.tracking.to_bits(),
+            tabular: style.tabular,
+        };
+        if !self.cache.contains_key(&key) {
+            if self.cache.len() >= CACHE_LIMIT {
+                self.cache.clear();
+            }
+            let shaped = self.shape(text, style);
+            self.cache.insert(key.clone(), shaped);
+        }
+        &self.cache[&key]
     }
 
     fn shape(&mut self, text: &str, style: TextStyle) -> Shaped {

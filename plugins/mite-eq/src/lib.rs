@@ -13,7 +13,7 @@ pub mod dsp;
 pub mod editor;
 pub mod params;
 
-use dsp::{EqEngine, PhaseMode};
+use dsp::{EqEngine, Output, PhaseMode};
 use params::{EqParams, BANDS};
 
 /// Points of the spectral stage's telemetry: the analyzer's points (log-spaced over the plot's
@@ -84,6 +84,19 @@ impl MiteEq {
         std::array::from_fn(|i| self.params.bands[i].settings())
     }
 
+    /// The output stage as the parameters set it; the soloed band is the first with solo on.
+    fn output(&self) -> Output {
+        let p = &self.params;
+        Output {
+            mix: p.mix.value() / 100.0,
+            delta: p.delta.value(),
+            bypass: p.bypass.value(),
+            auto_gain: p.auto_gain.value(),
+            pan: p.out_pan.value() / 100.0,
+            solo: p.bands.iter().position(|b| b.solo.value() && b.on.value()),
+        }
+    }
+
     fn set_mode(&mut self) {
         let mode = PhaseMode::from_index(self.params.mode.value().max(0) as usize);
         self.engine.set_mode(mode, self.params.lp_res.value().max(0) as usize);
@@ -138,6 +151,7 @@ impl Plugin for MiteEq {
     fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {
         let settings = self.settings();
         self.set_mode();
+        self.engine.set_output(self.output());
         self.engine.prepare(config.sample_rate, &settings, self.params.out_gain.value());
         self.shared.sample_rate.store(config.sample_rate);
         self.reported_latency = self.engine.latency() as u32;
@@ -148,12 +162,14 @@ impl Plugin for MiteEq {
 
     fn reset(&mut self) {
         let settings = self.settings();
+        self.engine.set_output(self.output());
         self.engine.reset(&settings, self.params.out_gain.value());
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let settings = self.settings();
         self.set_mode();
+        self.engine.set_output(self.output());
         let (left, right) = self.engine.process(
             buffer.as_slice(),
             &settings,

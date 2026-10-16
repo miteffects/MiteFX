@@ -1,14 +1,15 @@
 //! CPU of 8 bands in the engine, static vs dynamic with the level swinging through the threshold
 //! (the worst case for dynamic redesigns). BLUEPRINT §8.6 budget: 8 dynamic bands < 1.5 %.
+//! A third run keeps the output stage busy (mix, delta, auto gain, balance and a solo).
 //!
 //!     cargo run --release -p mite_eq --example bench_dyn
 
 use mite_dsp::eq::{BandSettings, BandType, Dynamics};
-use mite_eq::dsp::EqEngine;
+use mite_eq::dsp::{EqEngine, Output};
 use mite_eq::params::BANDS;
 fn main() {
     let fs = 48_000.0_f32;
-    for dynamic in [false, true] {
+    for (dynamic, busy) in [(false, false), (true, false), (false, true)] {
         let mut settings = [BandSettings::default(); BANDS];
         for (i, s) in settings.iter_mut().take(8).enumerate() {
             *s = BandSettings {
@@ -22,6 +23,9 @@ fn main() {
             };
         }
         let mut eq = EqEngine::new(fs, &settings, 0.0);
+        if busy {
+            eq.set_output(Output { mix: 0.7, delta: true, auto_gain: true, pan: 0.3, solo: Some(3), ..Default::default() });
+        }
         let mut seed = 1u32;
         let secs = 20;
         let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
@@ -39,6 +43,7 @@ fn main() {
             eq.process(&mut [&mut l, &mut r], &settings, 0.0, None, None);
         }
         let cpu = t.elapsed().as_secs_f64() / secs as f64 * 100.0;
-        println!("8 bands, dynamic={dynamic}: {cpu:.2} % of one core (stereo, 48 kHz)");
+        let stage = if busy { ", output stage busy" } else { "" };
+        println!("8 bands, dynamic={dynamic}{stage}: {cpu:.2} % of one core (stereo, 48 kHz)");
     }
 }

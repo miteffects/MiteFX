@@ -24,7 +24,7 @@ fn host_ids_match_manifest() {
 #[test]
 fn ids_follow_the_blueprint_scheme() {
     let ids: Vec<String> = EqParams::default().param_map().into_iter().map(|(id, _, _)| id).collect();
-    assert_eq!(ids.len(), 3 + 24 * 22);
+    assert_eq!(ids.len(), 8 + 24 * 23);
     assert!(ids.contains(&"b01_freq".to_owned()));
     assert!(ids.contains(&"b24_slope".to_owned()));
     assert!(ids.contains(&"b24_stereo".to_owned()));
@@ -36,4 +36,8 @@ fn ids_follow_the_blueprint_scheme() {
     assert!(ids.contains(&"b24_transition".to_owned()));
     assert!(ids.contains(&"b24_spectral".to_owned()));
     assert!(ids.contains(&"b24_rthresh".to_owned()));
+    assert!(ids.contains(&"b24_solo".to_owned()));
+    for id in ["out_pan", "mix", "auto_gain", "delta", "bypass"] {
+        assert!(ids.contains(&id.to_owned()), "{id}");
+    }
 }

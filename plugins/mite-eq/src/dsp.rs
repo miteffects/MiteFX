@@ -11,6 +11,10 @@
 //!
 //! Spectral stage: while any band works per frequency bin (a spectral compressor), an STFT runs after the EQ chain and adds its frame length to the latency. Turning it on
 //! or off goes through the same dip as a mode change.
+//!
+//! Output stage ([`Output`]): auto gain, mix and delta against the dry signal delayed by the
+//! latency, band solo, output gain and balance, then bypass (also latency-aligned). Blocks run
+//! in chunks of at most [`CHUNK`] samples.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -19,7 +23,8 @@ use std::time::Duration;
 
 use mite_core::{triple_buffer, Handover, SpectrumTap, TripleReader, TripleWriter};
 use mite_dsp::conv::{Convolver, KernelSet};
-use mite_dsp::eq::{BandProcessor, BandSettings};
+use mite_dsp::eq::{BandProcessor, BandSettings, Placement};
+use mite_dsp::output::{balance, isolate, loudness_change_db, solo_filter, DryDelay};
 use mite_dsp::analyzer::{spectrum_point_freq, SPECTRUM_POINTS};
 use mite_dsp::spectral::SpectralBands;
 use mite_dsp::stft::Stft;
@@ -66,6 +71,39 @@ const SWITCH_FADE_MS: f32 = 10.0;
 const MONO_CHUNK: usize = 256;
 /// Spectral stage frame length at 48 kHz, samples (also its latency).
 const STFT_48K: usize = 1024;
+/// The engine processes long host blocks in chunks of this many samples (the dry path and the
+/// solo scratch are sized for it).
+pub const CHUNK: usize = 512;
+/// Fades of bypass, delta and solo, ms; auto gain's glide to a new compensation, ms, and the
+/// least time between two of its recalculations while the curve moves, samples at 48 kHz.
+const OUTPUT_FADE_MS: f32 = 10.0;
+const AUTO_GAIN_GLIDE_MS: f32 = 50.0;
+const AUTO_GAIN_INTERVAL_48K: usize = 1024;
+/// Auto gain never compensates more than this, dB.
+const AUTO_GAIN_LIMIT_DB: f64 = 24.0;
+
+/// The global output settings (BLUEPRINT §8.4), as the host parameters describe them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Output {
+    /// Dry/wet, 0…1.
+    pub mix: f32,
+    /// Play what the EQ changes (the wet signal minus the dry) instead of the result.
+    pub delta: bool,
+    /// The whole plugin bypassed (latency kept).
+    pub bypass: bool,
+    /// Compensate the static curve's loudness change.
+    pub auto_gain: bool,
+    /// Output balance, −1…1.
+    pub pan: f32,
+    /// The band being listened to alone.
+    pub solo: Option<usize>,
+}
+
+impl Default for Output {
+    fn default() -> Self {
+        Self { mix: 1.0, delta: false, bypass: false, auto_gain: false, pan: 0.0, solo: None }
+    }
+}
 
 /// The power-of-two multiple of 48 kHz nearest `sample_rate` (1 at 44.1/48, 2 at 88.2/96 …).
 fn rate_ratio(sample_rate: f64) -> usize {
@@ -186,6 +224,24 @@ pub struct EqEngine {
     /// Samples processed since the last switch, and samples spent waiting muted for a kernel.
     filled: usize,
     waited: usize,
+    /// The output stage: its settings, the latency-aligned dry signal and the fades.
+    output: Output,
+    dry: DryDelay,
+    mix: LinearSmoother,
+    delta: LinearSmoother,
+    bypass: LinearSmoother,
+    pan: [LinearSmoother; 2],
+    /// Auto gain: the compensation (linear), the curve it was worked out for, and samples until
+    /// it may be worked out again.
+    auto_gain: LinearSmoother,
+    loudness_key: Option<([BandSettings; BANDS], bool)>,
+    loudness_wait: usize,
+    /// Solo: the filter over the soloed band's region, the part of the stereo image the band
+    /// hears, the fade into the solo, and the soloed signal's scratch.
+    solo_filter: BandProcessor,
+    solo_placement: Placement,
+    solo: LinearSmoother,
+    solo_scratch: [Vec<f32>; 2],
 }
 
 impl EqEngine {
@@ -225,6 +281,19 @@ impl EqEngine {
             mono_scratch: vec![0.0; MONO_CHUNK],
             filled: 0,
             waited: 0,
+            output: Output::default(),
+            dry: DryDelay::new(0, CHUNK),
+            mix: LinearSmoother::new(1.0),
+            delta: LinearSmoother::new(0.0),
+            bypass: LinearSmoother::new(0.0),
+            pan: [LinearSmoother::new(1.0), LinearSmoother::new(1.0)],
+            auto_gain: LinearSmoother::new(1.0),
+            loudness_key: None,
+            loudness_wait: 0,
+            solo_filter: BandProcessor::new(sr, FREQ.smoothing_ms),
+            solo_placement: Placement::Stereo,
+            solo: LinearSmoother::new(0.0),
+            solo_scratch: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
         };
         engine.prepare(sample_rate, settings, out_db);
         engine
@@ -235,6 +304,12 @@ impl EqEngine {
     pub fn set_mode(&mut self, mode: PhaseMode, lp_res: usize) {
         self.wanted.mode = mode;
         self.wanted.lp_res = lp_res.min(LP_LENGTHS_48K.len() - 1);
+    }
+
+    /// Sets the output stage (mix, delta, bypass, auto gain, balance, solo). Changes
+    /// fade in over the next blocks. Allocation-free.
+    pub fn set_output(&mut self, output: Output) {
+        self.output = output;
     }
 
     /// Off the audio thread: sets the sample rate, sizes the convolver, and jumps to the given
@@ -254,6 +329,17 @@ impl EqEngine {
         self.np_conv = Convolver::new(NP_BLOCK_48K * ratio, 2 * natural_phase::DELAY_48K * ratio, fade);
         self.stft = Stft::new(spectral_latency(sr));
         self.spectral = SpectralBands::new(BANDS, self.stft.size(), sr);
+        let max_latency = linear_phase_latency(LP_LENGTHS_48K.len() - 1, sr).max(natural_phase_latency(sr)) + spectral_latency(sr);
+        self.dry = DryDelay::new(max_latency, CHUNK);
+        let [pan_l, pan_r] = &mut self.pan;
+        for s in [&mut self.mix, pan_l, pan_r] {
+            s.set_ramp(sample_rate, crate::params::MIX.smoothing_ms);
+        }
+        for s in [&mut self.delta, &mut self.bypass, &mut self.solo] {
+            s.set_ramp(sample_rate, OUTPUT_FADE_MS);
+        }
+        self.auto_gain.set_ramp(sample_rate, AUTO_GAIN_GLIDE_MS);
+        self.solo_filter.prepare(sr, FREQ.smoothing_ms, &BandSettings::default());
         self.wanted.spectral = needs_spectrum(settings);
         self.active = self.wanted;
         self.switch = Switch::Steady;
@@ -280,6 +366,17 @@ impl EqEngine {
         for m in &mut self.meters {
             m.reset();
         }
+        self.dry.reset();
+        let o = self.output;
+        let (pl, pr) = balance(o.pan);
+        self.mix.reset(o.mix.clamp(0.0, 1.0));
+        self.delta.reset(if o.delta { 1.0 } else { 0.0 });
+        self.bypass.reset(if o.bypass { 1.0 } else { 0.0 });
+        self.pan[0].reset(pl);
+        self.pan[1].reset(pr);
+        self.solo.reset(0.0);
+        self.solo_filter.reset(&BandSettings::default());
+        self.auto_gain.reset(if o.auto_gain { self.auto_gain.target() } else { 1.0 });
     }
 
     /// The convolver a convolving mode runs.
@@ -428,7 +525,8 @@ impl EqEngine {
     }
 
     /// Processes in place and returns output peak levels (left, right) in dBFS. `pre`/`post`
-    /// receive the mono sum before and after the EQ for the analyzer.
+    /// receive the mono sum before and after the EQ for the analyzer, at the same moment: the
+    /// pre tap hears the input delayed by the latency, as the output is.
     pub fn process(
         &mut self,
         channels: &mut [&mut [f32]],
@@ -437,12 +535,86 @@ impl EqEngine {
         pre: Option<&SpectrumTap>,
         post: Option<&SpectrumTap>,
     ) -> (f32, f32) {
-        if let Some(tap) = pre {
-            push_mono(tap, channels);
-        }
         self.update_mode(settings);
+        self.update_output(settings, channels.len() == 1, out_db);
 
         let frames = channels.first().map_or(0, |c| c.len());
+        self.loudness_wait = self.loudness_wait.saturating_sub(frames);
+        let mut start = 0;
+        while start < frames {
+            let end = (start + CHUNK).min(frames);
+            match channels {
+                [l, r, ..] => self.process_chunk(&mut [&mut l[start..end], &mut r[start..end]], settings, pre),
+                [m] => self.process_chunk(&mut [&mut m[start..end]], settings, pre),
+                [] => {}
+            }
+            start = end;
+        }
+
+        if let Some(tap) = post {
+            push_mono(tap, channels);
+        }
+        let left = channels.first().map_or(mite_dsp::MINUS_INFINITY_DB, |c| self.meters[0].process(c));
+        let right = channels.get(1).map_or(left, |c| self.meters[1].process(c));
+        (left, right)
+    }
+
+    /// Once per block: the output stage's targets.
+    fn update_output(&mut self, settings: &[BandSettings; BANDS], mono: bool, out_db: f32) {
+        let o = self.output;
+        self.out_gain.set_target(db_to_gain(out_db));
+        self.mix.set_target(o.mix.clamp(0.0, 1.0));
+        self.delta.set_target(if o.delta { 1.0 } else { 0.0 });
+        self.bypass.set_target(if o.bypass { 1.0 } else { 0.0 });
+        let (pl, pr) = if mono { (1.0, 1.0) } else { balance(o.pan) };
+        self.pan[0].set_target(pl);
+        self.pan[1].set_target(pr);
+
+        // Auto gain: worked out from the curve, at most every few milliseconds while it moves.
+        if o.auto_gain {
+            let key = Some((*settings, mono));
+            if self.loudness_key != key && self.loudness_wait == 0 {
+                let db = (-loudness_change_db(settings, mono)).clamp(-AUTO_GAIN_LIMIT_DB, AUTO_GAIN_LIMIT_DB);
+                self.auto_gain.set_target(db_to_gain(db as f32));
+                self.loudness_key = key;
+                self.loudness_wait = AUTO_GAIN_INTERVAL_48K * rate_ratio(self.sample_rate);
+            }
+        } else {
+            self.auto_gain.set_target(1.0);
+            self.loudness_key = None;
+        }
+
+        // Solo: the soloed band's region, faded in; a band without one (tilt) cannot solo.
+        let filter = o.solo.filter(|&b| b < BANDS && settings[b].enabled).and_then(|b| solo_filter(&settings[b]).map(|f| (f, settings[b].placement)));
+        match filter {
+            Some((f, placement)) => {
+                if self.solo.current() == 0.0 && !self.solo.is_smoothing() {
+                    // Starting from silence: jump straight to the band.
+                    self.solo_filter.reset(&f);
+                } else {
+                    self.solo_filter.set_target(&f);
+                }
+                self.solo_placement = placement;
+                self.solo.set_target(1.0);
+            }
+            None => self.solo.set_target(0.0),
+        }
+    }
+
+    /// One chunk of at most [`CHUNK`] samples.
+    fn process_chunk(&mut self, channels: &mut [&mut [f32]], settings: &[BandSettings; BANDS], pre: Option<&SpectrumTap>) {
+        let frames = channels.first().map_or(0, |c| c.len());
+        self.dry.set_delay(self.latency());
+        match &*channels {
+            [l, r, ..] => self.dry.write(l, Some(r)),
+            [m] => self.dry.write(m, None),
+            [] => {}
+        }
+        if let Some(tap) = pre {
+            // The input as delayed as the output will be (mono input is stored on both sides).
+            let dry = &self.dry;
+            tap.push((0..frames).map(|i| 0.5 * (dry.read(0, i) + dry.read(1, i))));
+        }
         self.filled = self.filled.saturating_add(frames);
         if self.switch == Switch::Waiting {
             self.waited = self.waited.saturating_add(frames);
@@ -471,31 +643,90 @@ impl EqEngine {
         if self.active.spectral {
             self.run_spectral(channels, settings);
         }
+        self.finish(channels);
+        self.dry.advance(frames);
+    }
 
-        self.out_gain.set_target(db_to_gain(out_db));
+    /// Whether the output stage leaves the wet signal as it is (only output gain and the switch
+    /// dip apply).
+    fn output_is_plain(&self) -> bool {
+        let still = |s: &LinearSmoother, v: f32| !s.is_smoothing() && s.current() == v;
+        still(&self.mix, 1.0)
+            && still(&self.delta, 0.0)
+            && still(&self.bypass, 0.0)
+            && still(&self.solo, 0.0)
+            && still(&self.auto_gain, 1.0)
+            && still(&self.pan[0], 1.0)
+            && still(&self.pan[1], 1.0)
+    }
+
+    /// The output stage over one chunk.
+    fn finish(&mut self, channels: &mut [&mut [f32]]) {
         let frames = channels.first().map_or(0, |c| c.len());
-        if self.out_gain.is_smoothing() || self.fader.is_smoothing() || self.fader.current() != 1.0 {
-            for i in 0..frames {
-                let g = self.out_gain.next_value() * self.fader.next_value();
+        if self.output_is_plain() {
+            if self.out_gain.is_smoothing() || self.fader.is_smoothing() || self.fader.current() != 1.0 {
+                for i in 0..frames {
+                    let g = self.out_gain.next_value() * self.fader.next_value();
+                    for ch in channels.iter_mut() {
+                        ch[i] *= g;
+                    }
+                }
+            } else if self.out_gain.current() != 1.0 {
+                let g = self.out_gain.current();
                 for ch in channels.iter_mut() {
-                    ch[i] *= g;
+                    for s in ch.iter_mut() {
+                        *s *= g;
+                    }
                 }
             }
-        } else if self.out_gain.current() != 1.0 {
-            let g = self.out_gain.current();
-            for ch in channels.iter_mut() {
-                for s in ch.iter_mut() {
-                    *s *= g;
+            return;
+        }
+        // Auto gain, then mix and delta against the dry signal.
+        for i in 0..frames {
+            let (ag, mix, delta) = (self.auto_gain.next_value(), self.mix.next_value(), self.delta.next_value());
+            for (c, ch) in channels.iter_mut().enumerate() {
+                let (wet, dry) = (ch[i] * ag, self.dry.read(c, i));
+                let x = if mix <= 0.0 { dry } else { dry + mix * (wet - dry) };
+                ch[i] = x - delta * dry;
+            }
+        }
+        // Solo: crossfade into the soloed band's region (of what the band hears).
+        if self.solo.is_smoothing() || self.solo.current() > 0.0 {
+            let [sl, sr] = &mut self.solo_scratch;
+            let (sl, sr) = (&mut sl[..frames], &mut sr[..frames]);
+            match &*channels {
+                [l, r, ..] => {
+                    for i in 0..frames {
+                        (sl[i], sr[i]) = isolate(self.solo_placement, l[i], r[i]);
+                    }
+                    self.solo_filter.process(&mut [sl, sr]);
+                }
+                [m] => {
+                    sl.copy_from_slice(m);
+                    self.solo_filter.process(&mut [sl]);
+                }
+                [] => {}
+            }
+            for i in 0..frames {
+                let t = self.solo.next_value();
+                for (c, ch) in channels.iter_mut().enumerate() {
+                    let soloed = self.solo_scratch[c][i];
+                    ch[i] += t * (soloed - ch[i]);
                 }
             }
         }
-
-        if let Some(tap) = post {
-            push_mono(tap, channels);
+        // Output gain and balance, then bypass to the dry signal, then the switch dip.
+        for i in 0..frames {
+            let g = self.out_gain.next_value();
+            let pan = [self.pan[0].next_value(), self.pan[1].next_value()];
+            let (bypass, fader) = (self.bypass.next_value(), self.fader.next_value());
+            for (c, ch) in channels.iter_mut().enumerate() {
+                let y = ch[i] * g * pan[c];
+                let dry = self.dry.read(c, i);
+                let y = if bypass >= 1.0 { dry } else { y + bypass * (dry - y) };
+                ch[i] = y * fader;
+            }
         }
-        let left = channels.first().map_or(mite_dsp::MINUS_INFINITY_DB, |c| self.meters[0].process(c));
-        let right = channels.get(1).map_or(left, |c| self.meters[1].process(c));
-        (left, right)
     }
 
     /// Runs a convolving mode's convolver over the channels (mono through a scratch right channel).
@@ -1016,6 +1247,48 @@ mod tests {
     }
 
     #[test]
+    fn the_analyzer_compares_the_same_moment_before_and_after() {
+        // A spectral bell high up (8 kHz) adds the STFT's latency. Below it nothing is touched,
+        // so the pre and post spectra must agree there, on changing material too: the pre tap
+        // has to hear the input as delayed as the output is.
+        use mite_dsp::analyzer::{Analyzer, LogSpectrum, ANALYZER_SIZE, SPECTRUM_POINTS, spectrum_point_freq};
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 8000.0, q: 2.0, ..Default::default() };
+        settings[0].dynamics = mite_dsp::eq::Dynamics { enabled: true, spectral: true, threshold_db: -60.0, range_db: -12.0, ..Default::default() };
+        for mode in [PhaseMode::ZeroLatency, PhaseMode::LinearPhase] {
+            let mut eq = engine_in(mode, SR, &settings);
+            assert!(eq.latency() > 0);
+            let (pre, post) = (SpectrumTap::new(ANALYZER_SIZE), SpectrumTap::new(ANALYZER_SIZE));
+            // Noise in bursts: the spectrum changes from one moment to the next.
+            let mut input = noise(48_000, 13);
+            for (i, v) in input.iter_mut().enumerate() {
+                *v *= if (i / 1500) % 2 == 0 { 1.0 } else { 0.05 };
+            }
+            let (mut l, mut r) = (input.clone(), input);
+            for (a, b) in l.chunks_mut(128).zip(r.chunks_mut(128)) {
+                eq.process(&mut [a, b], &settings, 0.0, Some(&pre), Some(&post));
+            }
+            let mut analyzer = Analyzer::new(ANALYZER_SIZE);
+            let spectrum = LogSpectrum::new(ANALYZER_SIZE, f64::from(SR));
+            let read = |tap: &SpectrumTap, analyzer: &mut Analyzer| {
+                let mut samples = vec![0.0; ANALYZER_SIZE];
+                tap.read_latest(&mut samples);
+                let mut power = vec![0.0; analyzer.bins()];
+                analyzer.analyze_power(&samples, &mut power);
+                let mut db = vec![0.0; SPECTRUM_POINTS];
+                spectrum.read(&power, &mut db);
+                db
+            };
+            let (a, b) = (read(&pre, &mut analyzer), read(&post, &mut analyzer));
+            let worst = (0..SPECTRUM_POINTS)
+                .filter(|&i| (40.0..2000.0).contains(&spectrum_point_freq(i)))
+                .map(|i| (a[i] - b[i]).abs())
+                .fold(0.0f32, f32::max);
+            assert!(worst < 0.2, "{mode:?}: pre and post differ by {worst:.2} dB below the band");
+        }
+    }
+
+    #[test]
     fn taps_receive_mono_sum() {
         let tap = SpectrumTap::new(16);
         let mut eq = EqEngine::new(SR, &flat(), 0.0);
@@ -1024,5 +1297,180 @@ mod tests {
         let mut out = [0.0; 4];
         tap.read_latest(&mut out);
         assert_eq!(out, [0.5; 4]);
+    }
+
+    fn rms(x: &[f32]) -> f64 {
+        (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt()
+    }
+
+    fn largest_step(x: &[f32]) -> f32 {
+        x.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max)
+    }
+
+    #[test]
+    fn mix_zero_and_bypass_null_against_the_delayed_input_in_every_mode() {
+        let settings = bell(9.0);
+        for mode in [PhaseMode::ZeroLatency, PhaseMode::NaturalPhase, PhaseMode::LinearPhase] {
+            for output in [Output { mix: 0.0, ..Default::default() }, Output { bypass: true, ..Default::default() }] {
+                let mut eq = engine_in(mode, SR, &settings);
+                eq.set_output(output);
+                eq.reset(&settings, 0.0);
+                let latency = eq.latency();
+                let input = noise(16_384, 11);
+                let (mut l, mut r) = (input.clone(), input.clone());
+                run(&mut eq, &settings, &mut l, &mut r, false);
+                let worst = (0..16_384 - latency).map(|n| (l[n + latency] - input[n]).abs()).fold(0.0f32, f32::max);
+                assert!(worst == 0.0, "{mode:?} {output:?}: residual {worst}");
+            }
+        }
+    }
+
+    #[test]
+    fn delta_plays_exactly_what_the_eq_changes() {
+        let settings = bell(9.0);
+        for mode in [PhaseMode::ZeroLatency, PhaseMode::LinearPhase] {
+            let input = noise(16_384, 5);
+            let mut wet = engine_in(mode, SR, &settings);
+            let (mut wl, mut wr) = (input.clone(), input.clone());
+            run(&mut wet, &settings, &mut wl, &mut wr, false);
+            let mut delta = engine_in(mode, SR, &settings);
+            delta.set_output(Output { delta: true, ..Default::default() });
+            delta.reset(&settings, 0.0);
+            let latency = delta.latency();
+            let (mut dl, mut dr) = (input.clone(), input.clone());
+            run(&mut delta, &settings, &mut dl, &mut dr, false);
+            let worst = (0..16_384 - latency).map(|n| (dl[n + latency] + input[n] - wl[n + latency]).abs()).fold(0.0f32, f32::max);
+            assert!(worst < 1e-6, "{mode:?}: residual {worst}");
+            // And a neutral EQ's delta is silence.
+            let mut empty = engine_in(mode, SR, &flat());
+            empty.set_output(Output { delta: true, ..Default::default() });
+            empty.reset(&flat(), 0.0);
+            let (mut el, mut er) = (input.clone(), input.clone());
+            run(&mut empty, &flat(), &mut el, &mut er, false);
+            assert!(el.iter().all(|v| v.abs() < 1e-6), "{mode:?}: neutral delta not silent");
+        }
+    }
+
+    #[test]
+    fn output_switches_are_click_free() {
+        let settings = bell(9.0);
+        let mut eq = EqEngine::new(SR, &settings, 0.0);
+        let steps = [
+            Output { bypass: true, ..Default::default() },
+            Output::default(),
+            Output { delta: true, ..Default::default() },
+            Output::default(),
+            Output { mix: 0.0, ..Default::default() },
+            Output { pan: 1.0, ..Default::default() },
+            Output { solo: Some(0), ..Default::default() },
+            Output::default(),
+            Output { auto_gain: true, ..Default::default() },
+            Output::default(),
+        ];
+        let input = sine(1000.0, 4800 * steps.len());
+        let (mut l, mut r) = (input.clone(), input.clone());
+        for (i, (a, b)) in l.chunks_mut(4800).zip(r.chunks_mut(4800)).enumerate() {
+            eq.set_output(steps[i]);
+            for (x, y) in a.chunks_mut(128).zip(b.chunks_mut(128)) {
+                eq.process(&mut [x, y], &settings, 0.0, None, None);
+            }
+        }
+        // A 1 kHz sine at 0.5 (+9 dB at most) moves at most about 0.37 per sample.
+        let step = largest_step(&l);
+        assert!(step < 0.45, "step {step}");
+    }
+
+    #[test]
+    fn auto_gain_keeps_the_loudness_of_a_broad_boost() {
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 2000.0, gain_db: 6.0, q: 0.3, ..Default::default() };
+        // Pink noise (Paul Kellet's filter on white), the spectrum auto gain is weighted for.
+        let mut b = [0.0f32; 7];
+        let input: Vec<f32> = noise(96_000, 9)
+            .into_iter()
+            .map(|w| {
+                b[0] = 0.99886 * b[0] + w * 0.0555179;
+                b[1] = 0.99332 * b[1] + w * 0.0750759;
+                b[2] = 0.96900 * b[2] + w * 0.153852;
+                b[3] = 0.86650 * b[3] + w * 0.3104856;
+                b[4] = 0.55000 * b[4] + w * 0.5329522;
+                b[5] = -0.7616 * b[5] - w * 0.0168980;
+                let pink = b[0] + b[1] + b[2] + b[3] + b[4] + b[5] + b[6] + w * 0.5362;
+                b[6] = w * 0.115926;
+                pink * 0.2
+            })
+            .collect();
+        // Loudness as auto gain weighs it (K weighting: a high pass near 38 Hz, +4 dB above 1.5 kHz).
+        let loudness = |x: &[f32]| {
+            let k = [
+                BandSettings { enabled: true, kind: BandType::LowCut, freq: 38.0, slope: 1, ..Default::default() },
+                BandSettings { enabled: true, kind: BandType::HighShelf, freq: 1500.0, gain_db: 4.0, q: 0.7, ..Default::default() },
+            ];
+            let mut y = x.to_vec();
+            for s in &k {
+                let mut band = BandProcessor::new(f64::from(SR), 20.0);
+                band.reset(s);
+                band.process(&mut [&mut y]);
+            }
+            rms(&y)
+        };
+        let change = |auto_gain: bool| {
+            let mut eq = EqEngine::new(SR, &settings, 0.0);
+            eq.set_output(Output { auto_gain, ..Default::default() });
+            eq.reset(&settings, 0.0);
+            let (mut l, mut r) = (input.clone(), input.clone());
+            run(&mut eq, &settings, &mut l, &mut r, false);
+            20.0 * (loudness(&l[48_000..]) / loudness(&input[48_000..])).log10()
+        };
+        let (plain, compensated) = (change(false), change(true));
+        assert!(plain > 2.0, "{plain}");
+        assert!(compensated.abs() < 0.5, "{plain} → {compensated}");
+    }
+
+    #[test]
+    fn a_soloed_band_plays_only_its_region() {
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 500.0, gain_db: -6.0, q: 4.0, ..Default::default() };
+        let level_with = |settings: &[BandSettings; BANDS], freq: f64, solo: Option<usize>| {
+            let mut eq = EqEngine::new(SR, settings, 0.0);
+            eq.set_output(Output { solo, ..Default::default() });
+            let input = sine(freq, 24_000);
+            let (mut l, mut r) = (input.clone(), input.clone());
+            run(&mut eq, settings, &mut l, &mut r, false);
+            20.0 * (rms(&l[12_000..]) / rms(&input[12_000..])).log10()
+        };
+        let level = |freq, solo| level_with(&settings, freq, solo);
+        assert!(level(5000.0, None).abs() < 0.1);
+        assert!(level(5000.0, Some(0)) < -30.0, "{}", level(5000.0, Some(0)));
+        // At the centre the band pass is unity, so the solo plays the band's own −6 dB.
+        assert!((level(500.0, Some(0)) + 6.0).abs() < 0.2, "{}", level(500.0, Some(0)));
+        // A disabled band cannot solo.
+        settings[0].enabled = false;
+        assert!(level_with(&settings, 5000.0, Some(0)).abs() < 0.1);
+    }
+
+    #[test]
+    fn a_soloed_side_band_plays_only_the_side() {
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 1000.0, q: 1.0, placement: Placement::Side, ..Default::default() };
+        let mut eq = EqEngine::new(SR, &settings, 0.0);
+        eq.set_output(Output { solo: Some(0), ..Default::default() });
+        // Identical channels: no side at all.
+        let input = sine(1000.0, 24_000);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        run(&mut eq, &settings, &mut l, &mut r, false);
+        assert!(rms(&l[12_000..]) < 1e-4, "{}", rms(&l[12_000..]));
+    }
+
+    #[test]
+    fn balance_closes_the_other_side() {
+        let mut eq = EqEngine::new(SR, &flat(), 0.0);
+        eq.set_output(Output { pan: 1.0, ..Default::default() });
+        eq.reset(&flat(), 0.0);
+        let input = sine(1000.0, 4800);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        run(&mut eq, &flat(), &mut l, &mut r, false);
+        assert!(rms(&l) < 1e-6);
+        assert!((rms(&r) - rms(&input)).abs() < 1e-6);
     }
 }
