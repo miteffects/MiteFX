@@ -385,3 +385,38 @@ fn above_the_spectrum_the_pointer_ignores_its_peaks() {
     assert_eq!(band_plain(&host, 1, ON.id), 1.0);
     assert!((band_plain(&host, 1, Q.id) - 1.0).abs() < 0.01, "q {}", band_plain(&host, 1, Q.id));
 }
+
+/// The footer's snapshot letters A–D.
+fn slot(i: usize) -> Point {
+    Point::new(680.0 + 38.0 * i as f64, 732.0)
+}
+
+#[test]
+fn snapshot_letters_switch_what_is_edited_and_bring_each_one_back() {
+    let (mut view, host) = setup();
+    host.set_plain(&band_id(0, GAIN.id), 6.0);
+    // B was never stored: it starts as a copy of A.
+    click(&mut view, &host, slot(1));
+    assert_eq!(plain(&host, GAIN.id), 6.0);
+    host.set_plain(&band_id(0, GAIN.id), -4.0);
+    draw(&mut view, &host);
+    // Back to A: its +6 dB returns; to B again: −4 dB.
+    click(&mut view, &host, slot(0));
+    assert!((plain(&host, GAIN.id) - 6.0).abs() < 0.01, "A {}", plain(&host, GAIN.id));
+    draw(&mut view, &host);
+    click(&mut view, &host, slot(1));
+    assert!((plain(&host, GAIN.id) + 4.0).abs() < 0.01, "B {}", plain(&host, GAIN.id));
+}
+
+#[test]
+fn dragging_a_letter_onto_another_copies_that_snapshot() {
+    let (mut view, host) = setup();
+    host.set_plain(&band_id(0, GAIN.id), 9.0);
+    draw(&mut view, &host);
+    drag(&mut view, &host, slot(0), slot(2));
+    // A is still the one edited; C now holds A.
+    host.set_plain(&band_id(0, GAIN.id), 0.0);
+    click(&mut view, &host, slot(2));
+    assert!((plain(&host, GAIN.id) - 9.0).abs() < 0.01, "C {}", plain(&host, GAIN.id));
+}
+

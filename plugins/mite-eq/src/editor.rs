@@ -21,6 +21,7 @@ use crate::params::{
     band_id, ATTACK, ATTACK_DIAL, AUTO_GAIN, BANDS, BYPASS, DELTA, DMODE, DYN, FREQ, GAIN, LP_RES, MIX, MODE, ON, OUT_GAIN, OUT_PAN, Q, RANGE, RATIO, RELEASE,
     RELEASE_DIAL, RTHRESH, SLOPE, SOLO, SPECTRAL, SREL, SSMOOTH, STEREO, SUSTAIN, THRESH, TRANSIENT, TRANSITION, TTIME, TYPE,
 };
+use crate::snapshots::{snapshot_ids, Values, NAMES as SLOT_NAMES, SLOTS};
 use crate::{EqShared, SPECTRAL_POINTS};
 
 /// A stand-in host holding every Mite EQ parameter at its default, for tests, the standalone
@@ -119,6 +120,12 @@ const PANEL_DIAL: f64 = 56.0;
 const PANEL_LAST_DIAL_X: f64 = 596.0;
 const PANEL_DIAL_STEP: f64 = 84.0;
 const MENU_ITEM_H: f64 = 30.0;
+/// Footer snapshot letters: the first one's centre x, the distance between centres, and their size.
+const SLOT_X0: f64 = 680.0;
+const SLOT_STEP: f64 = 38.0;
+const SLOT_W: f64 = 32.0;
+const SLOT_H: f64 = 30.0;
+
 /// Footer: the distance between dial centres, and the toggles' size.
 const FOOTER_DIAL_STEP: f64 = 92.0;
 const TOGGLE: f64 = 34.0;
@@ -704,6 +711,9 @@ pub struct EqView {
     toggle_hits: [Rect; 3],
     /// The band being listened to alone, as last drawn.
     soloed: Option<usize>,
+    /// Footer snapshot letters (set while drawing), and a letter being pressed.
+    slot_hits: [Rect; SLOTS],
+    slot_press: Option<usize>,
     meter: LevelMeter,
     analyzer: Analyzer,
     samples: Vec<f32>,
@@ -794,6 +804,8 @@ impl EqView {
             footer_knobs,
             toggle_hits: [Rect::ZERO; 3],
             soloed: None,
+            slot_hits: [Rect::ZERO; SLOTS],
+            slot_press: None,
             meter: LevelMeter::new(Rect::new(1233.5, DISPLAY_TOP + 19.5, 1266.5, DISPLAY_TOP + 592.5)),
             analyzer,
             samples: vec![0.0; ANALYZER_SIZE],
@@ -1024,6 +1036,16 @@ impl EqView {
                 "Delta — hear only what the EQ changes",
                 "Bypass — the whole EQ, latency kept",
             ];
+            if let Some(from) = self.slot_press {
+                if let Some(to) = self.slot_hits.iter().position(|r| r.contains(p)).filter(|&to| to != from) {
+                    return Help::default().text(format!("Copy {} to {} — release to copy", SLOT_NAMES[from], SLOT_NAMES[to]));
+                }
+            }
+            if let Some(i) = self.slot_hits.iter().position(|r| r.contains(p)) {
+                let store = &self.shared.snapshots;
+                let state = if store.active() == i { " · editing" } else if store.filled(i) { "" } else { " · empty (starts as a copy)" };
+                return Help::default().text(format!("Snapshot {}{state} — click to edit it; drag onto another letter to copy it there", SLOT_NAMES[i]));
+            }
             if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(p)) {
                 let on = Self::plain(host, TOGGLES[i]) >= 0.5;
                 return Help::default().text(WORDS[i]).text(if on { " · on" } else { "" });
@@ -1150,6 +1172,57 @@ impl EqView {
             Hot::Mode(_) => Help::default().text("Transient shaper"),
             Hot::RemoveDynamics => band().text("— make static"),
         })
+    }
+
+    /// The band parameters now, as a snapshot's values.
+    fn capture(host: &dyn ParamHost) -> Values {
+        snapshot_ids().map(|id| {
+            let v = host.normalized(&id);
+            (id, v)
+        }).collect()
+    }
+
+    /// Writes a snapshot's values into the parameters (only those that differ, as gestures).
+    fn recall(host: &dyn ParamHost, values: &Values) {
+        for (id, &v) in values {
+            if (host.normalized(id) - v).abs() > 1e-7 {
+                host.begin_gesture(id);
+                host.set_normalized(id, v);
+                host.end_gesture(id);
+            }
+        }
+    }
+
+    /// Makes `slot` the one being edited: the parameters now go into the slot that was, and
+    /// `slot`'s values come back (a slot never stored starts as a copy).
+    fn select_slot(&mut self, host: &dyn ParamHost, slot: usize) {
+        let store = &self.shared.snapshots;
+        let from = store.active();
+        if slot != from {
+            let live = Self::capture(host);
+            store.store(from, live.clone());
+            match store.slot(slot) {
+                Some(values) => Self::recall(host, &values),
+                None => store.store(slot, live),
+            }
+            store.set_active(slot);
+        }
+        if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
+            self.select(None);
+        }
+        self.panel_knobs.clear();
+    }
+
+    /// Copies snapshot `from` into `to` (the active one's contents are the parameters).
+    fn copy_slot(&mut self, host: &dyn ParamHost, from: usize, to: usize) {
+        let store = &self.shared.snapshots;
+        let active = store.active();
+        let values = if from == active { Self::capture(host) } else { store.slot(from).unwrap_or_else(|| Self::capture(host)) };
+        if to == active {
+            Self::recall(host, &values);
+            self.panel_knobs.clear();
+        }
+        store.store(to, values);
     }
 
     fn add_band(&mut self, host: &dyn ParamHost, p: Point) {
@@ -2506,6 +2579,19 @@ impl EqView {
         cx.text.draw(cx.scene, "LATENCY", label_x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
         cx.text.draw(cx.scene, &latency, label_x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
 
+        // Snapshots: the letters A–D, the edited one lit, empty ones dim.
+        let active = self.shared.snapshots.active();
+        for (i, name) in SLOT_NAMES.iter().enumerate() {
+            let c = SLOT_X0 + SLOT_STEP * i as f64;
+            let r = Rect::new(c - SLOT_W / 2.0, top + 13.0, c + SLOT_W / 2.0, top + 13.0 + SLOT_H);
+            let target = self.slot_press.is_some_and(|from| from != i) && self.pointer.is_some_and(|p| r.contains(p));
+            let hot = target || self.pointer.is_some_and(|p| r.contains(p));
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, active == i, theme.accent);
+            let ink = if active != i && !hot && !self.shared.snapshots.filled(i) { theme.text_lo } else { ink };
+            cx.text.draw(cx.scene, name, c, r.y0 + 8.0, TextStyle::LABEL.sized(11.0), ink, Align::Center);
+            self.slot_hits[i] = r;
+        }
+
         // Auto gain, delta and bypass: icon toggles, lit while on.
         let first_dial = self.footer_knobs[0].center.x;
         for (i, id) in TOGGLES.into_iter().enumerate() {
@@ -2609,6 +2695,9 @@ impl View for EqView {
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
+                if self.slot_press.is_some() {
+                    return true;
+                }
                 if let Some(g) = &mut self.grab {
                     // The ghost Bell stays on the peak; up and down set its gain.
                     let factor = if mods.fine() { 0.1 } else { 1.0 };
@@ -2713,6 +2802,10 @@ impl View for EqView {
                         self.toggle_menu(MenuKind::Resolution, 0, r, host);
                         return true;
                     }
+                    if let Some(i) = self.slot_hits.iter().position(|r| r.contains(pos)) {
+                        self.slot_press = Some(i);
+                        return true;
+                    }
                     if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(pos)) {
                         let id = TOGGLES[i];
                         Self::set(host, id, if Self::plain(host, id) >= 0.5 { 0.0 } else { 1.0 });
@@ -2804,7 +2897,15 @@ impl View for EqView {
                 }
                 false
             }
-            UiEvent::PointerUp { button: MouseButton::Left, .. } => {
+            UiEvent::PointerUp { pos, button: MouseButton::Left, .. } => {
+                if let Some(from) = self.slot_press.take() {
+                    match self.slot_hits.iter().position(|r| r.contains(pos)) {
+                        Some(to) if to == from => self.select_slot(host, from),
+                        Some(to) => self.copy_slot(host, from, to),
+                        None => {}
+                    }
+                    return true;
+                }
                 if let Some(g) = self.grab.take() {
                     // Released after a drag: the ghost becomes a band. A plain click on a peak
                     // is a click on the display (clears the selection).

@@ -312,6 +312,15 @@ pub const MODE: ChoiceSpec = ChoiceSpec { id: "mode", name: "Processing Mode", c
 /// Linear-phase resolution: kernel length, and with it latency and low-frequency precision.
 pub const LP_RES: ChoiceSpec = ChoiceSpec { id: "lp_res", name: "Linear Phase Resolution", choices: &crate::dsp::LP_RESOLUTIONS, default: 2 };
 
+/// The key the snapshots are saved under in the plugin state (frozen, like the parameter ids).
+pub const SNAPSHOTS_KEY: &str = "snapshots";
+
+/// The per-band parameters a snapshot holds (every one but solo, which is an audition).
+pub const SNAPSHOT_PARAMS: [&str; 22] = [
+    ON.id, TYPE.id, FREQ.id, GAIN.id, Q.id, SLOPE.id, STEREO.id, DYN.id, RANGE.id, THRESH.id, ATTACK.id, RELEASE.id, RATIO.id, DMODE.id, SUSTAIN.id,
+    TRANSIENT.id, TTIME.id, TRANSITION.id, SPECTRAL.id, SSMOOTH.id, SREL.id, RTHRESH.id,
+];
+
 /// `b03_freq` for band index 2.
 pub fn band_id(band: usize, param: &str) -> String {
     format!("b{:02}_{param}", band + 1)
@@ -452,6 +461,8 @@ pub struct EqParams {
     pub auto_gain: BoolParam,
     pub delta: BoolParam,
     pub bypass: BoolParam,
+    /// Snapshots A–D (not parameters: saved with the state through `serialize_fields`).
+    pub snapshots: std::sync::Arc<crate::snapshots::Snapshots>,
     pub bands: [BandParams; BANDS],
 }
 
@@ -466,14 +477,36 @@ impl Default for EqParams {
             auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
             delta: bool_param(&DELTA, DELTA.name.to_owned()),
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()).make_bypass(),
+            snapshots: std::sync::Arc::new(crate::snapshots::Snapshots::new()),
             bands: std::array::from_fn(BandParams::new),
         }
+    }
+}
+
+impl EqParams {
+    /// Every parameter's pointer by id.
+    fn ptrs(&self) -> std::collections::HashMap<String, ParamPtr> {
+        self.param_map().into_iter().map(|(id, ptr, _)| (id, ptr)).collect()
     }
 }
 
 // SAFETY: every `ParamPtr` points into `self`, which nih-plug keeps alive (in an `Arc`) for as
 // long as it uses the map. The ids match `manifest()` (checked by tests/params.rs).
 unsafe impl Params for EqParams {
+    /// The snapshots (A–D), with the band parameters now as the active slot.
+    fn serialize_fields(&self) -> std::collections::BTreeMap<String, String> {
+        let ptrs = self.ptrs();
+        // SAFETY: the pointers point into `self` (see above).
+        let live = crate::snapshots::snapshot_ids().filter_map(|id| ptrs.get(&id).map(|p| (id.clone(), unsafe { p.unmodulated_normalized_value() }))).collect();
+        [(SNAPSHOTS_KEY.to_owned(), self.snapshots.to_json(live))].into_iter().collect()
+    }
+
+    fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
+        if let Some(json) = serialized.get(SNAPSHOTS_KEY) {
+            self.snapshots.load_json(json);
+        }
+    }
+
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
         let mut map = vec![
             (OUT_GAIN.id.to_owned(), self.out_gain.as_ptr(), String::new()),

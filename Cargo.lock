@@ -1169,6 +1169,8 @@ dependencies = [
  "mite-ui",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

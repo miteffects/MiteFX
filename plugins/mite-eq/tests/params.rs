@@ -4,7 +4,7 @@
 //! migration; only then update `tests/golden/mite_eq.params.txt`.
 
 use mite_eq::params::{manifest, EqParams};
-use nih_plug::prelude::Params;
+use nih_plug::prelude::{Param, Params};
 
 const GOLDEN: &str = include_str!("../../../tests/golden/mite_eq.params.txt");
 
@@ -40,4 +40,22 @@ fn ids_follow_the_blueprint_scheme() {
     for id in ["out_pan", "mix", "auto_gain", "delta", "bypass"] {
         assert!(ids.contains(&id.to_owned()), "{id}");
     }
+}
+
+#[test]
+fn snapshots_are_saved_with_the_state_and_restored() {
+    use mite_eq::snapshots::Values;
+    let params = EqParams::default();
+    let stored: Values = [("b01_gain".to_owned(), 0.8_f32)].into_iter().collect();
+    params.snapshots.store(2, stored.clone());
+    params.snapshots.set_active(1);
+    let saved = params.serialize_fields();
+    let restored = EqParams::default();
+    restored.deserialize_fields(&saved);
+    assert_eq!(restored.snapshots.active(), 1);
+    assert_eq!(restored.snapshots.slot(2), Some(stored));
+    // The active slot is saved as the parameters were (every band parameter, normalized).
+    let active = restored.snapshots.slot(1).expect("the active slot is saved");
+    assert_eq!(active.len(), 24 * 22);
+    assert_eq!(active.get("b01_freq").copied(), Some(params.bands[0].freq.default_normalized_value()));
 }
