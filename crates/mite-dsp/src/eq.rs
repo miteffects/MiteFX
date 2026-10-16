@@ -20,12 +20,10 @@ pub enum BandType {
     Notch,
     BandPass,
     TiltShelf,
-    /// Soothe-style resonance suppression inside the band's range (spectral; no static curve).
-    Resonance,
 }
 
 impl BandType {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Bell,
         Self::LowShelf,
         Self::HighShelf,
@@ -34,10 +32,9 @@ impl BandType {
         Self::Notch,
         Self::BandPass,
         Self::TiltShelf,
-        Self::Resonance,
     ];
-    pub const NAMES: [&'static str; 9] =
-        ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf", "Resonance"];
+    pub const NAMES: [&'static str; 8] =
+        ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf"];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -111,6 +108,13 @@ pub struct Dynamics {
     /// Compressor mode: work per frequency bin inside the band's range (spectral dynamics)
     /// instead of moving the whole band.
     pub spectral: bool,
+    /// Spectral mode: how far each frequency's gain spreads to its neighbours (0…1: each bin on
+    /// its own … a half-octave average).
+    pub smoothing: f64,
+    /// Spectral mode: compare each frequency with its surroundings (the average level around
+    /// it) instead of a fixed level; `relative_db` is then the threshold, dB above them.
+    pub relative: bool,
+    pub relative_db: f64,
     pub threshold_db: f64,
     pub attack_ms: f64,
     pub release_ms: f64,
@@ -128,6 +132,9 @@ impl Default for Dynamics {
             transient_ms: DEFAULT_TRANSIENT_MS,
             transition: DEFAULT_TRANSITION,
             spectral: false,
+            smoothing: DEFAULT_SMOOTHING,
+            relative: false,
+            relative_db: DEFAULT_RELATIVE_DB,
             threshold_db: -30.0,
             attack_ms: 10.0,
             release_ms: 150.0,
@@ -326,25 +333,15 @@ impl Dynamics {
     }
 }
 
-/// A resonance band's settings (soothe-style suppression).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ResonanceSettings {
-    /// The most a resonance is cut, dB (positive).
-    pub depth_db: f64,
-    /// 0…1: how narrow the resonances it goes after are (higher = only the narrowest).
-    pub sharpness: f64,
-    /// 0…1: how far a resonance must stick out of its surroundings to be cut (higher = only the
-    /// most prominent).
-    pub selectivity: f64,
-    /// 0…1: how fast the cuts follow the sound (higher = faster attack and release).
-    pub speed: f64,
-}
+/// Default spectral smoothing (share of the widest, half an octave).
+pub const DEFAULT_SMOOTHING: f64 = 0.25;
+/// The widest spectral smoothing window, octaves.
+pub const SMOOTHING_MAX_OCT: f64 = 0.5;
 
-impl Default for ResonanceSettings {
-    fn default() -> Self {
-        Self { depth_db: 6.0, sharpness: 0.5, selectivity: 0.5, speed: 0.5 }
-    }
-}
+/// Relative spectral mode: the default threshold above the surroundings, dB, and how wide the
+/// surroundings each frequency is compared with are, octaves.
+pub const DEFAULT_RELATIVE_DB: f64 = 6.0;
+pub const RELATIVE_WIDTH_OCT: f64 = 0.6;
 
 /// One band's settings, as the host parameters describe them.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -358,12 +355,11 @@ pub struct BandSettings {
     pub slope: usize,
     pub placement: Placement,
     pub dynamics: Dynamics,
-    pub resonance: ResonanceSettings,
 }
 
 impl Default for BandSettings {
     fn default() -> Self {
-        Self { enabled: false, kind: BandType::Bell, freq: 1000.0, gain_db: 0.0, q: FRAC_1_SQRT_2, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default(), resonance: ResonanceSettings::default() }
+        Self { enabled: false, kind: BandType::Bell, freq: 1000.0, gain_db: 0.0, q: FRAC_1_SQRT_2, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default() }
     }
 }
 
@@ -378,9 +374,9 @@ impl BandSettings {
         self.is_dynamic() && self.dynamics.mode == DynamicsMode::Compressor && self.dynamics.spectral
     }
 
-    /// Whether the band needs the spectral stage: a spectral compressor or a resonance band.
+    /// Whether the band needs the spectral stage (a spectral compressor).
     pub fn uses_spectrum(&self) -> bool {
-        self.enabled && (self.is_spectral() || self.kind == BandType::Resonance)
+        self.enabled && self.is_spectral()
     }
 
     /// Whether `other` needs a different filter structure (a crossfade instead of smoothing).
@@ -451,8 +447,6 @@ fn for_each_prototype(s: &BandSettings, mut f: impl FnMut(Analog, bool)) {
             // First-order tilt pivoting on f0: −g/2 at DC, +g/2 at the top, unity at f0.
             f(Analog::first(a, 1.0, 1.0, a), false);
         }
-        // No static curve: a resonance band works entirely in the spectral stage.
-        BandType::Resonance => {}
         BandType::Notch => f(Analog::second(1.0, 0.0, 1.0, 1.0, 1.0 / q, 1.0), false),
         BandType::BandPass => f(Analog::second(0.0, 1.0 / q, 0.0, 1.0, 1.0 / q, 1.0), false),
         BandType::LowCut | BandType::HighCut => {
@@ -723,6 +717,16 @@ impl BandProcessor {
         }
     }
 
+    /// True when the band is fully in and has no sections and no dynamics: it leaves the audio as
+    /// it is.
+    fn passes_through(&self) -> bool {
+        self.sections.as_slice().is_empty()
+            && !self.target.structure_differs(&self.active)
+            && !self.mix.is_smoothing()
+            && !self.detecting()
+            && self.dynamic_db == 0.0
+    }
+
     /// True when the band contributes nothing and needs no work: disabled and fully faded out.
     pub fn is_idle(&self) -> bool {
         !self.active.enabled && !self.target.enabled && !self.mix.is_smoothing() && self.mix.current() == 0.0
@@ -770,6 +774,14 @@ impl BandProcessor {
     /// Processes up to two channels in place. With one channel every placement processes it.
     pub fn process(&mut self, channels: &mut [&mut [f32]]) {
         if self.is_idle() {
+            return;
+        }
+        if self.passes_through() {
+            // No filter to run (no sections, e.g. a flat band): just keep the
+            // smoothed values on their targets for the display.
+            self.log_freq.reset(self.target.freq.ln() as f32);
+            self.gain.reset(self.target.gain_db as f32);
+            self.log_q.reset(self.target.q.ln() as f32);
             return;
         }
         let frames = channels.first().map_or(0, |c| c.len());
@@ -853,7 +865,7 @@ mod tests {
     }
 
     fn band(kind: BandType, freq: f64, gain_db: f64, q: f64) -> BandSettings {
-        BandSettings { enabled: true, kind, freq, gain_db, q, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default(), resonance: ResonanceSettings::default() }
+        BandSettings { enabled: true, kind, freq, gain_db, q, slope: DEFAULT_SLOPE, placement: Placement::Stereo, dynamics: Dynamics::default() }
     }
 
     #[test]

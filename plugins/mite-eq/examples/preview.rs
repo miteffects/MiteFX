@@ -2,6 +2,9 @@
 //! engine (as if audio were playing), for interactive testing and frame-time measurement.
 //!
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_eq --example preview
+//!
+//! PREVIEW_SPECTRAL=1 makes band 3 a spectral compressor (PREVIEW_RELATIVE=1: relative) and adds a
+//! ringing 2.8 kHz tone to the noise.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -10,7 +13,7 @@ use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::{run_standalone, MemoryParamHost, ThemeKind, View, WindowOptions};
 
@@ -59,7 +62,11 @@ fn main() -> Result<(), String> {
             .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
             .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
             .with_id(leak(band_id(b, TTIME.id)), TTIME)
-            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION);
+            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION)
+            .with_id(leak(band_id(b, SPECTRAL.id)), index_spec("spectral", 2, 0))
+            .with_id(leak(band_id(b, SSMOOTH.id)), SSMOOTH)
+            .with_id(leak(band_id(b, SREL.id)), index_spec("srel", 2, 0))
+            .with_id(leak(band_id(b, RTHRESH.id)), RTHRESH);
     }
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),
@@ -77,6 +84,18 @@ fn main() -> Result<(), String> {
         settings[b] = BandSettings { enabled: true, kind, freq: f64::from(freq), gain_db: f64::from(gain), q: f64::from(q), slope: 3, ..Default::default() };
     }
 
+    let relative = std::env::var_os("PREVIEW_RELATIVE").is_some();
+    let spectral = std::env::var_os("PREVIEW_SPECTRAL").is_some() || relative;
+    if spectral {
+        host.set_plain(&band_id(2, DYN.id), 1.0);
+        host.set_plain(&band_id(2, SPECTRAL.id), 1.0);
+        host.set_plain(&band_id(2, RANGE.id), -9.0);
+        host.set_plain(&band_id(2, THRESH.id), -40.0);
+        host.set_plain(&band_id(2, SREL.id), if relative { 1.0 } else { 0.0 });
+        settings[2].dynamics = mite_dsp::eq::Dynamics { enabled: true, spectral: true, relative, range_db: -9.0, threshold_db: -40.0, ..Default::default() };
+    }
+    let resonance = spectral;
+
     // "Audio thread": 512-sample blocks of pink noise at 48 kHz, in real time.
     let shared = Arc::new(EqShared::new());
     shared.sample_rate.store(48_000.0);
@@ -88,6 +107,7 @@ fn main() -> Result<(), String> {
         let mut block = vec![0.0_f32; 512];
         let start = Instant::now();
         let mut blocks = 0u64;
+        let mut phase = 0.0_f64;
         loop {
             for s in &mut block {
                 seed ^= seed << 13;
@@ -98,10 +118,32 @@ fn main() -> Result<(), String> {
                 b1 = 0.96300 * b1 + white * 0.2965164;
                 b2 = 0.57000 * b2 + white * 1.0526913;
                 *s = (b0 + b1 + b2 + white * 0.1848) * 0.03;
+                if resonance {
+                    // Rings on and off every second, so the cut comes and goes.
+                    phase += 2.0 * std::f64::consts::PI * 2800.0 / 48_000.0;
+                    let on = (blocks / 94) % 2 == 0;
+                    *s += if on { (0.08 * phase.sin()) as f32 } else { 0.0 };
+                }
             }
             let (mut l, mut r) = (block.clone(), block.clone());
             let (pl, pr) = engine.process(&mut [&mut l, &mut r], &settings, 0.0, Some(&audio.pre), Some(&audio.post));
             audio.meter.store(pl, pr);
+            for (slot, db) in audio.dynamic.iter().zip(engine.dynamic_gains()) {
+                slot.store(db);
+            }
+            for (i, slot) in audio.spectral.iter().enumerate() {
+                slot.store(engine.spectral_gain_db(mite_eq::spectral_point_freq(i)));
+            }
+            audio.latency.store(engine.latency() as f32);
+            let focus = audio.focus.load();
+            if focus >= 0.0 {
+                for i in 0..mite_eq::SPECTRAL_POINTS {
+                    let (level, threshold, gain) = engine.spectral_band_db(focus as usize, i);
+                    audio.focus_level[i].store(level);
+                    audio.focus_threshold[i].store(threshold);
+                    audio.focus_gain[i].store(gain);
+                }
+            }
             blocks += 1;
             let due = start + Duration::from_secs_f64(blocks as f64 * 512.0 / 48_000.0);
             if let Some(wait) = due.checked_duration_since(Instant::now()) {

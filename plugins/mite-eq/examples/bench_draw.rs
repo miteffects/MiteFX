@@ -1,13 +1,14 @@
 //! CPU cost of building one editor frame (scene + text, no GPU) in the worst case for dynamic
 //! bands: 8 dynamic bells whose live gain changes every frame, one selected (panel open).
 //!
-//!     cargo run --release -p mite_eq --example bench_draw     (BENCH_TRANSIENT=1 for transient bands)
+//!     cargo run --release -p mite_eq --example bench_draw     (BENCH_TRANSIENT=1 for transient bands,
+//!                                                              BENCH_SPECTRAL=1 for spectral ones)
 
 use std::sync::Arc;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::vello::Scene;
@@ -58,7 +59,11 @@ fn main() {
             .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
             .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
             .with_id(leak(band_id(b, TTIME.id)), TTIME)
-            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION);
+            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION)
+            .with_id(leak(band_id(b, SPECTRAL.id)), index_spec("spectral", 2, 0))
+            .with_id(leak(band_id(b, SSMOOTH.id)), SSMOOTH)
+            .with_id(leak(band_id(b, SREL.id)), index_spec("srel", 2, 0))
+            .with_id(leak(band_id(b, RTHRESH.id)), RTHRESH);
     }
     let bell = mite_dsp::eq::BandType::Bell as usize as f32;
     for b in 0..8 {
@@ -72,6 +77,13 @@ fn main() {
             host.set_plain(&band_id(b, DMODE.id), 1.0);
             host.set_plain(&band_id(b, TRANSIENT.id), 6.0);
             host.set_plain(&band_id(b, SUSTAIN.id), -4.0);
+        }
+        // BENCH_SPECTRAL=1: spectral compressors (alternately relative), with the
+        // per-bin curve moving every frame.
+        if std::env::var_os("BENCH_SPECTRAL").is_some() {
+            host.set_plain(&band_id(b, SPECTRAL.id), 1.0);
+            host.set_plain(&band_id(b, SREL.id), (b % 2) as f32);
+            host.set_plain(&band_id(b, RANGE.id), -6.0);
         }
     }
     let shared = Arc::new(EqShared::new());
@@ -100,6 +112,9 @@ fn main() {
         for (b, slot) in shared.level.iter().enumerate() {
             slot.store(-30.0 + 12.0 * ((f + b * 5) as f32 * 0.13).sin());
         }
+        for (i, slot) in shared.spectral.iter().enumerate() {
+            slot.store(-4.0 * (0.5 + 0.5 * ((f + i) as f32 * 0.21).sin()));
+        }
         view.tick(&host);
         let t = std::time::Instant::now();
         draw(&mut view);
@@ -107,5 +122,5 @@ fn main() {
     }
     times.sort_by(f64::total_cmp);
     let mean = times.iter().sum::<f64>() / frames as f64;
-    println!("frame build (8 dynamic bands, panel open): mean {mean:.2} ms, p95 {:.2} ms, max {:.2} ms", times[frames * 95 / 100], times[frames - 1]);
+    println!("frame build (8 moving bands, panel open): mean {mean:.2} ms, p95 {:.2} ms, max {:.2} ms", times[frames * 95 / 100], times[frames - 1]);
 }

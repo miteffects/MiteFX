@@ -9,7 +9,7 @@ use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType};
 use mite_eq::dsp::EqEngine;
 use mite_eq::editor::EqView;
-use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::render::render_view;
@@ -71,7 +71,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
             .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
             .with_id(leak(band_id(b, TTIME.id)), TTIME)
-            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION);
+            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION)
+            .with_id(leak(band_id(b, SPECTRAL.id)), index_spec("spectral", 2, 0))
+            .with_id(leak(band_id(b, SSMOOTH.id)), SSMOOTH)
+            .with_id(leak(band_id(b, SREL.id)), index_spec("srel", 2, 0))
+            .with_id(leak(band_id(b, RTHRESH.id)), RTHRESH);
     }
     let mock = [
         (BandType::LowCut, 32.0, 0.0, 0.71),
@@ -115,6 +119,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // SNAPSHOT_SPECTRAL makes band 3's compressor spectral; SNAPSHOT_RELATIVE also makes its
+    // threshold relative (6 dB over the surroundings). Either way a ringing 2.8 kHz tone joins the noise, so the
+    // live cuts drawn are the engine's own.
+    let spectral = std::env::var_os("SNAPSHOT_SPECTRAL").is_some();
+    let relative = std::env::var_os("SNAPSHOT_RELATIVE").is_some();
+    let spectral = spectral || relative;
+    if spectral {
+        host.set_plain(&band_id(2, SPECTRAL.id), 1.0);
+        host.set_plain(&band_id(2, RANGE.id), -9.0);
+        settings[2].dynamics.spectral = true;
+        settings[2].dynamics.range_db = -9.0;
+    }
+    // SNAPSHOT_SPECTRAL_FREQ=42 moves that band (the scope where STFT bins are sparse).
+    if let Some(f) = std::env::var("SNAPSHOT_SPECTRAL_FREQ").ok().and_then(|v| v.parse::<f64>().ok()) {
+        host.set_plain(&band_id(2, FREQ.id), f as f32);
+        settings[2].freq = f;
+    }
+    if relative {
+        host.set_plain(&band_id(2, SREL.id), 1.0);
+        settings[2].dynamics.relative = true;
+    }
+    let ring = spectral;
+    let mut phase = 0.0_f64;
+
     // Pink-ish noise (Paul Kellet's filter) through the real engine feeds both analyzer taps.
     let shared = Arc::new(EqShared::new());
     shared.sample_rate.store(48_000.0);
@@ -122,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut seed = 0x2545_F491_u32;
     let (mut b0, mut b1, mut b2) = (0.0_f32, 0.0_f32, 0.0_f32);
     let mut block = vec![0.0_f32; 512];
-    for _ in 0..64 {
+    for _ in 0..if ring { 160 } else { 64 } {
         for s in &mut block {
             seed ^= seed << 13;
             seed ^= seed >> 17;
@@ -132,6 +160,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             b1 = 0.96300 * b1 + white * 0.2965164;
             b2 = 0.57000 * b2 + white * 1.0526913;
             *s = (b0 + b1 + b2 + white * 0.1848) * 0.06;
+            if ring {
+                phase += 2.0 * std::f64::consts::PI * 2800.0 / 48_000.0;
+                *s += (0.12 * phase.sin()) as f32;
+            }
         }
         let mut l = block.clone();
         let mut r = block.clone();
@@ -143,8 +175,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (slot, db) in shared.level.iter().zip(engine.detector_levels()) {
             slot.store(db);
         }
+        for (i, slot) in shared.spectral.iter().enumerate() {
+            slot.store(engine.spectral_gain_db(mite_eq::spectral_point_freq(i)));
+        }
+        // The editor will select band 3: its per-bin detail.
+        for i in 0..mite_eq::SPECTRAL_POINTS {
+            let (level, threshold, gain) = engine.spectral_band_db(2, i);
+            shared.focus_level[i].store(level);
+            shared.focus_threshold[i].store(threshold);
+            shared.focus_gain[i].store(gain);
+        }
     }
 
+    shared.latency.store(engine.latency() as f32);
     // SNAPSHOT_NP shows Natural Phase.
     if std::env::var_os("SNAPSHOT_NP").is_some() {
         host.set_plain("mode", 1.0);
@@ -163,13 +206,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(std::time::Duration::from_millis(8));
     }
     // Select band 3 the way a user would: click its node (mockup: 2.8 kHz, −3 dB).
-    let x = 1200.0 * (2800.0_f64 / 10.0).ln() / 3000.0_f64.ln();
+    let x = 1200.0 * (settings[2].freq / 10.0).ln() / 3000.0_f64.ln();
     let y = 56.0 + 306.0 + 3.0 * 264.0 / 18.0;
     let at = Point::new(x, y);
     let mods = Modifiers::default();
     view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
     view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
     let _ = host.normalized(OUT_GAIN.id);
+    // A tick after selecting, as live: picks up the selected band's per-bin detail.
+    view.tick(&host);
     // Optional further clicks in design units, e.g. SNAPSHOT_CLICK="380,600" to open a dropdown.
     // Each is preceded by a render so the view knows where its controls are.
     if let Ok(clicks) = std::env::var("SNAPSHOT_CLICK") {

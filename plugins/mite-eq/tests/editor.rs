@@ -5,7 +5,7 @@ use std::sync::Arc;
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::BandType;
 use mite_eq::editor::{EqView, ACCENT};
-use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use mite_eq::params::{band_id, ATTACK, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
 use mite_eq::EqShared;
 use mite_ui::kurbo::Point;
 use mite_ui::vello::Scene;
@@ -34,6 +34,10 @@ fn leak(s: String) -> &'static str {
 
 /// One enabled bell at 1 kHz, 0 dB: its node sits at (690.2, 362) in design units.
 fn setup() -> (EqView, MemoryParamHost) {
+    setup_with(Arc::new(EqShared::new()))
+}
+
+fn setup_with(shared: Arc<EqShared>) -> (EqView, MemoryParamHost) {
     let mut host = MemoryParamHost::new()
         .with(OUT_GAIN)
         .with_id("mode", index_spec("mode", 3, 0))
@@ -57,12 +61,16 @@ fn setup() -> (EqView, MemoryParamHost) {
             .with_id(leak(band_id(b, SUSTAIN.id)), SUSTAIN)
             .with_id(leak(band_id(b, TRANSIENT.id)), TRANSIENT)
             .with_id(leak(band_id(b, TTIME.id)), TTIME)
-            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION);
+            .with_id(leak(band_id(b, TRANSITION.id)), TRANSITION)
+            .with_id(leak(band_id(b, SPECTRAL.id)), index_spec("spectral", 2, 0))
+            .with_id(leak(band_id(b, SSMOOTH.id)), SSMOOTH)
+            .with_id(leak(band_id(b, SREL.id)), index_spec("srel", 2, 0))
+            .with_id(leak(band_id(b, RTHRESH.id)), RTHRESH);
     }
     host.set_plain(&band_id(0, ON.id), 1.0);
     host.set_plain(&band_id(0, TYPE.id), BandType::Bell as usize as f32);
     host.set_plain(&band_id(0, FREQ.id), 1000.0);
-    let mut view = EqView::new(Arc::new(EqShared::new()));
+    let mut view = EqView::new(shared);
     click(&mut view, &host, NODE);
     draw(&mut view, &host);
     (view, host)
@@ -193,4 +201,89 @@ fn the_footer_picks_the_processing_mode_and_resolution() {
     draw(&mut view, &host);
     click(&mut view, &host, Point::new(444.0, 691.0));
     assert_eq!(host.plain("lp_res", host.normalized("lp_res")), 3.0);
+}
+
+#[test]
+fn the_middle_mode_button_makes_the_compressor_spectral() {
+    let (mut view, host) = setup();
+    let ring = Point::new(762.0 - 35.0, 606.0);
+    drag(&mut view, &host, ring, Point::new(ring.x - 40.0, ring.y));
+    draw(&mut view, &host);
+    // Three mode buttons beside the scope (x 476…506): compressor 470…496, spectral 500…526,
+    // transient shaper 530…556.
+    click(&mut view, &host, Point::new(491.0, 513.0));
+    assert_eq!(plain(&host, SPECTRAL.id), 1.0);
+    assert_eq!(plain(&host, DMODE.id), 0.0);
+    draw(&mut view, &host);
+    // The transient shaper is not spectral; back to the plain compressor turns spectral off.
+    click(&mut view, &host, Point::new(491.0, 543.0));
+    assert_eq!((plain(&host, DMODE.id), plain(&host, SPECTRAL.id)), (1.0, 0.0));
+    draw(&mut view, &host);
+    click(&mut view, &host, Point::new(491.0, 513.0));
+    draw(&mut view, &host);
+    click(&mut view, &host, Point::new(491.0, 483.0));
+    assert_eq!((plain(&host, DMODE.id), plain(&host, SPECTRAL.id)), (0.0, 0.0));
+}
+
+#[test]
+fn the_spectral_scope_drags_the_threshold_and_adds_smoothing() {
+    let (mut view, host) = setup();
+    let ring = Point::new(762.0 - 35.0, 606.0);
+    drag(&mut view, &host, ring, Point::new(ring.x - 40.0, ring.y));
+    draw(&mut view, &host);
+    click(&mut view, &host, Point::new(491.0, 513.0));
+    draw(&mut view, &host);
+    // The spectral scope's threshold line follows the pointer up: 14 px is 12 dB of its 60 dB
+    // over 70 px.
+    let (thresh, range) = (plain(&host, THRESH.id), plain(&host, RANGE.id));
+    drag(&mut view, &host, Point::new(330.0, 520.0), Point::new(330.0, 506.0));
+    assert!((plain(&host, THRESH.id) - thresh - 12.0).abs() < 0.01, "threshold {}", plain(&host, THRESH.id));
+    // The range is the ring's; this scope leaves it alone.
+    assert_eq!(plain(&host, RANGE.id), range);
+    // A fifth dial, SMOOTHING, sits last in the row (x 308 + 4 × 70 from the panel's left at 250).
+    let at = Point::new(250.0 + 308.0 + 280.0, 458.0 + 38.0);
+    let before = plain(&host, SSMOOTH.id);
+    drag(&mut view, &host, at, Point::new(at.x, at.y - 40.0));
+    assert!(plain(&host, SSMOOTH.id) > before, "smoothing {} → {}", before, plain(&host, SSMOOTH.id));
+}
+
+#[test]
+fn the_relative_toggle_makes_the_threshold_follow_the_surroundings() {
+    let (mut view, host) = setup();
+    let ring = Point::new(762.0 - 35.0, 606.0);
+    drag(&mut view, &host, ring, Point::new(ring.x - 40.0, ring.y));
+    draw(&mut view, &host);
+    click(&mut view, &host, Point::new(491.0, 513.0));
+    draw(&mut view, &host);
+    // Spectral bands get a toggle under the remove-dynamics button (x 906…936, y 520…550).
+    click(&mut view, &host, Point::new(921.0, 535.0));
+    assert_eq!(plain(&host, SREL.id), 1.0);
+    draw(&mut view, &host);
+    // Now the scope's line is the relative threshold (dB over the surroundings): 14 px up is
+    // 12 dB more, and the fixed threshold stays where it was.
+    let (relative, fixed) = (plain(&host, RTHRESH.id), plain(&host, THRESH.id));
+    drag(&mut view, &host, Point::new(330.0, 520.0), Point::new(330.0, 506.0));
+    assert!((plain(&host, RTHRESH.id) - relative - 12.0).abs() < 0.01, "relative threshold {}", plain(&host, RTHRESH.id));
+    assert_eq!(plain(&host, THRESH.id), fixed);
+    // And back to a fixed level.
+    click(&mut view, &host, Point::new(921.0, 535.0));
+    assert_eq!(plain(&host, SREL.id), 0.0);
+}
+
+#[test]
+fn live_spectral_cuts_draw_on_the_plot() {
+    let shared = Arc::new(EqShared::new());
+    let (mut view, host) = setup_with(shared.clone());
+    host.set_plain(&band_id(0, DYN.id), 1.0);
+    host.set_plain(&band_id(0, SPECTRAL.id), 1.0);
+    shared.dynamic[0].store(-8.0);
+    for slot in &shared.focus_level {
+        slot.store(-30.0);
+    }
+    for (i, slot) in shared.spectral.iter().enumerate() {
+        slot.store(if (120..136).contains(&i) { -8.0 } else { 0.0 });
+    }
+    // The telemetry change asks for a frame, and the frame draws with it.
+    assert!(view.tick(&host));
+    draw(&mut view, &host);
 }

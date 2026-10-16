@@ -11,7 +11,7 @@ pub mod gain;
 pub mod linear_phase;
 pub mod natural_phase;
 pub mod meter;
-pub mod resonance;
+pub mod spectral;
 pub mod smooth;
 pub mod stft;
 

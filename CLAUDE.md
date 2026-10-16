@@ -16,7 +16,7 @@ cargo test --workspace                          # DSP, core, UI and plugin tests
 cargo clippy --workspace --all-targets
 cargo xtask bundle mite_gain --release          # CLAP + VST3 into target/bundled/
 cargo xtask bundle mite_gain                    # debug build: allocations in process() abort
-cargo xtask install mite_gain                   # copy bundles to ~/.clap, ~/.vst3 (or OS equivalent)
+cargo xtask install mite_gain                   # release bundle, then copy to ~/.clap, ~/.vst3 (or OS equivalent)
 cargo xtask validate mite_gain                  # clap-validator + pluginval, if on PATH
 cargo run -p mite_gain --example preview        # editor in a standalone window, fake meter
 cargo run -p mite_gain --example snapshot -- out.png 2   # editor → PNG (GPU, no window)

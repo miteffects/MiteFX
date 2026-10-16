@@ -16,6 +16,13 @@ pub mod params;
 use dsp::{EqEngine, PhaseMode};
 use params::{EqParams, BANDS};
 
+/// Points of the spectral stage's telemetry: the analyzer's points (log-spaced over the plot's
+/// range), which the spectral detector also works on.
+pub const SPECTRAL_POINTS: usize = mite_dsp::analyzer::SPECTRUM_POINTS;
+
+/// The frequency of spectral telemetry point `i`.
+pub use mite_dsp::analyzer::spectrum_point_freq as spectral_point_freq;
+
 /// Audio → UI telemetry. Everything is lock-free and allocation-free on the audio side.
 pub struct EqShared {
     pub meter: StereoMeter,
@@ -28,6 +35,15 @@ pub struct EqShared {
     pub level: [AtomicF32; BANDS],
     /// The latency the engine runs with, samples.
     pub latency: AtomicF32,
+    /// The spectral stage's total gain at each [`spectral_point_freq`], dB (all 0 while it is off).
+    pub spectral: [AtomicF32; SPECTRAL_POINTS],
+    /// The band whose per-bin detail the editor shows (the selected one), set by the editor, and
+    /// that band's detected level and threshold (dBFS) and applied gain (dB) at each
+    /// [`spectral_point_freq`]. Level and threshold are −150 where the band does not listen.
+    pub focus: AtomicF32,
+    pub focus_level: [AtomicF32; SPECTRAL_POINTS],
+    pub focus_threshold: [AtomicF32; SPECTRAL_POINTS],
+    pub focus_gain: [AtomicF32; SPECTRAL_POINTS],
 }
 
 impl EqShared {
@@ -40,6 +56,11 @@ impl EqShared {
             dynamic: std::array::from_fn(|_| AtomicF32::new(0.0)),
             level: std::array::from_fn(|_| AtomicF32::new(-120.0)),
             latency: AtomicF32::new(0.0),
+            spectral: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            focus: AtomicF32::new(-1.0),
+            focus_level: std::array::from_fn(|_| AtomicF32::new(-150.0)),
+            focus_threshold: std::array::from_fn(|_| AtomicF32::new(-150.0)),
+            focus_gain: std::array::from_fn(|_| AtomicF32::new(0.0)),
         }
     }
 }
@@ -146,6 +167,18 @@ impl Plugin for MiteEq {
         }
         for (slot, db) in self.shared.level.iter().zip(self.engine.detector_levels()) {
             slot.store(db);
+        }
+        for (i, slot) in self.shared.spectral.iter().enumerate() {
+            slot.store(self.engine.spectral_gain_db(spectral_point_freq(i)));
+        }
+        let focus = self.shared.focus.load();
+        if focus >= 0.0 && (focus as usize) < BANDS {
+            for i in 0..SPECTRAL_POINTS {
+                let (level, threshold, gain) = self.engine.spectral_band_db(focus as usize, i);
+                self.shared.focus_level[i].store(level);
+                self.shared.focus_threshold[i].store(threshold);
+                self.shared.focus_gain[i].store(gain);
+            }
         }
         // A mode change switched latency behind its dip: tell the host (signalled, not polled).
         let latency = self.engine.latency() as u32;

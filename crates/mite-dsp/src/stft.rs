@@ -65,6 +65,11 @@ impl Stft {
         self.size
     }
 
+    /// Samples between frames.
+    pub fn hop(&self) -> usize {
+        self.hop
+    }
+
     /// Frames per second at `sample_rate`.
     pub fn frame_rate(&self, sample_rate: f64) -> f64 {
         sample_rate / self.hop as f64

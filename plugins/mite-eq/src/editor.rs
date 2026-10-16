@@ -7,8 +7,8 @@ use std::f64::consts::LN_2;
 use std::sync::Arc;
 use std::time::Instant;
 
-use mite_dsp::analyzer::Analyzer;
-use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Dynamics, DynamicsMode, Placement, ResonanceSettings, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
+use mite_dsp::analyzer::{Analyzer, LogSpectrum, SPECTRUM_POINTS};
+use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
@@ -17,13 +17,12 @@ use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
 use mite_ui::{Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
-use crate::params::{band_id, ATTACK, ATTACK_DIAL, LP_RES, MODE, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, RDEPTH, RSHARP, RSELECT, RSPEED, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
-use crate::EqShared;
+use crate::params::{band_id, ATTACK, ATTACK_DIAL, LP_RES, MODE, RELEASE_DIAL, BANDS, DMODE, DYN, SUSTAIN, TRANSIENT, TRANSITION, TTIME, SPECTRAL, SSMOOTH, SREL, RTHRESH, FREQ, GAIN, ON, OUT_GAIN, Q, RANGE, RATIO, RELEASE, SLOPE, STEREO, THRESH, TYPE};
+use crate::{EqShared, SPECTRAL_POINTS};
 
 /// Mite EQ wears the EQ accent (tokens.json `color.accent.eq`).
 pub const ACCENT: &str = "eq";
-/// Analyzer FFT size: the design's "8192 · High" resolution.
-pub const ANALYZER_SIZE: usize = 8192;
+pub use mite_dsp::analyzer::ANALYZER_SIZE;
 /// Default UI scale. The mockup is 1280×760; 75 % suits most screens.
 pub const ZOOM: f64 = 1.0;
 
@@ -41,8 +40,8 @@ const PLOT_TOP: f64 = DISPLAY_TOP + 24.0;
 const PLOT_BOT: f64 = DISPLAY_TOP + 588.0;
 const MID: f64 = DISPLAY_TOP + 306.0;
 const PX_PER_DB: f64 = 264.0 / 18.0;
-/// Curve and spectrum resolution: one point every 4 design px.
-const POINTS: usize = 301;
+/// Curve and spectrum resolution: one point every 4 design px (the analyzer's points).
+const POINTS: usize = SPECTRUM_POINTS;
 
 const NODE_HIT: f64 = 16.0;
 const PANEL_W: f64 = 700.0;
@@ -107,11 +106,6 @@ fn yg(y: f64) -> f64 {
     (MID - y) / PX_PER_DB
 }
 
-/// The analyzer's display tilt at `f`: 4.5 dB/oct around 1 kHz, so pink noise reads flat.
-fn tilt_db(f: f64) -> f64 {
-    4.5 * (f / 1000.0).log2()
-}
-
 /// Spectrum: 0 dBFS at the top of the plot, −90 at the bottom.
 fn sy(db: f64) -> f64 {
     PLOT_TOP + (-db / 90.0) * (PLOT_BOT - PLOT_TOP)
@@ -148,10 +142,9 @@ struct BandIds {
     ttime: String,
     transition: String,
     spectral: String,
-    rdepth: String,
-    rsharp: String,
-    rselect: String,
-    rspeed: String,
+    srel: String,
+    rthresh: String,
+    ssmooth: String,
 }
 
 impl BandIds {
@@ -176,10 +169,9 @@ impl BandIds {
             ttime: band_id(b, TTIME.id),
             transition: band_id(b, TRANSITION.id),
             spectral: band_id(b, SPECTRAL.id),
-            rdepth: band_id(b, RDEPTH.id),
-            rsharp: band_id(b, RSHARP.id),
-            rselect: band_id(b, RSELECT.id),
-            rspeed: band_id(b, RSPEED.id),
+            srel: band_id(b, SREL.id),
+            rthresh: band_id(b, RTHRESH.id),
+            ssmooth: band_id(b, SSMOOTH.id),
         }
     }
 }
@@ -200,6 +192,8 @@ enum DragMode {
     Sustain,
     /// The transient scope's handover line: sideways sets the transient time.
     Split,
+    /// The spectral compressor's scope: the threshold line follows the pointer up and down.
+    SpectralThreshold,
 }
 
 struct NodeDrag {
@@ -213,22 +207,10 @@ struct NodeDrag {
     thresh: f64,
     sustain: f64,
     transient: f64,
+    /// Relative spectral threshold, dB over the surroundings.
+    relative: f64,
 }
 
-/// How one display point reads the FFT: a weighted sum of the bins in
-/// `EqView::spectrum_weights[start..end]`, then its tilt gain. `cubic` points (where bins are
-/// sparser than the display) sum the bins' levels in dB with Catmull-Rom weights, so the curve
-/// passes smoothly through the bins; the others average power.
-struct SpectrumPoint {
-    start: usize,
-    end: usize,
-    tilt: f32,
-    cubic: bool,
-}
-
-/// Analyzer smoothing across frequency: a raised-cosine window this many octaves wide, so bins
-/// fade in and out of a point instead of stepping.
-const SPECTRUM_SMOOTH_OCT: f64 = 1.0 / 6.0;
 /// Analyzer motion: time constants of the rise and of the fall, s.
 const SPECTRUM_RISE_S: f64 = 0.06;
 const SPECTRUM_FALL_S: f64 = 0.3;
@@ -317,15 +299,6 @@ fn draw_type_icon(scene: &mut mite_ui::vello::Scene, kind: BandType, at: Point, 
         BandType::TiltShelf => {
             p.move_to(pt(0.0, 10.0));
             p.curve_to(pt(9.0, 10.0), pt(13.0, 2.0), pt(22.0, 2.0));
-        }
-        // A jagged spectrum with one peak shaved off.
-        BandType::Resonance => {
-            p.move_to(pt(0.0, 9.0));
-            for (x, y) in [(3.0, 6.0), (5.0, 9.0), (8.0, 5.0), (10.0, 8.0), (13.0, 6.5), (15.0, 9.0), (18.0, 6.0), (20.0, 8.5), (22.0, 7.0)] {
-                p.line_to(pt(x, y));
-            }
-            p.move_to(pt(9.0, 2.5));
-            p.line_to(pt(13.0, 2.5));
         }
     }
     let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
@@ -472,8 +445,10 @@ struct PanelHits {
     ring: Option<Point>,
     /// The dynamics scope and the button that removes dynamics (dynamic bands only).
     scope: Option<Rect>,
-    modes: Option<[Rect; 2]>,
+    modes: Option<[Rect; 3]>,
     remove_dynamics: Option<Rect>,
+    /// The spectral compressor's fixed/relative threshold toggle.
+    relative: Option<Rect>,
     bypass: Rect,
     close: Rect,
 }
@@ -488,9 +463,11 @@ enum Hot {
     Scope,
     /// The transient scope's line where the attack hands over to the sustain.
     Split,
-    /// A dynamics mode button (index into `DynamicsMode::NAMES`).
+    /// A dynamics mode button: compressor, spectral compressor, transient shaper.
     Mode(usize),
     RemoveDynamics,
+    /// The spectral compressor's fixed/relative threshold toggle.
+    Relative,
 }
 
 pub struct EqView {
@@ -508,9 +485,7 @@ pub struct EqView {
     analyzer: Analyzer,
     samples: Vec<f32>,
     power: Vec<f32>,
-    spectrum_map: Vec<SpectrumPoint>,
-    spectrum_weights: Vec<(usize, f32)>,
-    spectrum_rate: f64,
+    spectrum: LogSpectrum,
     pre: Vec<f64>,
     post: Vec<f64>,
     last_spectrum: Instant,
@@ -527,6 +502,18 @@ pub struct EqView {
     last_dynamic: [f32; BANDS],
     /// The selected band's detected level last drawn, dBFS.
     last_level: f32,
+    /// The spectral stage's gain curve last drawn, dB, and the selected band's per-bin level
+    /// (dBFS) and gain (dB).
+    last_spectral: [f32; SPECTRAL_POINTS],
+    focus_level: [f32; SPECTRAL_POINTS],
+    focus_threshold: [f32; SPECTRAL_POINTS],
+    focus_gain: [f32; SPECTRAL_POINTS],
+    /// The spectral scope as drawn: the focus telemetry smoothed across frequency and eased in
+    /// time like the analyzer (level before and after the band, dBFS, and the threshold).
+    scope_level: [f32; SPECTRAL_POINTS],
+    scope_out: [f32; SPECTRAL_POINTS],
+    scope_threshold: [f32; SPECTRAL_POINTS],
+    last_scope: Instant,
     hot: Option<Hot>,
     /// Origin the panel dials were laid out for, and whether the dynamics row was included.
     knobs_layout: Option<(Point, Option<f64>)>,
@@ -561,9 +548,7 @@ impl EqView {
             analyzer,
             samples: vec![0.0; ANALYZER_SIZE],
             power: vec![0.0; bins],
-            spectrum_map: Vec::new(),
-            spectrum_weights: Vec::new(),
-            spectrum_rate: 0.0,
+            spectrum: LogSpectrum::new(ANALYZER_SIZE, 48_000.0),
             pre: vec![-150.0; POINTS],
             post: vec![-150.0; POINTS],
             last_spectrum: Instant::now(),
@@ -576,6 +561,14 @@ impl EqView {
             slope_wheel: 0.0,
             last_dynamic: [0.0; BANDS],
             last_level: -120.0,
+            last_spectral: [0.0; SPECTRAL_POINTS],
+            focus_level: [-150.0; SPECTRAL_POINTS],
+            focus_threshold: [-150.0; SPECTRAL_POINTS],
+            focus_gain: [0.0; SPECTRAL_POINTS],
+            scope_level: [-150.0; SPECTRAL_POINTS],
+            scope_out: [-150.0; SPECTRAL_POINTS],
+            scope_threshold: [-150.0; SPECTRAL_POINTS],
+            last_scope: Instant::now(),
             hot: None,
             knobs_layout: None,
             panel_dock: None,
@@ -613,12 +606,9 @@ impl EqView {
                 release_ms: f64::from(Self::plain(host, &ids.release)),
                 ratio: f64::from(Self::plain(host, &ids.ratio)),
                 spectral: Self::plain(host, &ids.spectral) >= 0.5,
-            },
-            resonance: ResonanceSettings {
-                depth_db: f64::from(Self::plain(host, &ids.rdepth)),
-                sharpness: f64::from(Self::plain(host, &ids.rsharp)) / 100.0,
-                selectivity: f64::from(Self::plain(host, &ids.rselect)) / 100.0,
-                speed: f64::from(Self::plain(host, &ids.rspeed)) / 100.0,
+                smoothing: f64::from(Self::plain(host, &ids.ssmooth)) / 100.0,
+                relative: Self::plain(host, &ids.srel) >= 0.5,
+                relative_db: f64::from(Self::plain(host, &ids.rthresh)),
             },
         }
     }
@@ -679,52 +669,6 @@ impl EqView {
         self.responses[b].as_ref().expect("just filled")
     }
 
-    /// Per display point: the FFT bins it reads with their weights, and its tilt gain. Depends
-    /// only on the sample rate, so it is rebuilt only when that changes.
-    fn rebuild_spectrum_map(&mut self, fs: f64) {
-        let size = self.analyzer.size() as f64;
-        let last = self.power.len() - 1;
-        let half = 0.5 * SPECTRUM_SMOOTH_OCT;
-        let mut weights = Vec::new();
-        self.spectrum_map = (0..POINTS)
-            .map(|i| {
-                let f = xf(grid_x(i));
-                let tilt = 10f64.powf(tilt_db(f) / 10.0) as f32;
-                let start = weights.len();
-                let (lo, hi) = (f * 2f64.powf(-half) * size / fs, f * 2f64.powf(half) * size / fs);
-                let (a, b) = ((lo.ceil() as usize).max(1), (hi.floor() as usize).min(last));
-                if b >= a + 2 {
-                    let mut sum = 0.0;
-                    for k in a..=b {
-                        let d = (k as f64 * fs / size / f).log2() / half;
-                        let w = 0.5 * (1.0 + (std::f64::consts::PI * d).cos());
-                        weights.push((k, w as f32));
-                        sum += w;
-                    }
-                    for w in &mut weights[start..] {
-                        w.1 /= sum as f32;
-                    }
-                    SpectrumPoint { start, end: weights.len(), tilt, cubic: false }
-                } else {
-                    // Fewer bins than the window needs (low frequencies): a cubic through the
-                    // four bins around the point. Linear interpolation in power bows outwards in
-                    // dB and meets the next segment in a point at every bin.
-                    let k = (f * size / fs).clamp(1.0, last as f64 - 2.0);
-                    let k0 = k.floor() as usize;
-                    let t = (k - k0 as f64) as f32;
-                    let (t2, t3) = (t * t, t * t * t);
-                    weights.push((k0 - 1, 0.5 * (-t3 + 2.0 * t2 - t)));
-                    weights.push((k0, 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0)));
-                    weights.push((k0 + 1, 0.5 * (-3.0 * t3 + 4.0 * t2 + t)));
-                    weights.push((k0 + 2, 0.5 * (t3 - t2)));
-                    SpectrumPoint { start, end: weights.len(), tilt, cubic: true }
-                }
-            })
-            .collect();
-        self.spectrum_weights = weights;
-        self.spectrum_rate = fs;
-    }
-
     /// Called on every animation frame (~2× the display refresh). The FFT runs at most once
     /// per display refresh; every call advances the ballistics towards the latest analysis, so
     /// in-between frames still move smoothly.
@@ -732,8 +676,8 @@ impl EqView {
         let dt = self.last_spectrum.elapsed().as_secs_f64().min(0.1);
         self.last_spectrum = Instant::now();
         let fs = self.sample_rate();
-        if fs != self.spectrum_rate {
-            self.rebuild_spectrum_map(fs);
+        if fs != self.spectrum.sample_rate() {
+            self.spectrum = LogSpectrum::new(ANALYZER_SIZE, fs);
         }
         if self.last_analysis.elapsed().as_secs_f64() >= 0.0155 {
             self.last_analysis = Instant::now();
@@ -742,25 +686,7 @@ impl EqView {
                 tap.read_latest(&mut self.samples);
                 self.analyzer.analyze_power(&self.samples, &mut self.power);
                 let target = if which == 0 { &mut self.pre_target } else { &mut self.post_target };
-                let db = |p: f32| 10.0 * p.max(1e-15).log10();
-                for (t, m) in target.iter_mut().zip(&self.spectrum_map) {
-                    let bins = &self.spectrum_weights[m.start..m.end];
-                    *t = if m.cubic {
-                        bins.iter().map(|&(k, w)| db(self.power[k]) * w).sum::<f32>() + db(m.tilt)
-                    } else {
-                        db(bins.iter().map(|&(k, w)| self.power[k] * w).sum::<f32>() * m.tilt)
-                    };
-                }
-                // Round what is left of dips and peaks: a light [1 2 1] pass in dB, twice (about
-                // 0.04 octave), far narrower than the frequency smoothing.
-                for _ in 0..2 {
-                    let mut prev = target[0];
-                    for i in 1..target.len() - 1 {
-                        let here = target[i];
-                        target[i] = 0.25 * prev + 0.5 * here + 0.25 * target[i + 1];
-                        prev = here;
-                    }
-                }
+                self.spectrum.read(&self.power, target);
             }
         }
         let rise = (1.0 - (-dt / SPECTRUM_RISE_S).exp()) as f32;
@@ -778,6 +704,31 @@ impl EqView {
             }
         }
         changed
+    }
+
+    /// Eases the spectral scope towards the latest focus telemetry with the analyzer's rise and
+    /// fall. The telemetry is already the analyzer's points (the detector reads the spectrum as
+    /// the analyzer does), so the scope moves like the main spectrum. Returns whether it moved
+    /// visibly.
+    fn update_scope(&mut self) -> bool {
+        let dt = self.last_scope.elapsed().as_secs_f64().min(0.1);
+        self.last_scope = Instant::now();
+        let rise = (1.0 - (-dt / SPECTRUM_RISE_S).exp()) as f32;
+        let fall = (1.0 - (-dt / SPECTRUM_FALL_S).exp()) as f32;
+        let ease = |value: &mut f32, target: f32| {
+            let next = if *value <= -149.0 { target } else { *value + (target - *value) * if target > *value { rise } else { fall } };
+            let moved = (next - *value).abs() > 0.02;
+            *value = next;
+            moved
+        };
+        let mut moved = false;
+        for i in 0..SPECTRAL_POINTS {
+            let level = self.focus_level[i];
+            moved |= ease(&mut self.scope_level[i], level);
+            moved |= ease(&mut self.scope_out[i], (level + self.focus_gain[i]).max(-150.0));
+            moved |= ease(&mut self.scope_threshold[i], self.focus_threshold[i]);
+        }
+        moved
     }
 
     fn help_text(&self, host: &dyn ParamHost) -> String {
@@ -821,6 +772,7 @@ impl EqView {
         let d = &s.dynamics;
         match (s.is_dynamic(), d.mode) {
             (false, _) => "static".into(),
+            (true, DynamicsMode::Compressor) if d.spectral => format!("spectral {}", RANGE.format(d.range_db as f32)),
             (true, DynamicsMode::Compressor) => format!("dynamic {}", RANGE.format(d.range_db as f32)),
             (true, DynamicsMode::Transient) => {
                 format!("attack {} · sustain {}", TRANSIENT.format(d.transient_db as f32), SUSTAIN.format(d.sustain_db as f32))
@@ -835,7 +787,7 @@ impl EqView {
             Some(DragMode::TransientAttack | DragMode::Sustain) => Hot::Scope,
             Some(DragMode::Split) => Hot::Split,
             Some(DragMode::Ring) => Hot::Ring,
-            Some(DragMode::Scope) => Hot::Scope,
+            Some(DragMode::Scope | DragMode::SpectralThreshold) => Hot::Scope,
             Some(_) => return None,
             None => self.hot?,
         };
@@ -848,9 +800,19 @@ impl EqView {
             Hot::Grip(_) => format!("Band {n} — drag to make dynamic"),
             Hot::Ring => format!("Band {n} {words} — drag the ring; double-click removes"),
             Hot::Scope if s.dynamics.mode == DynamicsMode::Transient => format!("Band {n} {words} — drag"),
+            Hot::Scope if s.is_spectral() && s.dynamics.relative => format!(
+                "Band {n} {words} · threshold {} over the surroundings — what sticks out above the line is compressed; drag the line",
+                RTHRESH.format(s.dynamics.relative_db as f32)
+            ),
+            Hot::Scope if s.is_spectral() => {
+                format!("Band {n} {words} · threshold {} — each frequency above the line is compressed on its own; drag the line", THRESH.format(s.dynamics.threshold_db as f32))
+            }
+            Hot::Relative if s.dynamics.relative => "Threshold follows the surroundings: catches what sticks out, however loud — click for a fixed level".into(),
+            Hot::Relative => "Fixed threshold level — click to follow the surroundings instead (catches what sticks out, however loud)".into(),
             Hot::Scope => format!("Band {n} {words} · threshold {} — drag", THRESH.format(s.dynamics.threshold_db as f32)),
             Hot::Split => format!("Band {n} transient time {} — drag; double-click resets", TTIME.format(s.dynamics.transient_ms as f32)),
             Hot::Mode(0) => "Compressor".into(),
+            Hot::Mode(1) => "Spectral compressor: only the loud frequencies inside the band move".into(),
             Hot::Mode(_) => "Transient shaper".into(),
             Hot::RemoveDynamics => format!("Band {n} — make static"),
         })
@@ -892,8 +854,10 @@ impl EqView {
             // is the gain dial's ring, the scope and the grip on the plot.
             let mut col = 0.0;
             let x0 = origin.x + 14.0 + SCOPE_W + 12.0 + 30.0 + 52.0;
+            // Five dials (spectral compressor) sit closer together than four.
+            let step = if s.is_spectral() { 70.0 } else { 82.0 };
             let mut small = |spec, label, kind, id: &str| {
-                let k = Knob::new(spec, label, kind, Point::new(x0 + col * 82.0, dyn_top + 38.0), 48.0)
+                let k = Knob::new(spec, label, kind, Point::new(x0 + col * step, dyn_top + 38.0), 48.0)
                     .with_id(id);
                 col += 1.0;
                 k
@@ -904,10 +868,18 @@ impl EqView {
                 knobs.push(small(TTIME, "TIME", KnobKind::Unipolar, &ids.ttime));
                 knobs.push(small(TRANSITION, "TRANSITION", KnobKind::Unipolar, &ids.transition));
             } else {
-                knobs.push(small(THRESH, "THRESHOLD", KnobKind::Unipolar, &ids.thresh));
+                // Relative: the threshold is dB over the surroundings, its own parameter.
+                if s.is_spectral() && s.dynamics.relative {
+                    knobs.push(small(RTHRESH, "THRESHOLD", KnobKind::Unipolar, &ids.rthresh));
+                } else {
+                    knobs.push(small(THRESH, "THRESHOLD", KnobKind::Unipolar, &ids.thresh));
+                }
                 knobs.push(small(ATTACK, "ATTACK", KnobKind::Unipolar, &ids.attack).with_curve(ATTACK_DIAL));
                 knobs.push(small(RELEASE, "RELEASE", KnobKind::Unipolar, &ids.release).with_curve(RELEASE_DIAL));
                 knobs.push(small(RATIO, "RATIO", KnobKind::Unipolar, &ids.ratio));
+                if s.is_spectral() {
+                    knobs.push(small(SSMOOTH, "SMOOTHING", KnobKind::Unipolar, &ids.ssmooth));
+                }
             }
         }
         self.panel_knobs = knobs;
@@ -915,15 +887,22 @@ impl EqView {
 
     /// Dials the panel shows for `s`.
     fn panel_dial_count(s: &BandSettings, show_dynamics: bool) -> usize {
-        let dynamics = match s.dynamics.mode {
-            DynamicsMode::Compressor => 4,
-            DynamicsMode::Transient => 4,
-        };
+        // Every dynamics row has four dials; the spectral compressor adds smoothing.
+        let dynamics = if s.is_spectral() { 5 } else { 4 };
         (if s.kind.has_gain() { 3 } else { 2 }) + if show_dynamics { dynamics } else { 0 }
     }
 
     fn panel_height(s: &BandSettings) -> f64 {
         PANEL_H + if s.is_dynamic() { PANEL_DYN_H } else { 0.0 }
+    }
+
+    /// The dynamics mode button that is on: compressor, spectral compressor or transient shaper.
+    fn mode_index(s: &BandSettings) -> usize {
+        match s.dynamics.mode {
+            DynamicsMode::Transient => 2,
+            DynamicsMode::Compressor if s.dynamics.spectral => 1,
+            DynamicsMode::Compressor => 0,
+        }
     }
 
     /// The panel at its dock (x, and whether it hangs from the bottom of the plot) for `s`.
@@ -960,9 +939,29 @@ impl EqView {
         Rect::new(xs[0], y, xs[0] + PANEL_W, y + height)
     }
 
-    /// The band's live dynamic gain, dB (0 when not dynamic).
+    /// The band's live dynamic gain, dB (0 when not dynamic). For a spectral compressor, its
+    /// strongest per-bin gain.
     fn dynamic_now(&self, b: usize, s: &BandSettings) -> f64 {
-        if s.is_dynamic() { f64::from(self.shared.dynamic[b].load()) } else { 0.0 }
+        if s.is_dynamic() || s.uses_spectrum() { f64::from(self.shared.dynamic[b].load()) } else { 0.0 }
+    }
+
+    /// The spectral stage's live gain at `f`, dB: Catmull-Rom through the engine's log-spaced points.
+    fn spectral_at(&self, f: f64) -> f64 {
+        Self::points_at(&self.last_spectral, f)
+    }
+
+    /// Catmull-Rom through values at the [`crate::spectral_point_freq`] points, held between
+    /// neighbours.
+    fn points_at(points: &[f32; SPECTRAL_POINTS], f: f64) -> f64 {
+        let last = SPECTRAL_POINTS - 1;
+        let pos = ((f / FREQ_MIN).ln() / (FREQ_MAX / FREQ_MIN).ln() * last as f64).clamp(0.0, last as f64);
+        let k = (pos as usize).min(last - 1);
+        let t = pos - k as f64;
+        let v = |i: usize| f64::from(points[i.min(last)]);
+        let (p0, p1, p2, p3) = (v(k.saturating_sub(1)), v(k), v(k + 1), v(k + 2));
+        let v = 0.5 * ((2.0 * p1) + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t);
+        // Held between its neighbours: no overshoot the engine does not apply.
+        v.clamp(p1.min(p2), p1.max(p2))
     }
 
     /// The plot grips that set a band's dynamic range: the end of the range when the band is
@@ -1009,6 +1008,9 @@ impl EqView {
             if h.remove_dynamics.is_some_and(|r| r.contains(p)) {
                 return Some(Hot::RemoveDynamics);
             }
+            if h.relative.is_some_and(|r| r.contains(p)) {
+                return Some(Hot::Relative);
+            }
             return None;
         }
         // A grip wins over the node only when the pointer is nearer to it.
@@ -1030,6 +1032,7 @@ impl EqView {
             DragMode::TransientAttack => vec![&ids.transient, &ids.dyn_on],
             DragMode::Sustain => vec![&ids.sustain, &ids.dyn_on],
             DragMode::Split => vec![&ids.ttime],
+            DragMode::SpectralThreshold => vec![&ids.thresh, &ids.rthresh],
         }
     }
 
@@ -1054,6 +1057,7 @@ impl EqView {
             thresh: s.dynamics.threshold_db,
             sustain: s.dynamics.sustain_db,
             transient: s.dynamics.transient_db,
+            relative: s.dynamics.relative_db,
         });
     }
 
@@ -1150,6 +1154,44 @@ impl EqView {
         path
     }
 
+    /// A smooth curve through `pts` (x increasing): a monotone cubic (Fritsch–Butland tangents),
+    /// so it bends through every point without corners and never overshoots past its neighbours
+    /// (it shows no boost or cut that is not there). Appended to `path`, starting with a move or
+    /// a line to the first point.
+    fn smooth_through(path: &mut BezPath, pts: &[Point], start_with_line: bool) {
+        let mut kept: Vec<Point> = Vec::with_capacity(pts.len());
+        for &p in pts {
+            if kept.last().is_none_or(|q| (p.x - q.x).abs() > 1e-6) {
+                kept.push(p);
+            }
+        }
+        let Some(&first) = kept.first() else { return };
+        if start_with_line {
+            path.line_to(first);
+        } else {
+            path.move_to(first);
+        }
+        let n = kept.len();
+        let slope = |i: usize| (kept[i + 1].y - kept[i].y) / (kept[i + 1].x - kept[i].x);
+        let tangent = |i: usize| {
+            if n < 2 {
+                0.0
+            } else if i == 0 {
+                slope(0)
+            } else if i == n - 1 {
+                slope(n - 2)
+            } else {
+                let (a, b) = (slope(i - 1), slope(i));
+                if a * b <= 0.0 { 0.0 } else { 2.0 / (1.0 / a + 1.0 / b) }
+            }
+        };
+        for i in 0..n.saturating_sub(1) {
+            let (p, q) = (kept[i], kept[i + 1]);
+            let h = (q.x - p.x) / 3.0;
+            path.curve_to((p.x + h, p.y + tangent(i) * h), (q.x - h, q.y - tangent(i + 1) * h), (q.x, q.y));
+        }
+    }
+
     fn xy_path(xs: &[(f64, Option<usize>)], values: &[f64], map: impl Fn(f64) -> f64) -> BezPath {
         let mut path = BezPath::new();
         for (i, (&(x, _), &v)) in xs.iter().zip(values).enumerate() {
@@ -1225,8 +1267,10 @@ impl EqView {
                 // long many-segment paths (a thick bar appeared along the line).
                 cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.5), None, &Self::xy_path(&xs, &static_curve, clamp));
             }
-            // The band as it is right now, including its live dynamic gain.
-            let live = BandSettings { gain_db: s.gain_db + self.dynamic_now(b, s), ..*s };
+            // The band as it is right now, including its live dynamic gain (a spectral band's live
+            // movement is per bin, added below for all of them at once).
+            let moving = if s.uses_spectrum() { 0.0 } else { self.dynamic_now(b, s) };
+            let live = BandSettings { gain_db: s.gain_db + moving, ..*s };
             let r = self.response(b, &live);
             for (v, &(x, grid)) in values.iter_mut().zip(&xs) {
                 *v = match grid {
@@ -1243,7 +1287,35 @@ impl EqView {
             fill.close_path();
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if selected { 0.22 } else { 0.08 }), None, &fill);
         }
-        let curve = if any { Self::xy_path(&xs, &total, clamp) } else {
+        // The spectral stage's live per-bin gain: part of the curve, and lit between the curve
+        // without it and with it, so what it takes out (or adds) shows where it happens.
+        if self.last_spectral.iter().any(|v| v.abs() > 0.05) {
+            let without = total.clone();
+            for (t, &(x, _)) in total.iter_mut().zip(&xs) {
+                *t += self.spectral_at(xf(x));
+            }
+            let forward: Vec<Point> = xs.iter().zip(&total).map(|(&(x, _), &v)| Point::new(x, clamp(v))).collect();
+            let back: Vec<Point> = xs.iter().zip(&without).rev().map(|(&(x, _), &v)| Point::new(-x, clamp(v))).collect();
+            let mut lit = BezPath::new();
+            Self::smooth_through(&mut lit, &forward, false);
+            // The way back, mirrored so x increases, then mirrored again into place.
+            let mut tail = BezPath::new();
+            Self::smooth_through(&mut tail, &back, false);
+            for el in (Affine::FLIP_X * tail).elements() {
+                lit.push(match *el {
+                    mite_ui::kurbo::PathEl::MoveTo(p) => mite_ui::kurbo::PathEl::LineTo(p),
+                    other => other,
+                });
+            }
+            lit.close_path();
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.curve.multiply_alpha(0.28), None, &lit);
+        }
+        let curve = if any {
+            let pts: Vec<Point> = xs.iter().zip(&total).map(|(&(x, _), &v)| Point::new(x, clamp(v))).collect();
+            let mut path = BezPath::new();
+            Self::smooth_through(&mut path, &pts, false);
+            path
+        } else {
             let mut flat = BezPath::new();
             flat.move_to((0.0, MID));
             flat.line_to((PLOT_W, MID));
@@ -1417,6 +1489,7 @@ impl EqView {
         panel(cx.scene, RoundedRect::from_rect(r, 8.0), theme.well, theme.well_border);
         cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(r.inset(-1.0), 7.0));
         match s.dynamics.mode {
+            _ if s.is_spectral() => self.draw_spectral_scope(cx, r, s, color),
             DynamicsMode::Compressor => self.draw_compressor_scope(cx, r, b, s, color),
             DynamicsMode::Transient => self.draw_transient_scope(cx, r, s, color),
         }
@@ -1548,8 +1621,90 @@ impl EqView {
         }
     }
 
-    /// Icons for the dynamics modes, 16 × 16 at `at`: a compressor's bent transfer line, and a
-    /// hit's spike and decay.
+    /// Spectral compressor scope: the band's frequencies (three octaves either side of it, left to
+    /// right) and how loud each is right now (bottom −60 dBFS, top 0), against the threshold
+    /// line. Each frequency is compressed on its own: where the level (faint) rises over the line,
+    /// the band pulls just that part down, and the level after it (lit) shows by how much. The
+    /// levels are the engine's own per-bin detector; drag the line to set the threshold.
+    fn draw_spectral_scope(&self, cx: &mut DrawCx<'_>, r: Rect, s: &BandSettings, color: Color) {
+        let theme = cx.theme;
+        let pad = SCOPE_PAD;
+        let (f0, f1) = ((s.freq / 8.0).max(20.0), (s.freq * 8.0).min(20_000.0));
+        let x_of = |f: f64| r.x0 + (f / f0).ln() / (f1 / f0).ln() * r.width();
+        let y_of = |db: f64| r.y0 + pad + (db.clamp(SCOPE_FLOOR_DB, 0.0) / SCOPE_FLOOR_DB) * (r.height() - 2.0 * pad);
+        let mut grid = BezPath::new();
+        for db in [-12.0, -24.0, -36.0, -48.0] {
+            grid.move_to((r.x0, y_of(db)));
+            grid.line_to((r.x1, y_of(db)));
+        }
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &grid);
+        // The band's centre, and how much of each frequency it works on (its region), as a floor glow.
+        let cx_line = x_of(s.freq);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.2), None, &Line::new((cx_line, r.y0), (cx_line, r.y1)));
+        const N: usize = 72;
+        let freq = |i: usize| f0 * (f1 / f0).powf(i as f64 / (N - 1) as f64);
+        let input: Vec<Point> = (0..N).map(|i| Point::new(x_of(freq(i)), y_of(Self::points_at(&self.scope_level, freq(i))))).collect();
+        let output: Vec<Point> = (0..N).map(|i| Point::new(x_of(freq(i)), y_of(Self::points_at(&self.scope_out, freq(i))))).collect();
+        let heard = self.scope_level.iter().any(|&l| f64::from(l) > SCOPE_FLOOR_DB);
+        if heard {
+            let mut inp = BezPath::new();
+            Self::smooth_through(&mut inp, &input, false);
+            let mut out = BezPath::new();
+            Self::smooth_through(&mut out, &output, false);
+            // Under the level after the band: a quiet fill down to the floor.
+            let mut fill = out.clone();
+            fill.line_to((r.x1, r.y1));
+            fill.line_to((r.x0, r.y1));
+            fill.close_path();
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.12), None, &fill);
+            // What the band takes off (or adds): between the level before and after it.
+            let mut change = out.clone();
+            let back: Vec<Point> = input.iter().rev().map(|p| Point::new(-p.x, p.y)).collect();
+            let mut tail = BezPath::new();
+            Self::smooth_through(&mut tail, &back, false);
+            for el in (Affine::FLIP_X * tail).elements() {
+                change.push(match *el {
+                    mite_ui::kurbo::PathEl::MoveTo(p) => mite_ui::kurbo::PathEl::LineTo(p),
+                    other => other,
+                });
+            }
+            change.close_path();
+            cx.scene.fill(Fill::EvenOdd, Affine::IDENTITY, color.multiply_alpha(0.4), None, &change);
+            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.text_lo, None, &inp);
+            glow_stroke(cx.scene, &out, 1.6, color, color, 3.0);
+        }
+        // The threshold, with a grip on its right end: a line across at a fixed level, or
+        // (relative) a curve riding the surroundings, the engine's own per-bin thresholds.
+        let hot = self.hot == Some(Hot::Scope) || self.drag.as_ref().is_some_and(|d| d.mode == DragMode::SpectralThreshold);
+        let line_color = color.multiply_alpha(if hot { 0.9 } else { 0.55 });
+        let ty = if s.dynamics.relative {
+            let edge = x_of(freq(N - 1)) - 14.0;
+            let pts: Vec<Point> = (0..N)
+                .map(|i| Point::new(x_of(freq(i)), y_of(Self::points_at(&self.scope_threshold, freq(i)))))
+                .filter(|p| p.x <= edge)
+                .collect();
+            if heard && pts.len() > 1 {
+                let mut path = BezPath::new();
+                Self::smooth_through(&mut path, &pts, false);
+                cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, line_color, None, &path);
+                pts[pts.len() - 1].y
+            } else {
+                // Nothing heard yet: the threshold over silence, flat.
+                let y = y_of(SCOPE_FLOOR_DB + s.dynamics.relative_db);
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, line_color, None, &Line::new((r.x0, y), (r.x1 - 14.0, y)));
+                y
+            }
+        } else {
+            let y = y_of(s.dynamics.threshold_db);
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, line_color, None, &Line::new((r.x0, y), (r.x1 - 14.0, y)));
+            y
+        };
+        let grip = RoundedRect::new(r.x1 - 14.0, ty - 3.0, r.x1 - 4.0, ty + 3.0, 3.0);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { color } else { color.multiply_alpha(0.7) }, None, &grip);
+    }
+
+    /// Icons for the dynamics modes, 16 × 16 at `at`: a compressor's bent transfer line, the same
+    /// over a row of frequency bins (spectral), and a hit's spike and decay.
     fn draw_mode_icon(scene: &mut mite_ui::vello::Scene, mode: usize, at: Point, color: Color) {
         let pt = |x: f64, y: f64| (at.x + x, at.y + y);
         let mut p = BezPath::new();
@@ -1557,6 +1712,14 @@ impl EqView {
             p.move_to(pt(1.0, 15.0));
             p.line_to(pt(8.0, 8.0));
             p.quad_to(pt(10.0, 6.0), pt(15.0, 5.0));
+        } else if mode == 1 {
+            p.move_to(pt(1.0, 11.0));
+            p.line_to(pt(6.0, 6.0));
+            p.quad_to(pt(8.0, 4.0), pt(15.0, 3.0));
+            for (x, top) in [(2.5, 13.0), (6.0, 10.0), (9.5, 12.0), (13.0, 9.5)] {
+                p.move_to(pt(x, 15.5));
+                p.line_to(pt(x, top));
+            }
         } else {
             p.move_to(pt(0.0, 14.0));
             p.line_to(pt(3.0, 14.0));
@@ -1644,15 +1807,20 @@ impl EqView {
         });
         let stereo = dropdown(cx, x, 118.0, Placement::NAMES[s.placement as usize], Icon::Stereo(s.placement), open == Some(MenuKind::Stereo));
 
-        let (scope, modes, remove_dynamics) = if let Some(top) = dyn_top {
+        let (scope, modes, remove_dynamics, relative) = if let Some(top) = dyn_top {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((origin.x + 14.0, divider), (origin.x + PANEL_W - 14.0, divider)));
             let scope = Rect::new(origin.x + 14.0, top + 8.0, origin.x + 14.0 + SCOPE_W, top + 8.0 + SCOPE_H);
             self.draw_scope(cx, scope, b, &s, color);
-            // Mode buttons, stacked beside the scope: compressor over transient shaper.
+            // Mode buttons, stacked beside the scope: compressor, spectral compressor, transient shaper.
             let mx = scope.x1 + 12.0;
-            let modes = [Rect::new(mx, scope.y0, mx + 30.0, scope.y0 + 41.0), Rect::new(mx, scope.y1 - 41.0, mx + 30.0, scope.y1)];
+            let h = (SCOPE_H - 8.0) / 3.0;
+            let modes: [Rect; 3] = std::array::from_fn(|i| {
+                let y = scope.y0 + i as f64 * (h + 4.0);
+                Rect::new(mx, y, mx + 30.0, y + h)
+            });
+            let current = Self::mode_index(&s);
             for (i, m) in modes.iter().enumerate() {
-                let on = s.dynamics.mode as usize == i;
+                let on = current == i;
                 let hot = self.hot == Some(Hot::Mode(i));
                 let shape = RoundedRect::from_rect(*m, 6.0);
                 raised(cx.scene, shape, theme.panel_control, if on { color } else { theme.panel_control_border }, theme.shadows);
@@ -1679,9 +1847,38 @@ impl EqView {
             glyph.line_to((k.x + 6.0, k.y + 6.0));
             let stroke = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
             cx.scene.stroke(&stroke, Affine::IDENTITY, if hot { theme.text_hi } else { theme.text_mid }, None, &glyph);
-            (Some(scope), Some(modes), Some(remove))
+            // Spectral: below it, the threshold's kind — a fixed level, or following the
+            // surroundings (lit). Its icon: a line riding the tops of the bins.
+            let relative = s.is_spectral().then(|| {
+                let r = Rect::new(remove.x0, top + 58.0, remove.x1, top + 88.0);
+                let on = s.dynamics.relative;
+                let hot = self.hot == Some(Hot::Relative);
+                let shape = RoundedRect::from_rect(r, 6.0);
+                raised(cx.scene, shape, theme.panel_control, if on || hot { color } else { theme.panel_control_border }, theme.shadows);
+                if on {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
+                }
+                let ink = if on { color } else if hot { theme.text_hi } else { theme.text_mid };
+                let k = r.center();
+                let mut bars = BezPath::new();
+                let tops = [3.0, -2.0, 1.5, -4.0, 2.0];
+                for (i, t) in tops.iter().enumerate() {
+                    let x = k.x - 6.0 + 3.0 * i as f64;
+                    bars.move_to((x, k.y + 7.0));
+                    bars.line_to((x, k.y + t));
+                }
+                let mut line = BezPath::new();
+                line.move_to((k.x - 8.0, k.y - 1.0));
+                line.curve_to((k.x - 4.0, k.y - 5.0), (k.x - 1.0, k.y - 2.0), (k.x + 1.0, k.y - 5.0));
+                line.curve_to((k.x + 3.0, k.y - 8.0), (k.x + 6.0, k.y - 3.0), (k.x + 8.0, k.y - 4.0));
+                let stroke = Stroke::new(1.4).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+                cx.scene.stroke(&stroke, Affine::IDENTITY, ink.multiply_alpha(0.6), None, &bars);
+                cx.scene.stroke(&stroke, Affine::IDENTITY, ink, None, &line);
+                r
+            });
+            (Some(scope), Some(modes), Some(remove), relative)
         } else {
-            (None, None, None)
+            (None, None, None, None)
         };
 
         // Right: bypass over close.
@@ -1714,7 +1911,7 @@ impl EqView {
         if let Some(c) = ring {
             self.draw_ring(cx, c, b, &s, color);
         }
-        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, bypass, close });
+        self.panel_hits = Some(PanelHits { panel: rect, kind, slope, stereo, ring, scope, modes, remove_dynamics, relative, bypass, close });
     }
 
     /// The open dropdown, drawn over everything.
@@ -1998,6 +2195,17 @@ impl View for EqView {
                             host.set_normalized(&ids.sustain, host.normalize(&ids.sustain, d.sustain as f32));
                             Self::update_dynamics_on(host, ids);
                         }
+                        DragMode::SpectralThreshold => {
+                            // The line follows the pointer on the scope's level axis.
+                            let per_px = -SCOPE_FLOOR_DB / (SCOPE_H - 2.0 * SCOPE_PAD);
+                            if Self::plain(host, &ids.srel) >= 0.5 {
+                                d.relative = (d.relative - dy * factor * per_px).clamp(f64::from(RTHRESH.min), f64::from(RTHRESH.max));
+                                host.set_normalized(&ids.rthresh, host.normalize(&ids.rthresh, d.relative as f32));
+                            } else {
+                                d.thresh = (d.thresh - dy * factor * per_px).clamp(f64::from(THRESH.min), f64::from(THRESH.max));
+                                host.set_normalized(&ids.thresh, host.normalize(&ids.thresh, d.thresh as f32));
+                            }
+                        }
                     }
                     return true;
                 }
@@ -2031,6 +2239,7 @@ impl View for EqView {
                     let range = if s.is_dynamic() { s.dynamics.range_db } else { 0.0 };
                     match hot {
                         Hot::Ring => self.begin_drag(host, b, DragMode::Ring, pos, range),
+                        Hot::Scope if s.is_spectral() => self.begin_drag(host, b, DragMode::SpectralThreshold, pos, range),
                         Hot::Scope => {
                             // Transient scope: the hit's attack sets the attack amount, its tail the sustain.
                             let head = self.panel_hits.and_then(|h| h.scope).is_some_and(|r| pos.x < scope_x(r, s.dynamics.transient_ms / 1000.0));
@@ -2043,7 +2252,9 @@ impl View for EqView {
                         }
                         Hot::Split => self.begin_drag(host, b, DragMode::Split, pos, range),
                         Hot::Mode(i) => {
-                            Self::set(host, &self.ids[b].dmode, i as f32);
+                            let ids = &self.ids[b];
+                            Self::set(host, &ids.dmode, if i == 2 { 1.0 } else { 0.0 });
+                            Self::set(host, &ids.spectral, if i == 1 { 1.0 } else { 0.0 });
                             self.panel_knobs.clear();
                         }
                         // A ghost grip starts from where it sits, so the band follows the pointer.
@@ -2052,6 +2263,10 @@ impl View for EqView {
                             self.begin_drag(host, b, DragMode::Range, pos, from);
                         }
                         Hot::RemoveDynamics => self.remove_dynamics(host, b),
+                        Hot::Relative => {
+                            Self::set(host, &self.ids[b].srel, if s.dynamics.relative { 0.0 } else { 1.0 });
+                            self.panel_knobs.clear();
+                        }
                     }
                     return true;
                 }
@@ -2099,7 +2314,7 @@ impl View for EqView {
                         host.end_gesture(id);
                     }
                     // A move on the plot may have put the band under the panel: dock it afresh.
-                    if !matches!(d.mode, DragMode::Ring | DragMode::Scope) {
+                    if !matches!(d.mode, DragMode::Ring | DragMode::Scope | DragMode::SpectralThreshold) {
                         self.panel_dock = None;
                     }
                     return true;
@@ -2126,7 +2341,7 @@ impl View for EqView {
                     match hot {
                         Hot::Ring | Hot::Grip(_) => self.remove_dynamics(host, b),
                         Hot::Split => Self::set(host, &self.ids[b].ttime, TTIME.default),
-                        Hot::Scope | Hot::Mode(_) | Hot::RemoveDynamics => {}
+                        Hot::Scope | Hot::Mode(_) | Hot::RemoveDynamics | Hot::Relative => {}
                     }
                     return true;
                 }
@@ -2213,6 +2428,28 @@ impl View for EqView {
                 dirty = true;
             }
         }
+        // The spectral stage's live cuts.
+        for (last, now) in self.last_spectral.iter_mut().zip(&self.shared.spectral) {
+            let now = now.load();
+            if (now - *last).abs() > 0.02 {
+                *last = now;
+                dirty = true;
+            }
+        }
+        // The selected band's per-bin detail (spectral scope): ask the engine for it, follow it.
+        let focus = self.selected.filter(|&b| self.band(host, b).is_spectral());
+        self.shared.focus.store(focus.map_or(-1.0, |b| b as f32));
+        if focus.is_some() {
+            for (i, (level, gain)) in self.focus_level.iter_mut().zip(self.focus_gain.iter_mut()).enumerate() {
+                let (l, g) = (self.shared.focus_level[i].load(), self.shared.focus_gain[i].load());
+                let t = self.shared.focus_threshold[i].load();
+                if (l - *level).abs() > 0.05 || (g - *gain).abs() > 0.02 || (t - self.focus_threshold[i]).abs() > 0.05 {
+                    dirty = true;
+                }
+                (*level, *gain, self.focus_threshold[i]) = (l, g, t);
+            }
+            dirty |= self.update_scope();
+        }
         // The latency readout follows the engine (it changes once a mode switch completes).
         let latency = self.shared.latency.load();
         if latency != self.last_latency {
@@ -2242,7 +2479,7 @@ impl View for EqView {
         for ids in &self.ids {
             for id in [
                 &ids.on, &ids.kind, &ids.freq, &ids.gain, &ids.q, &ids.slope, &ids.stereo, &ids.dyn_on, &ids.range,
-                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition, &ids.spectral, &ids.rdepth, &ids.rsharp, &ids.rselect, &ids.rspeed,
+                &ids.thresh, &ids.attack, &ids.release, &ids.ratio, &ids.dmode, &ids.sustain, &ids.transient, &ids.ttime, &ids.transition, &ids.spectral, &ids.ssmooth, &ids.srel, &ids.rthresh,
             ] {
                 signature.push(host.normalized(id));
             }

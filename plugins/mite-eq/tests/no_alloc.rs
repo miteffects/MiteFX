@@ -17,20 +17,29 @@ fn engine_process_never_allocates_in_any_mode() {
     settings[0] = BandSettings { enabled: true, kind: BandType::Bell, freq: 1000.0, gain_db: 6.0, q: 1.0, ..Default::default() };
     settings[1] = BandSettings { enabled: true, kind: BandType::HighShelf, freq: 8000.0, gain_db: -3.0, q: 0.7, ..Default::default() };
     settings[1].dynamics.enabled = true;
+    // A relative spectral band that comes and goes, so the spectral stage switches on and off.
+    settings[2] = BandSettings { enabled: true, kind: BandType::Bell, freq: 3000.0, q: 0.5, ..Default::default() };
+    settings[2].dynamics = mite_dsp::eq::Dynamics { enabled: true, spectral: true, relative: true, ..Default::default() };
     let mut eq = EqEngine::new(sr, &settings, 0.0);
     let (mut l, mut r) = (vec![0.1f32; 128], vec![-0.1f32; 128]);
     let mut blocks = 0;
-    for (mode, res) in [
+    for (m, (mode, res)) in [
         (PhaseMode::LinearPhase, 2),
         (PhaseMode::NaturalPhase, 2),
         (PhaseMode::LinearPhase, 0),
         (PhaseMode::ZeroLatency, 0),
         (PhaseMode::LinearPhase, 3),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         eq.set_mode(mode, res);
         for i in 0..600 {
             // Keep the bands moving so kernels are redesigned and swapped all along.
             settings[0].gain_db = 6.0 * ((i / 40) % 2) as f64;
+            settings[2].enabled = (i / 150) % 2 == 0;
+            // The shelf's dynamics go spectral in every other mode.
+            settings[1].dynamics.spectral = m % 2 == 1;
             // Fresh input every block (feeding the output back in would stack the EQ on itself).
             l.fill(0.1);
             r.fill(-0.1);
@@ -40,6 +49,7 @@ fn engine_process_never_allocates_in_any_mode() {
         }
     }
     assert_eq!(blocks, 3000);
+    // It ends with the relative band off (blocks 450–599), so no spectral latency.
     assert_eq!(eq.latency(), mite_eq::dsp::linear_phase_latency(3, f64::from(sr)));
 }
 

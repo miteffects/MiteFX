@@ -1,7 +1,7 @@
 //! `cargo xtask` — bundling, installing and validating MiteFX plugins.
 //!
 //!     cargo xtask bundle <package> --release   CLAP + VST3 bundles into target/bundled (nih_plug_xtask)
-//!     cargo xtask install <package>            copy the bundles into the user's plugin folders
+//!     cargo xtask install <package>            bundle (release), then copy into the user's plugin folders
 //!     cargo xtask validate <package>           clap-validator + pluginval on the bundles
 //!
 //! Everything else is forwarded to nih_plug_xtask.
@@ -58,6 +58,9 @@ fn bundles(package: &str) -> Result<(PathBuf, PathBuf), String> {
 }
 
 fn install(package: &str) -> Result<(), String> {
+    // Always from a fresh release bundle: copying whatever was bundled last installs stale code.
+    let args = vec!["bundle".to_owned(), package.to_owned(), "--release".to_owned()];
+    nih_plug_xtask::main_with_args("cargo xtask", args).map_err(|e| e.to_string())?;
     let (clap, vst3) = bundles(package)?;
     let (clap_dir, vst3_dir) = plugin_dirs()?;
     for (src, dir) in [(&clap, &clap_dir), (&vst3, &vst3_dir)] {
