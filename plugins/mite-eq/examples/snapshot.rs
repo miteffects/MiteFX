@@ -91,6 +91,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let ring = spectral;
     let mut phase = 0.0_f64;
+    // SNAPSHOT_SIDECHAIN: a bass on the sidechain (a low tone and its harmonics, over low noise),
+    // and a low tone of the same pitch in the track, so the two collide (the masking view).
+    let sidechain = std::env::var_os("SNAPSHOT_SIDECHAIN").is_some();
+    let mut bass_phase = 0.0_f64;
+    let mut bass_noise = 0.0_f32;
+    // SNAPSHOT_MATCH: the reference on the sidechain is the same noise through another EQ
+    // (warmer lows, a scooped middle, more air), which EQ Match should find.
+    let reference = std::env::var_os("SNAPSHOT_MATCH").is_some();
+    let mut reference_bands = [BandSettings::default(); BANDS];
+    for (b, &(kind, freq, gain, q)) in [(BandType::LowShelf, 120.0, 4.0, 0.71), (BandType::Bell, 600.0, -4.0, 1.0), (BandType::HighShelf, 7000.0, 5.0, 0.71)].iter().enumerate() {
+        reference_bands[b] = BandSettings { enabled: true, kind, freq, gain_db: gain, q, ..Default::default() };
+    }
+    let mut reference_engine = EqEngine::new(48_000.0, &reference_bands, 0.0);
 
     // Pink-ish noise (Paul Kellet's filter) through the real engine feeds both analyzer taps.
     let shared = Arc::new(EqShared::new());
@@ -113,6 +126,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 phase += 2.0 * std::f64::consts::PI * 2800.0 / 48_000.0;
                 *s += (0.12 * phase.sin()) as f32;
             }
+            if sidechain {
+                bass_phase += 2.0 * std::f64::consts::PI * 87.0 / 48_000.0;
+                *s += (0.05 * bass_phase.sin()) as f32;
+            }
+        }
+        if sidechain {
+            let bass: Vec<f32> = (0..block.len())
+                .map(|i| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    let white = (seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
+                    bass_noise = 0.985 * bass_noise + 0.015 * white;
+                    let t = bass_phase + 2.0 * std::f64::consts::PI * 87.0 / 48_000.0 * (i as f64 - block.len() as f64);
+                    (0.25 * t.sin() + 0.1 * (2.0 * t).sin() + 0.05 * (3.0 * t).sin()) as f32 + 0.3 * bass_noise
+                })
+                .collect();
+            shared.sidechain.push(bass.into_iter());
+        }
+        if reference {
+            let (mut l, mut r) = (block.clone(), block.clone());
+            reference_engine.process(&mut [&mut l, &mut r], &reference_bands, 0.0, None, None);
+            shared.sidechain.push(l.iter().zip(&r).map(|(a, b)| 0.5 * (a + b)));
         }
         let mut l = block.clone();
         let mut r = block.clone();
@@ -154,6 +190,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         view.tick(&host);
         std::thread::sleep(std::time::Duration::from_millis(8));
     }
+    if sidechain {
+        // The masking averages need a moment of both playing.
+        for _ in 0..90 {
+            view.tick(&host);
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
+    }
     // Select band 3 the way a user would: click its node (mockup: 2.8 kHz, −3 dB).
     let x = 1200.0 * (settings[2].freq / 10.0).ln() / 3000.0_f64.ln();
     let y = 56.0 + 306.0 + 3.0 * 264.0 / 18.0;
@@ -164,6 +207,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = host.normalized(OUT_GAIN.id);
     // A tick after selecting, as live: picks up the selected band's per-bin detail.
     view.tick(&host);
+    // SNAPSHOT_MATCH: open EQ Match (its header button) and let it learn and fit.
+    if std::env::var_os("SNAPSHOT_MATCH").is_some() {
+        render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), 1.0)?;
+        let at = Point::new(806.0, 28.0);
+        view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
+        view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
+        view.event(&UiEvent::PointerLeft, &host);
+        for _ in 0..150 {
+            view.tick(&host);
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
+    }
     // Optional further clicks in design units, e.g. SNAPSHOT_CLICK="380,600" to open a dropdown.
     // Each is preceded by a render so the view knows where its controls are.
     if let Ok(clicks) = std::env::var("SNAPSHOT_CLICK") {

@@ -77,6 +77,8 @@ pub struct Theme {
     pub warn: Color,
     pub danger: Color,
     pub gain_reduction: Color,
+    pub sidechain: Color,
+    pub masking: Color,
     pub band_ramp: Vec<Color>,
     /// Drop shadows and glow are off in high contrast (`elevation.*.hc` = none).
     pub shadows: bool,
@@ -146,6 +148,8 @@ impl Theme {
             warn: semantic("warn"),
             danger: semantic("danger"),
             gain_reduction: semantic("gr"),
+            sidechain: semantic("sidechain"),
+            masking: semantic("masking"),
             band_ramp,
             shadows: !hc,
             border_width: n["borderWidth"].as_f64().unwrap_or(1.0),

@@ -30,6 +30,9 @@ pub struct EqShared {
     pub meter: StereoMeter,
     pub pre: SpectrumTap,
     pub post: SpectrumTap,
+    /// The sidechain input (mono sum; silence while unconnected), for the masking view and EQ
+    /// Match's reference.
+    pub sidechain: SpectrumTap,
     pub sample_rate: AtomicF32,
     /// Each band's current dynamic gain, dB.
     pub dynamic: [AtomicF32; BANDS],
@@ -64,6 +67,7 @@ impl EqShared {
             meter: StereoMeter::new(MINUS_INFINITY_DB),
             pre: SpectrumTap::new(editor::ANALYZER_SIZE),
             post: SpectrumTap::new(editor::ANALYZER_SIZE),
+            sidechain: SpectrumTap::new(editor::ANALYZER_SIZE),
             sample_rate: AtomicF32::new(48_000.0),
             dynamic: std::array::from_fn(|_| AtomicF32::new(0.0)),
             level: std::array::from_fn(|_| AtomicF32::new(-120.0)),
@@ -195,6 +199,11 @@ impl Plugin for MiteEq {
                 *slot = ch;
                 sc_channels += 1;
             }
+        }
+        match &sidechain[..sc_channels] {
+            [l, r] => self.shared.sidechain.push(l.iter().zip(r.iter()).map(|(a, b)| 0.5 * (a + b))),
+            [m] => self.shared.sidechain.push(m.iter().copied()),
+            _ => self.shared.sidechain.push(std::iter::repeat_n(0.0, buffer.samples())),
         }
         let (left, right) = self.engine.process_sidechain(
             buffer.as_slice(),

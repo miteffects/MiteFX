@@ -8,7 +8,9 @@ use std::f64::consts::LN_2;
 use std::sync::Arc;
 use std::time::Instant;
 
-use mite_dsp::analyzer::{Analyzer, LogSpectrum, SPECTRUM_POINTS};
+use mite_core::{ParamDisplay, ParamScale, ParamSpec};
+use mite_dsp::analyzer::{spectrum_point_freq, spectrum_point_oct, Analyzer, LogSpectrum, SPECTRUM_POINTS};
+use mite_dsp::matching::{self, Collision, LongTermSpectrum};
 use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, DetectSource, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel, raised};
@@ -420,6 +422,142 @@ struct Grab {
     moved: bool,
 }
 
+/// Masking (BLUEPRINT §8.3): the averages of this track and the sidechain it compares, s.
+const MASK_AVERAGE_S: f64 = 3.0;
+/// Where a spectrum counts as heard, dB as drawn.
+const HEARD_DB: f64 = -80.0;
+/// How often collisions are looked for, s, and how fast they fade in and out.
+const MASK_UPDATE_S: f64 = 0.1;
+const MASK_FADE_S: f64 = 0.25;
+/// The ring a carve suggestion is drawn as, and its reach.
+const CARVE_RING: f64 = 10.0;
+
+/// EQ Match: the header button, how often a learning fit is refreshed (s), and how much audio
+/// fills the learning ring (s).
+const MATCH_X: (f64, f64) = (790.0, 822.0);
+const MATCH_REFIT_S: f64 = 0.5;
+const MATCH_FULL_S: f64 = 10.0;
+
+/// EQ Match's dials (the editor's own, not plugin parameters): how far to go towards the
+/// reference, how many bands it may add, and how finely it follows the difference (octaves).
+const MATCH_AMOUNT: ParamSpec = ParamSpec {
+    id: "match_amount",
+    name: "Amount",
+    unit: "%",
+    min: 0.0,
+    max: 100.0,
+    default: 100.0,
+    scale: ParamScale::Linear,
+    smoothing_ms: 0.0,
+    decimals: 0,
+    wheel_step: 5.0,
+    wheel_step_fine: 1.0,
+    display: ParamDisplay::Number,
+};
+const MATCH_BANDS: ParamSpec =
+    ParamSpec { id: "match_bands", name: "Bands", unit: "", min: 1.0, max: BANDS as f32, default: 8.0, wheel_step: 1.0, wheel_step_fine: 1.0, ..MATCH_AMOUNT };
+const MATCH_SMOOTH: ParamSpec = ParamSpec {
+    id: "match_smooth",
+    name: "Smooth",
+    unit: " oct",
+    min: 0.08,
+    max: 1.0,
+    default: 1.0 / 3.0,
+    scale: ParamScale::Log,
+    decimals: 2,
+    wheel_step: 0.05,
+    wheel_step_fine: 0.01,
+    ..MATCH_AMOUNT
+};
+
+/// The Match panel's buttons, set while drawing.
+#[derive(Clone, Copy)]
+struct MatchHits {
+    panel: Rect,
+    learn: Rect,
+    restart: Rect,
+    apply: Rect,
+    close: Rect,
+}
+
+/// A fit running on a worker, and the aim it was given.
+type PendingFit = (std::sync::mpsc::Receiver<Vec<BandSettings>>, Vec<Option<f64>>);
+
+/// EQ Match (BLUEPRINT §8.3): this track before the EQ and the reference (the sidechain),
+/// averaged while learning, and the bands fitted to what the current bands leave.
+struct Match {
+    source: LongTermSpectrum,
+    reference: LongTermSpectrum,
+    learning: bool,
+    controls: mite_ui::MemoryParamHost,
+    knobs: Vec<Knob>,
+    /// The whole EQ the fit aims for (dB per grid point, only where the match listens), and the
+    /// fitted bands' curve (empty before the first fit).
+    aim: Vec<Option<f64>>,
+    ghost: Vec<f64>,
+    fitted: Vec<BandSettings>,
+    /// A fit running on a worker, the aim it was given, and whether the inputs changed since.
+    pending: Option<PendingFit>,
+    stale: bool,
+    last_fit: Instant,
+    /// The dials' values the last fit used.
+    inputs: [f32; 3],
+    hits: Option<MatchHits>,
+}
+
+impl Match {
+    fn new() -> Self {
+        let controls = mite_ui::MemoryParamHost::new().with(MATCH_AMOUNT).with(MATCH_BANDS).with(MATCH_SMOOTH);
+        let o = Self::rect().origin();
+        let first = o.x + PANEL_LAST_DIAL_X - 2.0 * PANEL_DIAL_STEP;
+        let knobs = [(MATCH_AMOUNT, "AMOUNT"), (MATCH_BANDS, "BANDS"), (MATCH_SMOOTH, "SMOOTH")]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (spec, label))| Knob::new(spec, label, KnobKind::Unipolar, Point::new(first + i as f64 * PANEL_DIAL_STEP, o.y + 44.0), PANEL_DIAL))
+            .collect();
+        Self {
+            source: LongTermSpectrum::new(POINTS, f64::INFINITY),
+            reference: LongTermSpectrum::new(POINTS, f64::INFINITY),
+            learning: true,
+            controls,
+            knobs,
+            aim: Vec::new(),
+            ghost: Vec::new(),
+            fitted: Vec::new(),
+            pending: None,
+            stale: false,
+            last_fit: Instant::now(),
+            inputs: [f32::NAN; 3],
+            hits: None,
+        }
+    }
+
+    /// Where the panel sits: the band panel's place, docked at the bottom centre of the plot.
+    fn rect() -> Rect {
+        let x = (PLOT_W - PANEL_W) / 2.0;
+        Rect::new(x, HELP_TOP - PANEL_H - 10.0, x + PANEL_W, HELP_TOP - 10.0)
+    }
+
+    fn inputs(&self) -> [f32; 3] {
+        [MATCH_AMOUNT, MATCH_BANDS, MATCH_SMOOTH].map(|spec| self.controls.plain(spec.id, self.controls.normalized(spec.id)))
+    }
+
+    fn restart(&mut self) {
+        self.source.clear();
+        self.reference.clear();
+        self.aim.clear();
+        self.ghost.clear();
+        self.fitted.clear();
+        self.learning = true;
+        self.stale = false;
+    }
+}
+
+/// The analyzer's points, Hz (the plot's grid points sit on them).
+fn grid_freqs() -> Vec<f64> {
+    (0..POINTS).map(spectrum_point_freq).collect()
+}
+
 /// Analyzer motion: time constants of the rise and of the fall, s.
 const SPECTRUM_RISE_S: f64 = 0.06;
 const SPECTRUM_FALL_S: f64 = 0.3;
@@ -602,6 +740,19 @@ fn icon_button(scene: &mut mite_ui::vello::Scene, theme: &mite_ui::Theme, r: Rec
     } else {
         theme.text_mid
     }
+}
+
+/// EQ Match centred on `c`: a curve and the dashed one it follows.
+fn draw_match_glyph(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
+    let wave = |dy: f64| {
+        let mut p = BezPath::new();
+        p.move_to((c.x - 8.0, c.y + dy));
+        p.curve_to((c.x - 3.0, c.y + dy - 7.0), (c.x + 3.0, c.y + dy + 7.0), (c.x + 8.0, c.y + dy));
+        p
+    };
+    let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
+    scene.stroke(&round.clone().with_dashes(0.0, [2.0, 2.5]), Affine::IDENTITY, color.multiply_alpha(0.7), None, &wave(-2.5));
+    scene.stroke(&round, Affine::IDENTITY, color, None, &wave(2.5));
 }
 
 /// A bin centred on `c`: removes the band.
@@ -909,6 +1060,24 @@ pub struct EqView {
     hold_since: Option<Instant>,
     holding: bool,
     hold_alpha: f32,
+    /// The sidechain spectrum as drawn (dB per grid point), its latest analysis, and whether it
+    /// carries signal.
+    sc: Vec<f64>,
+    sc_target: Vec<f32>,
+    sc_heard: bool,
+    /// Masking: slow averages of this track (post) and the sidechain, the score and collisions
+    /// found in them, their opacity as drawn, the one under the pointer, and the frequency
+    /// ranges dismissed (a collision whose peak falls in one stays hidden).
+    mask_post: LongTermSpectrum,
+    mask_sc: LongTermSpectrum,
+    mask_score: Vec<f64>,
+    collisions: Vec<Collision>,
+    last_mask: Instant,
+    mask_alpha: f32,
+    collision_hot: Option<usize>,
+    ignored: Vec<(f64, f64)>,
+    /// EQ Match, while its panel is open.
+    matcher: Option<Match>,
     hot: Option<Hot>,
     /// Origin the panel dials were laid out for, and whether the dynamics row was included.
     knobs_layout: Option<(Point, Option<f64>)>,
@@ -998,6 +1167,18 @@ impl EqView {
             hold_since: None,
             holding: false,
             hold_alpha: 0.0,
+            sc: vec![-150.0; POINTS],
+            sc_target: vec![-150.0; POINTS],
+            sc_heard: false,
+            mask_post: LongTermSpectrum::new(POINTS, MASK_AVERAGE_S),
+            mask_sc: LongTermSpectrum::new(POINTS, MASK_AVERAGE_S),
+            mask_score: vec![f64::NEG_INFINITY; POINTS],
+            collisions: Vec::new(),
+            last_mask: Instant::now(),
+            mask_alpha: 0.0,
+            collision_hot: None,
+            ignored: Vec::new(),
+            matcher: None,
             hot: None,
             knobs_layout: None,
             panel_dock: None,
@@ -1079,6 +1260,9 @@ impl EqView {
     }
 
     fn select(&mut self, band: Option<usize>) {
+        if band.is_some() {
+            self.matcher = None;
+        }
         self.selected = band;
         self.slope_wheel = 0.0;
         self.menu = None;
@@ -1116,19 +1300,29 @@ impl EqView {
             self.spectrum = LogSpectrum::new(ANALYZER_SIZE, fs);
         }
         if self.last_analysis.elapsed().as_secs_f64() >= 0.0155 {
+            let frame_s = self.last_analysis.elapsed().as_secs_f64().min(0.1);
             self.last_analysis = Instant::now();
-            for which in 0..2 {
-                let tap = if which == 0 { &self.shared.pre } else { &self.shared.post };
+            for which in 0..3 {
+                let (tap, target) = match which {
+                    0 => (&self.shared.pre, &mut self.pre_target),
+                    1 => (&self.shared.post, &mut self.post_target),
+                    _ => (&self.shared.sidechain, &mut self.sc_target),
+                };
                 tap.read_latest(&mut self.samples);
+                // A silent sidechain (unconnected, or nothing playing) needs no FFT.
+                if which == 2 && self.samples.iter().all(|s| s.abs() < 1e-7) {
+                    target.iter_mut().for_each(|t| *t = -150.0);
+                    continue;
+                }
                 self.analyzer.analyze_power(&self.samples, &mut self.power);
-                let target = if which == 0 { &mut self.pre_target } else { &mut self.post_target };
                 self.spectrum.read(&self.power, target);
             }
+            self.learn(frame_s);
         }
         let rise = (1.0 - (-dt / SPECTRUM_RISE_S).exp()) as f32;
         let fall = (1.0 - (-dt / SPECTRUM_FALL_S).exp()) as f32;
         let mut changed = false;
-        for (curve, target) in [(&mut self.pre, &self.pre_target), (&mut self.post, &self.post_target)] {
+        for (curve, target) in [(&mut self.pre, &self.pre_target), (&mut self.post, &self.post_target), (&mut self.sc, &self.sc_target)] {
             for (value, &db) in curve.iter_mut().zip(target.iter()) {
                 // Ballistics: both ways eased, so frames glide into each other instead of jumping.
                 let current = *value as f32;
@@ -1139,6 +1333,191 @@ impl EqView {
                 *value = f64::from(next);
             }
         }
+        self.sc_heard = self.sc.iter().any(|&v| v > -88.0);
+        changed
+    }
+
+    /// Feeds the latest analysis to the masking averages and, while EQ Match learns, to its
+    /// spectra. A frame counts only while both sides are heard, so pauses do not dilute them.
+    fn learn(&mut self, dt: f64) {
+        let heard = |v: &[f32]| v.iter().any(|&d| f64::from(d) > HEARD_DB);
+        if !heard(&self.sc_target) {
+            return;
+        }
+        if heard(&self.post_target) {
+            self.mask_post.add(&self.post_target, dt);
+            self.mask_sc.add(&self.sc_target, dt);
+        }
+        if let Some(m) = self.matcher.as_mut().filter(|m| m.learning) {
+            if heard(&self.pre_target) {
+                m.source.add(&self.pre_target, dt);
+                m.reference.add(&self.sc_target, dt);
+                m.stale = true;
+            }
+        }
+    }
+
+    /// The bands' static curve (dB per grid point), as drawn without their live movement.
+    fn static_total(&mut self, host: &dyn ParamHost) -> Vec<f64> {
+        let mut total = vec![0.0; POINTS];
+        for b in 0..BANDS {
+            let s = self.band(host, b);
+            if s.enabled {
+                for (t, v) in total.iter_mut().zip(&self.response(b, &s).grid) {
+                    *t += v;
+                }
+            }
+        }
+        total
+    }
+
+    /// Looks for collisions between this track and the sidechain (while the sidechain plays and
+    /// Match is closed) and fades them in or out. Returns whether anything drawn changed.
+    fn update_masking(&mut self, dt: f64) -> bool {
+        let show = self.sc_heard && self.matcher.is_none() && self.mask_sc.seconds() >= 1.0;
+        let mut changed = false;
+        if show && self.last_mask.elapsed().as_secs_f64() >= MASK_UPDATE_S {
+            self.last_mask = Instant::now();
+            let (mut a, mut b) = (vec![0.0; POINTS], vec![0.0; POINTS]);
+            self.mask_post.read_db(&mut a);
+            self.mask_sc.read_db(&mut b);
+            let freqs = grid_freqs();
+            let weight = matching::match_weight(&freqs, &a, &b, HEARD_DB);
+            self.mask_score = matching::masking_score(&a, &b, &weight, spectrum_point_oct());
+            let found: Vec<Collision> = matching::collisions(&self.mask_score, spectrum_point_oct())
+                .into_iter()
+                .filter(|c| !self.ignored.iter().any(|&(lo, hi)| (lo..=hi).contains(&freqs[c.peak])))
+                .collect();
+            changed |= found != self.collisions;
+            self.collisions = found;
+        }
+        let k = (1.0 - (-dt / MASK_FADE_S).exp()) as f32;
+        let target = if show && !self.collisions.is_empty() { 1.0 } else { 0.0 };
+        let next = self.mask_alpha + (target - self.mask_alpha) * k;
+        let next = if (next - target).abs() < 0.005 { target } else { next };
+        changed |= (next - self.mask_alpha).abs() > 0.001;
+        self.mask_alpha = next;
+        if next == 0.0 && target == 0.0 {
+            self.collisions.clear();
+            self.collision_hot = None;
+        }
+        changed
+    }
+
+    /// The carve collision `c` suggests.
+    fn carve(&self, c: &Collision) -> BandSettings {
+        matching::carve(c, &grid_freqs(), &self.mask_score)
+    }
+
+    /// The collision whose range holds `p` (on the plot), if collisions are showing.
+    fn collision_at(&self, p: Point) -> Option<usize> {
+        if self.mask_alpha < 0.5 || p.x < 0.0 || p.x >= PLOT_W || p.y < PLOT_TOP || p.y > PLOT_BOT {
+            return None;
+        }
+        self.collisions.iter().position(|c| p.x >= fx(spectrum_point_freq(c.start)) && p.x <= fx(spectrum_point_freq(c.end)))
+    }
+
+    /// Where the carve ring under the pointer is drawn, if one is (for tests and tools).
+    pub fn carve_ring(&self) -> Option<Point> {
+        self.collision_hot.filter(|&i| i < self.collisions.len()).map(|i| self.carve_pos(i))
+    }
+
+    /// Where collision `i`'s carve ring sits.
+    fn carve_pos(&self, i: usize) -> Point {
+        let s = self.carve(&self.collisions[i]);
+        Point::new(fx(s.freq), gy(s.gain_db))
+    }
+
+    /// Writes `s` into band `b` (a free one) and turns it on: no dynamics, both channels.
+    fn place_band(&self, host: &dyn ParamHost, b: usize, s: &BandSettings) {
+        let ids = &self.ids[b];
+        Self::set(host, &ids.kind, s.kind as usize as f32);
+        Self::set(host, &ids.freq, s.freq.clamp(FREQ_MIN, FREQ_MAX) as f32);
+        Self::set(host, &ids.gain, s.gain_db.clamp(-30.0, 30.0) as f32);
+        Self::set(host, &ids.q, s.q as f32);
+        Self::set(host, &ids.stereo, 0.0);
+        Self::set(host, &ids.dyn_on, 0.0);
+        Self::set(host, &ids.on, 1.0);
+    }
+
+    /// Opens or closes EQ Match. Opening starts learning afresh and puts the band panel away.
+    fn toggle_match(&mut self) {
+        if self.matcher.take().is_none() {
+            self.select(None);
+            self.matcher = Some(Match::new());
+            self.collision_hot = None;
+        }
+    }
+
+    /// Adds the fitted bands in the free slots (one undo step: one event) and closes Match.
+    fn apply_match(&mut self, host: &dyn ParamHost) {
+        let Some(m) = self.matcher.take() else { return };
+        let mut free = (0..BANDS).filter(|&b| !self.band(host, b).enabled);
+        for s in &m.fitted {
+            let Some(b) = free.next() else { break };
+            self.place_band(host, b, s);
+        }
+    }
+
+    /// Follows the fit on its worker and starts a new one when the learned spectra or the dials
+    /// moved (at most every [`MATCH_REFIT_S`] while learning). Returns whether anything drawn
+    /// changed.
+    fn update_match(&mut self, host: &dyn ParamHost) -> bool {
+        let Some(m) = &mut self.matcher else { return false };
+        let mut changed = false;
+        if let Some((rx, _)) = &m.pending {
+            match rx.try_recv() {
+                Ok(bands) => {
+                    let (_, aim) = m.pending.take().expect("pending");
+                    m.ghost = grid_freqs().iter().map(|&f| bands.iter().map(|s| analog_response_db(s, f)).sum()).collect();
+                    m.fitted = bands;
+                    m.aim = aim;
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => m.pending = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        let inputs = m.inputs();
+        let moved = inputs != m.inputs;
+        let due = moved || (m.stale && m.last_fit.elapsed().as_secs_f64() >= MATCH_REFIT_S);
+        if !due || m.pending.is_some() || m.reference.seconds() < 0.5 {
+            return changed;
+        }
+        m.inputs = inputs;
+        m.stale = false;
+        m.last_fit = Instant::now();
+        let [amount, bands, smooth] = inputs;
+        let (mut reference, mut source) = (vec![0.0; POINTS], vec![0.0; POINTS]);
+        m.reference.read_db(&mut reference);
+        m.source.read_db(&mut source);
+        let current = self.static_total(host);
+        let free = (0..BANDS).filter(|&b| !self.band(host, b).enabled).count();
+        let freqs = grid_freqs();
+        // The track as the current bands already shape it: the fit adds what they leave.
+        let shaped: Vec<f64> = source.iter().zip(&current).map(|(s, c)| s + c).collect();
+        // Past a cut's corner the match does not listen (fading in over the half octave inside
+        // it): it would undo what was removed on purpose.
+        let cuts: Vec<BandSettings> = (0..BANDS).map(|b| self.band(host, b)).filter(|s| s.enabled && matches!(s.kind, BandType::LowCut | BandType::HighCut)).collect();
+        let weight: Vec<f64> = matching::match_weight(&freqs, &reference, &source, HEARD_DB)
+            .iter()
+            .zip(&freqs)
+            .map(|(&w, &f)| {
+                cuts.iter().fold(w, |w, c| {
+                    let inside = if c.kind == BandType::LowCut { (f / c.freq).log2() } else { (c.freq / f).log2() };
+                    w * (2.0 * inside).clamp(0.0, 1.0)
+                })
+            })
+            .collect();
+        let residual = matching::match_target(&reference, &shaped, &weight, spectrum_point_oct(), f64::from(smooth), f64::from(amount) / 100.0);
+        let aim: Vec<Option<f64>> = (0..POINTS).map(|i| (weight[i] > 0.5).then(|| current[i] + residual[i])).collect();
+        let max = (bands.round() as usize).min(free);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(matching::fit(&freqs, &residual, &weight, max));
+        });
+        let m = self.matcher.as_mut().expect("open");
+        m.pending = Some((rx, aim));
         changed
     }
 
@@ -1191,6 +1570,27 @@ impl EqView {
             let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
             h.text(" — drag to move, Shift for fine, ").text(wheel).text(", double-click resets, right-click deletes")
         };
+        if let Some(m) = &self.matcher {
+            let text = if m.reference.seconds() == 0.0 && !self.sc_heard {
+                "EQ Match — play the reference into the sidechain; it learns while this track and the reference play"
+            } else if m.fitted.is_empty() && m.reference.seconds() > 0.0 && !(0..BANDS).any(|b| !self.band(host, b).enabled) {
+                "EQ Match — every band is in use"
+            } else if m.learning {
+                "EQ Match — learning while both play · amount, bands and smoothing shape the fit · the tick adds the bands, Esc closes"
+            } else {
+                "EQ Match — paused · the tick adds the bands, the arrow starts over, Esc closes"
+            };
+            return Help::default().text(text);
+        }
+        if let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len()) {
+            let s = self.carve(&self.collisions[i]);
+            return Help::default()
+                .text("Masking — this track and the sidechain peak together here · click the ring to carve ")
+                .slot(FREQ.format(s.freq as f32), "20.00 kHz")
+                .text(" ")
+                .slot(GAIN.format(s.gain_db as f32), "−30.0 dB")
+                .text(", right-click to ignore");
+        }
         if let Some(help) = self.dynamics_help(host) {
             return help;
         }
@@ -1678,7 +2078,7 @@ impl EqView {
             return true;
         }
         match key {
-            Key::Escape => self.preset_menu.take().is_some() || self.menu.take().is_some() || self.grab.take().is_some(),
+            Key::Escape => self.preset_menu.take().is_some() || self.menu.take().is_some() || self.grab.take().is_some() || self.matcher.take().is_some(),
             Key::Character(c) if mods.ctrl || mods.meta => match c.to_ascii_lowercase() {
                 'z' if mods.shift => {
                     self.redo(host);
@@ -2165,10 +2565,15 @@ impl EqView {
     fn draw_spectrum(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         // Silence (or no audio yet): draw nothing rather than a line along the floor.
+        let clamp = |db: f64| sy(db.clamp(-90.0, 6.0));
+        // The live sidechain (Match shows what it learned instead).
+        if self.sc_heard && self.matcher.is_none() {
+            let sc = Self::curve_path(&self.sc, clamp);
+            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.sidechain.multiply_alpha(0.7), None, &sc);
+        }
         if self.pre.iter().chain(&self.post).all(|&v| v < -88.0) {
             return;
         }
-        let clamp = |db: f64| sy(db.clamp(-90.0, 6.0));
         let pre = Self::curve_path(&self.pre, clamp);
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.5), None, &pre);
 
@@ -3171,6 +3576,11 @@ impl EqView {
             cx.text.draw(cx.scene, name, c, y0 + 9.0, TextStyle::LABEL.sized(11.0), ink, Align::Center);
             self.slot_hits[i] = r;
         }
+
+        // EQ Match.
+        let r = Rect::new(MATCH_X.0, y0, MATCH_X.1, y1);
+        let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), self.matcher.is_some(), theme.accent);
+        draw_match_glyph(cx.scene, r.center(), ink);
     }
 
     /// The open preset list, drawn over everything: "Save as…" (or the name being typed), then
@@ -3229,6 +3639,208 @@ impl EqView {
         }
     }
 
+    /// Masking: each collision as a 45° hatch with lit edges (tokens.json `masking`), and the
+    /// carve the one under the pointer suggests, as a ghost Bell and a dashed ring.
+    fn draw_masking(&self, cx: &mut DrawCx<'_>) {
+        let a = self.mask_alpha;
+        if a <= 0.001 {
+            return;
+        }
+        let theme = cx.theme;
+        let color = theme.masking;
+        let (top, bottom) = (PLOT_TOP, PLOT_BOT);
+        for (i, c) in self.collisions.iter().enumerate() {
+            let (x0, x1) = (fx(spectrum_point_freq(c.start)), fx(spectrum_point_freq(c.end)));
+            let hot = self.collision_hot == Some(i);
+            let area = Rect::new(x0, top, x1, bottom);
+            cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &area);
+            let mut hatch = BezPath::new();
+            let h = bottom - top;
+            let mut x = x0 - h;
+            while x < x1 {
+                hatch.move_to((x, bottom));
+                hatch.line_to((x + h, top));
+                x += 8.0;
+            }
+            cx.scene.stroke(&Stroke::new(3.0), Affine::IDENTITY, color.multiply_alpha(a * if hot { 0.3 } else { 0.22 }), None, &hatch);
+            cx.scene.pop_layer();
+            for x in [x0, x1] {
+                cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, color.multiply_alpha(a * 0.9), None, &Line::new((x, top), (x, bottom)));
+            }
+        }
+        let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len()) else { return };
+        let s = self.carve(&self.collisions[i]);
+        let band = Self::new_band_color(theme);
+        let xs: Vec<(f64, Option<usize>)> = (0..POINTS).map(|i| (grid_x(i), None)).collect();
+        let values = self.curve_at(&s, &xs, self.sample_rate());
+        let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
+        let curve = Self::xy_path(&xs, &values, clamp);
+        let mut fill = curve.clone();
+        fill.line_to((PLOT_W, MID));
+        fill.line_to((0.0, MID));
+        fill.close_path();
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, band.multiply_alpha(0.1 * a), None, &fill);
+        cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, band.multiply_alpha(0.6 * a), None, &curve);
+        let ring = Circle::new(self.carve_pos(i), CARVE_RING);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.6 * a), None, &ring);
+        let dashed = Stroke::new(2.0).with_dashes(0.0, [4.0, 3.0]);
+        cx.scene.stroke(&dashed, Affine::IDENTITY, theme.accent.multiply_alpha(a), None, &ring);
+        glow_stroke(cx.scene, &Circle::new(self.carve_pos(i), CARVE_RING - 4.0), 1.2, theme.accent.multiply_alpha(0.5 * a), theme.accent, 6.0);
+    }
+
+    /// EQ Match on the plot: the EQ it aims for (in the sidechain's colour, the reference) and
+    /// the EQ with the fitted bands added (a ghost of the curve), with a dashed ring on each
+    /// band it would add.
+    fn draw_match(&mut self, cx: &mut DrawCx<'_>) {
+        let Some(m) = &self.matcher else { return };
+        if m.aim.is_empty() {
+            return;
+        }
+        let (aim, ghost, fitted) = (m.aim.clone(), m.ghost.clone(), m.fitted.clone());
+        let theme = cx.theme;
+        let current = self.static_total(cx.host);
+        let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
+        // The aim, where the match listens (each heard stretch its own line).
+        let mut i = 0;
+        while i < POINTS {
+            let Some(start) = (i..POINTS).find(|&k| aim[k].is_some()) else { break };
+            let end = (start..POINTS).find(|&k| aim[k].is_none()).unwrap_or(POINTS);
+            if end - start >= 2 {
+                let xs: Vec<(f64, Option<usize>)> = (start..end).map(|k| (grid_x(k), None)).collect();
+                let values: Vec<f64> = (start..end).map(|k| aim[k].unwrap_or(0.0)).collect();
+                let path = Self::xy_path(&xs, &values, clamp);
+                cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.sidechain.multiply_alpha(0.75), None, &path);
+            }
+            i = end;
+        }
+        let total: Vec<f64> = current.iter().zip(&ghost).map(|(c, g)| c + g).collect();
+        let ghost_path = Self::curve_path(&total, clamp);
+        glow_stroke(cx.scene, &ghost_path, 1.8, theme.accent.multiply_alpha(0.75), theme.accent, 5.0);
+        let dashed = Stroke::new(1.6).with_dashes(0.0, [3.0, 3.0]);
+        for s in &fitted {
+            let p = Point::new(fx(s.freq), gy(s.gain_db.clamp(-18.0, 18.0)));
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.5), None, &Circle::new(p, 7.0));
+            cx.scene.stroke(&dashed, Affine::IDENTITY, theme.accent, None, &Circle::new(p, 7.0));
+        }
+    }
+
+    /// The Match panel, in the band panel's place: learn (with a ring filling as audio is
+    /// learned) and start over, the three dials, then close and add.
+    fn draw_match_panel(&mut self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
+        let pointer = self.pointer;
+        let heard = self.sc_heard;
+        let Some(m) = &mut self.matcher else { return };
+        let rect = Match::rect();
+        let o = rect.origin();
+        if theme.shadows {
+            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 14.0)), rect, Color::from_rgba8(0, 0, 0, 140), 14.0, 20.0);
+        }
+        panel(cx.scene, RoundedRect::from_rect(rect, 14.0), theme.glass.with_alpha(0.94), theme.glass_border);
+        let color = theme.accent;
+        draw_match_glyph(cx.scene, Point::new(o.x + 22.0, o.y + 24.0), color);
+        cx.text.draw(cx.scene, "Match", o.x + 40.0, o.y + 16.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
+        let hot = |r: Rect| pointer.is_some_and(|p| r.contains(p));
+        let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+
+        // Learn: a dot while paused (press to learn), two bars while learning (press to pause),
+        // inside a ring that fills as audio is learned.
+        let learn = Rect::new(o.x + 14.0, o.y + 54.0, o.x + 46.0, o.y + 86.0);
+        let ink = icon_button(cx.scene, theme, learn, theme.panel_control, hot(learn), m.learning, color);
+        let c = learn.center();
+        let ink = if heard || !m.learning { ink } else { theme.text_mid };
+        if m.learning {
+            for dx in [-2.5, 2.5] {
+                cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &Line::new((c.x + dx, c.y - 4.0), (c.x + dx, c.y + 4.0)));
+            }
+        } else {
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, ink, None, &Circle::new(c, 3.5));
+        }
+        let full = (m.reference.seconds() / MATCH_FULL_S).min(1.0);
+        cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, theme.tick_off, None, &Circle::new(c, 10.5));
+        if full > 0.0 {
+            let arc = mite_ui::kurbo::Arc::new(c, (10.5, 10.5), -std::f64::consts::FRAC_PI_2, full * std::f64::consts::TAU, 0.0);
+            cx.scene.stroke(&round, Affine::IDENTITY, color, None, &arc);
+        }
+        // Start over: a circular arrow.
+        let restart = Rect::new(o.x + 54.0, o.y + 54.0, o.x + 86.0, o.y + 86.0);
+        let ink = icon_button(cx.scene, theme, restart, theme.panel_control, hot(restart), false, color);
+        let c = restart.center();
+        let arc = mite_ui::kurbo::Arc::new(c, (5.5, 5.5), -0.9 * std::f64::consts::PI, 1.6 * std::f64::consts::PI, 0.0);
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &arc);
+        let tip = c + (5.5 * (0.7 * std::f64::consts::PI).cos(), 5.5 * (0.7 * std::f64::consts::PI).sin());
+        let mut head = BezPath::new();
+        head.move_to(tip + (-3.5, 0.5));
+        head.line_to(tip);
+        head.line_to(tip + (0.5, -3.5));
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &head);
+
+        // Close, and add the bands (a tick, lit once there is something to add).
+        let close = Rect::new(o.x + PANEL_W - 44.0, o.y + 12.0, o.x + PANEL_W - 14.0, o.y + 42.0);
+        let apply = Rect::new(close.x0, o.y + 58.0, close.x1, o.y + 88.0);
+        let ready = !m.fitted.is_empty();
+        let ink = icon_button(cx.scene, theme, apply, theme.panel_control, ready && hot(apply), ready, color);
+        let ink = if ready { ink } else { theme.text_disabled };
+        let k = apply.center();
+        let mut tick = BezPath::new();
+        tick.move_to((k.x - 4.5, k.y + 0.5));
+        tick.line_to((k.x - 1.5, k.y + 3.5));
+        tick.line_to((k.x + 4.5, k.y - 3.5));
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &tick);
+        let ink = icon_button(cx.scene, theme, close, theme.panel_control, hot(close), false, color);
+        let k = close.center();
+        let mut cross = BezPath::new();
+        cross.move_to((k.x - 3.0, k.y - 3.0));
+        cross.line_to((k.x + 3.0, k.y + 3.0));
+        cross.move_to((k.x + 3.0, k.y - 3.0));
+        cross.line_to((k.x - 3.0, k.y + 3.0));
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &cross);
+
+        let mut local = DrawCx { scene: &mut *cx.scene, theme, text: &mut *cx.text, host: &m.controls, size: cx.size };
+        for knob in &m.knobs {
+            knob.draw(&mut local);
+        }
+        m.hits = Some(MatchHits { panel: rect, learn, restart, apply, close });
+    }
+
+    /// Match panel events, answered with its own dials' host. `None` lets the event through to
+    /// the plot (nodes stay reachable; picking one closes Match).
+    fn match_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> Option<bool> {
+        let m = self.matcher.as_mut()?;
+        let hits = m.hits?;
+        let mut changed = false;
+        for k in &mut m.knobs {
+            changed |= k.event(event, &m.controls);
+        }
+        if m.knobs.iter().any(Knob::is_dragging) {
+            return Some(true);
+        }
+        let pos = match *event {
+            UiEvent::PointerMove { pos, .. } => {
+                self.pointer = Some(pos);
+                return hits.panel.contains(pos).then_some(true);
+            }
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => pos,
+            UiEvent::PointerUp { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } => {
+                return (changed || hits.panel.contains(pos)).then_some(true);
+            }
+            _ => return None,
+        };
+        if !hits.panel.contains(pos) {
+            return None;
+        }
+        if hits.learn.contains(pos) {
+            m.learning = !m.learning;
+        } else if hits.restart.contains(pos) {
+            m.restart();
+        } else if hits.close.contains(pos) {
+            self.matcher = None;
+        } else if hits.apply.contains(pos) {
+            self.apply_match(host);
+        }
+        Some(true)
+    }
+
     fn draw_help(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.help_strip, None, &Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
@@ -3263,7 +3875,9 @@ impl View for EqView {
         self.draw_grid(cx);
         cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, DISPLAY_TOP, PLOT_W, HELP_TOP));
         self.draw_spectrum(cx);
+        self.draw_masking(cx);
         self.draw_curves(cx, &bands);
+        self.draw_match(cx);
         self.draw_grab(cx);
         cx.scene.pop_layer();
         self.draw_nodes(cx, &bands);
@@ -3271,6 +3885,7 @@ impl View for EqView {
         let r = self.meter.rect;
         cx.text.draw(cx.scene, "OUT", r.center().x, DISPLAY_TOP + 596.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Center);
         self.draw_panel(cx, &bands);
+        self.draw_match_panel(cx);
         self.draw_help(cx);
         self.draw_footer(cx);
         for k in &self.footer_knobs {
@@ -3427,6 +4042,8 @@ impl View for EqView {
         }
         // The analyzer updates every UI tick so motion is as smooth as the display allows.
         dirty |= self.update_spectrum();
+        dirty |= self.update_masking(dt);
+        dirty |= self.update_match(host);
         // Host-side changes (automation, presets, undo) since the last frame, checked at frame
         // rate rather than every tick.
         if self.last_signature_check.elapsed() < std::time::Duration::from_millis(16) {
@@ -3470,6 +4087,9 @@ impl EqView {
             if k.event(event, host) {
                 return true;
             }
+        }
+        if let Some(answer) = self.match_event(event, host) {
+            return answer;
         }
         let in_panel = |hits: &Option<PanelHits>, p: Point| hits.is_some_and(|h| h.panel.contains(p));
 
@@ -3569,6 +4189,9 @@ impl EqView {
                 let peak = if hover.is_none() && hot.is_none() && !in_panel(&self.panel_hits, pos) { self.find_peak(pos) } else { None };
                 changed |= peak != self.peak;
                 self.peak = peak;
+                let collision = if hover.is_none() && hot.is_none() && peak.is_none() && !in_panel(&self.panel_hits, pos) { self.collision_at(pos) } else { None };
+                changed |= collision != self.collision_hot;
+                self.collision_hot = collision;
                 // The help strip follows the pointer over the display; footer buttons light on hover.
                 changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP || pos.y < HEADER
             }
@@ -3589,6 +4212,8 @@ impl EqView {
                         self.undo(host);
                     } else if at(REDO_X) {
                         self.redo(host);
+                    } else if at(MATCH_X) {
+                        self.toggle_match();
                     } else if let Some(i) = self.slot_hits.iter().position(|r| r.contains(pos)) {
                         self.slot_press = Some(i);
                     }
@@ -3687,6 +4312,16 @@ impl EqView {
                     self.begin_drag(host, b, mode, pos, 0.0);
                     return true;
                 }
+                // A carve ring: the suggested Bell becomes a band, already in hand to drag.
+                if let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len() && self.carve_pos(i).distance(pos) <= CARVE_RING + 4.0) {
+                    let s = self.carve(&self.collisions[i]);
+                    self.add_bell(host, s.freq, s.gain_db, s.q);
+                    self.collision_hot = None;
+                    if let Some(b) = self.selected {
+                        self.begin_drag(host, b, DragMode::Move, pos, 0.0);
+                    }
+                    return true;
+                }
                 if let Some(peak) = self.find_peak(pos) {
                     self.grab = Some(Grab { freq: peak.freq, gain: 0.0, start: pos, last: pos, moved: false });
                     return true;
@@ -3742,6 +4377,13 @@ impl EqView {
                     if self.selected == Some(b) {
                         self.select(None);
                     }
+                    return true;
+                }
+                // On a collision: ignore it from now on.
+                if let Some(i) = self.collision_at(pos) {
+                    let c = self.collisions.remove(i);
+                    self.ignored.push((spectrum_point_freq(c.start), spectrum_point_freq(c.end)));
+                    self.collision_hot = None;
                     return true;
                 }
                 false
@@ -3826,6 +4468,7 @@ impl EqView {
                 self.hover = None;
                 self.hot = None;
                 self.peak = None;
+                self.collision_hot = None;
                 true
             }
             _ => false,

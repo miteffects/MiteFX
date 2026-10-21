@@ -540,3 +540,123 @@ fn the_detection_dropdown_offers_the_sidechain_and_the_bands_that_are_on() {
     click(&mut view, &host, Point::new(first.x, first.y + 2.0 * row));
     assert_eq!(plain(&host, "dsrc"), 6.0, "band 5 (choice 2 + 4)");
 }
+
+/// Noise from a xorshift generator, `n` samples, roughly ±0.3.
+fn noise(seed: &mut u32, n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|_| {
+            *seed ^= *seed << 13;
+            *seed ^= *seed >> 17;
+            *seed ^= *seed << 5;
+            (*seed as f32 / u32::MAX as f32 - 0.5) * 0.6
+        })
+        .collect()
+}
+
+/// Feeds `pre`/`post` and the sidechain for about `seconds` of ticks (fresh blocks every tick).
+fn play(view: &mut EqView, host: &MemoryParamHost, shared: &EqShared, seconds: f64, track: &mut impl FnMut() -> Vec<f32>, sidechain: &mut impl FnMut() -> Vec<f32>) {
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs_f64() < seconds {
+        let t = track();
+        shared.pre.push(t.iter().copied());
+        shared.post.push(t.iter().copied());
+        shared.sidechain.push(sidechain().into_iter());
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        view.tick(host);
+    }
+    draw(view, host);
+}
+
+const MATCH: Point = Point::new(806.0, 28.0);
+/// The Match panel's tick (it sits in the band panel's place, bottom centre).
+const MATCH_APPLY: Point = Point::new(921.0, 635.0);
+
+fn enabled(host: &MemoryParamHost) -> Vec<usize> {
+    (0..mite_eq::params::BANDS).filter(|&b| band_plain(host, b, ON.id) >= 0.5).collect()
+}
+
+#[test]
+fn eq_match_learns_a_darker_reference_and_adds_its_bands_as_one_step() {
+    let shared = Arc::new(EqShared::new());
+    let (mut view, host) = setup_with(shared.clone());
+    click(&mut view, &host, MATCH);
+    // The reference is the same kind of noise through a one-pole low-pass (about 1.2 kHz).
+    let (mut a, mut b) = (1u32, 7u32);
+    let mut lp = 0.0f32;
+    let mut track = || noise(&mut a, 800);
+    let mut reference = || {
+        noise(&mut b, 800)
+            .into_iter()
+            .map(|x| {
+                lp += 0.15 * (x - lp);
+                lp
+            })
+            .collect()
+    };
+    play(&mut view, &host, &shared, 2.0, &mut track, &mut reference);
+    click(&mut view, &host, MATCH_APPLY);
+    let added: Vec<usize> = enabled(&host).into_iter().filter(|&b| b != 0).collect();
+    assert!(!added.is_empty() && added.len() <= 8, "added {added:?}");
+    // Together the new bands darken the track: well down at 8 kHz against 200 Hz.
+    let at = |f: f64| -> f64 {
+        added
+            .iter()
+            .map(|&b| {
+                let s = mite_dsp::eq::BandSettings {
+                    enabled: true,
+                    kind: BandType::from_index(band_plain(&host, b, TYPE.id) as usize),
+                    freq: f64::from(band_plain(&host, b, FREQ.id)),
+                    gain_db: f64::from(band_plain(&host, b, GAIN.id)),
+                    q: f64::from(band_plain(&host, b, Q.id)),
+                    ..Default::default()
+                };
+                mite_dsp::eq::analog_response_db(&s, f)
+            })
+            .sum()
+    };
+    assert!(at(8000.0) < at(200.0) - 10.0, "200 Hz {:.1} dB, 8 kHz {:.1} dB", at(200.0), at(8000.0));
+    // One step undoes them all.
+    draw(&mut view, &host);
+    click(&mut view, &host, UNDO);
+    assert_eq!(enabled(&host), vec![0]);
+}
+
+#[test]
+fn masking_hatches_where_both_peak_and_its_ring_carves_there() {
+    let shared = Arc::new(EqShared::new());
+    let (mut view, host) = setup_with(shared.clone());
+    // Close the band panel; both play a 100 Hz tone over noise.
+    key(&mut view, &host, Key::Escape, false, false);
+    click(&mut view, &host, Point::new(600.0, 150.0));
+    let tone = |phase: &mut f32| -> Vec<f32> {
+        (0..800)
+            .map(|_| {
+                *phase += std::f32::consts::TAU * 100.0 / 48_000.0;
+                0.3 * phase.sin()
+            })
+            .collect()
+    };
+    let (mut a, mut b, mut pa, mut pb) = (3u32, 9u32, 0.0f32, 0.0f32);
+    let mut track = || noise(&mut a, 800).iter().zip(tone(&mut pa)).map(|(n, t)| 0.1 * n + t).collect();
+    let mut sidechain = || noise(&mut b, 800).iter().zip(tone(&mut pb)).map(|(n, t)| 0.1 * n + t).collect();
+    play(&mut view, &host, &shared, 1.6, &mut track, &mut sidechain);
+    let x = 1200.0 * (100.0f64 / 10.0).ln() / 3000.0f64.ln();
+    view.event(&UiEvent::PointerMove { pos: Point::new(x, 150.0), mods: mods() }, &host);
+    let ring = view.carve_ring().expect("a collision at 100 Hz");
+    // Elsewhere there is none.
+    view.event(&UiEvent::PointerMove { pos: Point::new(900.0, 150.0), mods: mods() }, &host);
+    assert!(view.carve_ring().is_none());
+    // Pressing the ring adds the carve: a cut near 100 Hz.
+    click(&mut view, &host, ring);
+    let added: Vec<usize> = enabled(&host).into_iter().filter(|&b| b != 0).collect();
+    assert_eq!(added.len(), 1);
+    let freq = band_plain(&host, added[0], FREQ.id);
+    assert!((f64::from(freq) / 100.0).log2().abs() < 0.25, "{freq} Hz");
+    assert!(band_plain(&host, added[0], GAIN.id) <= -1.5);
+    // Right-click on the collision ignores it.
+    view.event(&UiEvent::PointerMove { pos: Point::new(x, 150.0), mods: mods() }, &host);
+    view.event(&UiEvent::PointerDown { pos: Point::new(x, 150.0), button: MouseButton::Right, mods: mods() }, &host);
+    play(&mut view, &host, &shared, 0.3, &mut track, &mut sidechain);
+    view.event(&UiEvent::PointerMove { pos: Point::new(x, 150.0), mods: mods() }, &host);
+    assert!(view.carve_ring().is_none(), "ignored");
+}
