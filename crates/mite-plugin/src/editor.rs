@@ -17,6 +17,11 @@ use raw_window_handle::{
 
 type ViewFactory = dyn Fn() -> Box<dyn View> + Send + Sync;
 
+/// A parameter host that any thread may use, and that keeps working after the editor window has
+/// closed: what another instance writes through (see [`create_editor_with`]).
+pub type SharedParamHost = Arc<dyn ParamHost + Send + Sync>;
+type HostSink = dyn Fn(SharedParamHost) + Send + Sync;
+
 /// Creates the editor for a plugin. `accent` is the plugin's key in tokens.json `color.accent`.
 /// `make_view` runs each time the host opens the window.
 pub fn create_editor<V, F>(
@@ -25,6 +30,28 @@ pub fn create_editor<V, F>(
     accent: &'static str,
     make_view: F,
 ) -> Option<Box<dyn Editor>>
+where
+    V: View,
+    F: Fn() -> V + Send + Sync + 'static,
+{
+    build_editor(params, title, accent, make_view, None)
+}
+
+/// [`create_editor`], also handing `on_host` a [`SharedParamHost`] over the host's GUI context
+/// each time the window opens. The host stays valid while the plugin instance lives, window open
+/// or not, so other instances can write this one's parameters (as gestures, like the editor).
+/// nih-plug hands out the GUI context only with a window, so until this instance's editor has
+/// opened once nothing can be written to it.
+pub fn create_editor_with<V, F, H>(params: Arc<dyn Params>, title: &'static str, accent: &'static str, make_view: F, on_host: H) -> Option<Box<dyn Editor>>
+where
+    V: View,
+    F: Fn() -> V + Send + Sync + 'static,
+    H: Fn(SharedParamHost) + Send + Sync + 'static,
+{
+    build_editor(params, title, accent, make_view, Some(Arc::new(on_host)))
+}
+
+fn build_editor<V, F>(params: Arc<dyn Params>, title: &'static str, accent: &'static str, make_view: F, on_host: Option<Arc<HostSink>>) -> Option<Box<dyn Editor>>
 where
     V: View,
     F: Fn() -> V + Send + Sync + 'static,
@@ -41,6 +68,7 @@ where
         host_resize: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         make_view: Arc::new(move || Box::new(make_view()) as Box<dyn View>),
         scale: AtomicF32::new(0.0),
+        on_host,
     }))
 }
 
@@ -58,11 +86,15 @@ struct MiteEditor {
     make_view: Arc<ViewFactory>,
     /// Host-provided DPI scale, 0 until the host sets one.
     scale: AtomicF32,
+    on_host: Option<Arc<HostSink>>,
 }
 
 impl Editor for MiteEditor {
     fn spawn(&self, parent: ParentWindowHandle, context: Arc<dyn GuiContext>) -> Box<dyn Any + Send> {
         let host = NihParamHost::new(self.params.clone(), context.clone());
+        if let Some(sink) = &self.on_host {
+            sink(Arc::new(RemoteParamHost::new(self.params.clone(), context.clone())));
+        }
         let scale = self.scale.load();
         let (w, h) = self.size();
         let shared = self.logical_size.clone();
@@ -252,6 +284,65 @@ impl ParamHost for NihParamHost {
     fn end_gesture(&self, id: &str) {
         if let Some(p) = self.ptr(id) {
             unsafe { self.context.raw_end_set_parameter(p) }
+        }
+    }
+}
+
+/// [`SharedParamHost`] over nih-plug's parameter pointers and GUI context. Unlike
+/// [`NihParamHost`] it shows the host's values as they are (no pending overrides): its writers
+/// are other instances, which do not draw these parameters.
+struct RemoteParamHost {
+    _params: Arc<dyn Params>,
+    ptrs: HashMap<String, ParamPtr>,
+    context: Arc<dyn GuiContext>,
+}
+
+// SAFETY: the `ParamPtr`s point into `_params`, which this struct keeps alive; nih-plug's
+// parameters read and write their values atomically, and `GuiContext` is `Send + Sync` and is
+// already used from the editor's own render thread, not only the host's GUI thread.
+unsafe impl Send for RemoteParamHost {}
+unsafe impl Sync for RemoteParamHost {}
+
+impl RemoteParamHost {
+    fn new(params: Arc<dyn Params>, context: Arc<dyn GuiContext>) -> Self {
+        let ptrs = params.param_map().into_iter().map(|(id, ptr, _group)| (id, ptr)).collect();
+        Self { _params: params, ptrs, context }
+    }
+}
+
+// SAFETY (all `unsafe` blocks below): as for `NihParamHost`.
+impl ParamHost for RemoteParamHost {
+    fn normalized(&self, id: &str) -> f32 {
+        self.ptrs.get(id).map_or(0.0, |p| unsafe { p.unmodulated_normalized_value() })
+    }
+
+    fn plain(&self, id: &str, normalized: f32) -> f32 {
+        self.ptrs.get(id).map_or(0.0, |p| unsafe { p.preview_plain(normalized) })
+    }
+
+    fn normalize(&self, id: &str, plain: f32) -> f32 {
+        self.ptrs.get(id).map_or(0.0, |p| unsafe { p.preview_normalized(plain) })
+    }
+
+    fn default_normalized(&self, id: &str) -> f32 {
+        self.ptrs.get(id).map_or(0.0, |p| unsafe { p.default_normalized_value() })
+    }
+
+    fn begin_gesture(&self, id: &str) {
+        if let Some(p) = self.ptrs.get(id) {
+            unsafe { self.context.raw_begin_set_parameter(*p) }
+        }
+    }
+
+    fn set_normalized(&self, id: &str, normalized: f32) {
+        if let Some(p) = self.ptrs.get(id) {
+            unsafe { self.context.raw_set_parameter_normalized(*p, normalized) }
+        }
+    }
+
+    fn end_gesture(&self, id: &str) {
+        if let Some(p) = self.ptrs.get(id) {
+            unsafe { self.context.raw_end_set_parameter(*p) }
         }
     }
 }

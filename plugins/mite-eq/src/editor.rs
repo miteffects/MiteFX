@@ -8,7 +8,7 @@ use std::f64::consts::LN_2;
 use std::sync::Arc;
 use std::time::Instant;
 
-use mite_core::{ParamDisplay, ParamScale, ParamSpec};
+use mite_core::{ParamDisplay, ParamScale, ParamSpec, Registry};
 use mite_dsp::analyzer::{spectrum_point_freq, spectrum_point_oct, Analyzer, LogSpectrum, SPECTRUM_POINTS};
 use mite_dsp::matching::{self, Collision, LongTermSpectrum};
 use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, DetectSource, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
@@ -26,7 +26,7 @@ use crate::params::{
 };
 use crate::presets::{preset_ids, Preset, PresetValues};
 use crate::snapshots::{snapshot_ids, Values, NAMES as SLOT_NAMES, SLOTS};
-use crate::{EqShared, SPECTRAL_POINTS};
+use crate::{EqShared, INSTANCES, SPECTRAL_POINTS};
 
 /// A stand-in host holding every Mite EQ parameter at its default, for tests, the standalone
 /// preview and benchmarks.
@@ -429,8 +429,59 @@ const HEARD_DB: f64 = -80.0;
 /// How often collisions are looked for, s, and how fast they fade in and out.
 const MASK_UPDATE_S: f64 = 0.1;
 const MASK_FADE_S: f64 = 0.25;
-/// The ring a carve suggestion is drawn as, and its reach.
+/// The ring a carve suggestion is drawn as, and its reach; the ring that carves on the other
+/// instance sits this far to its right.
 const CARVE_RING: f64 = 10.0;
+const CARVE_THERE_DX: f64 = 2.0 * CARVE_RING + 12.0;
+/// Other instances are listed this often, and analysed every this many of this track's
+/// analyses (their 3 s average needs no more).
+const PEERS_EVERY_S: f64 = 1.0;
+const PEER_ANALYSIS_EVERY: u32 = 4;
+
+/// What this track's masking is checked against.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Other {
+    Sidechain,
+    /// Another Mite EQ, by its number in the registry.
+    Instance(u32),
+}
+
+impl Other {
+    fn name(self) -> String {
+        match self {
+            Self::Sidechain => "the sidechain".to_owned(),
+            Self::Instance(n) => format!("EQ {n}"),
+        }
+    }
+}
+
+/// One thing masking compares this track with: its latest analysis, whether that was heard,
+/// its 3 s average, and the score against this track.
+struct MaskSource {
+    other: Other,
+    /// The other instance (`None` for the sidechain); weak, so it can go away.
+    shared: Option<std::sync::Weak<EqShared>>,
+    latest: Vec<f32>,
+    heard: bool,
+    /// Whether `latest` is new since it was last averaged.
+    fresh: bool,
+    average: LongTermSpectrum,
+    score: Vec<f64>,
+}
+
+impl MaskSource {
+    fn new(other: Other, shared: Option<std::sync::Weak<EqShared>>) -> Self {
+        Self {
+            other,
+            shared,
+            latest: vec![-150.0; POINTS],
+            heard: false,
+            fresh: false,
+            average: LongTermSpectrum::new(POINTS, MASK_AVERAGE_S),
+            score: vec![f64::NEG_INFINITY; POINTS],
+        }
+    }
+}
 
 /// EQ Match: the header button, how often a learning fit is refreshed (s), and how much audio
 /// fills the learning ring (s).
@@ -476,9 +527,15 @@ struct MatchHits {
     panel: Rect,
     learn: Rect,
     restart: Rect,
+    file: Rect,
+    /// The × after a reference file's name.
+    drop: Option<Rect>,
     apply: Rect,
     close: Rect,
 }
+
+/// A reference file being read on a worker: its name, and its spectrum or why not.
+type PendingFile = (String, std::sync::mpsc::Receiver<Result<Vec<f64>, String>>);
 
 /// A fit running on a worker, and the aim it was given.
 type PendingFit = (std::sync::mpsc::Receiver<Vec<BandSettings>>, Vec<Option<f64>>);
@@ -503,6 +560,12 @@ struct Match {
     /// The dials' values the last fit used.
     inputs: [f32; 3],
     hits: Option<MatchHits>,
+    /// A reference file instead of the sidechain (its name and long-term spectrum), a file
+    /// being picked or read, and why the last one could not be read.
+    file: Option<(String, Vec<f64>)>,
+    picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    loading: Option<PendingFile>,
+    error: Option<String>,
 }
 
 impl Match {
@@ -529,7 +592,35 @@ impl Match {
             last_fit: Instant::now(),
             inputs: [f32::NAN; 3],
             hits: None,
+            file: None,
+            picking: None,
+            loading: None,
+            error: None,
         }
+    }
+
+    /// Seconds learned: of this track against a file, of both against the sidechain.
+    fn learned_s(&self) -> f64 {
+        if self.file.is_some() { self.source.seconds() } else { self.reference.seconds() }
+    }
+
+    /// Starts reading `path` as the reference, on a worker.
+    fn load(&mut self, path: std::path::PathBuf) {
+        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::reference::analyze(&path));
+        });
+        self.loading = Some((name, rx));
+        self.error = None;
+    }
+
+    /// The fit starts again from nothing (the reference changed).
+    fn refit(&mut self) {
+        self.fitted.clear();
+        self.aim.clear();
+        self.ghost.clear();
+        self.inputs = [f32::NAN; 3];
     }
 
     /// Where the panel sits: the band panel's place, docked at the bottom centre of the plot.
@@ -1065,17 +1156,21 @@ pub struct EqView {
     sc: Vec<f64>,
     sc_target: Vec<f32>,
     sc_heard: bool,
-    /// Masking: slow averages of this track (post) and the sidechain, the score and collisions
-    /// found in them, their opacity as drawn, the one under the pointer, and the frequency
-    /// ranges dismissed (a collision whose peak falls in one stays hidden).
+    /// Masking: the slow average of this track (post); what it is compared with (the sidechain
+    /// first, then the other instances); the collisions found, their opacity as drawn, the one
+    /// under the pointer, and the frequency ranges dismissed per source (a collision whose peak
+    /// falls in one stays hidden).
     mask_post: LongTermSpectrum,
-    mask_sc: LongTermSpectrum,
-    mask_score: Vec<f64>,
-    collisions: Vec<Collision>,
+    sources: Vec<MaskSource>,
+    collisions: Vec<(Other, Collision)>,
     last_mask: Instant,
     mask_alpha: f32,
     collision_hot: Option<usize>,
-    ignored: Vec<(f64, f64)>,
+    ignored: Vec<(Other, f64, f64)>,
+    /// The instances this one can see, when they were last listed, and analyses so far.
+    registry: &'static Registry<EqShared>,
+    last_peers: Option<Instant>,
+    analyses: u32,
     /// EQ Match, while its panel is open.
     matcher: Option<Match>,
     hot: Option<Hot>,
@@ -1171,9 +1266,11 @@ impl EqView {
             sc_target: vec![-150.0; POINTS],
             sc_heard: false,
             mask_post: LongTermSpectrum::new(POINTS, MASK_AVERAGE_S),
-            mask_sc: LongTermSpectrum::new(POINTS, MASK_AVERAGE_S),
-            mask_score: vec![f64::NEG_INFINITY; POINTS],
+            sources: vec![MaskSource::new(Other::Sidechain, None)],
             collisions: Vec::new(),
+            registry: &INSTANCES,
+            last_peers: None,
+            analyses: 0,
             last_mask: Instant::now(),
             mask_alpha: 0.0,
             collision_hot: None,
@@ -1317,6 +1414,10 @@ impl EqView {
                 self.analyzer.analyze_power(&self.samples, &mut self.power);
                 self.spectrum.read(&self.power, target);
             }
+            self.analyses = self.analyses.wrapping_add(1);
+            if self.analyses % PEER_ANALYSIS_EVERY == 0 {
+                self.analyze_peers();
+            }
             self.learn(frame_s);
         }
         let rise = (1.0 - (-dt / SPECTRUM_RISE_S).exp()) as f32;
@@ -1337,21 +1438,71 @@ impl EqView {
         changed
     }
 
+    /// Lists the other instances (every [`PEERS_EVERY_S`]; an instance that is not registered
+    /// itself has none) and reads each one's post spectrum, if it runs at this sample rate.
+    fn analyze_peers(&mut self) {
+        if self.last_peers.is_none_or(|t| t.elapsed().as_secs_f64() >= PEERS_EVERY_S) {
+            self.last_peers = Some(Instant::now());
+            let others = if self.registry.number(&self.shared).is_some() { self.registry.others(&self.shared) } else { Vec::new() };
+            let before: Vec<Other> = self.sources.iter().map(|src| src.other).collect();
+            self.sources.retain(|src| match src.other {
+                Other::Sidechain => true,
+                Other::Instance(n) => others.iter().any(|(m, a)| *m == n && src.shared.as_ref().is_some_and(|w| std::ptr::eq(w.as_ptr(), Arc::as_ptr(a)))),
+            });
+            for (n, a) in &others {
+                if !self.sources.iter().any(|src| src.other == Other::Instance(*n)) {
+                    self.sources.push(MaskSource::new(Other::Instance(*n), Some(Arc::downgrade(a))));
+                }
+            }
+            if self.sources.iter().map(|src| src.other).ne(before) {
+                self.collisions.retain(|(other, _)| self.sources.iter().any(|src| src.other == *other));
+                self.collision_hot = None;
+            }
+        }
+        let fs = self.sample_rate();
+        for src in self.sources.iter_mut().skip(1) {
+            let Some(peer) = src.shared.as_ref().and_then(std::sync::Weak::upgrade) else { continue };
+            src.heard = false;
+            if f64::from(peer.sample_rate.load()) != fs {
+                continue;
+            }
+            peer.post.read_latest(&mut self.samples);
+            if self.samples.iter().all(|s| s.abs() < 1e-7) {
+                continue;
+            }
+            self.analyzer.analyze_power(&self.samples, &mut self.power);
+            self.spectrum.read(&self.power, &mut src.latest);
+            src.heard = src.latest.iter().any(|&d| f64::from(d) > HEARD_DB);
+            src.fresh = true;
+        }
+    }
+
     /// Feeds the latest analysis to the masking averages and, while EQ Match learns, to its
     /// spectra. A frame counts only while both sides are heard, so pauses do not dilute them.
     fn learn(&mut self, dt: f64) {
         let heard = |v: &[f32]| v.iter().any(|&d| f64::from(d) > HEARD_DB);
-        if !heard(&self.sc_target) {
-            return;
-        }
+        let sidechain = &mut self.sources[0];
+        sidechain.latest.copy_from_slice(&self.sc_target);
+        sidechain.heard = heard(&self.sc_target);
+        sidechain.fresh = true;
         if heard(&self.post_target) {
             self.mask_post.add(&self.post_target, dt);
-            self.mask_sc.add(&self.sc_target, dt);
+            for src in &mut self.sources {
+                if src.fresh && src.heard {
+                    let span = if src.other == Other::Sidechain { dt } else { dt * f64::from(PEER_ANALYSIS_EVERY) };
+                    src.average.add(&src.latest, span);
+                }
+                src.fresh = false;
+            }
         }
+        let (sidechain, track) = (heard(&self.sc_target), heard(&self.pre_target));
         if let Some(m) = self.matcher.as_mut().filter(|m| m.learning) {
-            if heard(&self.pre_target) {
+            // Against a file only this track needs to play.
+            if track && (sidechain || m.file.is_some()) {
                 m.source.add(&self.pre_target, dt);
-                m.reference.add(&self.sc_target, dt);
+                if m.file.is_none() {
+                    m.reference.add(&self.sc_target, dt);
+                }
                 m.stale = true;
             }
         }
@@ -1371,25 +1522,46 @@ impl EqView {
         total
     }
 
-    /// Looks for collisions between this track and the sidechain (while the sidechain plays and
-    /// Match is closed) and fades them in or out. Returns whether anything drawn changed.
+    /// Looks for collisions between this track and each source that plays (while Match is
+    /// closed) and fades them in or out. Returns whether anything drawn changed.
     fn update_masking(&mut self, dt: f64) -> bool {
-        let show = self.sc_heard && self.matcher.is_none() && self.mask_sc.seconds() >= 1.0;
+        let playing = |src: &MaskSource| src.heard && src.average.seconds() >= 1.0;
+        let show = self.matcher.is_none() && self.sources.iter().any(playing);
         let mut changed = false;
         if show && self.last_mask.elapsed().as_secs_f64() >= MASK_UPDATE_S {
             self.last_mask = Instant::now();
             let (mut a, mut b) = (vec![0.0; POINTS], vec![0.0; POINTS]);
             self.mask_post.read_db(&mut a);
-            self.mask_sc.read_db(&mut b);
             let freqs = grid_freqs();
-            let weight = matching::match_weight(&freqs, &a, &b, HEARD_DB);
-            self.mask_score = matching::masking_score(&a, &b, &weight, spectrum_point_oct());
-            let found: Vec<Collision> = matching::collisions(&self.mask_score, spectrum_point_oct())
-                .into_iter()
-                .filter(|c| !self.ignored.iter().any(|&(lo, hi)| (lo..=hi).contains(&freqs[c.peak])))
-                .collect();
-            changed |= found != self.collisions;
-            self.collisions = found;
+            let mut found = Vec::new();
+            for src in &mut self.sources {
+                if !playing(src) {
+                    continue;
+                }
+                src.average.read_db(&mut b);
+                let weight = matching::match_weight(&freqs, &a, &b, HEARD_DB);
+                src.score = matching::masking_score(&a, &b, &weight, spectrum_point_oct());
+                let other = src.other;
+                found.extend(
+                    matching::collisions(&src.score, spectrum_point_oct())
+                        .into_iter()
+                        .filter(|c| !self.ignored.iter().any(|&(o, lo, hi)| o == other && (lo..=hi).contains(&freqs[c.peak])))
+                        .map(|c| (other, c)),
+                );
+            }
+            if found != self.collisions {
+                changed = true;
+                // The averages drift, so the regions do: a suggestion being looked at stays up
+                // while the pointer is still in its (moved) region.
+                let hot = self.collision_hot.and_then(|i| self.collisions.get(i)).map(|(other, _)| *other);
+                self.collisions = found;
+                self.collision_hot = hot.and_then(|other| {
+                    let p = self.pointer?;
+                    self.collision_at(p).filter(|&i| self.collisions[i].0 == other)
+                });
+            } else {
+                self.collisions = found;
+            }
         }
         let k = (1.0 - (-dt / MASK_FADE_S).exp()) as f32;
         let target = if show && !self.collisions.is_empty() { 1.0 } else { 0.0 };
@@ -1404,9 +1576,42 @@ impl EqView {
         changed
     }
 
-    /// The carve collision `c` suggests.
-    fn carve(&self, c: &Collision) -> BandSettings {
-        matching::carve(c, &grid_freqs(), &self.mask_score)
+    fn source(&self, other: Other) -> Option<&MaskSource> {
+        self.sources.iter().find(|src| src.other == other)
+    }
+
+    /// The carve collision `i` suggests.
+    fn carve(&self, i: usize) -> BandSettings {
+        let (other, c) = &self.collisions[i];
+        let score = self.source(*other).map_or(&[][..], |src| &src.score[..]);
+        if score.len() < POINTS {
+            return BandSettings::default();
+        }
+        matching::carve(c, &grid_freqs(), score)
+    }
+
+    /// The other instance collision `i` is with, and its parameters if they can be written.
+    fn collision_peer(&self, i: usize) -> Option<(Arc<EqShared>, Option<mite_plugin::SharedParamHost>)> {
+        let src = self.source(self.collisions[i].0)?;
+        let peer = src.shared.as_ref()?.upgrade()?;
+        let host = peer.remote.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        Some((peer, host))
+    }
+
+    /// Where collision `i`'s second ring sits, the one that carves on the other instance (none
+    /// for the sidechain).
+    fn carve_there_pos(&self, i: usize) -> Option<Point> {
+        matches!(self.collisions[i].0, Other::Instance(_)).then(|| self.carve_pos(i) + (CARVE_THERE_DX, 0.0))
+    }
+
+    /// Carves collision `i` on the other instance: the same cut, in its first free band.
+    /// Returns whether it could.
+    fn carve_there(&self, i: usize) -> bool {
+        let Some((_, Some(remote))) = self.collision_peer(i) else { return false };
+        let s = self.carve(i);
+        let Some(b) = (0..BANDS).find(|&b| remote.normalized(&self.ids[b].on) < 0.5) else { return false };
+        self.place_band(&*remote, b, &s);
+        true
     }
 
     /// The collision whose range holds `p` (on the plot), if collisions are showing.
@@ -1414,7 +1619,7 @@ impl EqView {
         if self.mask_alpha < 0.5 || p.x < 0.0 || p.x >= PLOT_W || p.y < PLOT_TOP || p.y > PLOT_BOT {
             return None;
         }
-        self.collisions.iter().position(|c| p.x >= fx(spectrum_point_freq(c.start)) && p.x <= fx(spectrum_point_freq(c.end)))
+        self.collisions.iter().position(|(_, c)| p.x >= fx(spectrum_point_freq(c.start)) && p.x <= fx(spectrum_point_freq(c.end)))
     }
 
     /// Where the carve ring under the pointer is drawn, if one is (for tests and tools).
@@ -1422,9 +1627,14 @@ impl EqView {
         self.collision_hot.filter(|&i| i < self.collisions.len()).map(|i| self.carve_pos(i))
     }
 
+    /// Where the ring that carves on the other instance is drawn, if one is (for tests and tools).
+    pub fn carve_there_ring(&self) -> Option<Point> {
+        self.collision_hot.filter(|&i| i < self.collisions.len()).and_then(|i| self.carve_there_pos(i))
+    }
+
     /// Where collision `i`'s carve ring sits.
     fn carve_pos(&self, i: usize) -> Point {
-        let s = self.carve(&self.collisions[i]);
+        let s = self.carve(i);
         Point::new(fx(s.freq), gy(s.gain_db))
     }
 
@@ -1449,6 +1659,17 @@ impl EqView {
         }
     }
 
+    /// Matches to the audio file at `path` (opening Match if it is closed); what the file button
+    /// does once a file is picked.
+    pub fn load_match_reference(&mut self, path: std::path::PathBuf) {
+        if self.matcher.is_none() {
+            self.toggle_match();
+        }
+        if let Some(m) = &mut self.matcher {
+            m.load(path);
+        }
+    }
+
     /// Adds the fitted bands in the free slots (one undo step: one event) and closes Match.
     fn apply_match(&mut self, host: &dyn ParamHost) {
         let Some(m) = self.matcher.take() else { return };
@@ -1465,6 +1686,37 @@ impl EqView {
     fn update_match(&mut self, host: &dyn ParamHost) -> bool {
         let Some(m) = &mut self.matcher else { return false };
         let mut changed = false;
+        if let Some(rx) = &m.picking {
+            match rx.try_recv() {
+                Ok(path) => {
+                    m.picking = None;
+                    if let Some(path) = path {
+                        m.load(path);
+                        changed = true;
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => m.picking = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some((name, rx)) = &m.loading {
+            match rx.try_recv() {
+                Ok(result) => {
+                    let name = name.clone();
+                    m.loading = None;
+                    match result {
+                        Ok(db) => {
+                            m.file = Some((name, db));
+                            m.refit();
+                        }
+                        Err(e) => m.error = Some(format!("{name}: {e}")),
+                    }
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => m.loading = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if let Some((rx, _)) = &m.pending {
             match rx.try_recv() {
                 Ok(bands) => {
@@ -1481,7 +1733,7 @@ impl EqView {
         let inputs = m.inputs();
         let moved = inputs != m.inputs;
         let due = moved || (m.stale && m.last_fit.elapsed().as_secs_f64() >= MATCH_REFIT_S);
-        if !due || m.pending.is_some() || m.reference.seconds() < 0.5 {
+        if !due || m.pending.is_some() || m.learned_s() < 0.5 {
             return changed;
         }
         m.inputs = inputs;
@@ -1489,7 +1741,10 @@ impl EqView {
         m.last_fit = Instant::now();
         let [amount, bands, smooth] = inputs;
         let (mut reference, mut source) = (vec![0.0; POINTS], vec![0.0; POINTS]);
-        m.reference.read_db(&mut reference);
+        match &m.file {
+            Some((_, db)) => reference.copy_from_slice(db),
+            None => m.reference.read_db(&mut reference),
+        }
         m.source.read_db(&mut source);
         let current = self.static_total(host);
         let free = (0..BANDS).filter(|&b| !self.band(host, b).enabled).count();
@@ -1571,8 +1826,18 @@ impl EqView {
             h.text(" — drag to move, Shift for fine, ").text(wheel).text(", double-click resets, right-click deletes")
         };
         if let Some(m) = &self.matcher {
+            if let Some(e) = &m.error {
+                return Help::default().text(format!("EQ Match — could not read {e}"));
+            }
+            if let Some((name, _)) = &m.loading {
+                return Help::default().text(format!("EQ Match — reading {name} …"));
+            }
+            if let Some((name, _)) = &m.file {
+                let state = if m.learning { "learning this track while it plays" } else { "paused" };
+                return Help::default().text(format!("EQ Match — matching to {name} · {state} · the tick adds the bands, × goes back to the sidechain, Esc closes"));
+            }
             let text = if m.reference.seconds() == 0.0 && !self.sc_heard {
-                "EQ Match — play the reference into the sidechain; it learns while this track and the reference play"
+                "EQ Match — play the reference into the sidechain, or pick a file (the page button); it learns while both play"
             } else if m.fitted.is_empty() && m.reference.seconds() > 0.0 && !(0..BANDS).any(|b| !self.band(host, b).enabled) {
                 "EQ Match — every band is in use"
             } else if m.learning {
@@ -1583,13 +1848,19 @@ impl EqView {
             return Help::default().text(text);
         }
         if let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len()) {
-            let s = self.carve(&self.collisions[i]);
-            return Help::default()
-                .text("Masking — this track and the sidechain peak together here · click the ring to carve ")
+            let s = self.carve(i);
+            let other = self.collisions[i].0;
+            let h = Help::default()
+                .text(format!("Masking with {} — both peak here · the ring carves ", other.name()))
                 .slot(FREQ.format(s.freq as f32), "20.00 kHz")
                 .text(" ")
-                .slot(GAIN.format(s.gain_db as f32), "−30.0 dB")
-                .text(", right-click to ignore");
+                .slot(GAIN.format(s.gain_db as f32), "−30.0 dB");
+            let h = match self.collision_peer(i) {
+                Some((_, Some(_))) => h.text(format!(" here, the arrow on {}", other.name())),
+                Some((_, None)) => h.text(format!(" here (open {}'s window once to carve there too)", other.name())),
+                None => h,
+            };
+            return h.text(", right-click ignores");
         }
         if let Some(help) = self.dynamics_help(host) {
             return help;
@@ -1866,6 +2137,12 @@ impl EqView {
     // ---- presets ------------------------------------------------------------------------
 
     /// Keeps the user's presets in `dir` instead of the settings folder (tests, a portable setup).
+    /// Looks for other instances in `registry` instead of the plugin's own (tests).
+    pub fn with_registry(mut self, registry: &'static Registry<EqShared>) -> Self {
+        self.registry = registry;
+        self
+    }
+
     pub fn with_preset_dir(mut self, dir: std::path::PathBuf) -> Self {
         self.preset_dir = Some(dir);
         self.reload_user_presets();
@@ -3649,7 +3926,7 @@ impl EqView {
         let theme = cx.theme;
         let color = theme.masking;
         let (top, bottom) = (PLOT_TOP, PLOT_BOT);
-        for (i, c) in self.collisions.iter().enumerate() {
+        for (i, (_, c)) in self.collisions.iter().enumerate() {
             let (x0, x1) = (fx(spectrum_point_freq(c.start)), fx(spectrum_point_freq(c.end)));
             let hot = self.collision_hot == Some(i);
             let area = Rect::new(x0, top, x1, bottom);
@@ -3669,11 +3946,18 @@ impl EqView {
             }
         }
         let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len()) else { return };
-        let s = self.carve(&self.collisions[i]);
+        let s = self.carve(i);
+        let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
+        // Another instance: what it has been playing (its average), like the sidechain's trace.
+        if let Some(src) = self.source(self.collisions[i].0).filter(|src| src.other != Other::Sidechain) {
+            let mut avg = vec![0.0; POINTS];
+            src.average.read_db(&mut avg);
+            let path = Self::curve_path(&avg, |db: f64| sy(db.clamp(-90.0, 6.0)));
+            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.sidechain.multiply_alpha(0.7 * a), None, &path);
+        }
         let band = Self::new_band_color(theme);
         let xs: Vec<(f64, Option<usize>)> = (0..POINTS).map(|i| (grid_x(i), None)).collect();
         let values = self.curve_at(&s, &xs, self.sample_rate());
-        let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
         let curve = Self::xy_path(&xs, &values, clamp);
         let mut fill = curve.clone();
         fill.line_to((PLOT_W, MID));
@@ -3686,6 +3970,23 @@ impl EqView {
         let dashed = Stroke::new(2.0).with_dashes(0.0, [4.0, 3.0]);
         cx.scene.stroke(&dashed, Affine::IDENTITY, theme.accent.multiply_alpha(a), None, &ring);
         glow_stroke(cx.scene, &Circle::new(self.carve_pos(i), CARVE_RING - 4.0), 1.2, theme.accent.multiply_alpha(0.5 * a), theme.accent, 6.0);
+        // Carve on the other instance: a dashed ring in its colour with an arrow leaving it, dim
+        // while that instance cannot be written yet.
+        if let Some(c) = self.carve_there_pos(i) {
+            let reachable = matches!(self.collision_peer(i), Some((_, Some(_))));
+            let ink = if reachable { theme.sidechain } else { theme.text_disabled };
+            let ring = Circle::new(c, CARVE_RING);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.6 * a), None, &ring);
+            cx.scene.stroke(&dashed, Affine::IDENTITY, ink.multiply_alpha(a), None, &ring);
+            let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+            let mut arrow = BezPath::new();
+            arrow.move_to(c + (-4.0, 4.0));
+            arrow.line_to(c + (4.0, -4.0));
+            arrow.move_to(c + (-1.0, -4.0));
+            arrow.line_to(c + (4.0, -4.0));
+            arrow.line_to(c + (4.0, 1.0));
+            cx.scene.stroke(&round, Affine::IDENTITY, ink.multiply_alpha(a), None, &arrow);
+        }
     }
 
     /// EQ Match on the plot: the EQ it aims for (in the sidechain's colour, the reference) and
@@ -3739,16 +4040,36 @@ impl EqView {
         panel(cx.scene, RoundedRect::from_rect(rect, 14.0), theme.glass.with_alpha(0.94), theme.glass_border);
         let color = theme.accent;
         draw_match_glyph(cx.scene, Point::new(o.x + 22.0, o.y + 24.0), color);
-        cx.text.draw(cx.scene, "Match", o.x + 40.0, o.y + 16.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
+        let width = cx.text.draw(cx.scene, "Match", o.x + 40.0, o.y + 16.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
         let hot = |r: Rect| pointer.is_some_and(|p| r.contains(p));
         let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
+        // The reference file's name (or the one being read), and a × that goes back to the sidechain.
+        let shown = m.loading.as_ref().map(|(n, _)| format!("{n} …")).or_else(|| m.file.as_ref().map(|(n, _)| n.clone()));
+        let mut drop = None;
+        if let Some(name) = shown {
+            let name: String = if name.chars().count() > 40 { name.chars().take(39).chain(['…']).collect() } else { name };
+            let x = o.x + 40.0 + f64::from(width) + 12.0;
+            let w = cx.text.draw(cx.scene, &name, x, o.y + 17.0, TextStyle::BODY.weighted(600.0), theme.text_mid, Align::Left);
+            if m.file.is_some() && m.loading.is_none() {
+                let r = Rect::new(x + f64::from(w) + 8.0, o.y + 12.0, x + f64::from(w) + 32.0, o.y + 36.0);
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), false, color);
+                let k = r.center();
+                let mut cross = BezPath::new();
+                cross.move_to((k.x - 2.5, k.y - 2.5));
+                cross.line_to((k.x + 2.5, k.y + 2.5));
+                cross.move_to((k.x + 2.5, k.y - 2.5));
+                cross.line_to((k.x - 2.5, k.y + 2.5));
+                cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &cross);
+                drop = Some(r);
+            }
+        }
 
         // Learn: a dot while paused (press to learn), two bars while learning (press to pause),
         // inside a ring that fills as audio is learned.
         let learn = Rect::new(o.x + 14.0, o.y + 54.0, o.x + 46.0, o.y + 86.0);
         let ink = icon_button(cx.scene, theme, learn, theme.panel_control, hot(learn), m.learning, color);
         let c = learn.center();
-        let ink = if heard || !m.learning { ink } else { theme.text_mid };
+        let ink = if heard || m.file.is_some() || !m.learning { ink } else { theme.text_mid };
         if m.learning {
             for dx in [-2.5, 2.5] {
                 cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &Line::new((c.x + dx, c.y - 4.0), (c.x + dx, c.y + 4.0)));
@@ -3756,7 +4077,7 @@ impl EqView {
         } else {
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, ink, None, &Circle::new(c, 3.5));
         }
-        let full = (m.reference.seconds() / MATCH_FULL_S).min(1.0);
+        let full = (m.learned_s() / MATCH_FULL_S).min(1.0);
         cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, theme.tick_off, None, &Circle::new(c, 10.5));
         if full > 0.0 {
             let arc = mite_ui::kurbo::Arc::new(c, (10.5, 10.5), -std::f64::consts::FRAC_PI_2, full * std::f64::consts::TAU, 0.0);
@@ -3774,6 +4095,22 @@ impl EqView {
         head.line_to(tip);
         head.line_to(tip + (0.5, -3.5));
         cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &head);
+        // A reference file: a page with a wave on it, lit while one is the reference.
+        let file = Rect::new(o.x + 94.0, o.y + 54.0, o.x + 126.0, o.y + 86.0);
+        let ink = icon_button(cx.scene, theme, file, theme.panel_control, hot(file), m.file.is_some(), color);
+        let c = file.center();
+        let mut page = BezPath::new();
+        page.move_to((c.x - 5.5, c.y - 7.5));
+        page.line_to((c.x + 2.0, c.y - 7.5));
+        page.line_to((c.x + 5.5, c.y - 4.0));
+        page.line_to((c.x + 5.5, c.y + 7.5));
+        page.line_to((c.x - 5.5, c.y + 7.5));
+        page.close_path();
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &page);
+        let mut wave = BezPath::new();
+        wave.move_to((c.x - 3.5, c.y + 1.5));
+        wave.curve_to((c.x - 1.5, c.y - 3.0), (c.x + 1.5, c.y + 6.0), (c.x + 3.5, c.y + 1.5));
+        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &wave);
 
         // Close, and add the bands (a tick, lit once there is something to add).
         let close = Rect::new(o.x + PANEL_W - 44.0, o.y + 12.0, o.x + PANEL_W - 14.0, o.y + 42.0);
@@ -3800,7 +4137,7 @@ impl EqView {
         for knob in &m.knobs {
             knob.draw(&mut local);
         }
-        m.hits = Some(MatchHits { panel: rect, learn, restart, apply, close });
+        m.hits = Some(MatchHits { panel: rect, learn, restart, file, drop, apply, close });
     }
 
     /// Match panel events, answered with its own dials' host. `None` lets the event through to
@@ -3831,6 +4168,14 @@ impl EqView {
         }
         if hits.learn.contains(pos) {
             m.learning = !m.learning;
+        } else if hits.file.contains(pos) {
+            if m.picking.is_none() {
+                m.picking = Some(mite_ui::dialog::pick_file("Match to an audio file", &[("Audio", crate::reference::EXTENSIONS)]));
+            }
+        } else if hits.drop.is_some_and(|r| r.contains(pos)) {
+            m.file = None;
+            m.error = None;
+            m.refit();
         } else if hits.restart.contains(pos) {
             m.restart();
         } else if hits.close.contains(pos) {
@@ -4185,11 +4530,16 @@ impl EqView {
                 let hover = if in_panel(&self.panel_hits, pos) || hot.is_some() { None } else { self.node_at(host, pos) };
                 changed |= hover != self.hover;
                 self.hover = hover;
-                // Nodes and controls win over the spectrum underneath them.
-                let peak = if hover.is_none() && hot.is_none() && !in_panel(&self.panel_hits, pos) { self.find_peak(pos) } else { None };
+                // The suggestion's rings keep it up even past the edge of a narrow region.
+                let on_rings = self.collision_hot.filter(|&i| {
+                    i < self.collisions.len()
+                        && (self.carve_pos(i).distance(pos) <= CARVE_RING + 4.0 || self.carve_there_pos(i).is_some_and(|c| c.distance(pos) <= CARVE_RING + 4.0))
+                });
+                // Nodes, controls and carve rings win over the spectrum underneath them.
+                let peak = if hover.is_none() && hot.is_none() && on_rings.is_none() && !in_panel(&self.panel_hits, pos) { self.find_peak(pos) } else { None };
                 changed |= peak != self.peak;
                 self.peak = peak;
-                let collision = if hover.is_none() && hot.is_none() && peak.is_none() && !in_panel(&self.panel_hits, pos) { self.collision_at(pos) } else { None };
+                let collision = if hover.is_none() && hot.is_none() && peak.is_none() && !in_panel(&self.panel_hits, pos) { on_rings.or_else(|| self.collision_at(pos)) } else { None };
                 changed |= collision != self.collision_hot;
                 self.collision_hot = collision;
                 // The help strip follows the pointer over the display; footer buttons light on hover.
@@ -4313,8 +4663,12 @@ impl EqView {
                     return true;
                 }
                 // A carve ring: the suggested Bell becomes a band, already in hand to drag.
+                if let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len() && self.carve_there_pos(i).is_some_and(|c| c.distance(pos) <= CARVE_RING + 4.0)) {
+                    self.carve_there(i);
+                    return true;
+                }
                 if let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len() && self.carve_pos(i).distance(pos) <= CARVE_RING + 4.0) {
-                    let s = self.carve(&self.collisions[i]);
+                    let s = self.carve(i);
                     self.add_bell(host, s.freq, s.gain_db, s.q);
                     self.collision_hot = None;
                     if let Some(b) = self.selected {
@@ -4381,8 +4735,8 @@ impl EqView {
                 }
                 // On a collision: ignore it from now on.
                 if let Some(i) = self.collision_at(pos) {
-                    let c = self.collisions.remove(i);
-                    self.ignored.push((spectrum_point_freq(c.start), spectrum_point_freq(c.end)));
+                    let (other, c) = self.collisions.remove(i);
+                    self.ignored.push((other, spectrum_point_freq(c.start), spectrum_point_freq(c.end)));
                     self.collision_hot = None;
                     return true;
                 }

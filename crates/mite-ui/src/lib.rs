@@ -6,6 +6,7 @@
 //!
 //! All drawing happens in logical pixels; the window applies the DPI scale.
 
+pub mod dialog;
 pub mod host;
 pub mod paint;
 #[cfg(target_os = "linux")]

@@ -184,6 +184,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain("lp_res", res as f32);
         shared.latency.store(mite_eq::dsp::linear_phase_latency(res, 48_000.0) as f32);
     }
+    // SNAPSHOT_PEER: another Mite EQ in the process plays the bass the sidechain would (the
+    // masking view between instances). It stands in as reachable, so both carve rings show.
+    let peer = Arc::new(EqShared::new());
+    if std::env::var_os("SNAPSHOT_PEER").is_some() {
+        mite_eq::INSTANCES.register(&shared);
+        mite_eq::INSTANCES.register(&peer);
+        let mut bass = vec![0.0f32; mite_eq::editor::ANALYZER_SIZE];
+        shared.sidechain.read_latest(&mut bass);
+        peer.post.push(bass.into_iter());
+        shared.sidechain.push(std::iter::repeat_n(0.0, mite_eq::editor::ANALYZER_SIZE));
+        let remote: mite_plugin::SharedParamHost = Arc::new(ReachablePeer);
+        *peer.remote.lock().unwrap() = Some(remote);
+    }
     let mut view = EqView::new(shared);
     // Let the analyzer's ballistics settle as they would live (~0.5 s of 8 ms ticks).
     for _ in 0..60 {
@@ -207,6 +220,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = host.normalized(OUT_GAIN.id);
     // A tick after selecting, as live: picks up the selected band's per-bin detail.
     view.tick(&host);
+    // SNAPSHOT_MATCH_FILE=path: match to that audio file.
+    if let Ok(file) = std::env::var("SNAPSHOT_MATCH_FILE") {
+        view.load_match_reference(file.into());
+        for _ in 0..150 {
+            view.tick(&host);
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
+    }
     // SNAPSHOT_MATCH: open EQ Match (its header button) and let it learn and fit.
     if std::env::var_os("SNAPSHOT_MATCH").is_some() {
         render_view(&mut view, &host, &Theme::load(theme, mite_eq::editor::ACCENT), 1.0)?;
@@ -270,4 +291,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.write_header()?.write_image_data(&image.rgba)?;
     println!("wrote {path} ({}×{})", image.width, image.height);
     Ok(())
+}
+
+/// A peer's parameters that accept writes and read as defaults (the snapshot only draws).
+struct ReachablePeer;
+
+impl ParamHost for ReachablePeer {
+    fn normalized(&self, _id: &str) -> f32 {
+        0.0
+    }
+    fn plain(&self, _id: &str, normalized: f32) -> f32 {
+        normalized
+    }
+    fn normalize(&self, _id: &str, plain: f32) -> f32 {
+        plain
+    }
+    fn default_normalized(&self, _id: &str) -> f32 {
+        0.0
+    }
+    fn begin_gesture(&self, _id: &str) {}
+    fn set_normalized(&self, _id: &str, _normalized: f32) {}
+    fn end_gesture(&self, _id: &str) {}
 }

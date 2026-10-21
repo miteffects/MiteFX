@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use mite_core::{AtomicF32, SpectrumTap, StereoMeter};
+use mite_core::{AtomicF32, Registry, SpectrumTap, StereoMeter};
 use mite_dsp::eq::BandSettings;
 use mite_dsp::MINUS_INFINITY_DB;
 use nih_plug::prelude::*;
@@ -13,6 +13,7 @@ pub mod dsp;
 pub mod editor;
 pub mod params;
 pub mod presets;
+pub mod reference;
 pub mod snapshots;
 
 use dsp::{EqEngine, Output, PhaseMode};
@@ -24,6 +25,10 @@ pub const SPECTRAL_POINTS: usize = mite_dsp::analyzer::SPECTRUM_POINTS;
 
 /// The frequency of spectral telemetry point `i`.
 pub use mite_dsp::analyzer::spectrum_point_freq as spectral_point_freq;
+
+/// Every live Mite EQ in this process: editors compare their track with the others' (masking)
+/// and can carve on them.
+pub static INSTANCES: Registry<EqShared> = Registry::new();
 
 /// Audio → UI telemetry. Everything is lock-free and allocation-free on the audio side.
 pub struct EqShared {
@@ -52,6 +57,9 @@ pub struct EqShared {
     /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
     pub snapshots: Arc<snapshots::Snapshots>,
     pub preset: Arc<presets::CurrentPreset>,
+    /// This instance's parameters for other instances' editors to write (a carve), once its own
+    /// editor has opened (UI threads only).
+    pub remote: std::sync::Mutex<Option<mite_plugin::SharedParamHost>>,
 }
 
 impl EqShared {
@@ -77,6 +85,7 @@ impl EqShared {
             focus_level: std::array::from_fn(|_| AtomicF32::new(-150.0)),
             focus_threshold: std::array::from_fn(|_| AtomicF32::new(-150.0)),
             focus_gain: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            remote: std::sync::Mutex::new(None),
         }
     }
 }
@@ -125,6 +134,7 @@ impl Default for MiteEq {
         let settings = std::array::from_fn(|i| params.bands[i].settings());
         let engine = EqEngine::new(48_000.0, &settings, params.out_gain.value());
         let shared = Arc::new(EqShared::with_stores(params.snapshots.clone(), params.preset.clone()));
+        INSTANCES.register(&shared);
         Self { params, engine, shared, reported_latency: 0 }
     }
 }
@@ -165,9 +175,14 @@ impl Plugin for MiteEq {
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let shared = self.shared.clone();
-        mite_plugin::create_editor(self.params.clone(), "Mite EQ", editor::ACCENT, move || {
-            editor::EqView::new(shared.clone())
-        })
+        let own = self.shared.clone();
+        mite_plugin::create_editor_with(
+            self.params.clone(),
+            "Mite EQ",
+            editor::ACCENT,
+            move || editor::EqView::new(shared.clone()),
+            move |host| *own.remote.lock().unwrap_or_else(|e| e.into_inner()) = Some(host),
+        )
     }
 
     fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {

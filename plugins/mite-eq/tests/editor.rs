@@ -660,3 +660,147 @@ fn masking_hatches_where_both_peak_and_its_ring_carves_there() {
     view.event(&UiEvent::PointerMove { pos: Point::new(x, 150.0), mods: mods() }, &host);
     assert!(view.carve_ring().is_none(), "ignored");
 }
+
+/// A thread-safe stand-in for another instance's shared parameter host.
+struct SyncHost(std::sync::Mutex<MemoryParamHost>);
+
+impl ParamHost for SyncHost {
+    fn normalized(&self, id: &str) -> f32 {
+        self.0.lock().unwrap().normalized(id)
+    }
+    fn plain(&self, id: &str, normalized: f32) -> f32 {
+        self.0.lock().unwrap().plain(id, normalized)
+    }
+    fn normalize(&self, id: &str, plain: f32) -> f32 {
+        self.0.lock().unwrap().normalize(id, plain)
+    }
+    fn default_normalized(&self, id: &str) -> f32 {
+        self.0.lock().unwrap().default_normalized(id)
+    }
+    fn begin_gesture(&self, id: &str) {
+        self.0.lock().unwrap().begin_gesture(id)
+    }
+    fn set_normalized(&self, id: &str, normalized: f32) {
+        self.0.lock().unwrap().set_normalized(id, normalized)
+    }
+    fn end_gesture(&self, id: &str) {
+        self.0.lock().unwrap().end_gesture(id)
+    }
+}
+
+static PEERS: mite_core::Registry<EqShared> = mite_core::Registry::new();
+
+#[test]
+fn another_instance_peaking_with_this_track_can_be_carved_on_either() {
+    let (a, b) = (Arc::new(EqShared::new()), Arc::new(EqShared::new()));
+    PEERS.register(&a);
+    PEERS.register(&b);
+    let other = Arc::new(SyncHost(std::sync::Mutex::new(mite_eq::editor::memory_host())));
+    *b.remote.lock().unwrap() = Some(other.clone());
+    let host = mite_eq::editor::memory_host();
+    host.set_plain(&band_id(0, ON.id), 1.0);
+    host.set_plain(&band_id(0, FREQ.id), 1000.0);
+    let mut view = EqView::new(a.clone()).with_registry(&PEERS);
+    // Both tracks play a 100 Hz tone over noise; the sidechain is silent.
+    let (mut na, mut nb, mut pa, mut pb) = (3u32, 9u32, 0.0f32, 0.0f32);
+    let tone = |seed: &mut u32, phase: &mut f32| -> Vec<f32> {
+        noise(seed, 800)
+            .into_iter()
+            .map(|n| {
+                *phase += std::f32::consts::TAU * 100.0 / 48_000.0;
+                0.1 * n + 0.3 * phase.sin()
+            })
+            .collect()
+    };
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs_f64() < 2.0 {
+        let t = tone(&mut na, &mut pa);
+        a.pre.push(t.iter().copied());
+        a.post.push(t.iter().copied());
+        b.post.push(tone(&mut nb, &mut pb).into_iter());
+        a.sidechain.push(std::iter::repeat_n(0.0, 800));
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        view.tick(&host);
+    }
+    draw(&mut view, &host);
+    let x = 1200.0 * (100.0f64 / 10.0).ln() / 3000.0f64.ln();
+    view.event(&UiEvent::PointerMove { pos: Point::new(x, 150.0), mods: mods() }, &host);
+    let there = view.carve_there_ring().expect("a collision with the other instance");
+    // Moving onto the arrow ring keeps the suggestion up; pressing it carves on the other one.
+    view.event(&UiEvent::PointerMove { pos: there, mods: mods() }, &host);
+    view.event(&UiEvent::PointerDown { pos: there, button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::PointerUp { pos: there, button: MouseButton::Left, mods: mods() }, &host);
+    assert_eq!(enabled(&host), vec![0], "nothing added here");
+    let theirs = other.0.lock().unwrap();
+    let on: Vec<usize> = (0..mite_eq::params::BANDS).filter(|&k| theirs.normalized(&band_id(k, ON.id)) >= 0.5).collect();
+    assert_eq!(on, vec![0], "the carve went to the other instance's first free band");
+    let freq = theirs.plain(&band_id(0, FREQ.id), theirs.normalized(&band_id(0, FREQ.id)));
+    assert!((f64::from(freq) / 100.0).log2().abs() < 0.25, "{freq} Hz");
+    assert!(theirs.plain(&band_id(0, GAIN.id), theirs.normalized(&band_id(0, GAIN.id))) <= -1.5);
+}
+
+/// A mono 16-bit PCM WAV file.
+fn write_wav(path: &std::path::Path, rate: u32, samples: &[f32]) {
+    let data: Vec<u8> = samples.iter().flat_map(|&s| ((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()).collect();
+    let mut out = Vec::new();
+    out.extend(b"RIFF");
+    out.extend((36 + data.len() as u32).to_le_bytes());
+    out.extend(b"WAVEfmt ");
+    out.extend(16u32.to_le_bytes());
+    out.extend(1u16.to_le_bytes());
+    out.extend(1u16.to_le_bytes());
+    out.extend(rate.to_le_bytes());
+    out.extend((rate * 2).to_le_bytes());
+    out.extend(2u16.to_le_bytes());
+    out.extend(16u16.to_le_bytes());
+    out.extend(b"data");
+    out.extend((data.len() as u32).to_le_bytes());
+    out.extend(data);
+    std::fs::write(path, out).unwrap();
+}
+
+#[test]
+fn eq_match_matches_to_a_file_without_a_sidechain() {
+    let dir = std::env::temp_dir().join(format!("mite-eq-match-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("darker.wav");
+    // Ten seconds of noise through a one-pole low-pass (about 1.2 kHz at 48 kHz).
+    let mut seed = 5u32;
+    let mut lp = 0.0f32;
+    let samples: Vec<f32> = noise(&mut seed, 480_000)
+        .into_iter()
+        .map(|x| {
+            lp += 0.15 * (x - lp);
+            lp
+        })
+        .collect();
+    write_wav(&path, 48_000, &samples);
+    let shared = Arc::new(EqShared::new());
+    let (mut view, host) = setup_with(shared.clone());
+    view.load_match_reference(path);
+    let mut a = 1u32;
+    let mut track = || noise(&mut a, 800);
+    let mut silent = || vec![0.0; 800];
+    play(&mut view, &host, &shared, 2.0, &mut track, &mut silent);
+    click(&mut view, &host, MATCH_APPLY);
+    let added: Vec<usize> = enabled(&host).into_iter().filter(|&b| b != 0).collect();
+    assert!(!added.is_empty(), "matched to the file");
+    let gain_at = |f: f64| -> f64 {
+        added
+            .iter()
+            .map(|&b| {
+                let s = mite_dsp::eq::BandSettings {
+                    enabled: true,
+                    kind: BandType::from_index(band_plain(&host, b, TYPE.id) as usize),
+                    freq: f64::from(band_plain(&host, b, FREQ.id)),
+                    gain_db: f64::from(band_plain(&host, b, GAIN.id)),
+                    q: f64::from(band_plain(&host, b, Q.id)),
+                    ..Default::default()
+                };
+                mite_dsp::eq::analog_response_db(&s, f)
+            })
+            .sum()
+    };
+    assert!(gain_at(8000.0) < gain_at(200.0) - 10.0, "200 Hz {:.1} dB, 8 kHz {:.1} dB", gain_at(200.0), gain_at(8000.0));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -63,6 +63,80 @@ impl LongTermSpectrum {
     }
 }
 
+/// A whole recording's long-term spectrum, built as it streams in: frames of the analyzer's
+/// size, half overlapping, read at the analyzer's points (smoothed and tilted as drawn) and
+/// averaged in power. Frames quieter than `floor_db` everywhere (silence between songs, the
+/// fade at the end) do not count.
+pub struct RecordingSpectrum {
+    analyzer: crate::analyzer::Analyzer,
+    log: crate::analyzer::LogSpectrum,
+    buffer: Vec<f32>,
+    filled: usize,
+    power: Vec<f32>,
+    frame_db: Vec<f32>,
+    average: LongTermSpectrum,
+    hop_s: f64,
+    floor_db: f64,
+}
+
+impl RecordingSpectrum {
+    pub fn new(sample_rate: f64, floor_db: f64) -> Self {
+        let size = crate::analyzer::ANALYZER_SIZE;
+        let analyzer = crate::analyzer::Analyzer::new(size);
+        let bins = analyzer.bins();
+        Self {
+            analyzer,
+            log: crate::analyzer::LogSpectrum::new(size, sample_rate),
+            buffer: vec![0.0; size],
+            filled: 0,
+            power: vec![0.0; bins],
+            frame_db: vec![0.0; crate::analyzer::SPECTRUM_POINTS],
+            average: LongTermSpectrum::new(crate::analyzer::SPECTRUM_POINTS, f64::INFINITY),
+            hop_s: size as f64 / 2.0 / sample_rate,
+            floor_db,
+        }
+    }
+
+    /// Adds mono samples.
+    pub fn push(&mut self, samples: &[f32]) {
+        let size = self.buffer.len();
+        for &x in samples {
+            self.buffer[self.filled] = x;
+            self.filled += 1;
+            if self.filled == size {
+                self.frame();
+                self.buffer.copy_within(size / 2.., 0);
+                self.filled = size / 2;
+            }
+        }
+    }
+
+    fn frame(&mut self) {
+        self.analyzer.analyze_power(&self.buffer, &mut self.power);
+        self.log.read(&self.power, &mut self.frame_db);
+        if self.frame_db.iter().any(|&d| f64::from(d) > self.floor_db) {
+            self.average.add(&self.frame_db, self.hop_s);
+        }
+    }
+
+    /// Seconds of audio that counted.
+    pub fn seconds(&self) -> f64 {
+        self.average.seconds()
+    }
+
+    /// The long-term spectrum in dB at the analyzer's points; a recording shorter than one frame
+    /// is analysed as that frame, padded with silence.
+    pub fn finish(mut self) -> Vec<f64> {
+        if self.average.seconds() == 0.0 && self.filled > 0 {
+            self.buffer[self.filled..].iter_mut().for_each(|x| *x = 0.0);
+            self.frame();
+        }
+        let mut out = vec![0.0; crate::analyzer::SPECTRUM_POINTS];
+        self.average.read_db(&mut out);
+        out
+    }
+}
+
 /// Smooths `curve` (log-spaced points, `point_oct` octaves apart) with a raised-cosine window
 /// `width_oct` octaves wide, renormalized at the ends.
 pub fn smooth_curve(curve: &[f64], weight: &[f64], point_oct: f64, width_oct: f64) -> Vec<f64> {
@@ -353,6 +427,32 @@ mod tests {
         assert!(at(100.0) < 0.0 && at(8000.0) > 0.0, "the mean is removed");
         let half = match_target(&reference, &source, &weight, spectrum_point_oct(), 1.0 / 3.0, 0.5);
         assert!((half[200] - 0.5 * t[200]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_recording_reads_like_the_analyzer_and_skips_its_silence() {
+        let rate = 44_100.0;
+        let sine: Vec<f32> = (0..rate as usize).map(|n| (std::f64::consts::TAU * 1000.0 * n as f64 / rate).sin() as f32 * 0.5).collect();
+        let mut r = RecordingSpectrum::new(rate, -100.0);
+        r.push(&vec![0.0; rate as usize]);
+        r.push(&sine);
+        assert!((r.seconds() - 1.0).abs() < 0.2, "{} s counted", r.seconds());
+        let db = r.finish();
+        let f = freqs();
+        let peak = (0..db.len()).max_by(|&a, &b| db[a].total_cmp(&db[b])).unwrap();
+        assert!((f[peak] / 1000.0).log2().abs() < 0.05, "peak at {} Hz", f[peak]);
+        // It reads as the analyzer draws one frame of the sine.
+        let size = crate::analyzer::ANALYZER_SIZE;
+        let mut analyzer = crate::analyzer::Analyzer::new(size);
+        let mut power = vec![0.0; analyzer.bins()];
+        analyzer.analyze_power(&sine[..size], &mut power);
+        let mut drawn = vec![0.0f32; SPECTRUM_POINTS];
+        crate::analyzer::LogSpectrum::new(size, rate).read(&power, &mut drawn);
+        assert!((db[peak] - f64::from(drawn[peak])).abs() < 1.0, "{} dB, drawn {} dB", db[peak], drawn[peak]);
+        // Shorter than a frame still gives a spectrum.
+        let mut short = RecordingSpectrum::new(rate, -100.0);
+        short.push(&sine[..2000]);
+        assert!(short.finish().iter().any(|&d| d > -60.0));
     }
 
     #[test]

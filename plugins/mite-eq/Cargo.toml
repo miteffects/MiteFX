@@ -19,6 +19,7 @@ mite-ui.workspace = true
 nih_plug.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+symphonia.workspace = true
 
 [dev-dependencies]
 # The allocation guard nih-plug wraps `process()` in (same source as nih-plug's, so it is the same

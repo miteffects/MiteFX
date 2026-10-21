@@ -8,5 +8,5 @@
 mod editor;
 mod params;
 
-pub use editor::create_editor;
+pub use editor::{create_editor, create_editor_with, SharedParamHost};
 pub use params::{bool_param, choice_param, float_param, float_param_named};
