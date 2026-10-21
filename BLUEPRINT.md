@@ -421,14 +421,14 @@ Technical constraints for Design:
 
 - **Band types:**
   - Bell
-  - Low Shelf / High Shelf (with variants: standard, Baxandall, vintage-style overshoot)
+  - Low Shelf / High Shelf (variants: the shelf's Q runs from gentle, Baxandall-like, at low Q to vintage-style overshoot at high Q; no separate variant types)
   - Low Cut / High Cut
   - Notch
   - Band Pass
   - Tilt Shelf
-  - Flat Tilt
-  - **All-Pass / Phase Rotate** (beyond)
-- **Slopes (cuts and shelves):** 6, 12, 18, 24, 30, 36, 48, 72 and 96 dB/oct, plus **Brickwall** (linear-phase modes only).
+  - Flat Tilt **(done 2026-10-16:** one straight slope across the whole range through the pivot, gain / 5.8 dB per octave, from nine first-order pole/zero pairs spread evenly in log frequency; within 0.3 dB of the line from 20 Hz to 20 kHz, tested; first-order matched sections are now matched at their own corner, between zero and pole, instead of the band frequency, which only changes the flat tilt's pairs: its IIR alone went from 3.0 to 0.25 dB worst at 44.1 kHz, and Zero Latency's correction takes it to 0.000 dB)
+  - **All-Pass / Phase Rotate** **(done 2026-10-16:** second order at the frequency and Q; the digital section mirrors its denominator, so the level is exactly 1 and only the phase turns, −180° at the frequency, tested; Natural Phase follows the analog phase; Linear Phase, being zero phase, leaves it without effect, and the help strip says so; solo plays its band-pass region)
+- **Slopes (cuts and shelves):** 6, 12, 18, 24, 30, 36, 48, 72 and 96 dB/oct, plus **Brickwall** (linear-phase modes only). **Brickwall done (2026-10-16):** the last slope choice; Linear Phase builds it as a vertical edge (a raised cosine over 1/24 octave down to −150 dB; tested: a tone a third of an octave past the corner is more than 60 dB down, a tone just inside passes within 0.1 dB); Zero and Natural Phase play 96 dB/oct for it, the plot draws whichever plays, and the help strip says so.
 
 **Dynamic EQ (per band):**
 - Parameters: `dyn_range` (±30 dB), `threshold` (or auto), `attack`, `release`, `ratio`/knee.

@@ -104,7 +104,13 @@ fn matched_first(p: &Analog, w0: f64) -> Coeffs {
     // X = (b0+b1)², Y = (b0−b1)² the corner condition gives
     // ((1+a1)/(1−a1))² = φ1·(Hm² − Hn²) / (φ0·(Hd² − Hm²)).
     let (hd2, hn2) = (p.magnitude_sq(0.0), p.magnitude_sq(PI / w0));
-    let wm = w0.min(MAX_MATCH_W);
+    // The section's own corner: between its zero and its pole (just the pole for a low- or
+    // high-pass). For a tilt it is the band frequency; a flat tilt's pairs sit elsewhere, and
+    // matching them at the band frequency left the middle of the spectrum unconstrained.
+    let pole = p.d[0] / p.d[1];
+    let zero = if p.n[1] != 0.0 && p.n[0] != 0.0 { p.n[0] / p.n[1] } else { pole };
+    let corner = if pole > 0.0 && zero > 0.0 { (pole * zero).sqrt() } else { 1.0 };
+    let wm = (w0 * corner).min(MAX_MATCH_W);
     let hm2 = p.magnitude_sq(wm / w0);
     let s = (wm * 0.5).sin();
     let (phi1, phi0) = (s * s, 1.0 - s * s);
@@ -145,6 +151,11 @@ fn matched_second(p: &Analog, w0: f64) -> Coeffs {
     }
     if p.n[0] == 0.0 && p.n[1] == 0.0 {
         return highpass_zeros(p, w0, a1, a2);
+    }
+    // All-pass: the numerator mirrors the denominator, so the level stays exactly 1 and only the
+    // phase turns (matching magnitudes would give a flat section with no rotation at all).
+    if p.n[2] == p.d[2] && p.n[0] == p.d[0] && p.n[1] == -p.d[1] {
+        return Coeffs { b0: a2, b1: a1, b2: 1.0, a1, a2 };
     }
     // Notch: zeros exactly on the unit circle at the centre, so the notch is infinitely deep.
     if p.n[1] == 0.0 && p.n[0] == p.n[2] && w0 < PI {

@@ -7,11 +7,11 @@ auto_gain | bool | false
 delta | bool | false
 bypass | bool | false
 b01_on | bool | false
-b01_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b01_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b01_freq | Hz | 10 | 30000 | 1000 | Log
 b01_gain | dB | -30 | 30 | 0 | Linear
 b01_q |  | 0.025 | 40 | 0.70710677 | Log
-b01_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b01_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b01_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b01_dyn | bool | false
 b01_range | dB | -30 | 30 | -6 | Linear
@@ -31,11 +31,11 @@ b01_rthresh | dB | 0 | 24 | 6 | Linear
 b01_solo | bool | false
 b01_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b02_on | bool | false
-b02_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b02_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b02_freq | Hz | 10 | 30000 | 1000 | Log
 b02_gain | dB | -30 | 30 | 0 | Linear
 b02_q |  | 0.025 | 40 | 0.70710677 | Log
-b02_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b02_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b02_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b02_dyn | bool | false
 b02_range | dB | -30 | 30 | -6 | Linear
@@ -55,11 +55,11 @@ b02_rthresh | dB | 0 | 24 | 6 | Linear
 b02_solo | bool | false
 b02_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b03_on | bool | false
-b03_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b03_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b03_freq | Hz | 10 | 30000 | 1000 | Log
 b03_gain | dB | -30 | 30 | 0 | Linear
 b03_q |  | 0.025 | 40 | 0.70710677 | Log
-b03_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b03_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b03_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b03_dyn | bool | false
 b03_range | dB | -30 | 30 | -6 | Linear
@@ -79,11 +79,11 @@ b03_rthresh | dB | 0 | 24 | 6 | Linear
 b03_solo | bool | false
 b03_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b04_on | bool | false
-b04_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b04_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b04_freq | Hz | 10 | 30000 | 1000 | Log
 b04_gain | dB | -30 | 30 | 0 | Linear
 b04_q |  | 0.025 | 40 | 0.70710677 | Log
-b04_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b04_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b04_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b04_dyn | bool | false
 b04_range | dB | -30 | 30 | -6 | Linear
@@ -103,11 +103,11 @@ b04_rthresh | dB | 0 | 24 | 6 | Linear
 b04_solo | bool | false
 b04_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b05_on | bool | false
-b05_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b05_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b05_freq | Hz | 10 | 30000 | 1000 | Log
 b05_gain | dB | -30 | 30 | 0 | Linear
 b05_q |  | 0.025 | 40 | 0.70710677 | Log
-b05_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b05_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b05_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b05_dyn | bool | false
 b05_range | dB | -30 | 30 | -6 | Linear
@@ -127,11 +127,11 @@ b05_rthresh | dB | 0 | 24 | 6 | Linear
 b05_solo | bool | false
 b05_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b06_on | bool | false
-b06_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b06_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b06_freq | Hz | 10 | 30000 | 1000 | Log
 b06_gain | dB | -30 | 30 | 0 | Linear
 b06_q |  | 0.025 | 40 | 0.70710677 | Log
-b06_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b06_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b06_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b06_dyn | bool | false
 b06_range | dB | -30 | 30 | -6 | Linear
@@ -151,11 +151,11 @@ b06_rthresh | dB | 0 | 24 | 6 | Linear
 b06_solo | bool | false
 b06_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b07_on | bool | false
-b07_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b07_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b07_freq | Hz | 10 | 30000 | 1000 | Log
 b07_gain | dB | -30 | 30 | 0 | Linear
 b07_q |  | 0.025 | 40 | 0.70710677 | Log
-b07_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b07_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b07_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b07_dyn | bool | false
 b07_range | dB | -30 | 30 | -6 | Linear
@@ -175,11 +175,11 @@ b07_rthresh | dB | 0 | 24 | 6 | Linear
 b07_solo | bool | false
 b07_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b08_on | bool | false
-b08_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b08_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b08_freq | Hz | 10 | 30000 | 1000 | Log
 b08_gain | dB | -30 | 30 | 0 | Linear
 b08_q |  | 0.025 | 40 | 0.70710677 | Log
-b08_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b08_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b08_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b08_dyn | bool | false
 b08_range | dB | -30 | 30 | -6 | Linear
@@ -199,11 +199,11 @@ b08_rthresh | dB | 0 | 24 | 6 | Linear
 b08_solo | bool | false
 b08_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b09_on | bool | false
-b09_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b09_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b09_freq | Hz | 10 | 30000 | 1000 | Log
 b09_gain | dB | -30 | 30 | 0 | Linear
 b09_q |  | 0.025 | 40 | 0.70710677 | Log
-b09_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b09_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b09_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b09_dyn | bool | false
 b09_range | dB | -30 | 30 | -6 | Linear
@@ -223,11 +223,11 @@ b09_rthresh | dB | 0 | 24 | 6 | Linear
 b09_solo | bool | false
 b09_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b10_on | bool | false
-b10_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b10_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b10_freq | Hz | 10 | 30000 | 1000 | Log
 b10_gain | dB | -30 | 30 | 0 | Linear
 b10_q |  | 0.025 | 40 | 0.70710677 | Log
-b10_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b10_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b10_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b10_dyn | bool | false
 b10_range | dB | -30 | 30 | -6 | Linear
@@ -247,11 +247,11 @@ b10_rthresh | dB | 0 | 24 | 6 | Linear
 b10_solo | bool | false
 b10_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b11_on | bool | false
-b11_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b11_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b11_freq | Hz | 10 | 30000 | 1000 | Log
 b11_gain | dB | -30 | 30 | 0 | Linear
 b11_q |  | 0.025 | 40 | 0.70710677 | Log
-b11_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b11_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b11_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b11_dyn | bool | false
 b11_range | dB | -30 | 30 | -6 | Linear
@@ -271,11 +271,11 @@ b11_rthresh | dB | 0 | 24 | 6 | Linear
 b11_solo | bool | false
 b11_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b12_on | bool | false
-b12_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b12_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b12_freq | Hz | 10 | 30000 | 1000 | Log
 b12_gain | dB | -30 | 30 | 0 | Linear
 b12_q |  | 0.025 | 40 | 0.70710677 | Log
-b12_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b12_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b12_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b12_dyn | bool | false
 b12_range | dB | -30 | 30 | -6 | Linear
@@ -295,11 +295,11 @@ b12_rthresh | dB | 0 | 24 | 6 | Linear
 b12_solo | bool | false
 b12_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b13_on | bool | false
-b13_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b13_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b13_freq | Hz | 10 | 30000 | 1000 | Log
 b13_gain | dB | -30 | 30 | 0 | Linear
 b13_q |  | 0.025 | 40 | 0.70710677 | Log
-b13_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b13_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b13_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b13_dyn | bool | false
 b13_range | dB | -30 | 30 | -6 | Linear
@@ -319,11 +319,11 @@ b13_rthresh | dB | 0 | 24 | 6 | Linear
 b13_solo | bool | false
 b13_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b14_on | bool | false
-b14_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b14_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b14_freq | Hz | 10 | 30000 | 1000 | Log
 b14_gain | dB | -30 | 30 | 0 | Linear
 b14_q |  | 0.025 | 40 | 0.70710677 | Log
-b14_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b14_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b14_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b14_dyn | bool | false
 b14_range | dB | -30 | 30 | -6 | Linear
@@ -343,11 +343,11 @@ b14_rthresh | dB | 0 | 24 | 6 | Linear
 b14_solo | bool | false
 b14_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b15_on | bool | false
-b15_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b15_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b15_freq | Hz | 10 | 30000 | 1000 | Log
 b15_gain | dB | -30 | 30 | 0 | Linear
 b15_q |  | 0.025 | 40 | 0.70710677 | Log
-b15_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b15_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b15_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b15_dyn | bool | false
 b15_range | dB | -30 | 30 | -6 | Linear
@@ -367,11 +367,11 @@ b15_rthresh | dB | 0 | 24 | 6 | Linear
 b15_solo | bool | false
 b15_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b16_on | bool | false
-b16_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b16_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b16_freq | Hz | 10 | 30000 | 1000 | Log
 b16_gain | dB | -30 | 30 | 0 | Linear
 b16_q |  | 0.025 | 40 | 0.70710677 | Log
-b16_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b16_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b16_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b16_dyn | bool | false
 b16_range | dB | -30 | 30 | -6 | Linear
@@ -391,11 +391,11 @@ b16_rthresh | dB | 0 | 24 | 6 | Linear
 b16_solo | bool | false
 b16_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b17_on | bool | false
-b17_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b17_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b17_freq | Hz | 10 | 30000 | 1000 | Log
 b17_gain | dB | -30 | 30 | 0 | Linear
 b17_q |  | 0.025 | 40 | 0.70710677 | Log
-b17_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b17_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b17_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b17_dyn | bool | false
 b17_range | dB | -30 | 30 | -6 | Linear
@@ -415,11 +415,11 @@ b17_rthresh | dB | 0 | 24 | 6 | Linear
 b17_solo | bool | false
 b17_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b18_on | bool | false
-b18_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b18_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b18_freq | Hz | 10 | 30000 | 1000 | Log
 b18_gain | dB | -30 | 30 | 0 | Linear
 b18_q |  | 0.025 | 40 | 0.70710677 | Log
-b18_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b18_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b18_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b18_dyn | bool | false
 b18_range | dB | -30 | 30 | -6 | Linear
@@ -439,11 +439,11 @@ b18_rthresh | dB | 0 | 24 | 6 | Linear
 b18_solo | bool | false
 b18_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b19_on | bool | false
-b19_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b19_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b19_freq | Hz | 10 | 30000 | 1000 | Log
 b19_gain | dB | -30 | 30 | 0 | Linear
 b19_q |  | 0.025 | 40 | 0.70710677 | Log
-b19_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b19_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b19_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b19_dyn | bool | false
 b19_range | dB | -30 | 30 | -6 | Linear
@@ -463,11 +463,11 @@ b19_rthresh | dB | 0 | 24 | 6 | Linear
 b19_solo | bool | false
 b19_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b20_on | bool | false
-b20_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b20_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b20_freq | Hz | 10 | 30000 | 1000 | Log
 b20_gain | dB | -30 | 30 | 0 | Linear
 b20_q |  | 0.025 | 40 | 0.70710677 | Log
-b20_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b20_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b20_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b20_dyn | bool | false
 b20_range | dB | -30 | 30 | -6 | Linear
@@ -487,11 +487,11 @@ b20_rthresh | dB | 0 | 24 | 6 | Linear
 b20_solo | bool | false
 b20_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b21_on | bool | false
-b21_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b21_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b21_freq | Hz | 10 | 30000 | 1000 | Log
 b21_gain | dB | -30 | 30 | 0 | Linear
 b21_q |  | 0.025 | 40 | 0.70710677 | Log
-b21_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b21_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b21_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b21_dyn | bool | false
 b21_range | dB | -30 | 30 | -6 | Linear
@@ -511,11 +511,11 @@ b21_rthresh | dB | 0 | 24 | 6 | Linear
 b21_solo | bool | false
 b21_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b22_on | bool | false
-b22_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b22_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b22_freq | Hz | 10 | 30000 | 1000 | Log
 b22_gain | dB | -30 | 30 | 0 | Linear
 b22_q |  | 0.025 | 40 | 0.70710677 | Log
-b22_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b22_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b22_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b22_dyn | bool | false
 b22_range | dB | -30 | 30 | -6 | Linear
@@ -535,11 +535,11 @@ b22_rthresh | dB | 0 | 24 | 6 | Linear
 b22_solo | bool | false
 b22_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b23_on | bool | false
-b23_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b23_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b23_freq | Hz | 10 | 30000 | 1000 | Log
 b23_gain | dB | -30 | 30 | 0 | Linear
 b23_q |  | 0.025 | 40 | 0.70710677 | Log
-b23_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b23_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b23_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b23_dyn | bool | false
 b23_range | dB | -30 | 30 | -6 | Linear
@@ -559,11 +559,11 @@ b23_rthresh | dB | 0 | 24 | 6 | Linear
 b23_solo | bool | false
 b23_dsrc | choice | Own, Sidechain, Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7, Band 8, Band 9, Band 10, Band 11, Band 12, Band 13, Band 14, Band 15, Band 16, Band 17, Band 18, Band 19, Band 20, Band 21, Band 22, Band 23, Band 24 | 0
 b24_on | bool | false
-b24_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf | 0
+b24_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
 b24_freq | Hz | 10 | 30000 | 1000 | Log
 b24_gain | dB | -30 | 30 | 0 | Linear
 b24_q |  | 0.025 | 40 | 0.70710677 | Log
-b24_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+b24_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct, Brickwall | 3
 b24_stereo | choice | Stereo, Left, Right, Mid, Side | 0
 b24_dyn | bool | false
 b24_range | dB | -30 | 30 | -6 | Linear

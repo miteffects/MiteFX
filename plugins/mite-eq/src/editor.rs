@@ -427,6 +427,7 @@ const SPECTRUM_FALL_S: f64 = 0.3;
 struct BandResponse {
     settings: BandSettings,
     fs: f64,
+    linear: bool,
     sections: Sections,
     grid: Vec<f64>,
 }
@@ -438,10 +439,11 @@ fn grid_x(i: usize) -> f64 {
 
 /// A band's response in dB at `f`, as drawn: its analog prototype, which is what every mode
 /// plays (Zero Latency through its minimum-phase correction, Natural Phase through its complex
-/// one, Linear Phase by design), above half Nyquist included. The sections stay in the signature
-/// for the cache.
-fn band_db(_sections: &Sections, s: &BandSettings, f: f64, _fs: f64) -> f64 {
-    let db = analog_response_db(s, f);
+/// one, Linear Phase by design), above half Nyquist included; `linear`: as Linear Phase plays it
+/// (a Brickwall edge). The sections stay in the signature for the cache.
+fn band_db(_sections: &Sections, s: &BandSettings, f: f64, _fs: f64, linear: bool) -> f64 {
+    // A Brickwall cut is a vertical edge only in Linear Phase; the IIR modes play 96 dB/oct.
+    let db = if linear { mite_dsp::eq::linear_phase_response_db(s, f) } else { analog_response_db(s, f) };
     if db.is_nan() { -300.0 } else { db.max(-300.0) }
 }
 
@@ -494,6 +496,29 @@ fn draw_type_icon(scene: &mut mite_ui::vello::Scene, kind: BandType, at: Point, 
         BandType::TiltShelf => {
             p.move_to(pt(0.0, 10.0));
             p.curve_to(pt(9.0, 10.0), pt(13.0, 2.0), pt(22.0, 2.0));
+        }
+        BandType::FlatTilt => {
+            p.move_to(pt(0.0, 11.0));
+            p.line_to(pt(22.0, 1.0));
+        }
+        BandType::AllPass => {
+            // A flat level, with the phase turning: a circular arrow over it.
+            p.move_to(pt(0.0, 11.0));
+            p.line_to(pt(22.0, 11.0));
+            let (c, r, start, sweep) = (Point::new(at.x + 11.0, at.y + 4.5), 4.0, 0.5f64, 4.6f64);
+            p.move_to(c + (r * start.cos(), r * start.sin()));
+            p.extend(mite_ui::kurbo::Arc::new(c, (r, r), start, sweep, 0.0).append_iter(0.05));
+            // The arrowhead follows the arc's direction at its end.
+            let e = start + sweep;
+            let tip = c + (r * e.cos(), r * e.sin());
+            let dir = Point::new(-e.sin(), e.cos()).to_vec2();
+            let back = |turn: f64| {
+                let (sn, cs) = turn.sin_cos();
+                tip - mite_ui::kurbo::Vec2::new(dir.x * cs - dir.y * sn, dir.x * sn + dir.y * cs) * 2.8
+            };
+            p.move_to(back(0.6));
+            p.line_to(tip);
+            p.line_to(back(-0.6));
         }
     }
     let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
@@ -815,6 +840,8 @@ pub struct EqView {
     toggle_hits: [Rect; 3],
     /// The band being listened to alone, as last drawn.
     soloed: Option<usize>,
+    /// Whether the EQ runs Linear Phase, as last drawn (a Brickwall is drawn as it plays).
+    linear: bool,
     /// Header snapshot letters (set while drawing), and a letter being pressed.
     slot_hits: [Rect; SLOTS],
     slot_press: Option<usize>,
@@ -922,6 +949,7 @@ impl EqView {
             footer_knobs,
             toggle_hits: [Rect::ZERO; 3],
             soloed: None,
+            linear: false,
             slot_hits: [Rect::ZERO; SLOTS],
             slot_press: None,
             factory: crate::presets::factory(),
@@ -1067,11 +1095,12 @@ impl EqView {
     /// settings or the sample rate change.
     fn response(&mut self, b: usize, s: &BandSettings) -> &BandResponse {
         let fs = self.sample_rate();
-        let stale = !matches!(&self.responses[b], Some(r) if r.settings == *s && r.fs == fs);
+        let linear = self.linear;
+        let stale = !matches!(&self.responses[b], Some(r) if r.settings == *s && r.fs == fs && r.linear == linear);
         if stale {
             let sections = design(s, fs);
-            let grid = (0..POINTS).map(|i| band_db(&sections, s, xf(grid_x(i)), fs)).collect();
-            self.responses[b] = Some(BandResponse { settings: *s, fs, sections, grid });
+            let grid = (0..POINTS).map(|i| band_db(&sections, s, xf(grid_x(i)), fs, linear)).collect();
+            self.responses[b] = Some(BandResponse { settings: *s, fs, linear, sections, grid });
         }
         self.responses[b].as_ref().expect("just filled")
     }
@@ -1152,6 +1181,12 @@ impl EqView {
             }
             if s.is_dynamic() {
                 h = Self::dynamics_words(h.text(" · "), &s);
+            }
+            if mite_dsp::eq::is_brickwall(&s) && !self.linear {
+                h = h.text(" · 96 dB/oct here (a vertical edge in Linear Phase)");
+            }
+            if s.kind == BandType::AllPass {
+                h = h.text(if self.linear { " · phase only: no effect in Linear Phase" } else { " · phase only" });
             }
             let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
             h.text(" — drag to move, Shift for fine, ").text(wheel).text(", double-click resets, right-click deletes")
@@ -2180,8 +2215,8 @@ impl EqView {
             let selected = self.selected == Some(b);
             if s.is_dynamic() && !Self::is_transient(s) {
                 // Where the dynamics can take the band: from the static curve to static + range.
-                let static_curve = Self::curve_at(s, &xs, fs);
-                let full = Self::curve_at(&BandSettings { gain_db: s.gain_db + s.dynamics.range_db, ..*s }, &xs, fs);
+                let static_curve = self.curve_at(s, &xs, fs);
+                let full = self.curve_at(&BandSettings { gain_db: s.gain_db + s.dynamics.range_db, ..*s }, &xs, fs);
                 let mut region = Self::xy_path(&xs, &full, clamp);
                 for (&(x, _), &v) in xs.iter().zip(&static_curve).rev() {
                     region.line_to((x, clamp(v)));
@@ -2196,11 +2231,12 @@ impl EqView {
             // movement is per bin, added below for all of them at once).
             let moving = if s.uses_spectrum() { 0.0 } else { self.dynamic_now(b, s) };
             let live = BandSettings { gain_db: s.gain_db + moving, ..*s };
+            let linear = self.linear;
             let r = self.response(b, &live);
             for (v, &(x, grid)) in values.iter_mut().zip(&xs) {
                 *v = match grid {
                     Some(i) => r.grid[i],
-                    None => band_db(&r.sections, &live, xf(x), fs),
+                    None => band_db(&r.sections, &live, xf(x), fs, linear),
                 };
             }
             for (t, v) in total.iter_mut().zip(&values) {
@@ -2271,7 +2307,7 @@ impl EqView {
         let s = BandSettings { enabled: true, kind: BandType::Bell, freq: g.freq, gain_db: g.gain, q: PEAK_Q, ..Default::default() };
         let color = Self::new_band_color(theme);
         let xs: Vec<(f64, Option<usize>)> = (0..POINTS).map(|i| (grid_x(i), None)).collect();
-        let values = Self::curve_at(&s, &xs, self.sample_rate());
+        let values = self.curve_at(&s, &xs, self.sample_rate());
         let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
         let curve = Self::xy_path(&xs, &values, clamp);
         let mut fill = curve.clone();
@@ -2286,9 +2322,9 @@ impl EqView {
     }
 
     /// A band's drawn response at `xs`, designed fresh (not cached).
-    fn curve_at(s: &BandSettings, xs: &[(f64, Option<usize>)], fs: f64) -> Vec<f64> {
+    fn curve_at(&self, s: &BandSettings, xs: &[(f64, Option<usize>)], fs: f64) -> Vec<f64> {
         let sections = design(s, fs);
-        xs.iter().map(|&(x, _)| band_db(&sections, s, xf(x), fs)).collect()
+        xs.iter().map(|&(x, _)| band_db(&sections, s, xf(x), fs, self.linear)).collect()
     }
 
     fn draw_nodes(&self, cx: &mut DrawCx<'_>, bands: &[BandSettings]) {
@@ -2774,7 +2810,7 @@ impl EqView {
         });
         let stereo = dropdown(cx, x, 118.0, Placement::NAMES[s.placement as usize], Icon::Stereo(s.placement), open == Some(MenuKind::Stereo));
         // Solo: listen to the band's region alone (a tilt reaches everything, so has none).
-        let solo = (s.kind != BandType::TiltShelf).then(|| {
+        let solo = (!matches!(s.kind, BandType::TiltShelf | BandType::FlatTilt)).then(|| {
             let r = Rect::new(stereo.x1 + 8.0, row_y, stereo.x1 + 40.0, row_y + 32.0);
             let on = self.soloed == Some(b);
             let hot = self.pointer.is_some_and(|p| r.contains(p));
@@ -3221,6 +3257,7 @@ impl View for EqView {
         let theme = cx.theme;
         let bands: Vec<BandSettings> = (0..BANDS).map(|b| self.band(cx.host, b)).collect();
         self.soloed = self.soloed_band(cx.host);
+        self.linear = PhaseMode::from_index(Self::plain(cx.host, MODE.id).round().max(0.0) as usize) == PhaseMode::LinearPhase;
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
         self.draw_grid(cx);

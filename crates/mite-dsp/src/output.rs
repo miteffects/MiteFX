@@ -69,16 +69,16 @@ pub fn balance(pan: f32) -> (f32, f32) {
 }
 
 /// What soloing `s` listens to: a filter over the band's region (a band pass at its frequency
-/// and Q for bells, notches and band passes; below or above a shelf's corner; what a cut takes
-/// away), or `None` where the band has no region (a tilt reaches everything).
+/// and Q for bells, notches, band passes and all-passes; below or above a shelf's corner; what a
+/// cut takes away), or `None` where the band has no region (a tilt reaches everything).
 pub fn solo_filter(s: &BandSettings) -> Option<BandSettings> {
     let (kind, slope) = match s.kind {
-        BandType::Bell | BandType::Notch | BandType::BandPass => (BandType::BandPass, s.slope),
+        BandType::Bell | BandType::Notch | BandType::BandPass | BandType::AllPass => (BandType::BandPass, s.slope),
         BandType::LowShelf => (BandType::HighCut, 1),
         BandType::HighShelf => (BandType::LowCut, 1),
         BandType::LowCut => (BandType::HighCut, s.slope),
         BandType::HighCut => (BandType::LowCut, s.slope),
-        BandType::TiltShelf => return None,
+        BandType::TiltShelf | BandType::FlatTilt => return None,
     };
     let q = if kind == BandType::BandPass { s.q } else { std::f64::consts::FRAC_1_SQRT_2 };
     Some(BandSettings { enabled: true, kind, slope, q, gain_db: 0.0, placement: Placement::Stereo, dynamics: Default::default(), ..*s })

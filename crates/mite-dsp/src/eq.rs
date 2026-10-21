@@ -20,10 +20,15 @@ pub enum BandType {
     Notch,
     BandPass,
     TiltShelf,
+    /// A steady slope across the whole spectrum, pivoting at the frequency: the gain spread over
+    /// half the 10 Hz–30 kHz range (gain / 5.8 dB per octave).
+    FlatTilt,
+    /// Rotates the phase around the frequency (Q: how quickly) and leaves the level alone.
+    AllPass,
 }
 
 impl BandType {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 10] = [
         Self::Bell,
         Self::LowShelf,
         Self::HighShelf,
@@ -32,9 +37,11 @@ impl BandType {
         Self::Notch,
         Self::BandPass,
         Self::TiltShelf,
+        Self::FlatTilt,
+        Self::AllPass,
     ];
-    pub const NAMES: [&'static str; 8] =
-        ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf"];
+    pub const NAMES: [&'static str; 10] =
+        ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf", "Flat Tilt", "All Pass"];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -42,7 +49,7 @@ impl BandType {
 
     /// Whether the gain parameter does anything for this type.
     pub fn has_gain(self) -> bool {
-        matches!(self, Self::Bell | Self::LowShelf | Self::HighShelf | Self::TiltShelf)
+        matches!(self, Self::Bell | Self::LowShelf | Self::HighShelf | Self::TiltShelf | Self::FlatTilt)
     }
 
     /// Whether the slope parameter does anything for this type.
@@ -73,8 +80,16 @@ impl Placement {
 
 /// Cut slopes in dB/octave, in their frozen parameter order.
 pub const SLOPES_DB: [u32; 9] = [6, 12, 18, 24, 30, 36, 48, 72, 96];
-pub const SLOPE_NAMES: [&str; 9] =
-    ["6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "30 dB/oct", "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct"];
+/// The slope choices: the IIR slopes, then Brickwall, a vertical edge that only Linear Phase
+/// can make (the IIR modes play their steepest slope, 96 dB/oct, for it).
+pub const SLOPE_NAMES: [&str; 10] =
+    ["6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "30 dB/oct", "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct", "Brickwall"];
+/// Index of the Brickwall slope in [`SLOPE_NAMES`].
+pub const BRICKWALL: usize = 9;
+/// Flat Tilt: how many pole/zero pairs make its slope, and the span they cover, octaves (a little
+/// past 10 Hz–30 kHz so the slope holds to the ends).
+const FLAT_TILT_PAIRS: usize = 9;
+const FLAT_TILT_SPAN: (f64, f64) = (5.0, 60_000.0);
 /// Index into [`SLOPES_DB`] of the default slope (24 dB/oct).
 pub const DEFAULT_SLOPE: usize = 3;
 
@@ -501,6 +516,36 @@ fn for_each_prototype(s: &BandSettings, mut f: impl FnMut(Analog, bool)) {
             // First-order tilt pivoting on f0: −g/2 at DC, +g/2 at the top, unity at f0.
             f(Analog::first(a, 1.0, 1.0, a), false);
         }
+        BandType::FlatTilt => {
+            // A constant dB/oct slope from first-order pole/zero pairs spread evenly in log
+            // frequency (a pinking filter): each pair adds 6 dB/oct over the part of its interval
+            // between its zero and its pole. The slope is the gain over half the plot's range
+            // (so a pivot in the middle reaches ± the gain at its ends); the pivot (the band
+            // frequency) stays at unity.
+            let octaves = (FREQ_MAX / FREQ_MIN).log2() / 2.0;
+            let slope = s.gain_db.clamp(-GAIN_RANGE_DB, GAIN_RANGE_DB) / octaves;
+            let (lo, hi) = (FLAT_TILT_SPAN.0.log2(), FLAT_TILT_SPAN.1.log2());
+            let spacing = (hi - lo) / FLAT_TILT_PAIRS as f64;
+            let width = slope / (20.0 * 2f64.log10()) * spacing;
+            let f0 = s.freq.clamp(FREQ_MIN, FREQ_MAX);
+            let pair = |k: usize| {
+                let centre = 2f64.powf(lo + spacing * (k as f64 + 0.5)) / f0;
+                (centre * 2f64.powf(-width / 2.0), centre * 2f64.powf(width / 2.0))
+            };
+            // Unity at the pivot: the pairs' gain there, divided out of the first one.
+            let at_pivot: f64 = (0..FLAT_TILT_PAIRS)
+                .map(|k| {
+                    let (z, p) = pair(k);
+                    ((1.0 + 1.0 / (z * z)) / (1.0 + 1.0 / (p * p))).sqrt()
+                })
+                .product();
+            for k in 0..FLAT_TILT_PAIRS {
+                let (z, p) = pair(k);
+                let g = if k == 0 { 1.0 / at_pivot } else { 1.0 };
+                f(Analog::first(g / z, g, 1.0 / p, 1.0), false);
+            }
+        }
+        BandType::AllPass => f(Analog::second(1.0, -1.0 / q, 1.0, 1.0, 1.0 / q, 1.0), false),
         BandType::Notch => f(Analog::second(1.0, 0.0, 1.0, 1.0, 1.0 / q, 1.0), false),
         BandType::BandPass => f(Analog::second(0.0, 1.0 / q, 0.0, 1.0, 1.0 / q, 1.0), false),
         BandType::LowCut | BandType::HighCut => {
@@ -562,6 +607,37 @@ pub fn analog_response_db(s: &BandSettings, freq: f64) -> f64 {
     let mut db = 0.0;
     for_each_prototype(s, |proto, _| db += 10.0 * proto.magnitude_sq(x).log10());
     db
+}
+
+/// Whether `s` is a cut at the Brickwall slope.
+pub fn is_brickwall(s: &BandSettings) -> bool {
+    s.kind.has_slope() && s.slope == BRICKWALL
+}
+
+/// How wide a Brickwall's edge is, octaves (from unity to the floor, a raised cosine).
+const BRICKWALL_EDGE_OCT: f64 = 1.0 / 24.0;
+/// A Brickwall's stopband, dB.
+const BRICKWALL_FLOOR_DB: f64 = -150.0;
+
+/// The response Linear Phase builds its kernel from, dB: the analog prototype's, except that a
+/// Brickwall cut is a vertical edge at its frequency (only a linear-phase kernel can make one;
+/// the IIR modes play 96 dB/oct for it).
+pub fn linear_phase_response_db(s: &BandSettings, freq: f64) -> f64 {
+    if !s.enabled || !is_brickwall(s) {
+        return analog_response_db(s, freq);
+    }
+    let octaves = (freq.max(1e-3) / s.freq.clamp(FREQ_MIN, FREQ_MAX)).log2();
+    // Distance into the stopband, octaves: above the corner for a high cut, below it for a low.
+    let into = if s.kind == BandType::HighCut { octaves } else { -octaves };
+    let t = (into / BRICKWALL_EDGE_OCT + 0.5).clamp(0.0, 1.0);
+    if t <= 0.0 {
+        return 0.0;
+    }
+    if t >= 1.0 {
+        return BRICKWALL_FLOOR_DB;
+    }
+    let gain = 0.5 + 0.5 * (std::f64::consts::PI * t).cos();
+    (20.0 * gain.max(1e-12).log10()).max(BRICKWALL_FLOOR_DB)
 }
 
 /// The filter dynamic detection listens through: the band's region of the spectrum.
@@ -1113,6 +1189,50 @@ mod tests {
             let gain = 20.0 * (rms(&buf[24_000..]) / rms(&input[24_000..])).log10();
             assert!((gain - to).abs() < 0.005, "{from} → {to}: {gain}");
         }
+    }
+
+    #[test]
+    fn a_flat_tilt_is_one_straight_slope_through_its_pivot() {
+        for gain in [-12.0, 6.0, 18.0] {
+            let s = band(BandType::FlatTilt, 1000.0, gain, 1.0);
+            let slope = gain / ((FREQ_MAX / FREQ_MIN).log2() / 2.0);
+            assert!(analog_response_db(&s, 1000.0).abs() < 1e-9);
+            let mut f = 20.0;
+            while f < 20_000.0 {
+                let off = analog_response_db(&s, f) - slope * (f / 1000.0).log2();
+                assert!(off.abs() < 0.3, "{gain} dB at {f:.0} Hz: {off:+.2} dB off the line");
+                f *= 1.1;
+            }
+        }
+    }
+
+    #[test]
+    fn an_all_pass_keeps_the_level_and_turns_the_phase_half_way_at_its_frequency() {
+        let s = band(BandType::AllPass, 2000.0, 0.0, 1.0);
+        let sections = design(&s, FS);
+        let w0 = 2.0 * PI * 2000.0 / FS;
+        for i in 1..200 {
+            let w = PI * f64::from(i) / 200.0;
+            assert!(sections.response_db(w).abs() < 1e-9, "level {} at {w:.2}", sections.response_db(w));
+        }
+        // Analog: −180° at the centre; the digital one with it, within a few degrees.
+        let phase = |h: realfft::num_complex::Complex<f64>| h.arg().to_degrees().abs();
+        assert!((phase(analog_response(&s, 2000.0)) - 180.0).abs() < 1e-6);
+        assert!((phase(sections.response(w0)) - 180.0).abs() < 3.0, "{}", phase(sections.response(w0)));
+    }
+
+    #[test]
+    fn a_brickwall_cut_is_a_vertical_edge_for_linear_phase_and_96_db_for_the_rest() {
+        let s = BandSettings { slope: BRICKWALL, ..band(BandType::HighCut, 1000.0, 0.0, 0.7) };
+        assert!(is_brickwall(&s));
+        assert_eq!(linear_phase_response_db(&s, 960.0), 0.0);
+        assert!(linear_phase_response_db(&s, 1040.0) <= -149.0);
+        // The IIR modes play the steepest slope for it.
+        let steep = BandSettings { slope: SLOPES_DB.len() - 1, ..s };
+        assert_eq!(analog_response_db(&s, 2000.0), analog_response_db(&steep, 2000.0));
+        let low = BandSettings { kind: BandType::LowCut, ..s };
+        assert_eq!(linear_phase_response_db(&low, 1040.0), 0.0);
+        assert!(linear_phase_response_db(&low, 960.0) <= -149.0);
     }
 
     #[test]

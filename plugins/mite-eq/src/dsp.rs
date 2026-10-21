@@ -1564,6 +1564,45 @@ mod tests {
         assert!(step < 0.13, "step {step}");
     }
 
+    /// The level change of a sine at `freq` through `settings` in `mode`, dB.
+    fn tone_gain(mode: PhaseMode, settings: &[BandSettings; BANDS], freq: f64) -> f64 {
+        let mut eq = engine_in(mode, SR, settings);
+        let input = sine(freq, 48_000);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        run(&mut eq, settings, &mut l, &mut r, false);
+        20.0 * (rms(&l[24_000..]) / rms(&input[24_000..])).log10()
+    }
+
+    #[test]
+    fn a_brickwall_is_a_wall_in_linear_phase_and_96_db_per_octave_elsewhere() {
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::HighCut, freq: 1000.0, q: 0.7, slope: mite_dsp::eq::BRICKWALL, ..Default::default() };
+        let pass = tone_gain(PhaseMode::LinearPhase, &settings, 790.0);
+        let stop = tone_gain(PhaseMode::LinearPhase, &settings, 1260.0);
+        assert!(pass.abs() < 0.1, "passband {pass:+.2} dB");
+        assert!(stop < -60.0, "a third of an octave above: {stop:.1} dB");
+        // Zero Latency plays 96 dB/oct: a third of an octave above the corner, about 32 dB down.
+        let iir = tone_gain(PhaseMode::ZeroLatency, &settings, 1260.0);
+        assert!((-40.0..-25.0).contains(&iir), "Zero Latency {iir:.1} dB");
+    }
+
+    #[test]
+    fn an_all_pass_band_keeps_the_level_and_moves_the_phase() {
+        let mut settings = flat();
+        settings[0] = BandSettings { enabled: true, kind: BandType::AllPass, freq: 1000.0, q: 1.0, ..Default::default() };
+        for f in [200.0, 1000.0, 5000.0] {
+            let g = tone_gain(PhaseMode::ZeroLatency, &settings, f);
+            assert!(g.abs() < 0.01, "{f} Hz: {g:+.3} dB");
+        }
+        // At its frequency the tone comes out inverted (half a turn).
+        let mut eq = engine_in(PhaseMode::ZeroLatency, SR, &settings);
+        let input = sine(1000.0, 48_000);
+        let (mut l, mut r) = (input.clone(), input.clone());
+        run(&mut eq, &settings, &mut l, &mut r, false);
+        let correlation: f64 = l[24_000..].iter().zip(&input[24_000..]).map(|(a, b)| f64::from(*a) * f64::from(*b)).sum::<f64>() / (rms(&l[24_000..]) * rms(&input[24_000..]) * 24_000.0);
+        assert!(correlation < -0.99, "correlation {correlation:.3}");
+    }
+
     #[test]
     fn taps_receive_mono_sum() {
         let tap = SpectrumTap::new(16);

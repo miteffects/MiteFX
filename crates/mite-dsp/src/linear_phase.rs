@@ -9,7 +9,7 @@ use realfft::num_complex::Complex;
 use realfft::RealFftPlanner;
 
 use crate::conv::{KernelDesign, KernelLayout};
-use crate::eq::{analog_response_db, BandSettings, Placement};
+use crate::eq::{linear_phase_response_db, BandSettings, Placement};
 
 /// A 2×2 real matrix in the L/R basis: `[ll, lr, rl, rr]`.
 type Matrix = [f64; 4];
@@ -42,7 +42,7 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDes
     for s in bands.iter().filter(|s| s.enabled) {
         for (k, m) in response.iter_mut().enumerate() {
             let f = k as f64 * sample_rate / len as f64;
-            let db = analog_response_db(s, f);
+            let db = linear_phase_response_db(s, f);
             let g = if db.is_finite() { 10f64.powf(db / 20.0) } else { 0.0 };
             *m = multiply(band_matrix(s.placement, g), *m);
         }
@@ -120,7 +120,7 @@ mod tests {
             assert!((h[2048 - i] - h[2048 + i]).abs() < 1e-12, "asymmetric at ±{i}");
         }
         for f in [200.0, 1000.0, 3000.0, 10_000.0, 18_000.0] {
-            let want: f64 = bands.iter().map(|b| analog_response_db(b, f)).sum();
+            let want: f64 = bands.iter().map(|b| linear_phase_response_db(b, f)).sum();
             let got = magnitude_db(h, f, fs);
             assert!((got - want).abs() < 0.1, "{f} Hz: {got:.3} dB, analog {want:.3} dB");
         }

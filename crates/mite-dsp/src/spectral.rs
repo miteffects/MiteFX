@@ -534,7 +534,7 @@ pub fn region(s: &BandSettings, f: f64) -> f64 {
         BandType::Bell | BandType::Notch | BandType::BandPass => Analog::second(0.0, 1.0 / q, 0.0, 1.0, 1.0 / q, 1.0),
         BandType::LowShelf | BandType::LowCut => Analog::second(0.0, 0.0, 1.0, 1.0, std::f64::consts::SQRT_2, 1.0),
         BandType::HighShelf | BandType::HighCut => Analog::second(1.0, 0.0, 0.0, 1.0, std::f64::consts::SQRT_2, 1.0),
-        BandType::TiltShelf => return 1.0,
+        BandType::TiltShelf | BandType::FlatTilt | BandType::AllPass => return 1.0,
     };
     proto.magnitude_sq(x).min(1.0)
 }
