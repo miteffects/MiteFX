@@ -20,6 +20,8 @@ pub enum ParamDisplay {
     /// with two decimals from 1 s (`1.50 s`). Values snap to that precision (see
     /// [`ParamSpec::snap`]), so a drag lands on 15 ms exactly.
     Time,
+    /// A ratio `n:1`: one decimal under 10, none from there, and `∞` at the top of the range.
+    Ratio,
 }
 
 /// The precision a [`ParamDisplay::Time`] value is shown and snapped to, ms.
@@ -83,6 +85,9 @@ impl ParamSpec {
             ParamDisplay::Time if (plain * 10.0).round() < 100.0 => (format!("{:.1}", plain), "ms"),
             ParamDisplay::Time if plain.round() < 1000.0 => (format!("{:.0}", plain), "ms"),
             ParamDisplay::Time => (format!("{:.2}", plain / 1000.0), "s"),
+            ParamDisplay::Ratio if plain >= self.max * 0.995 => ("∞".to_owned(), ":1"),
+            ParamDisplay::Ratio if plain < 10.0 => (format!("{plain:.1}"), ":1"),
+            ParamDisplay::Ratio => (format!("{plain:.0}"), ":1"),
             ParamDisplay::Number => (self.format_number(plain), self.unit),
         }
     }
@@ -121,6 +126,9 @@ impl ParamSpec {
     pub fn parse(&self, text: &str) -> Option<f32> {
         let t = text.trim().replace('−', "-");
         let lower = t.to_ascii_lowercase();
+        if self.display == ParamDisplay::Ratio && (lower.contains('∞') || lower.starts_with("inf")) {
+            return Some(self.max);
+        }
         let seconds = self.display == ParamDisplay::Time && lower.ends_with('s') && !lower.ends_with("ms");
         let (num, factor) = if let Some(n) = lower.strip_suffix("khz").or_else(|| lower.strip_suffix('k')) {
             (n.trim().to_owned(), 1000.0)

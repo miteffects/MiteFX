@@ -1,0 +1,20 @@
+{
+  "plugin": "Mite Comp",
+  "version": 1,
+  "name": "Gentle Master",
+  "params": {
+    "s1_on": 1.0,
+    "s1_quad": 0.0,
+    "s1_thresh": -12,
+    "s1_ratio": 1.5,
+    "s1_knee": 12,
+    "s1_attack": 30,
+    "s1_release": 300,
+    "s1_range": 6,
+    "s1_det": 2.0,
+    "character": 4.0,
+    "smart": 3.0,
+    "lookahead": 2.0,
+    "auto_makeup": 1.0
+  }
+}

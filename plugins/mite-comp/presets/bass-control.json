@@ -1,0 +1,18 @@
+{
+  "plugin": "Mite Comp",
+  "version": 1,
+  "name": "Bass Control",
+  "params": {
+    "s1_on": 1.0,
+    "s1_quad": 0.0,
+    "s1_thresh": -24,
+    "s1_ratio": 4,
+    "s1_knee": 6,
+    "s1_attack": 15,
+    "s1_release": 120,
+    "s1_range": 60.0,
+    "s1_det": 1.0,
+    "character": 5.0,
+    "auto_makeup": 1.0
+  }
+}

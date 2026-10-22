@@ -1,0 +1,81 @@
+character | choice | Clean, Punch, FET, Opto, Bus, Vari-Mu, Custom | 0
+c_attack | × | 0.1 | 4 | 1 | Log
+c_release | × | 0.1 | 4 | 1 | Log
+c_drive | dB | -6 | 12 | 0 | Linear
+c_tail | % | 0 | 100 | 0 | Linear
+c_program | % | 0 | 100 | 0 | Linear
+c_bend | % | 0 | 100 | 0 | Linear
+smart | choice | Off, Adaptive, Vocal, Master | 0
+smart_amt | % | 0 | 100 | 70 | Linear
+target_gr | dB | 0 | 24 | 6 | Linear
+sibilance | % | 0 | 100 | 50 | Linear
+topology | choice | Feed-forward, Feedback | 0
+stereo | choice | L/R, M/S | 0
+link | % | 0 | 100 | 100 | Linear
+lookahead | ms | 0 | 20 | 0 | Linear
+hold | ms | 0 | 500 | 0 | Linear
+makeup | dB | -12 | 24 | 0 | Linear
+auto_makeup | bool | false
+oversampling | choice | 1×, 2×, 4× | 0
+sc_source | choice | Internal, External | 0
+listen | bool | false
+k1_on | bool | false
+k1_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 3
+k1_freq | Hz | 20 | 20000 | 100 | Log
+k1_gain | dB | -24 | 24 | 0 | Linear
+k1_q |  | 0.1 | 10 | 0.70710677 | Log
+k2_on | bool | false
+k2_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+k2_freq | Hz | 20 | 20000 | 1000 | Log
+k2_gain | dB | -24 | 24 | 0 | Linear
+k2_q |  | 0.1 | 10 | 0.70710677 | Log
+k3_on | bool | false
+k3_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 2
+k3_freq | Hz | 20 | 20000 | 6000 | Log
+k3_gain | dB | -24 | 24 | 0 | Linear
+k3_q |  | 0.1 | 10 | 0.70710677 | Log
+mix | % | 0 | 100 | 100 | Linear
+out_pan | % | -100 | 100 | 0 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+delta | bool | false
+bypass | bool | false
+s1_on | bool | false
+s1_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+s1_thresh | dB | -60 | 0 | -18 | Linear
+s1_ratio | :1 | 1 | 100 | 4 | Log
+s1_knee | dB | 0 | 24 | 6 | Linear
+s1_attack | ms | 0.05 | 250 | 10 | Log
+s1_release | ms | 5 | 2500 | 120 | Log
+s1_range | dB | 0 | 60 | 60 | Linear
+s1_det | choice | Peak, RMS, Loudness | 1
+s1_solo | bool | false
+s2_on | bool | false
+s2_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+s2_thresh | dB | -60 | 0 | -18 | Linear
+s2_ratio | :1 | 1 | 100 | 4 | Log
+s2_knee | dB | 0 | 24 | 6 | Linear
+s2_attack | ms | 0.05 | 250 | 10 | Log
+s2_release | ms | 5 | 2500 | 120 | Log
+s2_range | dB | 0 | 60 | 60 | Linear
+s2_det | choice | Peak, RMS, Loudness | 1
+s2_solo | bool | false
+s3_on | bool | false
+s3_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+s3_thresh | dB | -60 | 0 | -18 | Linear
+s3_ratio | :1 | 1 | 100 | 4 | Log
+s3_knee | dB | 0 | 24 | 6 | Linear
+s3_attack | ms | 0.05 | 250 | 10 | Log
+s3_release | ms | 5 | 2500 | 120 | Log
+s3_range | dB | 0 | 60 | 60 | Linear
+s3_det | choice | Peak, RMS, Loudness | 1
+s3_solo | bool | false
+s4_on | bool | false
+s4_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+s4_thresh | dB | -60 | 0 | -18 | Linear
+s4_ratio | :1 | 1 | 100 | 4 | Log
+s4_knee | dB | 0 | 24 | 6 | Linear
+s4_attack | ms | 0.05 | 250 | 10 | Log
+s4_release | ms | 5 | 2500 | 120 | Log
+s4_range | dB | 0 | 60 | 60 | Linear
+s4_det | choice | Peak, RMS, Loudness | 1
+s4_solo | bool | false

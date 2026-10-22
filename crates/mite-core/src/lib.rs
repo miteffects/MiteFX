@@ -16,5 +16,5 @@ pub use param::{manifest, BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamSc
 pub use registry::Registry;
 pub use undo::History;
 pub use handover::{triple_buffer, Handover, TripleReader, TripleWriter};
-pub use telemetry::SpectrumTap;
+pub use telemetry::{HistoryTap, SpectrumTap};
 pub use telemetry::{AtomicF32, StereoMeter};

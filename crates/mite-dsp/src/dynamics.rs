@@ -330,6 +330,8 @@ pub struct CompSettings {
     pub key_bands: [BandSettings; KEY_BANDS],
     /// Output the filtered detector signal instead of the result.
     pub listen: bool,
+    /// Hear only this stage's gain change (by slot).
+    pub solo: Option<usize>,
 }
 
 impl Default for CompSettings {
@@ -351,6 +353,7 @@ impl Default for CompSettings {
             external_key: false,
             key_bands: [BandSettings::default(); KEY_BANDS],
             listen: false,
+            solo: None,
         }
     }
 }
@@ -873,7 +876,10 @@ impl Compressor {
                 }
                 // The slow tail: a second, slow release stage blended in (Opto, Bus, Vari-Mu).
                 ch.tail = if sum.abs() > ch.tail.abs() { attack_a[order[0]] * ch.tail + (1.0 - attack_a[order[0]]) * sum } else { tail_a * ch.tail + (1.0 - tail_a) * sum };
-                let gain_db = if style.slow_tail > 0.0 { sum + (ch.tail - sum) * style.slow_tail } else { sum };
+                let mut gain_db = if style.slow_tail > 0.0 { sum + (ch.tail - sum) * style.slow_tail } else { sum };
+                if let Some(k) = s.solo.filter(|&k| k < STAGES) {
+                    gain_db = ch.env[k];
+                }
                 t.cut_db[c] = t.cut_db[c].min(gain_db);
                 t.lift_db[c] = t.lift_db[c].max(gain_db);
                 // The audio, delayed by the lookahead.
@@ -1187,6 +1193,17 @@ mod tests {
         c.process(&mut [&mut buf], Some(&[&key]), &s);
         let g = gain_to_db(buf[9599] / x);
         assert!((g + 15.0).abs() < 0.1, "a loud key ducks a quiet track: {g}");
+    }
+
+    #[test]
+    fn solo_plays_one_stage_alone() {
+        let a = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -25.0, 4.0) };
+        let b = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -30.0, 2.0) };
+        let both = steady_gain(&settings(&[a, b]), -10.0, 0.2);
+        let solo = steady_gain(&CompSettings { solo: Some(1), ..settings(&[a, b]) }, -10.0, 0.2);
+        // Stage b (lower threshold) runs first: −10 dB is 20 over −30 at 2:1, so it takes 10 dB;
+        // then a takes 3.75 dB more (−20 is 5 over −25 at 4:1).
+        assert!((solo + 10.0).abs() < 0.05 && (both + 13.75).abs() < 0.05, "solo {solo}, both {both}");
     }
 
     #[test]

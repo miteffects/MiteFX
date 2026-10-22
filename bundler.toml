@@ -4,3 +4,6 @@ name = "Mite Gain"
 
 [mite_eq]
 name = "Mite EQ"
+
+[mite_comp]
+name = "Mite Comp"

@@ -1,0 +1,25 @@
+{
+  "plugin": "Mite Comp",
+  "version": 1,
+  "name": "Room Tamer",
+  "params": {
+    "s1_on": 1.0,
+    "s1_quad": 1.0,
+    "s1_thresh": -36,
+    "s1_ratio": 2,
+    "s1_knee": 6,
+    "s1_attack": 2,
+    "s1_release": 150,
+    "s1_range": 12,
+    "s1_det": 1.0,
+    "s2_on": 1.0,
+    "s2_quad": 0.0,
+    "s2_thresh": -20,
+    "s2_ratio": 3,
+    "s2_knee": 6,
+    "s2_attack": 10,
+    "s2_release": 150,
+    "s2_range": 60.0,
+    "s2_det": 1.0
+  }
+}

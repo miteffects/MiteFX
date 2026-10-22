@@ -1,0 +1,27 @@
+{
+  "plugin": "Mite Comp",
+  "version": 1,
+  "name": "Gate + Comp",
+  "params": {
+    "s1_on": 1.0,
+    "s1_quad": 1.0,
+    "s1_thresh": -48,
+    "s1_ratio": 4,
+    "s1_knee": 4,
+    "s1_attack": 0.5,
+    "s1_release": 60,
+    "s1_range": 40,
+    "s1_det": 0.0,
+    "s2_on": 1.0,
+    "s2_quad": 0.0,
+    "s2_thresh": -18,
+    "s2_ratio": 4,
+    "s2_knee": 6,
+    "s2_attack": 10,
+    "s2_release": 120,
+    "s2_range": 60.0,
+    "s2_det": 1.0,
+    "character": 2.0,
+    "auto_makeup": 1.0
+  }
+}

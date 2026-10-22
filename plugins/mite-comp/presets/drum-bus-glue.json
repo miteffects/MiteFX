@@ -1,0 +1,18 @@
+{
+  "plugin": "Mite Comp",
+  "version": 1,
+  "name": "Drum Bus Glue",
+  "params": {
+    "s1_on": 1.0,
+    "s1_quad": 0.0,
+    "s1_thresh": -16,
+    "s1_ratio": 2,
+    "s1_knee": 10,
+    "s1_attack": 30,
+    "s1_release": 150,
+    "s1_range": 60.0,
+    "s1_det": 1.0,
+    "character": 4.0,
+    "auto_makeup": 1.0
+  }
+}
