@@ -137,6 +137,7 @@ impl CompEngine {
     }
 
     /// Processes one host block in place and pushes the history records it completes.
+    #[allow(clippy::needless_range_loop)] // channels and scratch buffers indexed together
     pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &CompSettings, out: &Output, history: &HistoryTap<{ record::WIDTH }>) {
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
@@ -210,9 +211,7 @@ impl CompEngine {
             a[record::CUT + c] = a[record::CUT + c].min(t.cut_db[c]);
             a[record::LIFT + c] = a[record::LIFT + c].max(t.lift_db[c]);
         }
-        for k in 0..STAGES {
-            a[record::STAGE + k] = t.stage_db[k];
-        }
+        a[record::STAGE..record::STAGE + STAGES].copy_from_slice(&t.stage_db);
         a[record::DETECTOR] = a[record::DETECTOR].max(t.detector_db);
         a[record::OFFSET] = t.smart_offset_db;
     }

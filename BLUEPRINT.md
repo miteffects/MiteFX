@@ -106,6 +106,9 @@ MiteFX/
 | Header: ‹ preset ›, preset list with Save as…, undo/redo, A–D, their help | `mite_ui::session::Session` (the plugin gives `SessionConfig`: name, factory files, sound ids, snapshot ids) |
 | Recording the editor's own edits for undo | `mite_ui::RecordingHost`, `Session::begin`/`end`/`follow` |
 | Help strip, dropdown lists, icon buttons, glass panels, glow | `mite_ui::widgets::{Help, Dropdown}`, `mite_ui::paint::{icon_button, glass_panel, glow_stroke}` |
+| Footer: toggles, dials with name and value, latency, dropdown buttons | `mite_ui::widgets::Footer`, `widgets::footer::draw_dropdown_button` |
+| Per-slice history telemetry (levels, GR) | `mite_core::HistoryTap` (Comp records one per 5 ms) |
+| Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
 | State version, migrations, snapshot/preset fields | `mite_plugin::state` (`migrate` from `Plugin::filter_state`; `session_fields`/`load_session_fields` from `Params::serialize_fields`/`deserialize_fields`) |
 | Golden state test through the real CLAP entry point | `mite_plugin::testing::check_golden_states` (`tests/golden/<plugin>.state.v<N>.json`) |
 | Parameter golden manifest | `mite_core::manifest` (`tests/golden/<plugin>.params.txt`) |
@@ -210,6 +213,8 @@ Full specification in §8.
 - External sidechain with a sidechain EQ (a full Mite EQ band set).
 - Lookahead and Delta.
 - **Beyond:** a "Character morph" between models; a per-node detector (peak, RMS or loudness); and stateful analog-style saturation in the gain cell, oversampled.
+
+**Status (2026-10-22): first version built** to the pass-4 design (`docs/design/mockups/comp-main.dc.html`, interaction.md "Mite Comp"). DSP in `mite_dsp::dynamics`: up to four stages in series in threshold order, each in one quadrant, with a soft range cap (no corner); per-stage Peak (instant attack, 10 ms release, so a gate does not chatter on zero crossings; tested), RMS and K-weighted loudness detectors; the six Characters plus Custom shape the motion only (attack/release scale, drive, program dependence, slow tail, Vari-Mu ratio bend); feed-forward or feedback; L/R or M/S with continuous link; lookahead to 20 ms (latency reported, a dip around changes); hold; makeup with curve-aware auto makeup; Smart (crest-adaptive release; Vocal and Master slide every threshold to hold a target GR; Vocal's sibilance guard); external key through a 3-band detector EQ; Listen; stage solo. `curve_db` and `input_level_at_threshold` are what the editor draws, so a later stage's diamond, node and history line sit where the input really reaches its threshold (its threshold lives in the level the stages before it leave). Every parameter glides over 20 ms (click test). Engine (`plugins/mite-comp/src/dsp.rs`): latency-aligned dry path (bypass and mix 0 null exactly, delta + dry = wet), output identical for every block size, one history record per 5 ms (`mite_core::HistoryTap`). Editor: the history (IN, OUT, GR from the top, lift from the bottom; it scrolls with the clock between host blocks), threshold lines and grips, the transfer square (shading, nodes, diamonds, live dot and trail, ghost grips when empty), stages made by pulling the line (quadrant from the pull; 4:1 at 48 px, ∞ at 160 px; a fifth refused), the stage strip, IN/GR/OUT meters, the docked stage panel (envelope scope through the stage's real ballistics with attack/release handles, quadrant radio, detector, dials, bin), Custom, Sidechain (mini EQ), Detector & output, stereo popover, Character and Smart footer menus (hovering a Character auditions it through `CompShared::audition`, never the parameter). Deviations from the boards: no words in the display (the Δ and Listen pills are glowing icons; the empty-state hint is the help strip); host parameter slots never swap (stage numbers re-rank by threshold instead). Measured: 120 fps steady in the preview at 2× DPI; frame GPU+render 1.7 ms median (2.6 ms with the stage panel open) at 2560×1520; clap-validator 34/0 and pluginval strictness 10 with GUI tests pass. **Later:** oversampling and Character saturation (the oversampler is shared with Limit and Sat), the compact layout (with the EQ's), help mode, right-click menus, a key spectrum behind the sidechain EQ.
 
 ### 3. Mite Limit. Rival: FabFilter Pro-L 2
 
@@ -601,6 +606,8 @@ Ordered steps:
 ### Phase 2: Dynamics core
 
 Mite Comp, Mite Limit and Mite Multiband. These build the dynamics cell and the loudness engine.
+
+**Status (2026-10-22):** Mite Comp's first version is built (§6.2). Next: oversampling (shared) and Character saturation, then Mite Limit.
 
 ### Phase 3: Space and colour
 

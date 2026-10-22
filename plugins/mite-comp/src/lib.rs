@@ -10,6 +10,7 @@ use mite_core::{AtomicF32, HistoryTap};
 use nih_plug::prelude::*;
 
 pub mod dsp;
+pub mod editor;
 pub mod params;
 pub mod presets;
 
@@ -122,6 +123,11 @@ impl Plugin for MiteComp {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let shared = self.shared.clone();
+        mite_plugin::create_editor(self.params.clone(), "Mite Comp", editor::ACCENT, move || editor::CompView::new(shared.clone()))
     }
 
     fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {

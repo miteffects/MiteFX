@@ -40,7 +40,8 @@ pub const KEY_BANDS: usize = 3;
 const RANGE_SOFTNESS: f32 = 3.0;
 /// Parameter glides: thresholds, ratios, knees, ranges, stages switching and makeup.
 const SMOOTH_MS: f32 = 20.0;
-/// Detector windows: RMS, and the K-weighted loudness detector.
+/// Detector windows: the peak detector's release, RMS, and the K-weighted loudness detector.
+const PEAK_RELEASE_MS: f32 = 10.0;
 const RMS_MS: f32 = 10.0;
 const LOUDNESS_MS: f32 = 50.0;
 /// The fast recovery lane of program-dependent release, and the slow (opto/glue) tail.
@@ -105,6 +106,7 @@ impl Quadrant {
 /// What a stage's detector measures. The index is saved state (append only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Detector {
+    /// Instant attack, 10 ms release (so a waveform's zero crossings are not silence).
     Peak,
     /// Power over 10 ms.
     #[default]
@@ -224,6 +226,36 @@ pub fn curve_db(stages: &[Stage; STAGES], input_db: f32, offset_db: f32) -> f32 
         level += stage_gain_db(&stages[i], level - offset_db, 0.0);
     }
     level
+}
+
+/// The level stage `slot` sees for input `input_db`: what the stages before it (lower
+/// thresholds) have made of the input.
+pub fn level_before(stages: &[Stage; STAGES], slot: usize, input_db: f32, offset_db: f32) -> f32 {
+    let mut level = input_db;
+    for i in order(stages) {
+        if i == slot {
+            break;
+        }
+        level += stage_gain_db(&stages[i], level - offset_db, 0.0);
+    }
+    level
+}
+
+/// The input level at which stage `slot` reaches its threshold: where the transfer plot shows it
+/// (its threshold lives in the level domain the stages before it leave). The map is monotone, so
+/// bisection finds it; flat stretches (an ∞:1 stage before it) converge to their edge.
+pub fn input_level_at_threshold(stages: &[Stage; STAGES], slot: usize, offset_db: f32) -> f32 {
+    let target = stages[slot].threshold_db + offset_db;
+    let (mut lo, mut hi) = (-160.0f32, 40.0f32);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if level_before(stages, slot, mid, offset_db) < target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
 }
 
 /// How each Character moves the stages.
@@ -446,6 +478,7 @@ struct Chan {
     env: [f32; STAGES],
     hold: [u32; STAGES],
     tail: f32,
+    peak: f32,
     rms: f32,
     loud: f32,
     k_weight: [Tdf2; 2],
@@ -463,6 +496,7 @@ impl Chan {
             env: [0.0; STAGES],
             hold: [0; STAGES],
             tail: 0.0,
+            peak: 0.0,
             rms: 0.0,
             loud: 0.0,
             k_weight: [Tdf2::default(); 2],
@@ -573,6 +607,7 @@ pub struct Compressor {
     sib_lp: Coeffs,
     key_sections: [Sections; KEY_BANDS],
     key_designed: [BandSettings; KEY_BANDS],
+    peak_a: f32,
     rms_a: f32,
     loud_a: f32,
     // Smart trackers (mono, on the linked detector).
@@ -603,6 +638,7 @@ impl Compressor {
             sib_lp: Coeffs::IDENTITY,
             key_sections: [Sections::default(); KEY_BANDS],
             key_designed: s.key_bands,
+            peak_a: 0.0,
             rms_a: 0.0,
             loud_a: 0.0,
             fast_env: 0.0,
@@ -635,6 +671,7 @@ impl Compressor {
         ];
         self.sib_hp = biquad(Biquad::HighPass, sample_rate, 4500.0, std::f32::consts::FRAC_1_SQRT_2, 0.0);
         self.sib_lp = biquad(Biquad::LowPass, sample_rate, 3000.0, std::f32::consts::FRAC_1_SQRT_2, 0.0);
+        self.peak_a = coef(PEAK_RELEASE_MS, sample_rate);
         self.rms_a = coef(RMS_MS, sample_rate);
         self.loud_a = coef(LOUDNESS_MS, sample_rate);
         for (g, st) in self.glides.iter_mut().zip(&s.stages) {
@@ -786,7 +823,8 @@ impl Compressor {
             for c in 0..n_ch {
                 let ch = &mut self.chans[c];
                 let x = det[c];
-                level[c][0] = x.abs();
+                ch.peak = x.abs().max(self.peak_a * ch.peak);
+                level[c][0] = ch.peak;
                 if use_rms {
                     ch.rms = self.rms_a * ch.rms + (1.0 - self.rms_a) * x * x;
                     level[c][1] = ch.rms.sqrt();
@@ -1070,11 +1108,13 @@ mod tests {
         c.process(&mut [&mut loud], None, &s);
         let after_attack = gain_to_db(loud[479] / hi);
         assert!((after_attack + 10.0 * (1.0 - (-1.0f32).exp())).abs() < 0.32, "attack {after_attack}");
-        // Back down: after one release time, 1/e of it left.
-        let mut quiet = vec![lo; 9600];
-        c.process(&mut [&mut quiet], None, &s);
-        let after_release = gain_to_db(quiet[4799] / lo);
-        assert!((after_release + 10.0 * (-1.0f32).exp()).abs() < 0.2, "release {after_release}");
+        // Down to −15 dB (still over the threshold, so the target is −5 dB): after one release
+        // time, 1/e of the 5 dB step is left (the peak detector's 10 ms release adds a little).
+        let mid = db_to_gain(-15.0);
+        let mut quieter = vec![mid; 9600];
+        c.process(&mut [&mut quieter], None, &s);
+        let after_release = gain_to_db(quieter[4799] / mid);
+        assert!((after_release + 5.0 + 5.0 * (-1.0f32).exp()).abs() < 0.2, "release {after_release}");
     }
 
     #[test]
@@ -1193,6 +1233,36 @@ mod tests {
         c.process(&mut [&mut buf], Some(&[&key]), &s);
         let g = gain_to_db(buf[9599] / x);
         assert!((g + 15.0).abs() < 0.1, "a loud key ducks a quiet track: {g}");
+    }
+
+    #[test]
+    fn a_gate_stays_open_on_a_steady_tone_above_its_threshold() {
+        // A 100 Hz sine at −20 dBFS peak through a fast 4:1 gate at −40 dB: the waveform crosses
+        // zero 200 times a second, but the level is steady, so the gate must not chatter.
+        let st = Stage { range_db: 60.0, attack_ms: 0.5, release_ms: 60.0, ..stage(Quadrant::Expand, -40.0, 4.0) };
+        let s = settings(&[st]);
+        let mut c = Compressor::new(FS);
+        c.prepare(FS, &s);
+        let input: Vec<f32> = (0..48_000).map(|i| 0.1 * (2.0 * std::f32::consts::PI * 100.0 * i as f32 / FS).sin()).collect();
+        let mut buf = input.clone();
+        c.process(&mut [&mut buf], None, &s);
+        let worst = buf[24_000..].iter().zip(&input[24_000..]).filter(|(_, x)| x.abs() > 0.05).map(|(y, x)| gain_to_db(y / x)).fold(0.0f32, f32::min);
+        assert!(worst > -0.5, "the gate closes on zero crossings: {worst} dB");
+    }
+
+    #[test]
+    fn a_later_stage_shows_where_the_input_reaches_its_threshold() {
+        // A 2:1 compressor from −30 dB, then a limiter at −12 dB (in the compressed domain): the
+        // limiter starts where the compressor's output reaches −12, at an input of +6 → clamp.
+        let comp = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -30.0, 2.0) };
+        let limit = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -20.0, RATIO_MAX) };
+        let stages = settings(&[comp, limit]).stages;
+        let x = input_level_at_threshold(&stages, 1, 0.0);
+        // −30 + (x + 30) / 2 = −20  →  x = −10.
+        assert!((x + 10.0).abs() < 0.01, "{x}");
+        assert!((level_before(&stages, 1, x, 0.0) + 20.0).abs() < 0.01);
+        // The first stage sees the input itself.
+        assert!((input_level_at_threshold(&stages, 0, 0.0) + 30.0).abs() < 0.01);
     }
 
     #[test]

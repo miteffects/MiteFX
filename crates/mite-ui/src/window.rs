@@ -272,6 +272,12 @@ impl UiWindow {
             keyboard_types::Key::Named(keyboard_types::NamedKey::Delete) => Key::Delete,
             keyboard_types::Key::Named(keyboard_types::NamedKey::Backspace) => Key::Backspace,
             keyboard_types::Key::Named(keyboard_types::NamedKey::Enter) => Key::Enter,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::ArrowUp) => Key::Up,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::ArrowDown) => Key::Down,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::ArrowLeft) => Key::Left,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::ArrowRight) => Key::Right,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::PageUp) => Key::PageUp,
+            keyboard_types::Key::Named(keyboard_types::NamedKey::PageDown) => Key::PageDown,
             keyboard_types::Key::Character(s) => match s.chars().next() {
                 Some(c) => Key::Character(c),
                 None => return EventStatus::Ignored,

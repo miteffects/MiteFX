@@ -53,6 +53,12 @@ pub enum Key {
     Delete,
     Backspace,
     Enter,
+    Up,
+    Down,
+    Left,
+    Right,
+    PageUp,
+    PageDown,
     Character(char),
 }
 
