@@ -402,6 +402,8 @@ FabFilter's strengths:
 
 ### 7.4 Design status
 
+**Mite Comp brief sent on 2026-10-22** (`docs/design/comp-brief.md`): the main view (history and transfer curve), creating stages by pulling the curve, the stage panel, Character, Smart, sidechain EQ, stereo link, compact, and a new upward-gain colour token.
+
 **Second pass received on 2026-10-14.** All EQ screens are delivered (12 states × dark, light and colour-blind themes, plus a compact layout), as are the shared components. A short third pass covers accent and token clean-up; see `docs/design/third-pass-brief.md`.
 
 **First pass received on 2026-10-14.** The canvas is https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5, with a snapshot and review in `docs/design/README.md`.
