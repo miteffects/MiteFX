@@ -5,6 +5,7 @@
 
 pub mod analyzer;
 pub mod conv;
+pub mod dynamics;
 pub mod eq;
 pub mod filter;
 pub mod gain;
