@@ -139,8 +139,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     shared.latency.store(engine.latency() as f32);
 
+    // SNAPSHOT_RANGE=36 picks the history's level range by hand (Auto otherwise).
+    if let Some(r) = std::env::var("SNAPSHOT_RANGE").ok().and_then(|v| v.parse::<f32>().ok()) {
+        shared.display_range.store(r);
+    }
     let mut view = CompView::new(shared.clone());
-    view.tick(&host);
+    // Let the range glide in as it would live (~0.5 s of ticks).
+    for _ in 0..50 {
+        view.tick(&host);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let theme_obj = Theme::load(theme, ACCENT);
     render_view(&mut view, &host, &theme_obj, 1.0)?;
     let mods = Modifiers::default();

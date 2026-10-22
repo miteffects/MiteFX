@@ -480,6 +480,8 @@ pub struct EqParams {
     /// through `serialize_fields`).
     pub snapshots: std::sync::Arc<mite_core::snapshots::Snapshots>,
     pub preset: std::sync::Arc<mite_core::presets::CurrentPreset>,
+    /// The display's dB range picked by hand (0: Auto), saved with the state.
+    pub display_range: std::sync::Arc<mite_core::AtomicF32>,
     pub bands: [BandParams; BANDS],
 }
 
@@ -496,6 +498,7 @@ impl Default for EqParams {
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()).make_bypass(),
             snapshots: std::sync::Arc::new(mite_core::snapshots::Snapshots::new()),
             preset: std::sync::Arc::new(mite_core::presets::CurrentPreset::default()),
+            display_range: std::sync::Arc::new(mite_core::AtomicF32::new(0.0)),
             bands: std::array::from_fn(BandParams::new),
         }
     }
@@ -507,11 +510,14 @@ unsafe impl Params for EqParams {
     /// The snapshots (A–D), with the band parameters now as the active slot.
     fn serialize_fields(&self) -> std::collections::BTreeMap<String, String> {
         let live = mite_plugin::state::live_values(self, &snapshot_ids());
-        mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live)
+        let mut fields = mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live);
+        mite_plugin::state::add_display_range(&mut fields, self.display_range.load());
+        fields
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
         mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
+        self.display_range.store(mite_plugin::state::display_range(serialized));
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {

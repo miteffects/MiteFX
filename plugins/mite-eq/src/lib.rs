@@ -57,6 +57,8 @@ pub struct EqShared {
     pub focus_gain: [AtomicF32; SPECTRAL_POINTS],
     /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
     pub snapshots: Arc<Snapshots>,
+    /// The plot's dB range picked by hand (0: Auto; the parameters' store, saved with the state).
+    pub display_range: Arc<AtomicF32>,
     pub preset: Arc<CurrentPreset>,
     /// This instance's parameters for other instances' editors to write (a carve), once its own
     /// editor has opened (UI threads only).
@@ -87,6 +89,7 @@ impl EqShared {
             focus_threshold: std::array::from_fn(|_| AtomicF32::new(-150.0)),
             focus_gain: std::array::from_fn(|_| AtomicF32::new(0.0)),
             remote: std::sync::Mutex::new(None),
+            display_range: Arc::new(AtomicF32::new(0.0)),
         }
     }
 }
@@ -134,7 +137,9 @@ impl Default for MiteEq {
         let params = Arc::new(EqParams::default());
         let settings = std::array::from_fn(|i| params.bands[i].settings());
         let engine = EqEngine::new(48_000.0, &settings, params.out_gain.value());
-        let shared = Arc::new(EqShared::with_stores(params.snapshots.clone(), params.preset.clone()));
+        let mut shared = EqShared::with_stores(params.snapshots.clone(), params.preset.clone());
+        shared.display_range = params.display_range.clone();
+        let shared = Arc::new(shared);
         INSTANCES.register(&shared);
         Self { params, engine, shared, reported_latency: 0 }
     }

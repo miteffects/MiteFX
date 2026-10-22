@@ -23,6 +23,8 @@ fn plain(host: &MemoryParamHost, id: &str) -> f32 {
 
 fn setup() -> (CompView, MemoryParamHost, Arc<CompShared>) {
     let shared = Arc::new(CompShared::new());
+    // The full 60 dB level range (Auto would fit the stages), so positions below are fixed.
+    shared.display_range.store(60.0);
     let dir = std::env::temp_dir().join(format!("mitefx-comp-editor-{}", std::process::id()));
     let mut view = CompView::new(shared.clone()).with_preset_dir(dir);
     let host = memory_host();

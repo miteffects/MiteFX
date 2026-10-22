@@ -31,6 +31,8 @@ pub struct CompShared {
     /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
     pub snapshots: Arc<Snapshots>,
     pub preset: Arc<CurrentPreset>,
+    /// The history's level range picked by hand (0: Auto; the parameters' store).
+    pub display_range: Arc<AtomicF32>,
 }
 
 impl CompShared {
@@ -46,6 +48,7 @@ impl CompShared {
             audition: AtomicF32::new(-1.0),
             snapshots,
             preset,
+            display_range: Arc::new(AtomicF32::new(0.0)),
         }
     }
 
@@ -81,7 +84,9 @@ impl Default for MiteComp {
     fn default() -> Self {
         let params = Arc::new(CompParams::default());
         let engine = CompEngine::new(48_000.0, &params.settings(None));
-        let shared = Arc::new(CompShared::with_stores(params.snapshots.clone(), params.preset.clone()));
+        let mut shared = CompShared::with_stores(params.snapshots.clone(), params.preset.clone());
+        shared.display_range = params.display_range.clone();
+        let shared = Arc::new(shared);
         Self { params, engine, shared, reported_latency: 0 }
     }
 }

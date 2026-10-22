@@ -197,6 +197,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let remote: mite_plugin::SharedParamHost = Arc::new(ReachablePeer);
         *peer.remote.lock().unwrap() = Some(remote);
     }
+    // SNAPSHOT_RANGE=6 picks the plot's dB range by hand (Auto otherwise).
+    if let Some(r) = std::env::var("SNAPSHOT_RANGE").ok().and_then(|v| v.parse::<f32>().ok()) {
+        shared.display_range.store(r);
+    }
     let mut view = EqView::new(shared);
     // Let the analyzer's ballistics settle as they would live (~0.5 s of 8 ms ticks).
     for _ in 0..60 {

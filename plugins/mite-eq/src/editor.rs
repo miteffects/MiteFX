@@ -4,6 +4,7 @@
 //! Gestures follow docs/design/interaction.md, "Main display gestures".
 
 use std::f64::consts::LN_2;
+use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,7 +18,7 @@ use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::footer::draw_dropdown_button;
-use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, LevelMeter, ToggleGlyph};
+use mite_ui::widgets::{ease_range, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, LevelMeter, RangePicker, ToggleGlyph};
 use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
@@ -111,7 +112,23 @@ const PLOT_W: f64 = 1200.0;
 const PLOT_TOP: f64 = DISPLAY_TOP + 24.0;
 const PLOT_BOT: f64 = DISPLAY_TOP + 588.0;
 const MID: f64 = DISPLAY_TOP + 306.0;
-const PX_PER_DB: f64 = 264.0 / 18.0;
+/// The plot's dB range (FabFilter's ±3/±6/±12/±30, or Auto): the top labels read ±range, 176 px
+/// from the 0 dB line; the plot's edge is 1.5 × the range. Each view sets the range it shows
+/// before drawing or handling events (`set_db_range`), so the mapping below follows it.
+const RANGE_PX: f64 = 176.0;
+const DB_RANGES: &[f32] = &[3.0, 6.0, 12.0, 30.0];
+const DB_RANGE_LABELS: &[&str] = &["Auto", "±3 dB", "±6 dB", "±12 dB", "±30 dB"];
+thread_local! {
+    static DB_RANGE: Cell<f64> = const { Cell::new(12.0) };
+}
+
+fn set_db_range(range: f32) {
+    DB_RANGE.with(|r| r.set(f64::from(range)));
+}
+
+fn px_per_db() -> f64 {
+    RANGE_PX / DB_RANGE.with(Cell::get)
+}
 /// Curve and spectrum resolution: one point every 4 design px (the analyzer's points).
 const POINTS: usize = SPECTRUM_POINTS;
 
@@ -174,11 +191,11 @@ fn xf(x: f64) -> f64 {
 }
 
 fn gy(db: f64) -> f64 {
-    MID - db * PX_PER_DB
+    MID - db * px_per_db()
 }
 
 fn yg(y: f64) -> f64 {
-    (MID - y) / PX_PER_DB
+    (MID - y) / px_per_db()
 }
 
 /// Spectrum: 0 dBFS at the top of the plot, −90 at the bottom.
@@ -903,6 +920,13 @@ pub struct EqView {
     linear: bool,
     /// The header's presets, undo and snapshots A–D.
     session: Session,
+    /// The plot's dB range: the picker, and the range as drawn (eased towards Auto's or the
+    /// picked one).
+    range: RangePicker,
+    range_shown: f32,
+    /// The range it glides to: the grid and labels are its values (round numbers), placed on the
+    /// scale as shown.
+    range_target: f32,
     meter: LevelMeter,
     analyzer: Analyzer,
     samples: Vec<f32>,
@@ -1018,6 +1042,16 @@ impl EqView {
             footer,
             soloed: None,
             linear: false,
+            range: RangePicker::new(
+                Rect::new(1186.0, DISPLAY_TOP + 6.0, 1230.0, DISPLAY_TOP + 24.0),
+                Rect::new(1196.0, DISPLAY_TOP, 1232.0, HELP_TOP),
+                DB_RANGES,
+                DB_RANGE_LABELS,
+                shared.display_range.clone(),
+                (DISPLAY_TOP, HELP_TOP),
+            ),
+            range_shown: 12.0,
+            range_target: 12.0,
             session: Session::new(
                 SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: snapshot_ids() },
                 shared.snapshots.clone(),
@@ -1667,6 +1701,10 @@ impl EqView {
             if let Some(help) = self.session.help() {
                 return help;
             }
+            if self.range.rect.contains(p) || (self.range.wheel_area.contains(p) && self.selected.is_none() && self.hover.is_none()) {
+                let how = if self.range.manual().is_some() { "picked" } else { "Auto: widens when a band needs it" };
+                return Help::default().text("Display range ").slot(format!("±{:.0} dB", self.range_shown), "±30 dB").text(format!(" · {how} — click to pick, wheel over the scale steps, double-click for Auto"));
+            }
             if let Some(help) = self.footer.help(host) {
                 return help;
             }
@@ -2207,11 +2245,15 @@ impl EqView {
                 path.line_to((x, HELP_TOP));
             }
         }
-        for d in [-15.0, -9.0, -3.0, 3.0, 9.0, 15.0] {
+        // Majors at half and the whole range, minors between (the scale follows the range).
+        let range = f64::from(self.range_target);
+        for k in [-5.0, -3.0, -1.0, 1.0, 3.0, 5.0] {
+            let d = k * range / 4.0;
             minor.move_to((0.0, gy(d).round() + 0.5));
             minor.line_to((PLOT_W, gy(d).round() + 0.5));
         }
-        for d in [-12.0, -6.0, 6.0, 12.0] {
+        for k in [-2.0, -1.0, 1.0, 2.0] {
+            let d = k * range / 2.0;
             major.move_to((0.0, gy(d).round() + 0.5));
             major.line_to((PLOT_W, gy(d).round() + 0.5));
         }
@@ -2225,15 +2267,18 @@ impl EqView {
         for (f, t) in [(20.0, "20"), (50.0, "50"), (100.0, "100"), (200.0, "200"), (500.0, "500"), (1000.0, "1k"), (2000.0, "2k"), (5000.0, "5k"), (10000.0, "10k"), (20000.0, "20k")] {
             cx.text.draw(cx.scene, t, fx(f), DISPLAY_TOP + 596.0, label, theme.text_lo, Align::Center);
         }
-        for d in [12, 6, 0, -6, -12] {
-            let t = match d.cmp(&0) {
-                std::cmp::Ordering::Greater => format!("+{d}"),
-                std::cmp::Ordering::Less => format!("−{}", -d),
-                std::cmp::Ordering::Equal => "0".into(),
-            };
-            let color = if d == 0 { theme.text_mid } else { theme.text_lo };
-            cx.text.draw(cx.scene, &t, 1206.0, gy(f64::from(d)) - 7.0, label, color, Align::Left);
+        for k in [2.0, 1.0, 0.0, -1.0, -2.0] {
+            let d = k * range / 2.0;
+            let n = if (d.round() - d).abs() < 0.05 { format!("{:.0}", d.abs()) } else { format!("{:.1}", d.abs()) };
+            let t = if d > 0.0 { format!("+{n}") } else if d < 0.0 { format!("−{n}") } else { "0".into() };
+            let color = if k == 0.0 { theme.text_mid } else { theme.text_lo };
+            // The top label gives way to the range pill.
+            if k == 2.0 && gy(d) - 7.0 < self.range.rect.y1 + 2.0 {
+                continue;
+            }
+            cx.text.draw(cx.scene, &t, 1206.0, gy(d) - 7.0, label, color, Align::Left);
         }
+        self.range.draw(cx, self.range_shown);
     }
 
     /// A smooth curve through the grid values (Catmull-Rom as cubic Béziers): no corners at the
@@ -3494,6 +3539,7 @@ impl View for EqView {
     }
 
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
+        set_db_range(self.range_shown);
         let theme = cx.theme;
         let bands: Vec<BandSettings> = (0..BANDS).map(|b| self.band(cx.host, b)).collect();
         self.soloed = self.soloed_band(cx.host);
@@ -3517,10 +3563,12 @@ impl View for EqView {
         self.draw_help(cx);
         self.draw_footer(cx);
         self.draw_menu(cx);
+        self.range.draw_menu(cx);
         self.session.draw_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        set_db_range(self.range_shown);
         // The editor's own writes are noted; once nothing is being dragged, they become one undo
         // step.
         self.session.begin(host);
@@ -3545,6 +3593,23 @@ impl View for EqView {
         // frame rate instead of stepping from block to block.
         let dt = self.last_live.elapsed().as_secs_f64().min(0.1);
         self.last_live = Instant::now();
+        // The plot's range: Auto keeps ±12 and widens to ±30 when a band (with its dynamic range)
+        // would leave the plot (its edge is 1.5 × the range); a picked range is kept. It glides.
+        let needed = (0..BANDS)
+            .map(|b| self.band(host, b))
+            .filter(|s| s.enabled && s.kind.has_gain())
+            .map(|s| {
+                let range = if s.is_dynamic() { s.dynamics.range_db } else { 0.0 };
+                s.gain_db.abs().max((s.gain_db + range).abs())
+            })
+            .fold(0.0, f64::max);
+        let auto = (needed / 1.45).max(12.0) as f32;
+        let target = self.range.target(auto);
+        self.range_target = target;
+        if ease_range(&mut self.range_shown, target, dt as f32) {
+            dirty = true;
+        }
+        set_db_range(self.range_shown);
         let k = (1.0 - (-dt / LIVE_EASE_S).exp()) as f32;
         let mut ease = |shown: &mut f32, mid: &mut f32, now: f32| {
             *mid += (now - *mid) * k;
@@ -3691,6 +3756,9 @@ impl EqView {
         if let Some(answer) = self.session.event(event, host) {
             return answer;
         }
+        if self.range.event(event, self.range_shown) {
+            return true;
+        }
         // Footer dials and toggles.
         if self.footer.event(event, host) {
             return true;
@@ -3709,7 +3777,7 @@ impl EqView {
                     let dy = pos.y - g.last.y;
                     g.last = pos;
                     g.moved |= pos.distance(g.start) > 3.0;
-                    g.gain = (g.gain - dy * factor / PX_PER_DB).clamp(-30.0, 30.0);
+                    g.gain = (g.gain - dy * factor / px_per_db()).clamp(-30.0, 30.0);
                     return true;
                 }
                 if let Some(d) = &mut self.drag {
@@ -3724,7 +3792,7 @@ impl EqView {
                             host.set_normalized(&ids.freq, host.normalize(&ids.freq, d.log_freq.exp() as f32));
                             let kind = BandType::from_index(Self::plain(host, &ids.kind).round() as usize);
                             if kind.has_gain() {
-                                d.gain = (d.gain - dy * factor / PX_PER_DB).clamp(-30.0, 30.0);
+                                d.gain = (d.gain - dy * factor / px_per_db()).clamp(-30.0, 30.0);
                                 host.set_normalized(&ids.gain, host.normalize(&ids.gain, d.gain as f32));
                             }
                         }
@@ -3737,7 +3805,7 @@ impl EqView {
                         DragMode::Range | DragMode::Ring | DragMode::Scope => {
                             let (lo, hi) = Self::range_limits(host, ids);
                             let delta = match d.mode {
-                                DragMode::Range => -dy / PX_PER_DB,
+                                DragMode::Range => -dy / px_per_db(),
                                 DragMode::Ring => (dx - dy) * RING_DB_PER_PX,
                                 _ => -dy * RING_DB_PER_PX * 1.5,
                             };

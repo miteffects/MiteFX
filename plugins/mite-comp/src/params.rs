@@ -274,6 +274,8 @@ pub struct CompParams {
     /// `serialize_fields`).
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
+    /// The history's level range picked by hand (0: Auto), saved with the state.
+    pub display_range: std::sync::Arc<mite_core::AtomicF32>,
 }
 
 impl Default for CompParams {
@@ -311,6 +313,7 @@ impl Default for CompParams {
             stages: std::array::from_fn(StageParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
+            display_range: std::sync::Arc::new(mite_core::AtomicF32::new(0.0)),
         }
     }
 }
@@ -361,11 +364,14 @@ impl CompParams {
 unsafe impl Params for CompParams {
     fn serialize_fields(&self) -> std::collections::BTreeMap<String, String> {
         let live = mite_plugin::state::live_values(self, &sound_ids());
-        mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live)
+        let mut fields = mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live);
+        mite_plugin::state::add_display_range(&mut fields, self.display_range.load());
+        fields
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
         mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
+        self.display_range.store(mite_plugin::state::display_range(serialized));
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {

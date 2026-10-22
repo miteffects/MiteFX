@@ -20,7 +20,7 @@ use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::footer::draw_dropdown_button;
-use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::{ease_range, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, RangePicker, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::record;
@@ -45,7 +45,27 @@ const HEADER_ROW: (f64, f64) = (12.0, 44.0);
 const HIST_W: f64 = 776.0;
 const HIST_SECONDS: f64 = 6.0;
 const HIST_COLUMNS: usize = 300;
-const GR_PX_PER_DB: f64 = 10.0;
+/// GR px per dB at the full 60 dB level range (it zooms with the range).
+const GR_PX_AT_60: f64 = 10.0;
+/// The history's level range (dB below 0 shown): 24/36/48/60 or Auto, as FabFilter's. Each view
+/// sets the range it shows before drawing or handling events.
+const LEVEL_RANGES: &[f32] = &[24.0, 36.0, 48.0, 60.0];
+const LEVEL_RANGE_LABELS: &[&str] = &["Auto", "24 dB", "36 dB", "48 dB", "60 dB"];
+thread_local! {
+    static LEVEL_RANGE: std::cell::Cell<f64> = const { std::cell::Cell::new(60.0) };
+}
+
+fn set_level_range(range: f32) {
+    LEVEL_RANGE.with(|r| r.set(f64::from(range)));
+}
+
+fn level_range() -> f64 {
+    LEVEL_RANGE.with(std::cell::Cell::get)
+}
+
+fn gr_px_per_db() -> f64 {
+    GR_PX_AT_60 * 60.0 / level_range()
+}
 /// Threshold lines end in a grip at the history's right edge.
 const GRIP_X: f64 = 738.0;
 const GRIP_SIZE: (f64, f64) = (34.0, 22.0);
@@ -226,11 +246,12 @@ fn sq_rect() -> Rect {
 
 /// History levels: 0 dB 24 px under the display's top, −60 dB 572 px lower.
 fn lv_y(db: f32) -> f64 {
-    DISPLAY_TOP + 24.0 + f64::from(-db.clamp(-60.0, 0.0)) / 60.0 * 572.0
+    let range = level_range();
+    DISPLAY_TOP + 24.0 + (-f64::from(db)).clamp(0.0, range) / range * 572.0
 }
 
 fn lv_db(y: f64) -> f32 {
-    (-(y - DISPLAY_TOP - 24.0) / 572.0 * 60.0) as f32
+    (-(y - DISPLAY_TOP - 24.0) / 572.0 * level_range()) as f32
 }
 
 fn hist_rect() -> Rect {
@@ -311,6 +332,10 @@ struct PanelHits {
 pub struct CompView {
     shared: Arc<CompShared>,
     session: Session,
+    /// The history's level range: the picker, the range as drawn (eased), and where it goes.
+    range: RangePicker,
+    range_shown: f32,
+    range_target: f32,
     footer: Footer,
     selected: Option<usize>,
     pointer: Option<Point>,
@@ -351,6 +376,17 @@ impl CompView {
             ],
         );
         Self {
+            range: RangePicker::new(
+                Rect::new(8.0, DISPLAY_TOP + 4.0, 54.0, DISPLAY_TOP + 22.0),
+                Rect::new(0.0, DISPLAY_TOP + 24.0, 36.0, HELP_TOP),
+                LEVEL_RANGES,
+                LEVEL_RANGE_LABELS,
+                shared.display_range.clone(),
+                (DISPLAY_TOP, HELP_TOP),
+            )
+            .with_prefix("−"),
+            range_shown: 60.0,
+            range_target: 60.0,
             session: Session::new(
                 SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() },
                 shared.snapshots.clone(),
@@ -519,7 +555,7 @@ impl CompView {
     }
 
     fn target_rect(host: &dyn ParamHost) -> Rect {
-        let y = DISPLAY_TOP + f64::from(Self::plain(host, TARGET_GR.id)) * GR_PX_PER_DB;
+        let y = DISPLAY_TOP + f64::from(Self::plain(host, TARGET_GR.id)) * gr_px_per_db();
         Rect::new(GRIP_X - 30.0, y - 11.0, GRIP_X + GRIP_SIZE.0, y + 11.0)
     }
 
@@ -651,7 +687,10 @@ impl CompView {
     fn draw_history(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
         let theme = cx.theme;
         let grid = theme.grid_minor;
-        for db in [-12.0, -24.0, -36.0, -48.0] {
+        // Gridlines and labels every 6 dB (24 dB range) or 12 dB, from the range it glides to.
+        let step = if self.range_target <= 24.5 { 6.0 } else { 12.0 };
+        let levels: Vec<f32> = (1..).map(|k| -step * k as f32).take_while(|&db| db > -self.range_target + 0.5).collect();
+        for &db in &levels {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, grid, None, &Line::new((0.0, lv_y(db)), (HIST_W, lv_y(db))));
         }
         for s in 1..6 {
@@ -659,8 +698,9 @@ impl CompView {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, grid, None, &Line::new((x, DISPLAY_TOP), (x, HELP_TOP)));
         }
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_zero, None, &Line::new((0.0, DISPLAY_TOP + 24.0), (HIST_W, DISPLAY_TOP + 24.0)));
-        for (db, label) in [(0.0, "0"), (-12.0, "−12"), (-24.0, "−24"), (-36.0, "−36"), (-48.0, "−48")] {
-            cx.text.draw(cx.scene, label, 8.0, lv_y(db) + 3.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) }, theme.text_lo, Align::Left);
+        for db in std::iter::once(0.0).chain(levels.iter().copied()) {
+            let label = if db == 0.0 { "0".to_owned() } else { format!("−{:.0}", -db) };
+            cx.text.draw(cx.scene, &label, 8.0, lv_y(db) + 3.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) }, theme.text_lo, Align::Left);
         }
 
         // Columns of 4 records (20 ms), fixed to the records' absolute times so they never
@@ -728,7 +768,7 @@ impl CompView {
         // Upward gain from the bottom.
         let up = |r: &[f32; record::WIDTH]| r[record::LIFT].max(r[record::LIFT + 1]);
         if cols.iter().any(|(_, r)| up(r) > 0.05) {
-            let edge = line(&|r| HELP_TOP - (f64::from(up(r)) * GR_PX_PER_DB).min(160.0));
+            let edge = line(&|r| HELP_TOP - (f64::from(up(r)) * gr_px_per_db()).min(160.0));
             let fill = Gradient::new_linear((0.0, HELP_TOP), (0.0, HELP_TOP - 160.0)).with_stops([theme.gain_up.multiply_alpha(0.5), theme.gain_up.multiply_alpha(0.14)]);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(edge.clone(), HELP_TOP));
             glow_stroke(cx, &edge, 1.6, theme.gain_up, theme.gain_up, 2.4);
@@ -748,7 +788,7 @@ impl CompView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(output.clone(), HELP_TOP));
         glow_stroke(cx, &output, 1.8, out_color, out_color, 2.4);
         // GR from the top: solid for L/M, dashed for R/S when the channels differ.
-        let cut = |r: &[f32; record::WIDTH], c: usize| DISPLAY_TOP + (f64::from(-r[record::CUT + c]) * GR_PX_PER_DB).clamp(0.0, 250.0);
+        let cut = |r: &[f32; record::WIDTH], c: usize| DISPLAY_TOP + (f64::from(-r[record::CUT + c]) * gr_px_per_db()).clamp(0.0, 250.0);
         if !cols.iter().any(|(_, r)| r[record::CUT].min(r[record::CUT + 1]) < -0.05) {
             return;
         }
@@ -1274,7 +1314,7 @@ impl CompView {
         let det = Rect::new(qx, rect.y0 + 112.0, qx + 116.0, rect.y0 + 148.0);
         let open = matches!(self.menu, Some(Menu { kind: MenuKind::StageDetector(_), .. }));
         let d = s.detector as usize;
-        draw_dropdown_button(cx, det, Detector::NAMES[d], open, hot(det), |scene, at| draw_glyph(scene, glyph::DETECTORS[d], at + (8.0, 0.0), 18.0, theme.accent, 1.8));
+        draw_dropdown_button(cx, det, Detector::NAMES[d], open, hot(det), |scene, at| draw_glyph(scene, glyph::DETECTORS[d], at + (8.0, 6.0), 18.0, theme.accent, 1.8));
         hits.detector = Some(det);
         // The bin under the close button.
         let bin = Rect::new(rect.x1 - 14.0 - 36.0, rect.y1 - 12.0 - 36.0, rect.x1 - 14.0, rect.y1 - 12.0);
@@ -1292,7 +1332,7 @@ impl CompView {
         let src = Rect::new(rect.x0 + 16.0, rect.y0 + 50.0, rect.x0 + 186.0, rect.y0 + 86.0);
         let open = matches!(self.menu, Some(Menu { kind: MenuKind::KeySource, .. }));
         let (name, d) = if external { ("External", glyph::EXTERNAL) } else { ("Internal", glyph::INTERNAL) };
-        draw_dropdown_button(cx, src, name, open, hot(src), |scene, at| draw_glyph(scene, d, at + (8.0, 0.0), 18.0, theme.sidechain, 1.8));
+        draw_dropdown_button(cx, src, name, open, hot(src), |scene, at| draw_glyph(scene, d, at + (8.0, 6.0), 18.0, theme.sidechain, 1.8));
         hits.key_source = Some(src);
         let listen = Rect::new(rect.x0 + 16.0, rect.y0 + 96.0, rect.x0 + 186.0, rect.y0 + 134.0);
         let on = Self::on(cx.host, LISTEN.id);
@@ -1363,8 +1403,8 @@ impl CompView {
         let smart_r = Rect::new(176.0, top + 10.0, 316.0, top + 46.0);
         let hot = |r: Rect| self.pointer.is_some_and(|p| r.contains(p));
         let lit = |on: bool| if on { theme.accent } else { theme.text_mid };
-        draw_dropdown_button(cx, char_r, CHARACTERS[character], open(MenuKind::Character), hot(char_r), |scene, at| draw_glyph(scene, glyph::CHARACTERS[character], at + (8.0, 0.0), 22.0, lit(character != 0), 1.7));
-        draw_dropdown_button(cx, smart_r, Smart::NAMES[smart], open(MenuKind::Smart), hot(smart_r), |scene, at| draw_glyph(scene, glyph::SMART[smart], at + (8.0, 0.0), 22.0, lit(smart != 0), 1.7));
+        draw_dropdown_button(cx, char_r, CHARACTERS[character], open(MenuKind::Character), hot(char_r), |scene, at| draw_glyph(scene, glyph::CHARACTERS[character], at + (8.0, 6.0), 22.0, lit(character != 0), 1.7));
+        draw_dropdown_button(cx, smart_r, Smart::NAMES[smart], open(MenuKind::Smart), hot(smart_r), |scene, at| draw_glyph(scene, glyph::SMART[smart], at + (8.0, 6.0), 22.0, lit(smart != 0), 1.7));
         self.foot_hits = [char_r, smart_r];
         let sample_rate = f64::from(self.shared.sample_rate.load()).max(1.0);
         self.footer.draw_latency(cx, 332.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
@@ -1411,6 +1451,10 @@ impl CompView {
         }
         if let Some(help) = self.session.help() {
             return help;
+        }
+        if self.pointer.is_some_and(|p| self.range.rect.contains(p)) {
+            let how = if self.range.manual().is_some() { "picked" } else { "Auto: fits the music and the stages" };
+            return Help::default().text("Level range ").slot(format!("{:.0} dB", self.range_shown), "60 dB").text(format!(" · {how} — click to pick, wheel over the left scale steps, double-click for Auto"));
         }
         if let Some(help) = self.footer.help(host) {
             return help;
@@ -1686,6 +1730,9 @@ impl CompView {
         if let Some(answer) = self.session.event(event, host) {
             return answer;
         }
+        if self.range.event(event, self.range_shown) {
+            return true;
+        }
         if self.footer.event(event, host) {
             return true;
         }
@@ -1908,7 +1955,7 @@ impl CompView {
                 Self::set_raw(host, &stage_id(slot, S_THRESH.id), (threshold + d * fine as f32).clamp(-60.0, 0.0));
             }
             Drag::Target { start, target } => {
-                let d = ((pos.y - start.y) / GR_PX_PER_DB * fine) as f32;
+                let d = ((pos.y - start.y) / gr_px_per_db() * fine) as f32;
                 Self::set_raw(host, TARGET_GR.id, (target + d).clamp(0.0, 24.0));
             }
             Drag::Scope { slot, attack, start, value } => {
@@ -2044,6 +2091,7 @@ impl View for CompView {
     }
 
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
+        set_level_range(self.range_shown);
         let theme = cx.theme;
         let stages = Self::stages(cx.host);
         self.draw_header(cx);
@@ -2052,6 +2100,7 @@ impl View for CompView {
         self.draw_history(cx, &stages);
         cx.scene.pop_layer();
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((HIST_W + 0.5, DISPLAY_TOP), (HIST_W + 0.5, HELP_TOP)));
+        self.range.draw(cx, self.range_shown);
         self.draw_thresholds(cx, &stages);
         self.draw_square(cx, &stages);
         self.draw_strip(cx, &stages);
@@ -2061,10 +2110,12 @@ impl View for CompView {
         self.draw_footer(cx);
         self.draw_panel(cx, &stages);
         self.draw_menu(cx);
+        self.range.draw_menu(cx);
         self.session.draw_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        set_level_range(self.range_shown);
         self.session.begin(host);
         let recording = RecordingHost::new(host);
         let changed = self.handle_event(event, &recording);
@@ -2092,6 +2143,21 @@ impl View for CompView {
         if fresh {
             self.last_fresh = Instant::now();
         }
+        // The level range: Auto fits the music (its quiet tenth, silence aside) and the deepest
+        // stage's line, with a little room; a picked range is kept. It glides.
+        let stages = Self::stages(host);
+        let deepest = Self::ranked(&stages).iter().map(|&s| -Self::threshold_input(&stages, s, 0.0) + 6.0).fold(0.0f32, f32::max);
+        let mut levels: Vec<f32> = self.history.iter().rev().take(1200).map(|r| r[record::IN].max(r[record::IN + 1])).filter(|&l| l > -80.0).collect();
+        let content = if levels.len() > 50 {
+            levels.sort_by(f32::total_cmp);
+            -levels[levels.len() / 10] + 3.0
+        } else {
+            0.0
+        };
+        let auto = if deepest == 0.0 && content == 0.0 { 60.0 } else { deepest.max(content) };
+        self.range_target = self.range.target(auto);
+        let moved = ease_range(&mut self.range_shown, self.range_target, dt);
+        set_level_range(self.range_shown);
         // Meters: instant attack, 20 dB/s release (GR returns at the same speed).
         if let Some(r) = self.history.back().copied() {
             let targets = [r[record::IN], r[record::IN + 1], r[record::CUT], r[record::CUT + 1], r[record::OUT], r[record::OUT + 1]];
@@ -2102,7 +2168,7 @@ impl View for CompView {
         }
         // While audio flows the history scrolls every frame; when it stops, the meters fall.
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || self.drag.is_some() || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > -149.0 })
+        fresh || flowing || moved || self.drag.is_some() || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > -149.0 })
     }
 }
 

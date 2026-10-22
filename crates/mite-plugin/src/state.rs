@@ -26,6 +26,8 @@ pub const STATE_VERSION_KEY: &str = "mitefx_state";
 /// The snapshots' and the current preset's fields (frozen).
 pub const SNAPSHOTS_KEY: &str = "snapshots";
 pub const PRESET_KEY: &str = "preset";
+/// A display's dB range picked by hand (absent: Auto; frozen).
+pub const DISPLAY_RANGE_KEY: &str = "display_range";
 
 /// One migration: lifts a state of version N to N + 1.
 pub type Migration = fn(&mut PluginState);
@@ -66,6 +68,19 @@ pub fn session_fields(current: u32, snapshots: &Snapshots, preset: &CurrentPrese
         out.insert(PRESET_KEY.to_owned(), name);
     }
     out
+}
+
+/// Adds the display range to `fields` when it was picked by hand (`range` > 0); Auto writes
+/// nothing, so states from before it existed read as Auto.
+pub fn add_display_range(fields: &mut BTreeMap<String, String>, range: f32) {
+    if range > 0.0 {
+        fields.insert(DISPLAY_RANGE_KEY.to_owned(), range.to_string());
+    }
+}
+
+/// The display range saved in `fields` (0: Auto).
+pub fn display_range(fields: &BTreeMap<String, String>) -> f32 {
+    fields.get(DISPLAY_RANGE_KEY).and_then(|v| v.parse().ok()).unwrap_or(0.0)
 }
 
 /// Restores what [`session_fields`] saved.

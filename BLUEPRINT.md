@@ -570,6 +570,7 @@ Open:
   - Cuts are designed as inverted boosts, so boost and cut are exact mirror images.
   - 24 bands with click-free smoothing; type, slope and on/off changes crossfade; disabled bands are bit-exact.
 - **Analyzer:** `realfft`, 1/12-octave smoothing, 4.5 dB/oct tilt.
+- **Display range (2026-10-22, as FabFilter's):** the plot's dB scale is ±3, ±6, ±12 or ±30 (labels at the range; the plot's edge at 1.5 ×), or Auto (the default): it keeps ±12 and widens to ±30 when a band's gain, or gain plus dynamic range, would leave the plot. A pill at the top of the scale shows the range (an A while Auto chooses) and opens the list; the wheel over the scale steps; double-click returns to Auto. The scale glides (log easing, 120 ms); the grid and labels are the target range's round numbers. A picked range is saved with the state (`display_range`; Auto writes nothing, so older states read as Auto). Shared: `mite_ui::widgets::RangePicker`. Mite Comp uses it for the history's level range (24/36/48/60 dB or Auto, which fits the music's quiet tenth and the deepest stage's line; the GR scale zooms with it).
 - **Parameters:** 145 frozen IDs (`b01_freq` …) checked against a golden manifest.
 - **Editor**, per the mockup:
   - spectrum, curves and nodes;

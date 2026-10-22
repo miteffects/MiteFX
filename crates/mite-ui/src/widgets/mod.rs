@@ -6,9 +6,11 @@ pub mod footer;
 pub mod help;
 pub mod knob;
 pub mod meter;
+pub mod range;
 
 pub use dropdown::{Dropdown, DropdownEvent};
 pub use footer::{Footer, FooterDial, FooterToggle, ToggleGlyph};
 pub use help::Help;
 pub use knob::{Knob, KnobKind};
 pub use meter::LevelMeter;
+pub use range::{ease_range, RangePicker};
