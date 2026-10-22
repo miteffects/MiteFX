@@ -1,0 +1,1761 @@
+{
+  "fields": {
+    "mitefx_state": "1",
+    "preset": "Kick tight",
+    "snapshots": "{\"active\":1,\"slots\":[{\"b01_gain\":0.6},{\"b01_attack\":0.5,\"b01_dmode\":0.0,\"b01_dsrc\":0.0,\"b01_dyn\":0.0,\"b01_freq\":0.35183844,\"b01_gain\":0.5,\"b01_on\":1.0,\"b01_q\":0.4677464,\"b01_range\":0.4,\"b01_ratio\":0.3992745,\"b01_release\":0.49312872,\"b01_rthresh\":0.25,\"b01_slope\":0.44444445,\"b01_spectral\":0.0,\"b01_srel\":0.0,\"b01_ssmooth\":0.25,\"b01_stereo\":0.0,\"b01_sustain\":0.5,\"b01_thresh\":0.625,\"b01_transient\":0.5,\"b01_transition\":0.5,\"b01_ttime\":0.45261392,\"b01_type\":0.33333334,\"b02_attack\":0.5,\"b02_dmode\":0.0,\"b02_dsrc\":0.0,\"b02_dyn\":1.0,\"b02_freq\":0.66408306,\"b02_gain\":0.45,\"b02_on\":1.0,\"b02_q\":0.5993698,\"b02_range\":0.4,\"b02_ratio\":0.3992745,\"b02_release\":0.49312872,\"b02_rthresh\":0.25,\"b02_slope\":0.33333334,\"b02_spectral\":0.0,\"b02_srel\":0.0,\"b02_ssmooth\":0.25,\"b02_stereo\":0.75,\"b02_sustain\":0.5,\"b02_thresh\":0.625,\"b02_transient\":0.5,\"b02_transition\":0.5,\"b02_ttime\":0.45261392,\"b02_type\":0.0,\"b03_attack\":0.5,\"b03_dmode\":0.0,\"b03_dsrc\":0.0,\"b03_dyn\":0.0,\"b03_freq\":0.5554709,\"b03_gain\":0.5,\"b03_on\":0.0,\"b03_q\":0.4677464,\"b03_range\":0.4,\"b03_ratio\":0.3992745,\"b03_release\":0.49312872,\"b03_rthresh\":0.25,\"b03_slope\":0.33333334,\"b03_spectral\":0.0,\"b03_srel\":0.0,\"b03_ssmooth\":0.25,\"b03_stereo\":0.0,\"b03_sustain\":0.5,\"b03_thresh\":0.625,\"b03_transient\":0.5,\"b03_transition\":0.5,\"b03_ttime\":0.45261392,\"b03_type\":0.0,\"b04_attack\":0.5,\"b04_dmode\":0.0,\"b04_dsrc\":0.0,\"b04_dyn\":0.0,\"b04_freq\":0.5554709,\"b04_gain\":0.5,\"b04_on\":0.0,\"b04_q\":0.4677464,\"b04_range\":0.4,\"b04_ratio\":0.3992745,\"b04_release\":0.49312872,\"b04_rthresh\":0.25,\"b04_slope\":0.33333334,\"b04_spectral\":0.0,\"b04_srel\":0.0,\"b04_ssmooth\":0.25,\"b04_stereo\":0.0,\"b04_sustain\":0.5,\"b04_thresh\":0.625,\"b04_transient\":0.5,\"b04_transition\":0.5,\"b04_ttime\":0.45261392,\"b04_type\":0.0,\"b05_attack\":0.5,\"b05_dmode\":0.0,\"b05_dsrc\":0.0,\"b05_dyn\":0.0,\"b05_freq\":0.5554709,\"b05_gain\":0.5,\"b05_on\":0.0,\"b05_q\":0.4677464,\"b05_range\":0.4,\"b05_ratio\":0.3992745,\"b05_release\":0.49312872,\"b05_rthresh\":0.25,\"b05_slope\":0.33333334,\"b05_spectral\":0.0,\"b05_srel\":0.0,\"b05_ssmooth\":0.25,\"b05_stereo\":0.0,\"b05_sustain\":0.5,\"b05_thresh\":0.625,\"b05_transient\":0.5,\"b05_transition\":0.5,\"b05_ttime\":0.45261392,\"b05_type\":0.0,\"b06_attack\":0.5,\"b06_dmode\":0.0,\"b06_dsrc\":0.0,\"b06_dyn\":0.0,\"b06_freq\":0.5554709,\"b06_gain\":0.5,\"b06_on\":0.0,\"b06_q\":0.4677464,\"b06_range\":0.4,\"b06_ratio\":0.3992745,\"b06_release\":0.49312872,\"b06_rthresh\":0.25,\"b06_slope\":0.33333334,\"b06_spectral\":0.0,\"b06_srel\":0.0,\"b06_ssmooth\":0.25,\"b06_stereo\":0.0,\"b06_sustain\":0.5,\"b06_thresh\":0.625,\"b06_transient\":0.5,\"b06_transition\":0.5,\"b06_ttime\":0.45261392,\"b06_type\":0.0,\"b07_attack\":0.5,\"b07_dmode\":0.0,\"b07_dsrc\":0.0,\"b07_dyn\":0.0,\"b07_freq\":0.5554709,\"b07_gain\":0.5,\"b07_on\":0.0,\"b07_q\":0.4677464,\"b07_range\":0.4,\"b07_ratio\":0.3992745,\"b07_release\":0.49312872,\"b07_rthresh\":0.25,\"b07_slope\":0.33333334,\"b07_spectral\":0.0,\"b07_srel\":0.0,\"b07_ssmooth\":0.25,\"b07_stereo\":0.0,\"b07_sustain\":0.5,\"b07_thresh\":0.625,\"b07_transient\":0.5,\"b07_transition\":0.5,\"b07_ttime\":0.45261392,\"b07_type\":0.0,\"b08_attack\":0.5,\"b08_dmode\":0.0,\"b08_dsrc\":0.0,\"b08_dyn\":0.0,\"b08_freq\":0.5554709,\"b08_gain\":0.5,\"b08_on\":0.0,\"b08_q\":0.4677464,\"b08_range\":0.4,\"b08_ratio\":0.3992745,\"b08_release\":0.49312872,\"b08_rthresh\":0.25,\"b08_slope\":0.33333334,\"b08_spectral\":0.0,\"b08_srel\":0.0,\"b08_ssmooth\":0.25,\"b08_stereo\":0.0,\"b08_sustain\":0.5,\"b08_thresh\":0.625,\"b08_transient\":0.5,\"b08_transition\":0.5,\"b08_ttime\":0.45261392,\"b08_type\":0.0,\"b09_attack\":0.5,\"b09_dmode\":0.0,\"b09_dsrc\":0.0,\"b09_dyn\":0.0,\"b09_freq\":0.5554709,\"b09_gain\":0.5,\"b09_on\":0.0,\"b09_q\":0.4677464,\"b09_range\":0.4,\"b09_ratio\":0.3992745,\"b09_release\":0.49312872,\"b09_rthresh\":0.25,\"b09_slope\":0.33333334,\"b09_spectral\":0.0,\"b09_srel\":0.0,\"b09_ssmooth\":0.25,\"b09_stereo\":0.0,\"b09_sustain\":0.5,\"b09_thresh\":0.625,\"b09_transient\":0.5,\"b09_transition\":0.5,\"b09_ttime\":0.45261392,\"b09_type\":0.0,\"b10_attack\":0.5,\"b10_dmode\":0.0,\"b10_dsrc\":0.0,\"b10_dyn\":0.0,\"b10_freq\":0.5554709,\"b10_gain\":0.5,\"b10_on\":0.0,\"b10_q\":0.4677464,\"b10_range\":0.4,\"b10_ratio\":0.3992745,\"b10_release\":0.49312872,\"b10_rthresh\":0.25,\"b10_slope\":0.33333334,\"b10_spectral\":0.0,\"b10_srel\":0.0,\"b10_ssmooth\":0.25,\"b10_stereo\":0.0,\"b10_sustain\":0.5,\"b10_thresh\":0.625,\"b10_transient\":0.5,\"b10_transition\":0.5,\"b10_ttime\":0.45261392,\"b10_type\":0.0,\"b11_attack\":0.5,\"b11_dmode\":0.0,\"b11_dsrc\":0.0,\"b11_dyn\":0.0,\"b11_freq\":0.5554709,\"b11_gain\":0.5,\"b11_on\":0.0,\"b11_q\":0.4677464,\"b11_range\":0.4,\"b11_ratio\":0.3992745,\"b11_release\":0.49312872,\"b11_rthresh\":0.25,\"b11_slope\":0.33333334,\"b11_spectral\":0.0,\"b11_srel\":0.0,\"b11_ssmooth\":0.25,\"b11_stereo\":0.0,\"b11_sustain\":0.5,\"b11_thresh\":0.625,\"b11_transient\":0.5,\"b11_transition\":0.5,\"b11_ttime\":0.45261392,\"b11_type\":0.0,\"b12_attack\":0.5,\"b12_dmode\":0.0,\"b12_dsrc\":0.0,\"b12_dyn\":0.0,\"b12_freq\":0.5554709,\"b12_gain\":0.5,\"b12_on\":0.0,\"b12_q\":0.4677464,\"b12_range\":0.4,\"b12_ratio\":0.3992745,\"b12_release\":0.49312872,\"b12_rthresh\":0.25,\"b12_slope\":0.33333334,\"b12_spectral\":0.0,\"b12_srel\":0.0,\"b12_ssmooth\":0.25,\"b12_stereo\":0.0,\"b12_sustain\":0.5,\"b12_thresh\":0.625,\"b12_transient\":0.5,\"b12_transition\":0.5,\"b12_ttime\":0.45261392,\"b12_type\":0.0,\"b13_attack\":0.5,\"b13_dmode\":0.0,\"b13_dsrc\":0.0,\"b13_dyn\":0.0,\"b13_freq\":0.5554709,\"b13_gain\":0.5,\"b13_on\":0.0,\"b13_q\":0.4677464,\"b13_range\":0.4,\"b13_ratio\":0.3992745,\"b13_release\":0.49312872,\"b13_rthresh\":0.25,\"b13_slope\":0.33333334,\"b13_spectral\":0.0,\"b13_srel\":0.0,\"b13_ssmooth\":0.25,\"b13_stereo\":0.0,\"b13_sustain\":0.5,\"b13_thresh\":0.625,\"b13_transient\":0.5,\"b13_transition\":0.5,\"b13_ttime\":0.45261392,\"b13_type\":0.0,\"b14_attack\":0.5,\"b14_dmode\":0.0,\"b14_dsrc\":0.0,\"b14_dyn\":0.0,\"b14_freq\":0.5554709,\"b14_gain\":0.5,\"b14_on\":0.0,\"b14_q\":0.4677464,\"b14_range\":0.4,\"b14_ratio\":0.3992745,\"b14_release\":0.49312872,\"b14_rthresh\":0.25,\"b14_slope\":0.33333334,\"b14_spectral\":0.0,\"b14_srel\":0.0,\"b14_ssmooth\":0.25,\"b14_stereo\":0.0,\"b14_sustain\":0.5,\"b14_thresh\":0.625,\"b14_transient\":0.5,\"b14_transition\":0.5,\"b14_ttime\":0.45261392,\"b14_type\":0.0,\"b15_attack\":0.5,\"b15_dmode\":0.0,\"b15_dsrc\":0.0,\"b15_dyn\":0.0,\"b15_freq\":0.5554709,\"b15_gain\":0.5,\"b15_on\":0.0,\"b15_q\":0.4677464,\"b15_range\":0.4,\"b15_ratio\":0.3992745,\"b15_release\":0.49312872,\"b15_rthresh\":0.25,\"b15_slope\":0.33333334,\"b15_spectral\":0.0,\"b15_srel\":0.0,\"b15_ssmooth\":0.25,\"b15_stereo\":0.0,\"b15_sustain\":0.5,\"b15_thresh\":0.625,\"b15_transient\":0.5,\"b15_transition\":0.5,\"b15_ttime\":0.45261392,\"b15_type\":0.0,\"b16_attack\":0.5,\"b16_dmode\":0.0,\"b16_dsrc\":0.0,\"b16_dyn\":0.0,\"b16_freq\":0.5554709,\"b16_gain\":0.5,\"b16_on\":0.0,\"b16_q\":0.4677464,\"b16_range\":0.4,\"b16_ratio\":0.3992745,\"b16_release\":0.49312872,\"b16_rthresh\":0.25,\"b16_slope\":0.33333334,\"b16_spectral\":0.0,\"b16_srel\":0.0,\"b16_ssmooth\":0.25,\"b16_stereo\":0.0,\"b16_sustain\":0.5,\"b16_thresh\":0.625,\"b16_transient\":0.5,\"b16_transition\":0.5,\"b16_ttime\":0.45261392,\"b16_type\":0.0,\"b17_attack\":0.5,\"b17_dmode\":0.0,\"b17_dsrc\":0.0,\"b17_dyn\":0.0,\"b17_freq\":0.5554709,\"b17_gain\":0.5,\"b17_on\":0.0,\"b17_q\":0.4677464,\"b17_range\":0.4,\"b17_ratio\":0.3992745,\"b17_release\":0.49312872,\"b17_rthresh\":0.25,\"b17_slope\":0.33333334,\"b17_spectral\":0.0,\"b17_srel\":0.0,\"b17_ssmooth\":0.25,\"b17_stereo\":0.0,\"b17_sustain\":0.5,\"b17_thresh\":0.625,\"b17_transient\":0.5,\"b17_transition\":0.5,\"b17_ttime\":0.45261392,\"b17_type\":0.0,\"b18_attack\":0.5,\"b18_dmode\":0.0,\"b18_dsrc\":0.0,\"b18_dyn\":0.0,\"b18_freq\":0.5554709,\"b18_gain\":0.5,\"b18_on\":0.0,\"b18_q\":0.4677464,\"b18_range\":0.4,\"b18_ratio\":0.3992745,\"b18_release\":0.49312872,\"b18_rthresh\":0.25,\"b18_slope\":0.33333334,\"b18_spectral\":0.0,\"b18_srel\":0.0,\"b18_ssmooth\":0.25,\"b18_stereo\":0.0,\"b18_sustain\":0.5,\"b18_thresh\":0.625,\"b18_transient\":0.5,\"b18_transition\":0.5,\"b18_ttime\":0.45261392,\"b18_type\":0.0,\"b19_attack\":0.5,\"b19_dmode\":0.0,\"b19_dsrc\":0.0,\"b19_dyn\":0.0,\"b19_freq\":0.5554709,\"b19_gain\":0.5,\"b19_on\":0.0,\"b19_q\":0.4677464,\"b19_range\":0.4,\"b19_ratio\":0.3992745,\"b19_release\":0.49312872,\"b19_rthresh\":0.25,\"b19_slope\":0.33333334,\"b19_spectral\":0.0,\"b19_srel\":0.0,\"b19_ssmooth\":0.25,\"b19_stereo\":0.0,\"b19_sustain\":0.5,\"b19_thresh\":0.625,\"b19_transient\":0.5,\"b19_transition\":0.5,\"b19_ttime\":0.45261392,\"b19_type\":0.0,\"b20_attack\":0.5,\"b20_dmode\":0.0,\"b20_dsrc\":0.0,\"b20_dyn\":0.0,\"b20_freq\":0.5554709,\"b20_gain\":0.5,\"b20_on\":0.0,\"b20_q\":0.4677464,\"b20_range\":0.4,\"b20_ratio\":0.3992745,\"b20_release\":0.49312872,\"b20_rthresh\":0.25,\"b20_slope\":0.33333334,\"b20_spectral\":0.0,\"b20_srel\":0.0,\"b20_ssmooth\":0.25,\"b20_stereo\":0.0,\"b20_sustain\":0.5,\"b20_thresh\":0.625,\"b20_transient\":0.5,\"b20_transition\":0.5,\"b20_ttime\":0.45261392,\"b20_type\":0.0,\"b21_attack\":0.5,\"b21_dmode\":0.0,\"b21_dsrc\":0.0,\"b21_dyn\":0.0,\"b21_freq\":0.5554709,\"b21_gain\":0.5,\"b21_on\":0.0,\"b21_q\":0.4677464,\"b21_range\":0.4,\"b21_ratio\":0.3992745,\"b21_release\":0.49312872,\"b21_rthresh\":0.25,\"b21_slope\":0.33333334,\"b21_spectral\":0.0,\"b21_srel\":0.0,\"b21_ssmooth\":0.25,\"b21_stereo\":0.0,\"b21_sustain\":0.5,\"b21_thresh\":0.625,\"b21_transient\":0.5,\"b21_transition\":0.5,\"b21_ttime\":0.45261392,\"b21_type\":0.0,\"b22_attack\":0.5,\"b22_dmode\":0.0,\"b22_dsrc\":0.0,\"b22_dyn\":0.0,\"b22_freq\":0.5554709,\"b22_gain\":0.5,\"b22_on\":0.0,\"b22_q\":0.4677464,\"b22_range\":0.4,\"b22_ratio\":0.3992745,\"b22_release\":0.49312872,\"b22_rthresh\":0.25,\"b22_slope\":0.33333334,\"b22_spectral\":0.0,\"b22_srel\":0.0,\"b22_ssmooth\":0.25,\"b22_stereo\":0.0,\"b22_sustain\":0.5,\"b22_thresh\":0.625,\"b22_transient\":0.5,\"b22_transition\":0.5,\"b22_ttime\":0.45261392,\"b22_type\":0.0,\"b23_attack\":0.5,\"b23_dmode\":0.0,\"b23_dsrc\":0.0,\"b23_dyn\":0.0,\"b23_freq\":0.5554709,\"b23_gain\":0.5,\"b23_on\":0.0,\"b23_q\":0.4677464,\"b23_range\":0.4,\"b23_ratio\":0.3992745,\"b23_release\":0.49312872,\"b23_rthresh\":0.25,\"b23_slope\":0.33333334,\"b23_spectral\":0.0,\"b23_srel\":0.0,\"b23_ssmooth\":0.25,\"b23_stereo\":0.0,\"b23_sustain\":0.5,\"b23_thresh\":0.625,\"b23_transient\":0.5,\"b23_transition\":0.5,\"b23_ttime\":0.45261392,\"b23_type\":0.0,\"b24_attack\":0.5,\"b24_dmode\":0.0,\"b24_dsrc\":0.0,\"b24_dyn\":0.0,\"b24_freq\":0.5554709,\"b24_gain\":0.5,\"b24_on\":0.0,\"b24_q\":0.4677464,\"b24_range\":0.4,\"b24_ratio\":0.3992745,\"b24_release\":0.49312872,\"b24_rthresh\":0.25,\"b24_slope\":0.33333334,\"b24_spectral\":0.0,\"b24_srel\":0.0,\"b24_ssmooth\":0.25,\"b24_stereo\":0.0,\"b24_sustain\":0.5,\"b24_thresh\":0.625,\"b24_transient\":0.5,\"b24_transition\":0.5,\"b24_ttime\":0.45261392,\"b24_type\":0.0},{\"b03_on\":1.0},null]}"
+  },
+  "params": {
+    "auto_gain": {
+      "bool": false
+    },
+    "b01_attack": {
+      "f32": 10.0
+    },
+    "b01_dmode": {
+      "i32": 0
+    },
+    "b01_dsrc": {
+      "i32": 0
+    },
+    "b01_dyn": {
+      "bool": false
+    },
+    "b01_freq": {
+      "f32": 80.0
+    },
+    "b01_gain": {
+      "f32": 0.0
+    },
+    "b01_on": {
+      "bool": true
+    },
+    "b01_q": {
+      "f32": 0.70710677
+    },
+    "b01_range": {
+      "f32": -6.0
+    },
+    "b01_ratio": {
+      "f32": 3.0
+    },
+    "b01_release": {
+      "f32": 150.0
+    },
+    "b01_rthresh": {
+      "f32": 6.0
+    },
+    "b01_slope": {
+      "i32": 4
+    },
+    "b01_solo": {
+      "bool": false
+    },
+    "b01_spectral": {
+      "bool": false
+    },
+    "b01_srel": {
+      "bool": false
+    },
+    "b01_ssmooth": {
+      "f32": 25.0
+    },
+    "b01_stereo": {
+      "i32": 0
+    },
+    "b01_sustain": {
+      "f32": 0.0
+    },
+    "b01_thresh": {
+      "f32": -30.0
+    },
+    "b01_transient": {
+      "f32": 0.0
+    },
+    "b01_transition": {
+      "f32": 100.0
+    },
+    "b01_ttime": {
+      "f32": 25.0
+    },
+    "b01_type": {
+      "i32": 3
+    },
+    "b02_attack": {
+      "f32": 10.0
+    },
+    "b02_dmode": {
+      "i32": 0
+    },
+    "b02_dsrc": {
+      "i32": 0
+    },
+    "b02_dyn": {
+      "bool": true
+    },
+    "b02_freq": {
+      "f32": 2800.0
+    },
+    "b02_gain": {
+      "f32": -3.0
+    },
+    "b02_on": {
+      "bool": true
+    },
+    "b02_q": {
+      "f32": 2.6
+    },
+    "b02_range": {
+      "f32": -6.0
+    },
+    "b02_ratio": {
+      "f32": 3.0
+    },
+    "b02_release": {
+      "f32": 150.0
+    },
+    "b02_rthresh": {
+      "f32": 6.0
+    },
+    "b02_slope": {
+      "i32": 3
+    },
+    "b02_solo": {
+      "bool": false
+    },
+    "b02_spectral": {
+      "bool": false
+    },
+    "b02_srel": {
+      "bool": false
+    },
+    "b02_ssmooth": {
+      "f32": 25.0
+    },
+    "b02_stereo": {
+      "i32": 3
+    },
+    "b02_sustain": {
+      "f32": 0.0
+    },
+    "b02_thresh": {
+      "f32": -30.0
+    },
+    "b02_transient": {
+      "f32": 0.0
+    },
+    "b02_transition": {
+      "f32": 100.0
+    },
+    "b02_ttime": {
+      "f32": 25.0
+    },
+    "b02_type": {
+      "i32": 0
+    },
+    "b03_attack": {
+      "f32": 10.0
+    },
+    "b03_dmode": {
+      "i32": 0
+    },
+    "b03_dsrc": {
+      "i32": 0
+    },
+    "b03_dyn": {
+      "bool": false
+    },
+    "b03_freq": {
+      "f32": 1000.0
+    },
+    "b03_gain": {
+      "f32": 0.0
+    },
+    "b03_on": {
+      "bool": false
+    },
+    "b03_q": {
+      "f32": 0.70710677
+    },
+    "b03_range": {
+      "f32": -6.0
+    },
+    "b03_ratio": {
+      "f32": 3.0
+    },
+    "b03_release": {
+      "f32": 150.0
+    },
+    "b03_rthresh": {
+      "f32": 6.0
+    },
+    "b03_slope": {
+      "i32": 3
+    },
+    "b03_solo": {
+      "bool": false
+    },
+    "b03_spectral": {
+      "bool": false
+    },
+    "b03_srel": {
+      "bool": false
+    },
+    "b03_ssmooth": {
+      "f32": 25.0
+    },
+    "b03_stereo": {
+      "i32": 0
+    },
+    "b03_sustain": {
+      "f32": 0.0
+    },
+    "b03_thresh": {
+      "f32": -30.0
+    },
+    "b03_transient": {
+      "f32": 0.0
+    },
+    "b03_transition": {
+      "f32": 100.0
+    },
+    "b03_ttime": {
+      "f32": 25.0
+    },
+    "b03_type": {
+      "i32": 0
+    },
+    "b04_attack": {
+      "f32": 10.0
+    },
+    "b04_dmode": {
+      "i32": 0
+    },
+    "b04_dsrc": {
+      "i32": 0
+    },
+    "b04_dyn": {
+      "bool": false
+    },
+    "b04_freq": {
+      "f32": 1000.0
+    },
+    "b04_gain": {
+      "f32": 0.0
+    },
+    "b04_on": {
+      "bool": false
+    },
+    "b04_q": {
+      "f32": 0.70710677
+    },
+    "b04_range": {
+      "f32": -6.0
+    },
+    "b04_ratio": {
+      "f32": 3.0
+    },
+    "b04_release": {
+      "f32": 150.0
+    },
+    "b04_rthresh": {
+      "f32": 6.0
+    },
+    "b04_slope": {
+      "i32": 3
+    },
+    "b04_solo": {
+      "bool": false
+    },
+    "b04_spectral": {
+      "bool": false
+    },
+    "b04_srel": {
+      "bool": false
+    },
+    "b04_ssmooth": {
+      "f32": 25.0
+    },
+    "b04_stereo": {
+      "i32": 0
+    },
+    "b04_sustain": {
+      "f32": 0.0
+    },
+    "b04_thresh": {
+      "f32": -30.0
+    },
+    "b04_transient": {
+      "f32": 0.0
+    },
+    "b04_transition": {
+      "f32": 100.0
+    },
+    "b04_ttime": {
+      "f32": 25.0
+    },
+    "b04_type": {
+      "i32": 0
+    },
+    "b05_attack": {
+      "f32": 10.0
+    },
+    "b05_dmode": {
+      "i32": 0
+    },
+    "b05_dsrc": {
+      "i32": 0
+    },
+    "b05_dyn": {
+      "bool": false
+    },
+    "b05_freq": {
+      "f32": 1000.0
+    },
+    "b05_gain": {
+      "f32": 0.0
+    },
+    "b05_on": {
+      "bool": false
+    },
+    "b05_q": {
+      "f32": 0.70710677
+    },
+    "b05_range": {
+      "f32": -6.0
+    },
+    "b05_ratio": {
+      "f32": 3.0
+    },
+    "b05_release": {
+      "f32": 150.0
+    },
+    "b05_rthresh": {
+      "f32": 6.0
+    },
+    "b05_slope": {
+      "i32": 3
+    },
+    "b05_solo": {
+      "bool": false
+    },
+    "b05_spectral": {
+      "bool": false
+    },
+    "b05_srel": {
+      "bool": false
+    },
+    "b05_ssmooth": {
+      "f32": 25.0
+    },
+    "b05_stereo": {
+      "i32": 0
+    },
+    "b05_sustain": {
+      "f32": 0.0
+    },
+    "b05_thresh": {
+      "f32": -30.0
+    },
+    "b05_transient": {
+      "f32": 0.0
+    },
+    "b05_transition": {
+      "f32": 100.0
+    },
+    "b05_ttime": {
+      "f32": 25.0
+    },
+    "b05_type": {
+      "i32": 0
+    },
+    "b06_attack": {
+      "f32": 10.0
+    },
+    "b06_dmode": {
+      "i32": 0
+    },
+    "b06_dsrc": {
+      "i32": 0
+    },
+    "b06_dyn": {
+      "bool": false
+    },
+    "b06_freq": {
+      "f32": 1000.0
+    },
+    "b06_gain": {
+      "f32": 0.0
+    },
+    "b06_on": {
+      "bool": false
+    },
+    "b06_q": {
+      "f32": 0.70710677
+    },
+    "b06_range": {
+      "f32": -6.0
+    },
+    "b06_ratio": {
+      "f32": 3.0
+    },
+    "b06_release": {
+      "f32": 150.0
+    },
+    "b06_rthresh": {
+      "f32": 6.0
+    },
+    "b06_slope": {
+      "i32": 3
+    },
+    "b06_solo": {
+      "bool": false
+    },
+    "b06_spectral": {
+      "bool": false
+    },
+    "b06_srel": {
+      "bool": false
+    },
+    "b06_ssmooth": {
+      "f32": 25.0
+    },
+    "b06_stereo": {
+      "i32": 0
+    },
+    "b06_sustain": {
+      "f32": 0.0
+    },
+    "b06_thresh": {
+      "f32": -30.0
+    },
+    "b06_transient": {
+      "f32": 0.0
+    },
+    "b06_transition": {
+      "f32": 100.0
+    },
+    "b06_ttime": {
+      "f32": 25.0
+    },
+    "b06_type": {
+      "i32": 0
+    },
+    "b07_attack": {
+      "f32": 10.0
+    },
+    "b07_dmode": {
+      "i32": 0
+    },
+    "b07_dsrc": {
+      "i32": 0
+    },
+    "b07_dyn": {
+      "bool": false
+    },
+    "b07_freq": {
+      "f32": 1000.0
+    },
+    "b07_gain": {
+      "f32": 0.0
+    },
+    "b07_on": {
+      "bool": false
+    },
+    "b07_q": {
+      "f32": 0.70710677
+    },
+    "b07_range": {
+      "f32": -6.0
+    },
+    "b07_ratio": {
+      "f32": 3.0
+    },
+    "b07_release": {
+      "f32": 150.0
+    },
+    "b07_rthresh": {
+      "f32": 6.0
+    },
+    "b07_slope": {
+      "i32": 3
+    },
+    "b07_solo": {
+      "bool": false
+    },
+    "b07_spectral": {
+      "bool": false
+    },
+    "b07_srel": {
+      "bool": false
+    },
+    "b07_ssmooth": {
+      "f32": 25.0
+    },
+    "b07_stereo": {
+      "i32": 0
+    },
+    "b07_sustain": {
+      "f32": 0.0
+    },
+    "b07_thresh": {
+      "f32": -30.0
+    },
+    "b07_transient": {
+      "f32": 0.0
+    },
+    "b07_transition": {
+      "f32": 100.0
+    },
+    "b07_ttime": {
+      "f32": 25.0
+    },
+    "b07_type": {
+      "i32": 0
+    },
+    "b08_attack": {
+      "f32": 10.0
+    },
+    "b08_dmode": {
+      "i32": 0
+    },
+    "b08_dsrc": {
+      "i32": 0
+    },
+    "b08_dyn": {
+      "bool": false
+    },
+    "b08_freq": {
+      "f32": 1000.0
+    },
+    "b08_gain": {
+      "f32": 0.0
+    },
+    "b08_on": {
+      "bool": false
+    },
+    "b08_q": {
+      "f32": 0.70710677
+    },
+    "b08_range": {
+      "f32": -6.0
+    },
+    "b08_ratio": {
+      "f32": 3.0
+    },
+    "b08_release": {
+      "f32": 150.0
+    },
+    "b08_rthresh": {
+      "f32": 6.0
+    },
+    "b08_slope": {
+      "i32": 3
+    },
+    "b08_solo": {
+      "bool": false
+    },
+    "b08_spectral": {
+      "bool": false
+    },
+    "b08_srel": {
+      "bool": false
+    },
+    "b08_ssmooth": {
+      "f32": 25.0
+    },
+    "b08_stereo": {
+      "i32": 0
+    },
+    "b08_sustain": {
+      "f32": 0.0
+    },
+    "b08_thresh": {
+      "f32": -30.0
+    },
+    "b08_transient": {
+      "f32": 0.0
+    },
+    "b08_transition": {
+      "f32": 100.0
+    },
+    "b08_ttime": {
+      "f32": 25.0
+    },
+    "b08_type": {
+      "i32": 0
+    },
+    "b09_attack": {
+      "f32": 10.0
+    },
+    "b09_dmode": {
+      "i32": 0
+    },
+    "b09_dsrc": {
+      "i32": 0
+    },
+    "b09_dyn": {
+      "bool": false
+    },
+    "b09_freq": {
+      "f32": 1000.0
+    },
+    "b09_gain": {
+      "f32": 0.0
+    },
+    "b09_on": {
+      "bool": false
+    },
+    "b09_q": {
+      "f32": 0.70710677
+    },
+    "b09_range": {
+      "f32": -6.0
+    },
+    "b09_ratio": {
+      "f32": 3.0
+    },
+    "b09_release": {
+      "f32": 150.0
+    },
+    "b09_rthresh": {
+      "f32": 6.0
+    },
+    "b09_slope": {
+      "i32": 3
+    },
+    "b09_solo": {
+      "bool": false
+    },
+    "b09_spectral": {
+      "bool": false
+    },
+    "b09_srel": {
+      "bool": false
+    },
+    "b09_ssmooth": {
+      "f32": 25.0
+    },
+    "b09_stereo": {
+      "i32": 0
+    },
+    "b09_sustain": {
+      "f32": 0.0
+    },
+    "b09_thresh": {
+      "f32": -30.0
+    },
+    "b09_transient": {
+      "f32": 0.0
+    },
+    "b09_transition": {
+      "f32": 100.0
+    },
+    "b09_ttime": {
+      "f32": 25.0
+    },
+    "b09_type": {
+      "i32": 0
+    },
+    "b10_attack": {
+      "f32": 10.0
+    },
+    "b10_dmode": {
+      "i32": 0
+    },
+    "b10_dsrc": {
+      "i32": 0
+    },
+    "b10_dyn": {
+      "bool": false
+    },
+    "b10_freq": {
+      "f32": 1000.0
+    },
+    "b10_gain": {
+      "f32": 0.0
+    },
+    "b10_on": {
+      "bool": false
+    },
+    "b10_q": {
+      "f32": 0.70710677
+    },
+    "b10_range": {
+      "f32": -6.0
+    },
+    "b10_ratio": {
+      "f32": 3.0
+    },
+    "b10_release": {
+      "f32": 150.0
+    },
+    "b10_rthresh": {
+      "f32": 6.0
+    },
+    "b10_slope": {
+      "i32": 3
+    },
+    "b10_solo": {
+      "bool": false
+    },
+    "b10_spectral": {
+      "bool": false
+    },
+    "b10_srel": {
+      "bool": false
+    },
+    "b10_ssmooth": {
+      "f32": 25.0
+    },
+    "b10_stereo": {
+      "i32": 0
+    },
+    "b10_sustain": {
+      "f32": 0.0
+    },
+    "b10_thresh": {
+      "f32": -30.0
+    },
+    "b10_transient": {
+      "f32": 0.0
+    },
+    "b10_transition": {
+      "f32": 100.0
+    },
+    "b10_ttime": {
+      "f32": 25.0
+    },
+    "b10_type": {
+      "i32": 0
+    },
+    "b11_attack": {
+      "f32": 10.0
+    },
+    "b11_dmode": {
+      "i32": 0
+    },
+    "b11_dsrc": {
+      "i32": 0
+    },
+    "b11_dyn": {
+      "bool": false
+    },
+    "b11_freq": {
+      "f32": 1000.0
+    },
+    "b11_gain": {
+      "f32": 0.0
+    },
+    "b11_on": {
+      "bool": false
+    },
+    "b11_q": {
+      "f32": 0.70710677
+    },
+    "b11_range": {
+      "f32": -6.0
+    },
+    "b11_ratio": {
+      "f32": 3.0
+    },
+    "b11_release": {
+      "f32": 150.0
+    },
+    "b11_rthresh": {
+      "f32": 6.0
+    },
+    "b11_slope": {
+      "i32": 3
+    },
+    "b11_solo": {
+      "bool": false
+    },
+    "b11_spectral": {
+      "bool": false
+    },
+    "b11_srel": {
+      "bool": false
+    },
+    "b11_ssmooth": {
+      "f32": 25.0
+    },
+    "b11_stereo": {
+      "i32": 0
+    },
+    "b11_sustain": {
+      "f32": 0.0
+    },
+    "b11_thresh": {
+      "f32": -30.0
+    },
+    "b11_transient": {
+      "f32": 0.0
+    },
+    "b11_transition": {
+      "f32": 100.0
+    },
+    "b11_ttime": {
+      "f32": 25.0
+    },
+    "b11_type": {
+      "i32": 0
+    },
+    "b12_attack": {
+      "f32": 10.0
+    },
+    "b12_dmode": {
+      "i32": 0
+    },
+    "b12_dsrc": {
+      "i32": 0
+    },
+    "b12_dyn": {
+      "bool": false
+    },
+    "b12_freq": {
+      "f32": 1000.0
+    },
+    "b12_gain": {
+      "f32": 0.0
+    },
+    "b12_on": {
+      "bool": false
+    },
+    "b12_q": {
+      "f32": 0.70710677
+    },
+    "b12_range": {
+      "f32": -6.0
+    },
+    "b12_ratio": {
+      "f32": 3.0
+    },
+    "b12_release": {
+      "f32": 150.0
+    },
+    "b12_rthresh": {
+      "f32": 6.0
+    },
+    "b12_slope": {
+      "i32": 3
+    },
+    "b12_solo": {
+      "bool": false
+    },
+    "b12_spectral": {
+      "bool": false
+    },
+    "b12_srel": {
+      "bool": false
+    },
+    "b12_ssmooth": {
+      "f32": 25.0
+    },
+    "b12_stereo": {
+      "i32": 0
+    },
+    "b12_sustain": {
+      "f32": 0.0
+    },
+    "b12_thresh": {
+      "f32": -30.0
+    },
+    "b12_transient": {
+      "f32": 0.0
+    },
+    "b12_transition": {
+      "f32": 100.0
+    },
+    "b12_ttime": {
+      "f32": 25.0
+    },
+    "b12_type": {
+      "i32": 0
+    },
+    "b13_attack": {
+      "f32": 10.0
+    },
+    "b13_dmode": {
+      "i32": 0
+    },
+    "b13_dsrc": {
+      "i32": 0
+    },
+    "b13_dyn": {
+      "bool": false
+    },
+    "b13_freq": {
+      "f32": 1000.0
+    },
+    "b13_gain": {
+      "f32": 0.0
+    },
+    "b13_on": {
+      "bool": false
+    },
+    "b13_q": {
+      "f32": 0.70710677
+    },
+    "b13_range": {
+      "f32": -6.0
+    },
+    "b13_ratio": {
+      "f32": 3.0
+    },
+    "b13_release": {
+      "f32": 150.0
+    },
+    "b13_rthresh": {
+      "f32": 6.0
+    },
+    "b13_slope": {
+      "i32": 3
+    },
+    "b13_solo": {
+      "bool": false
+    },
+    "b13_spectral": {
+      "bool": false
+    },
+    "b13_srel": {
+      "bool": false
+    },
+    "b13_ssmooth": {
+      "f32": 25.0
+    },
+    "b13_stereo": {
+      "i32": 0
+    },
+    "b13_sustain": {
+      "f32": 0.0
+    },
+    "b13_thresh": {
+      "f32": -30.0
+    },
+    "b13_transient": {
+      "f32": 0.0
+    },
+    "b13_transition": {
+      "f32": 100.0
+    },
+    "b13_ttime": {
+      "f32": 25.0
+    },
+    "b13_type": {
+      "i32": 0
+    },
+    "b14_attack": {
+      "f32": 10.0
+    },
+    "b14_dmode": {
+      "i32": 0
+    },
+    "b14_dsrc": {
+      "i32": 0
+    },
+    "b14_dyn": {
+      "bool": false
+    },
+    "b14_freq": {
+      "f32": 1000.0
+    },
+    "b14_gain": {
+      "f32": 0.0
+    },
+    "b14_on": {
+      "bool": false
+    },
+    "b14_q": {
+      "f32": 0.70710677
+    },
+    "b14_range": {
+      "f32": -6.0
+    },
+    "b14_ratio": {
+      "f32": 3.0
+    },
+    "b14_release": {
+      "f32": 150.0
+    },
+    "b14_rthresh": {
+      "f32": 6.0
+    },
+    "b14_slope": {
+      "i32": 3
+    },
+    "b14_solo": {
+      "bool": false
+    },
+    "b14_spectral": {
+      "bool": false
+    },
+    "b14_srel": {
+      "bool": false
+    },
+    "b14_ssmooth": {
+      "f32": 25.0
+    },
+    "b14_stereo": {
+      "i32": 0
+    },
+    "b14_sustain": {
+      "f32": 0.0
+    },
+    "b14_thresh": {
+      "f32": -30.0
+    },
+    "b14_transient": {
+      "f32": 0.0
+    },
+    "b14_transition": {
+      "f32": 100.0
+    },
+    "b14_ttime": {
+      "f32": 25.0
+    },
+    "b14_type": {
+      "i32": 0
+    },
+    "b15_attack": {
+      "f32": 10.0
+    },
+    "b15_dmode": {
+      "i32": 0
+    },
+    "b15_dsrc": {
+      "i32": 0
+    },
+    "b15_dyn": {
+      "bool": false
+    },
+    "b15_freq": {
+      "f32": 1000.0
+    },
+    "b15_gain": {
+      "f32": 0.0
+    },
+    "b15_on": {
+      "bool": false
+    },
+    "b15_q": {
+      "f32": 0.70710677
+    },
+    "b15_range": {
+      "f32": -6.0
+    },
+    "b15_ratio": {
+      "f32": 3.0
+    },
+    "b15_release": {
+      "f32": 150.0
+    },
+    "b15_rthresh": {
+      "f32": 6.0
+    },
+    "b15_slope": {
+      "i32": 3
+    },
+    "b15_solo": {
+      "bool": false
+    },
+    "b15_spectral": {
+      "bool": false
+    },
+    "b15_srel": {
+      "bool": false
+    },
+    "b15_ssmooth": {
+      "f32": 25.0
+    },
+    "b15_stereo": {
+      "i32": 0
+    },
+    "b15_sustain": {
+      "f32": 0.0
+    },
+    "b15_thresh": {
+      "f32": -30.0
+    },
+    "b15_transient": {
+      "f32": 0.0
+    },
+    "b15_transition": {
+      "f32": 100.0
+    },
+    "b15_ttime": {
+      "f32": 25.0
+    },
+    "b15_type": {
+      "i32": 0
+    },
+    "b16_attack": {
+      "f32": 10.0
+    },
+    "b16_dmode": {
+      "i32": 0
+    },
+    "b16_dsrc": {
+      "i32": 0
+    },
+    "b16_dyn": {
+      "bool": false
+    },
+    "b16_freq": {
+      "f32": 1000.0
+    },
+    "b16_gain": {
+      "f32": 0.0
+    },
+    "b16_on": {
+      "bool": false
+    },
+    "b16_q": {
+      "f32": 0.70710677
+    },
+    "b16_range": {
+      "f32": -6.0
+    },
+    "b16_ratio": {
+      "f32": 3.0
+    },
+    "b16_release": {
+      "f32": 150.0
+    },
+    "b16_rthresh": {
+      "f32": 6.0
+    },
+    "b16_slope": {
+      "i32": 3
+    },
+    "b16_solo": {
+      "bool": false
+    },
+    "b16_spectral": {
+      "bool": false
+    },
+    "b16_srel": {
+      "bool": false
+    },
+    "b16_ssmooth": {
+      "f32": 25.0
+    },
+    "b16_stereo": {
+      "i32": 0
+    },
+    "b16_sustain": {
+      "f32": 0.0
+    },
+    "b16_thresh": {
+      "f32": -30.0
+    },
+    "b16_transient": {
+      "f32": 0.0
+    },
+    "b16_transition": {
+      "f32": 100.0
+    },
+    "b16_ttime": {
+      "f32": 25.0
+    },
+    "b16_type": {
+      "i32": 0
+    },
+    "b17_attack": {
+      "f32": 10.0
+    },
+    "b17_dmode": {
+      "i32": 0
+    },
+    "b17_dsrc": {
+      "i32": 0
+    },
+    "b17_dyn": {
+      "bool": false
+    },
+    "b17_freq": {
+      "f32": 1000.0
+    },
+    "b17_gain": {
+      "f32": 0.0
+    },
+    "b17_on": {
+      "bool": false
+    },
+    "b17_q": {
+      "f32": 0.70710677
+    },
+    "b17_range": {
+      "f32": -6.0
+    },
+    "b17_ratio": {
+      "f32": 3.0
+    },
+    "b17_release": {
+      "f32": 150.0
+    },
+    "b17_rthresh": {
+      "f32": 6.0
+    },
+    "b17_slope": {
+      "i32": 3
+    },
+    "b17_solo": {
+      "bool": false
+    },
+    "b17_spectral": {
+      "bool": false
+    },
+    "b17_srel": {
+      "bool": false
+    },
+    "b17_ssmooth": {
+      "f32": 25.0
+    },
+    "b17_stereo": {
+      "i32": 0
+    },
+    "b17_sustain": {
+      "f32": 0.0
+    },
+    "b17_thresh": {
+      "f32": -30.0
+    },
+    "b17_transient": {
+      "f32": 0.0
+    },
+    "b17_transition": {
+      "f32": 100.0
+    },
+    "b17_ttime": {
+      "f32": 25.0
+    },
+    "b17_type": {
+      "i32": 0
+    },
+    "b18_attack": {
+      "f32": 10.0
+    },
+    "b18_dmode": {
+      "i32": 0
+    },
+    "b18_dsrc": {
+      "i32": 0
+    },
+    "b18_dyn": {
+      "bool": false
+    },
+    "b18_freq": {
+      "f32": 1000.0
+    },
+    "b18_gain": {
+      "f32": 0.0
+    },
+    "b18_on": {
+      "bool": false
+    },
+    "b18_q": {
+      "f32": 0.70710677
+    },
+    "b18_range": {
+      "f32": -6.0
+    },
+    "b18_ratio": {
+      "f32": 3.0
+    },
+    "b18_release": {
+      "f32": 150.0
+    },
+    "b18_rthresh": {
+      "f32": 6.0
+    },
+    "b18_slope": {
+      "i32": 3
+    },
+    "b18_solo": {
+      "bool": false
+    },
+    "b18_spectral": {
+      "bool": false
+    },
+    "b18_srel": {
+      "bool": false
+    },
+    "b18_ssmooth": {
+      "f32": 25.0
+    },
+    "b18_stereo": {
+      "i32": 0
+    },
+    "b18_sustain": {
+      "f32": 0.0
+    },
+    "b18_thresh": {
+      "f32": -30.0
+    },
+    "b18_transient": {
+      "f32": 0.0
+    },
+    "b18_transition": {
+      "f32": 100.0
+    },
+    "b18_ttime": {
+      "f32": 25.0
+    },
+    "b18_type": {
+      "i32": 0
+    },
+    "b19_attack": {
+      "f32": 10.0
+    },
+    "b19_dmode": {
+      "i32": 0
+    },
+    "b19_dsrc": {
+      "i32": 0
+    },
+    "b19_dyn": {
+      "bool": false
+    },
+    "b19_freq": {
+      "f32": 1000.0
+    },
+    "b19_gain": {
+      "f32": 0.0
+    },
+    "b19_on": {
+      "bool": false
+    },
+    "b19_q": {
+      "f32": 0.70710677
+    },
+    "b19_range": {
+      "f32": -6.0
+    },
+    "b19_ratio": {
+      "f32": 3.0
+    },
+    "b19_release": {
+      "f32": 150.0
+    },
+    "b19_rthresh": {
+      "f32": 6.0
+    },
+    "b19_slope": {
+      "i32": 3
+    },
+    "b19_solo": {
+      "bool": false
+    },
+    "b19_spectral": {
+      "bool": false
+    },
+    "b19_srel": {
+      "bool": false
+    },
+    "b19_ssmooth": {
+      "f32": 25.0
+    },
+    "b19_stereo": {
+      "i32": 0
+    },
+    "b19_sustain": {
+      "f32": 0.0
+    },
+    "b19_thresh": {
+      "f32": -30.0
+    },
+    "b19_transient": {
+      "f32": 0.0
+    },
+    "b19_transition": {
+      "f32": 100.0
+    },
+    "b19_ttime": {
+      "f32": 25.0
+    },
+    "b19_type": {
+      "i32": 0
+    },
+    "b20_attack": {
+      "f32": 10.0
+    },
+    "b20_dmode": {
+      "i32": 0
+    },
+    "b20_dsrc": {
+      "i32": 0
+    },
+    "b20_dyn": {
+      "bool": false
+    },
+    "b20_freq": {
+      "f32": 1000.0
+    },
+    "b20_gain": {
+      "f32": 0.0
+    },
+    "b20_on": {
+      "bool": false
+    },
+    "b20_q": {
+      "f32": 0.70710677
+    },
+    "b20_range": {
+      "f32": -6.0
+    },
+    "b20_ratio": {
+      "f32": 3.0
+    },
+    "b20_release": {
+      "f32": 150.0
+    },
+    "b20_rthresh": {
+      "f32": 6.0
+    },
+    "b20_slope": {
+      "i32": 3
+    },
+    "b20_solo": {
+      "bool": false
+    },
+    "b20_spectral": {
+      "bool": false
+    },
+    "b20_srel": {
+      "bool": false
+    },
+    "b20_ssmooth": {
+      "f32": 25.0
+    },
+    "b20_stereo": {
+      "i32": 0
+    },
+    "b20_sustain": {
+      "f32": 0.0
+    },
+    "b20_thresh": {
+      "f32": -30.0
+    },
+    "b20_transient": {
+      "f32": 0.0
+    },
+    "b20_transition": {
+      "f32": 100.0
+    },
+    "b20_ttime": {
+      "f32": 25.0
+    },
+    "b20_type": {
+      "i32": 0
+    },
+    "b21_attack": {
+      "f32": 10.0
+    },
+    "b21_dmode": {
+      "i32": 0
+    },
+    "b21_dsrc": {
+      "i32": 0
+    },
+    "b21_dyn": {
+      "bool": false
+    },
+    "b21_freq": {
+      "f32": 1000.0
+    },
+    "b21_gain": {
+      "f32": 0.0
+    },
+    "b21_on": {
+      "bool": false
+    },
+    "b21_q": {
+      "f32": 0.70710677
+    },
+    "b21_range": {
+      "f32": -6.0
+    },
+    "b21_ratio": {
+      "f32": 3.0
+    },
+    "b21_release": {
+      "f32": 150.0
+    },
+    "b21_rthresh": {
+      "f32": 6.0
+    },
+    "b21_slope": {
+      "i32": 3
+    },
+    "b21_solo": {
+      "bool": false
+    },
+    "b21_spectral": {
+      "bool": false
+    },
+    "b21_srel": {
+      "bool": false
+    },
+    "b21_ssmooth": {
+      "f32": 25.0
+    },
+    "b21_stereo": {
+      "i32": 0
+    },
+    "b21_sustain": {
+      "f32": 0.0
+    },
+    "b21_thresh": {
+      "f32": -30.0
+    },
+    "b21_transient": {
+      "f32": 0.0
+    },
+    "b21_transition": {
+      "f32": 100.0
+    },
+    "b21_ttime": {
+      "f32": 25.0
+    },
+    "b21_type": {
+      "i32": 0
+    },
+    "b22_attack": {
+      "f32": 10.0
+    },
+    "b22_dmode": {
+      "i32": 0
+    },
+    "b22_dsrc": {
+      "i32": 0
+    },
+    "b22_dyn": {
+      "bool": false
+    },
+    "b22_freq": {
+      "f32": 1000.0
+    },
+    "b22_gain": {
+      "f32": 0.0
+    },
+    "b22_on": {
+      "bool": false
+    },
+    "b22_q": {
+      "f32": 0.70710677
+    },
+    "b22_range": {
+      "f32": -6.0
+    },
+    "b22_ratio": {
+      "f32": 3.0
+    },
+    "b22_release": {
+      "f32": 150.0
+    },
+    "b22_rthresh": {
+      "f32": 6.0
+    },
+    "b22_slope": {
+      "i32": 3
+    },
+    "b22_solo": {
+      "bool": false
+    },
+    "b22_spectral": {
+      "bool": false
+    },
+    "b22_srel": {
+      "bool": false
+    },
+    "b22_ssmooth": {
+      "f32": 25.0
+    },
+    "b22_stereo": {
+      "i32": 0
+    },
+    "b22_sustain": {
+      "f32": 0.0
+    },
+    "b22_thresh": {
+      "f32": -30.0
+    },
+    "b22_transient": {
+      "f32": 0.0
+    },
+    "b22_transition": {
+      "f32": 100.0
+    },
+    "b22_ttime": {
+      "f32": 25.0
+    },
+    "b22_type": {
+      "i32": 0
+    },
+    "b23_attack": {
+      "f32": 10.0
+    },
+    "b23_dmode": {
+      "i32": 0
+    },
+    "b23_dsrc": {
+      "i32": 0
+    },
+    "b23_dyn": {
+      "bool": false
+    },
+    "b23_freq": {
+      "f32": 1000.0
+    },
+    "b23_gain": {
+      "f32": 0.0
+    },
+    "b23_on": {
+      "bool": false
+    },
+    "b23_q": {
+      "f32": 0.70710677
+    },
+    "b23_range": {
+      "f32": -6.0
+    },
+    "b23_ratio": {
+      "f32": 3.0
+    },
+    "b23_release": {
+      "f32": 150.0
+    },
+    "b23_rthresh": {
+      "f32": 6.0
+    },
+    "b23_slope": {
+      "i32": 3
+    },
+    "b23_solo": {
+      "bool": false
+    },
+    "b23_spectral": {
+      "bool": false
+    },
+    "b23_srel": {
+      "bool": false
+    },
+    "b23_ssmooth": {
+      "f32": 25.0
+    },
+    "b23_stereo": {
+      "i32": 0
+    },
+    "b23_sustain": {
+      "f32": 0.0
+    },
+    "b23_thresh": {
+      "f32": -30.0
+    },
+    "b23_transient": {
+      "f32": 0.0
+    },
+    "b23_transition": {
+      "f32": 100.0
+    },
+    "b23_ttime": {
+      "f32": 25.0
+    },
+    "b23_type": {
+      "i32": 0
+    },
+    "b24_attack": {
+      "f32": 10.0
+    },
+    "b24_dmode": {
+      "i32": 0
+    },
+    "b24_dsrc": {
+      "i32": 0
+    },
+    "b24_dyn": {
+      "bool": false
+    },
+    "b24_freq": {
+      "f32": 1000.0
+    },
+    "b24_gain": {
+      "f32": 0.0
+    },
+    "b24_on": {
+      "bool": false
+    },
+    "b24_q": {
+      "f32": 0.70710677
+    },
+    "b24_range": {
+      "f32": -6.0
+    },
+    "b24_ratio": {
+      "f32": 3.0
+    },
+    "b24_release": {
+      "f32": 150.0
+    },
+    "b24_rthresh": {
+      "f32": 6.0
+    },
+    "b24_slope": {
+      "i32": 3
+    },
+    "b24_solo": {
+      "bool": false
+    },
+    "b24_spectral": {
+      "bool": false
+    },
+    "b24_srel": {
+      "bool": false
+    },
+    "b24_ssmooth": {
+      "f32": 25.0
+    },
+    "b24_stereo": {
+      "i32": 0
+    },
+    "b24_sustain": {
+      "f32": 0.0
+    },
+    "b24_thresh": {
+      "f32": -30.0
+    },
+    "b24_transient": {
+      "f32": 0.0
+    },
+    "b24_transition": {
+      "f32": 100.0
+    },
+    "b24_ttime": {
+      "f32": 25.0
+    },
+    "b24_type": {
+      "i32": 0
+    },
+    "bypass": {
+      "bool": false
+    },
+    "delta": {
+      "bool": false
+    },
+    "lp_res": {
+      "i32": 1
+    },
+    "mix": {
+      "f32": 80.0
+    },
+    "mode": {
+      "i32": 2
+    },
+    "out_gain": {
+      "f32": -1.5
+    },
+    "out_pan": {
+      "f32": 0.0
+    }
+  }
+}

@@ -4,6 +4,8 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use mite_core::presets::CurrentPreset;
+use mite_core::snapshots::Snapshots;
 use mite_core::{AtomicF32, Registry, SpectrumTap, StereoMeter};
 use mite_dsp::eq::BandSettings;
 use mite_dsp::MINUS_INFINITY_DB;
@@ -14,7 +16,6 @@ pub mod editor;
 pub mod params;
 pub mod presets;
 pub mod reference;
-pub mod snapshots;
 
 use dsp::{EqEngine, Output, PhaseMode};
 use params::{EqParams, BANDS};
@@ -55,8 +56,8 @@ pub struct EqShared {
     pub focus_threshold: [AtomicF32; SPECTRAL_POINTS],
     pub focus_gain: [AtomicF32; SPECTRAL_POINTS],
     /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
-    pub snapshots: Arc<snapshots::Snapshots>,
-    pub preset: Arc<presets::CurrentPreset>,
+    pub snapshots: Arc<Snapshots>,
+    pub preset: Arc<CurrentPreset>,
     /// This instance's parameters for other instances' editors to write (a carve), once its own
     /// editor has opened (UI threads only).
     pub remote: std::sync::Mutex<Option<mite_plugin::SharedParamHost>>,
@@ -64,11 +65,11 @@ pub struct EqShared {
 
 impl EqShared {
     pub fn new() -> Self {
-        Self::with_stores(Arc::new(snapshots::Snapshots::new()), Arc::new(presets::CurrentPreset::default()))
+        Self::with_stores(Arc::new(Snapshots::new()), Arc::new(CurrentPreset::default()))
     }
 
     /// Telemetry around the parameters' snapshot and preset stores.
-    pub fn with_stores(snapshots: Arc<snapshots::Snapshots>, preset: Arc<presets::CurrentPreset>) -> Self {
+    pub fn with_stores(snapshots: Arc<Snapshots>, preset: Arc<CurrentPreset>) -> Self {
         Self {
             snapshots,
             preset,
@@ -168,6 +169,10 @@ impl Plugin for MiteEq {
 
     type SysExMessage = ();
     type BackgroundTask = ();
+
+    fn filter_state(state: &mut PluginState) {
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+    }
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()

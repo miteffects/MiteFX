@@ -22,14 +22,20 @@ pub const GAIN: ParamSpec = ParamSpec {
 /// Every parameter, in host order.
 pub const SPECS: &[ParamSpec] = &[GAIN];
 
+/// The state format version (`mite_plugin::state`).
+pub const STATE_VERSION: u32 = 1;
+
 #[derive(Params)]
 pub struct GainParams {
     #[id = "gain"]
     pub gain: FloatParam,
+    /// Saved with the state as `mitefx_state` (see `mite_plugin::state`).
+    #[persist = "mitefx_state"]
+    pub state_version: std::sync::atomic::AtomicU32,
 }
 
 impl Default for GainParams {
     fn default() -> Self {
-        Self { gain: float_param(&GAIN) }
+        Self { gain: float_param(&GAIN), state_version: std::sync::atomic::AtomicU32::new(STATE_VERSION) }
     }
 }

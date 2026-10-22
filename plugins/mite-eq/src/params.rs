@@ -317,10 +317,9 @@ pub const MODE: ChoiceSpec = ChoiceSpec { id: "mode", name: "Processing Mode", c
 /// Linear-phase resolution: kernel length, and with it latency and low-frequency precision.
 pub const LP_RES: ChoiceSpec = ChoiceSpec { id: "lp_res", name: "Linear Phase Resolution", choices: &crate::dsp::LP_RESOLUTIONS, default: 2 };
 
-/// The key the snapshots are saved under in the plugin state (frozen, like the parameter ids).
-pub const SNAPSHOTS_KEY: &str = "snapshots";
-/// The key the current preset's name is saved under.
-pub const PRESET_KEY: &str = "preset";
+/// The state format version (`mite_plugin::state`). Bump it, with a migration step in
+/// `MiteEq::filter_state` and a new golden state file, when a release changes what a state means.
+pub const STATE_VERSION: u32 = 1;
 
 /// The per-band parameters a snapshot holds (every one but solo, which is an audition).
 pub const SNAPSHOT_PARAMS: [&str; 23] = [
@@ -334,6 +333,11 @@ pub fn band_id(band: usize, param: &str) -> String {
 }
 
 /// The frozen parameter manifest, in host order.
+/// Every snapshot parameter id, in order (the bands' sound settings).
+pub fn snapshot_ids() -> Vec<String> {
+    (0..BANDS).flat_map(|b| SNAPSHOT_PARAMS.iter().map(move |p| band_id(b, p))).collect()
+}
+
 pub fn manifest() -> String {
     let mut lines = vec![
         OUT_GAIN.manifest_line(),
@@ -474,8 +478,8 @@ pub struct EqParams {
     pub bypass: BoolParam,
     /// Snapshots A–D and the current preset's name (not parameters: saved with the state
     /// through `serialize_fields`).
-    pub snapshots: std::sync::Arc<crate::snapshots::Snapshots>,
-    pub preset: std::sync::Arc<crate::presets::CurrentPreset>,
+    pub snapshots: std::sync::Arc<mite_core::snapshots::Snapshots>,
+    pub preset: std::sync::Arc<mite_core::presets::CurrentPreset>,
     pub bands: [BandParams; BANDS],
 }
 
@@ -490,17 +494,10 @@ impl Default for EqParams {
             auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
             delta: bool_param(&DELTA, DELTA.name.to_owned()),
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()).make_bypass(),
-            snapshots: std::sync::Arc::new(crate::snapshots::Snapshots::new()),
-            preset: std::sync::Arc::new(crate::presets::CurrentPreset::default()),
+            snapshots: std::sync::Arc::new(mite_core::snapshots::Snapshots::new()),
+            preset: std::sync::Arc::new(mite_core::presets::CurrentPreset::default()),
             bands: std::array::from_fn(BandParams::new),
         }
-    }
-}
-
-impl EqParams {
-    /// Every parameter's pointer by id.
-    fn ptrs(&self) -> std::collections::HashMap<String, ParamPtr> {
-        self.param_map().into_iter().map(|(id, ptr, _)| (id, ptr)).collect()
     }
 }
 
@@ -509,21 +506,12 @@ impl EqParams {
 unsafe impl Params for EqParams {
     /// The snapshots (A–D), with the band parameters now as the active slot.
     fn serialize_fields(&self) -> std::collections::BTreeMap<String, String> {
-        let ptrs = self.ptrs();
-        // SAFETY: the pointers point into `self` (see above).
-        let live = crate::snapshots::snapshot_ids().filter_map(|id| ptrs.get(&id).map(|p| (id.clone(), unsafe { p.unmodulated_normalized_value() }))).collect();
-        let mut out: std::collections::BTreeMap<String, String> = [(SNAPSHOTS_KEY.to_owned(), self.snapshots.to_json(live))].into_iter().collect();
-        if let Some(name) = self.preset.get() {
-            out.insert(PRESET_KEY.to_owned(), name);
-        }
-        out
+        let live = mite_plugin::state::live_values(self, &snapshot_ids());
+        mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live)
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
-        if let Some(json) = serialized.get(SNAPSHOTS_KEY) {
-            self.snapshots.load_json(json);
-        }
-        self.preset.set(serialized.get(PRESET_KEY).cloned());
+        mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {

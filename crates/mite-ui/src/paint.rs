@@ -91,3 +91,18 @@ pub fn raised(scene: &mut Scene, rect: RoundedRect, fill: Color, border: Color, 
     highlight.line_to((b.x1 - r, b.y0 + 1.5));
     scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, Color::from_rgba8(255, 255, 255, 16), None, &highlight);
 }
+
+/// Every icon button looks and answers alike: raised on `fill`, its border lit in `color` while
+/// hovered or on, tinted while on. Returns the ink for its glyph.
+pub fn icon_button(scene: &mut Scene, theme: &crate::Theme, r: vello::kurbo::Rect, fill: Color, hot: bool, on: bool, color: Color) -> Color {
+    let shape = RoundedRect::from_rect(r, 6.0);
+    raised(scene, shape, fill, if hot || on { color } else { theme.panel_control_border }, theme.shadows);
+    if on {
+        scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
+        color
+    } else if hot {
+        theme.text_hi
+    } else {
+        theme.text_mid
+    }
+}

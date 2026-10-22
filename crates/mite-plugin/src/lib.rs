@@ -7,6 +7,8 @@
 
 mod editor;
 mod params;
+pub mod state;
+pub mod testing;
 
 pub use editor::{create_editor, create_editor_with, SharedParamHost};
 pub use params::{bool_param, choice_param, float_param, float_param_named};

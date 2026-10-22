@@ -45,7 +45,7 @@ fn ids_follow_the_blueprint_scheme() {
 
 #[test]
 fn snapshots_are_saved_with_the_state_and_restored() {
-    use mite_eq::snapshots::Values;
+    use mite_core::snapshots::Values;
     let params = EqParams::default();
     let stored: Values = [("b01_gain".to_owned(), 0.8_f32)].into_iter().collect();
     params.snapshots.store(2, stored.clone());

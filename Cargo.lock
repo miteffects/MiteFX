@@ -1493,6 +1493,10 @@ dependencies = [
 [[package]]
 name = "mite-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "mite-dsp"
@@ -1506,10 +1510,12 @@ name = "mite-plugin"
 version = "0.1.0"
 dependencies = [
  "baseview",
+ "clap-sys",
  "mite-core",
  "mite-ui",
  "nih_plug",
  "raw-window-handle 0.6.2",
+ "serde_json",
 ]
 
 [[package]]
@@ -1558,6 +1564,7 @@ dependencies = [
  "mite-ui",
  "nih_plug",
  "png",
+ "serde_json",
 ]
 
 [[package]]

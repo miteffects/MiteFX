@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Every plugin is bundled and validated (packages, and their bundle names in bundler.toml).
+  PACKAGES: -p mite_gain -p mite_eq
+  BUNDLES: Mite Gain;Mite EQ
 
 jobs:
   test:
@@ -49,15 +52,18 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
-          cargo xtask bundle-universal mite_gain --release
+          cargo xtask bundle-universal $PACKAGES --release
       - name: Bundle
         if: runner.os != 'macOS'
-        run: cargo xtask bundle mite_gain --release
+        shell: bash
+        run: cargo xtask bundle $PACKAGES --release
 
       - name: Install clap-validator
         run: cargo install --git https://github.com/free-audio/clap-validator --locked clap-validator
       - name: clap-validator
-        run: clap-validator validate "target/bundled/Mite Gain.clap"
+        shell: bash
+        run: |
+          IFS=';'; for b in $BUNDLES; do clap-validator validate "target/bundled/$b.clap"; done
 
       - name: Install pluginval
         shell: bash
@@ -74,9 +80,11 @@ jobs:
             *)       PV=pluginval/pluginval ;;
           esac
           chmod +x "$PV" || true
-          "$PV" --strictness-level 10 --skip-gui-tests --validate-in-process --validate "target/bundled/Mite Gain.vst3"
+          IFS=';'; for b in $BUNDLES; do
+            "$PV" --strictness-level 10 --skip-gui-tests --validate-in-process --validate "target/bundled/$b.vst3"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mite-gain-${{ matrix.os }}
+          name: mitefx-${{ matrix.os }}
           path: target/bundled/

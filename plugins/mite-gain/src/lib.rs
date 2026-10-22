@@ -55,6 +55,10 @@ impl Plugin for MiteGain {
     type SysExMessage = ();
     type BackgroundTask = ();
 
+    fn filter_state(state: &mut PluginState) {
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+    }
+
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
     }

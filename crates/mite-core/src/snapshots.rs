@@ -1,8 +1,8 @@
-//! Snapshots A–D (BLUEPRINT §7.2 "A/B/C/D snapshots and copy between them").
+//! Snapshots A–D (BLUEPRINT §7.2 "A/B/C/D snapshots and copy between them"), for any plugin.
 //!
-//! One slot is active: the band parameters are its contents, so editing always edits it. The
-//! other slots are stored as the band parameters' normalized values by id, which is also what the
-//! plugin state saves. Switching slots writes the stored values back into the parameters, so the
+//! One slot is active: the snapshot parameters (the plugin chooses which; the EQ's bands) are its
+//! contents, so editing always edits it. The other slots are stored as those parameters'
+//! normalized values by id, which is also what the plugin state saves. Switching slots writes the stored values back into the parameters, so the
 //! audio thread only ever plays the parameters. A slot never stored is a copy of the active one.
 //! Everything here runs on the UI or host thread.
 
@@ -11,18 +11,11 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::params::{band_id, BANDS, SNAPSHOT_PARAMS};
-
 pub const SLOTS: usize = 4;
 pub const NAMES: [&str; SLOTS] = ["A", "B", "C", "D"];
 
-/// A stored slot: each band parameter's normalized value, by id (`b03_freq` …).
+/// A stored slot: each snapshot parameter's normalized value, by id (`b03_freq` …).
 pub type Values = BTreeMap<String, f32>;
-
-/// Every snapshot parameter id, in order.
-pub fn snapshot_ids() -> impl Iterator<Item = String> {
-    (0..BANDS).flat_map(|b| SNAPSHOT_PARAMS.iter().map(move |p| band_id(b, p)))
-}
 
 /// The saved form of the snapshots (also what undo keeps).
 #[derive(Default, Clone, PartialEq, Debug, Serialize, Deserialize)]

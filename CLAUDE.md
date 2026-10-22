@@ -25,11 +25,13 @@ cargo run -p mite_gain --example snapshot -- out.png 2   # editor → PNG (GPU, 
 ## Layout
 
 - `crates/mite-dsp`: DSP primitives (smoother, meter, dB).
-- `crates/mite-core`: `ParamSpec`, telemetry atomics, golden manifest.
-- `crates/mite-ui`: tokens (from `docs/design/tokens.json`), text (embedded Manrope), widgets, window, offscreen render.
-- `crates/mite-plugin`: the only nih-plug glue.
+- `crates/mite-core`: `ParamSpec`, telemetry atomics, golden manifest, presets, snapshots A–D, undo history.
+- `crates/mite-ui`: tokens (from `docs/design/tokens.json`), text (embedded Manrope), widgets, the header `Session`, effects (bloom, glass), window, offscreen render.
+- `crates/mite-plugin`: the only nih-plug glue; `state` (versions, migrations) and `testing` (CLAP test host, golden states).
 - `plugins/<name>`: the plugin crates.
-- `tests/golden/`: frozen parameter manifests.
+- `tests/golden/`: frozen parameter manifests and golden states (`<plugin>.state.v<N>.json`; bless a new version with `MITEFX_BLESS=1`).
+
+A new plugin reuses these instead of copying from the EQ: see BLUEPRINT.md §3, "What a new plugin reuses".
 
 ## Hard rules (full list: BLUEPRINT.md §5)
 

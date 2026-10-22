@@ -3,7 +3,6 @@
 //!
 //! Gestures follow docs/design/interaction.md, "Main display gestures".
 
-use std::cell::Cell;
 use std::f64::consts::LN_2;
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,19 +12,20 @@ use mite_dsp::analyzer::{spectrum_point_freq, spectrum_point_oct, Analyzer, LogS
 use mite_dsp::matching::{self, Collision, LongTermSpectrum};
 use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, DetectSource, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
-use mite_ui::paint::{glass_panel, glow_stroke, panel, raised};
+use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
-use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
-use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, TextStyle, UiEvent, View};
+use mite_ui::session::{Session, SessionConfig};
+use mite_ui::widgets::{Dropdown, DropdownEvent, Help, Knob, KnobKind, LevelMeter};
+use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
 use crate::params::{
     band_id, ATTACK, ATTACK_DIAL, AUTO_GAIN, BANDS, BYPASS, DELTA, DETECT_NAMES, DMODE, DSRC, DYN, FREQ, GAIN, LP_RES, MIX, MODE, ON, OUT_GAIN, OUT_PAN, Q, RANGE, RATIO, RELEASE,
     RELEASE_DIAL, RTHRESH, SLOPE, SOLO, SPECTRAL, SREL, SSMOOTH, STEREO, SUSTAIN, THRESH, TRANSIENT, TRANSITION, TTIME, TYPE,
 };
-use crate::presets::{preset_ids, Preset, PresetValues};
-use crate::snapshots::{snapshot_ids, Values, NAMES as SLOT_NAMES, SLOTS};
+use crate::params::snapshot_ids;
+use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::{EqShared, INSTANCES, SPECTRAL_POINTS};
 
 /// A stand-in host holding every Mite EQ parameter at its default, for tests, the standalone
@@ -124,24 +124,9 @@ const PANEL_DYN_H: f64 = 104.0;
 const PANEL_DIAL: f64 = 56.0;
 const PANEL_LAST_DIAL_X: f64 = 596.0;
 const PANEL_DIAL_STEP: f64 = 84.0;
-const MENU_ITEM_H: f64 = 30.0;
-/// Header (interaction.md: presets ‹ › → undo → redo → snapshots): controls 32 px tall, the
-/// preset arrows and name, undo and redo, and the snapshot letters (first centre, spacing, size).
+/// The header row the controls sit in (the session's presets, undo and snapshots take the left
+/// part; see `mite_ui::session::HeaderLayout`).
 const HEADER_ROW: (f64, f64) = (12.0, 44.0);
-const PRESET_PREV: (f64, f64) = (150.0, 182.0);
-const PRESET_NAME: (f64, f64) = (186.0, 436.0);
-const PRESET_NEXT: (f64, f64) = (440.0, 472.0);
-const UNDO_X: (f64, f64) = (492.0, 524.0);
-const REDO_X: (f64, f64) = (528.0, 560.0);
-const SLOT_X0: f64 = 604.0;
-const SLOT_STEP: f64 = 38.0;
-const SLOT_W: f64 = 32.0;
-/// The preset list: its width, row height and the rows shown at once (the wheel scrolls).
-const PRESET_MENU_W: f64 = 320.0;
-const PRESET_ROW_H: f64 = 28.0;
-const PRESET_ROWS: usize = 18;
-/// Undo steps kept.
-const UNDO_DEPTH: usize = 100;
 
 /// Footer: the distance between dial centres, and the toggles' size.
 const FOOTER_DIAL_STEP: f64 = 92.0;
@@ -211,81 +196,6 @@ fn note_name(freq: f64) -> String {
     let idx = (n as i32).rem_euclid(12) as usize;
     let octave = (n as i32).div_euclid(12) - 1;
     format!("{}{} {}{} ct", NAMES[idx], octave, if cents < 0 { "−" } else { "+" }, cents.abs())
-}
-
-/// The host as the editor's own events see it: everything passes through, and a write is noted,
-/// so the edit can become an undo step (automation and host changes never pass through here).
-struct Recording<'a> {
-    inner: &'a dyn ParamHost,
-    wrote: Cell<bool>,
-}
-
-impl ParamHost for Recording<'_> {
-    fn normalized(&self, id: &str) -> f32 {
-        self.inner.normalized(id)
-    }
-    fn plain(&self, id: &str, normalized: f32) -> f32 {
-        self.inner.plain(id, normalized)
-    }
-    fn normalize(&self, id: &str, plain: f32) -> f32 {
-        self.inner.normalize(id, plain)
-    }
-    fn default_normalized(&self, id: &str) -> f32 {
-        self.inner.default_normalized(id)
-    }
-    fn begin_gesture(&self, id: &str) {
-        self.inner.begin_gesture(id);
-    }
-    fn set_normalized(&self, id: &str, normalized: f32) {
-        self.wrote.set(true);
-        self.inner.set_normalized(id, normalized);
-    }
-    fn end_gesture(&self, id: &str) {
-        self.inner.end_gesture(id);
-    }
-}
-
-/// One undo step: the sound parameters (normalized, in [`preset_ids`] order), the snapshots and
-/// the current preset's name.
-#[derive(Clone, PartialEq)]
-struct UndoState {
-    params: Vec<f32>,
-    snapshots: crate::snapshots::State,
-    preset: Option<String>,
-}
-
-/// A row of the preset list.
-#[derive(Clone, Copy, PartialEq)]
-enum PresetRow {
-    /// "Save as…", or the name being typed.
-    Save,
-    Section(&'static str),
-    /// Index into factory ++ user.
-    Preset(usize),
-}
-
-/// The open preset list: the hovered row, the first row shown, and a name being typed.
-struct PresetMenu {
-    hover: Option<usize>,
-    scroll: usize,
-    naming: Option<String>,
-}
-
-/// One line of the help strip: plain text, and values in slots as wide as the widest value they
-/// can hold (the template), so moving the pointer changes the numbers without moving the words.
-#[derive(Default)]
-struct Help(Vec<(String, Option<String>)>);
-
-impl Help {
-    fn text(mut self, text: impl Into<String>) -> Self {
-        self.0.push((text.into(), None));
-        self
-    }
-
-    fn slot(mut self, value: impl Into<String>, widest: impl Into<String>) -> Self {
-        self.0.push((value.into(), Some(widest.into())));
-        self
-    }
 }
 
 /// Host ids for one band, built once.
@@ -816,23 +726,6 @@ enum Icon {
     Source(DetectSource),
 }
 
-/// Every icon button looks and answers alike: raised on `fill`, its border lit in `color` while
-/// hovered or on, tinted while on. Returns the ink for its glyph.
-fn icon_button(scene: &mut mite_ui::vello::Scene, theme: &mite_ui::Theme, r: Rect, fill: Color, hot: bool, on: bool, color: Color) -> Color {
-    let shape = RoundedRect::from_rect(r, 6.0);
-    raised(scene, shape, fill, if hot || on { color } else { theme.panel_control_border }, theme.shadows);
-    if on {
-        scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.16), None, &shape);
-    }
-    if on {
-        color
-    } else if hot {
-        theme.text_hi
-    } else {
-        theme.text_mid
-    }
-}
-
 /// EQ Match centred on `c`: a curve and the dashed one it follows.
 fn draw_match_glyph(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
     let wave = |dy: f64| {
@@ -969,18 +862,13 @@ enum MenuKind {
     Source,
 }
 
-/// An open dropdown: its button, its items and the hovered item.
+/// An open dropdown and what it chooses.
 struct Menu {
     kind: MenuKind,
     band: usize,
     /// The band's type when the menu opened (slope icons are drawn for it).
     band_kind: BandType,
-    anchor: Rect,
-    items: &'static [&'static str],
-    /// The choices offered, in order (indices into `items`; not every source is on offer).
-    shown: Vec<usize>,
-    current: usize,
-    hover: Option<usize>,
+    list: Dropdown,
 }
 
 impl Menu {
@@ -992,36 +880,6 @@ impl Menu {
             MenuKind::Resolution => Icon::Resolution(i),
             MenuKind::Source => Icon::Source(DetectSource::from_index(i)),
         }
-    }
-
-    /// Item rectangles: below the button when they fit inside the display, otherwise above.
-    /// Item rectangles (one per shown choice): below the button when they fit inside the
-    /// display, otherwise above; rows get shorter when a long list would not fit at all.
-    fn item_rects(&self) -> Vec<Rect> {
-        let count = self.shown.len();
-        let w = self.anchor.width().max(if self.kind == MenuKind::Type { 184.0 } else { 150.0 });
-        let room = (HELP_TOP - DISPLAY_TOP - 20.0).max(self.anchor.y0 - DISPLAY_TOP - 10.0);
-        let row = MENU_ITEM_H.min((room - 8.0) / count.max(1) as f64);
-        let h = count as f64 * row + 8.0;
-        let top = if self.anchor.y1 + 4.0 + h <= HELP_TOP {
-            self.anchor.y1 + 4.0
-        } else if self.anchor.y0 - 4.0 - h >= DISPLAY_TOP {
-            self.anchor.y0 - 4.0 - h
-        } else {
-            DISPLAY_TOP + 10.0
-        };
-        (0..count)
-            .map(|i| {
-                let y = top + 4.0 + i as f64 * row;
-                Rect::new(self.anchor.x0, y, self.anchor.x0 + w, y + row)
-            })
-            .collect()
-    }
-
-    fn bounds(&self) -> Rect {
-        let items = self.item_rects();
-        let (first, last) = (items[0], items[items.len() - 1]);
-        Rect::new(first.x0, first.y0 - 4.0, first.x1, last.y1 + 4.0)
     }
 }
 
@@ -1084,23 +942,8 @@ pub struct EqView {
     soloed: Option<usize>,
     /// Whether the EQ runs Linear Phase, as last drawn (a Brickwall is drawn as it plays).
     linear: bool,
-    /// Header snapshot letters (set while drawing), and a letter being pressed.
-    slot_hits: [Rect; SLOTS],
-    slot_press: Option<usize>,
-    /// Presets: the factory and user lists, the open list, and the values (normalized by id) of
-    /// the preset last loaded or saved, to show when the sound has moved on from it.
-    factory: Vec<Preset>,
-    user: Vec<Preset>,
-    preset_dir: Option<std::path::PathBuf>,
-    preset_menu: Option<PresetMenu>,
-    loaded: Option<std::collections::HashMap<String, f32>>,
-    /// Undo: the parameters it covers, the steps back and forward, the state the last step
-    /// ended in, and whether an edit of the editor's own is waiting to become a step.
-    history_ids: Vec<String>,
-    undo: Vec<UndoState>,
-    redo: Vec<UndoState>,
-    committed: Option<UndoState>,
-    edited: bool,
+    /// The header's presets, undo and snapshots A–D.
+    session: Session,
     meter: LevelMeter,
     analyzer: Analyzer,
     samples: Vec<f32>,
@@ -1201,7 +1044,6 @@ impl EqView {
             })
             .collect();
         Self {
-            shared,
             ids: (0..BANDS).map(BandIds::new).collect(),
             selected: None,
             hover: None,
@@ -1214,18 +1056,11 @@ impl EqView {
             toggle_hits: [Rect::ZERO; 3],
             soloed: None,
             linear: false,
-            slot_hits: [Rect::ZERO; SLOTS],
-            slot_press: None,
-            factory: crate::presets::factory(),
-            user: crate::presets::user_dir().map(|d| crate::presets::user_in(&d)).unwrap_or_default(),
-            preset_dir: crate::presets::user_dir(),
-            preset_menu: None,
-            loaded: None,
-            history_ids: preset_ids(),
-            undo: Vec::new(),
-            redo: Vec::new(),
-            committed: None,
-            edited: false,
+            session: Session::new(
+                SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: snapshot_ids() },
+                shared.snapshots.clone(),
+                shared.preset.clone(),
+            ),
             meter: LevelMeter::new(Rect::new(1233.5, DISPLAY_TOP + 19.5, 1266.5, DISPLAY_TOP + 592.5)),
             analyzer,
             samples: vec![0.0; ANALYZER_SIZE],
@@ -1283,6 +1118,7 @@ impl EqView {
             resolution_hit: None,
             last_latency: 0.0,
             ticks: 0,
+            shared,
         }
     }
 
@@ -1871,15 +1707,8 @@ impl EqView {
                 "Delta — hear only what the EQ changes",
                 "Bypass — the whole EQ, latency kept",
             ];
-            if let Some(from) = self.slot_press {
-                if let Some(to) = self.slot_hits.iter().position(|r| r.contains(p)).filter(|&to| to != from) {
-                    return Help::default().text(format!("Copy {} to {} — release to copy", SLOT_NAMES[from], SLOT_NAMES[to]));
-                }
-            }
-            if let Some(i) = self.slot_hits.iter().position(|r| r.contains(p)) {
-                let store = &self.shared.snapshots;
-                let state = if store.active() == i { " · editing" } else if store.filled(i) { "" } else { " · empty (starts as a copy)" };
-                return Help::default().text(format!("Snapshot {}{state} — click to edit it; drag onto another letter to copy it there", SLOT_NAMES[i]));
+            if let Some(help) = self.session.help() {
+                return help;
             }
             if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(p)) {
                 let on = Self::plain(host, TOGGLES[i]) >= 0.5;
@@ -2017,361 +1846,50 @@ impl EqView {
         })
     }
 
-    /// The band parameters now, as a snapshot's values.
-    fn capture(host: &dyn ParamHost) -> Values {
-        snapshot_ids().map(|id| {
-            let v = host.normalized(&id);
-            (id, v)
-        }).collect()
-    }
-
-    /// Writes a snapshot's values into the parameters (only those that differ, as gestures).
-    fn recall(host: &dyn ParamHost, values: &Values) {
-        for (id, &v) in values {
-            if (host.normalized(id) - v).abs() > 1e-7 {
-                host.begin_gesture(id);
-                host.set_normalized(id, v);
-                host.end_gesture(id);
-            }
-        }
-    }
-
-    /// Makes `slot` the one being edited: the parameters now go into the slot that was, and
-    /// `slot`'s values come back (a slot never stored starts as a copy).
-    fn select_slot(&mut self, host: &dyn ParamHost, slot: usize) {
-        let store = &self.shared.snapshots;
-        let from = store.active();
-        if slot != from {
-            let live = Self::capture(host);
-            store.store(from, live.clone());
-            match store.slot(slot) {
-                Some(values) => Self::recall(host, &values),
-                None => store.store(slot, live),
-            }
-            store.set_active(slot);
-        }
-        if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
-            self.select(None);
-        }
-        self.panel_knobs.clear();
-    }
-
-    /// Copies snapshot `from` into `to` (the active one's contents are the parameters).
-    fn copy_slot(&mut self, host: &dyn ParamHost, from: usize, to: usize) {
-        let store = &self.shared.snapshots;
-        let active = store.active();
-        let values = if from == active { Self::capture(host) } else { store.slot(from).unwrap_or_else(|| Self::capture(host)) };
-        if to == active {
-            Self::recall(host, &values);
-            self.panel_knobs.clear();
-        }
-        store.store(to, values);
-    }
-
-    // ---- undo ---------------------------------------------------------------------------
-
-    fn undo_state(&self, host: &dyn ParamHost) -> UndoState {
-        UndoState {
-            params: self.history_ids.iter().map(|id| host.normalized(id)).collect(),
-            snapshots: self.shared.snapshots.export(),
-            preset: self.shared.preset.get(),
-        }
-    }
-
     /// Whether a gesture is still under way (a drag becomes one undo step when it ends).
     fn busy(&self) -> bool {
         self.drag.is_some()
             || self.grab.is_some()
-            || self.slot_press.is_some()
             || self.panel_knobs.iter().any(Knob::is_dragging)
             || self.footer_knobs.iter().any(Knob::is_dragging)
     }
 
-    /// Ends an edit: the state before it becomes an undo step.
-    fn commit(&mut self, host: &dyn ParamHost) {
-        let now = self.undo_state(host);
-        if let Some(before) = self.committed.take() {
-            if before != now {
-                self.undo.push(before);
-                if self.undo.len() > UNDO_DEPTH {
-                    self.undo.remove(0);
-                }
-                self.redo.clear();
-            }
-        }
-        self.committed = Some(now);
-        self.edited = false;
-    }
-
-    /// Puts `state` back: the parameters that differ (as gestures), the snapshots, the preset.
-    fn apply(&mut self, host: &dyn ParamHost, state: &UndoState) {
-        for (id, &v) in self.history_ids.iter().zip(&state.params) {
-            if (host.normalized(id) - v).abs() > 1e-7 {
-                host.begin_gesture(id);
-                host.set_normalized(id, v);
-                host.end_gesture(id);
-            }
-        }
-        self.shared.snapshots.import(state.snapshots.clone());
-        self.shared.preset.set(state.preset.clone());
-        self.loaded = state.preset.as_deref().and_then(|name| self.preset_values(host, name));
-        self.committed = Some(state.clone());
-        if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
-            self.select(None);
-        }
-        self.panel_knobs.clear();
-    }
-
-    fn undo(&mut self, host: &dyn ParamHost) {
-        let Some(state) = self.undo.pop() else { return };
-        self.redo.push(self.undo_state(host));
-        self.apply(host, &state);
-    }
-
-    fn redo(&mut self, host: &dyn ParamHost) {
-        let Some(state) = self.redo.pop() else { return };
-        self.undo.push(self.undo_state(host));
-        self.apply(host, &state);
-    }
-
-    // ---- presets ------------------------------------------------------------------------
-
-    /// Keeps the user's presets in `dir` instead of the settings folder (tests, a portable setup).
     /// Looks for other instances in `registry` instead of the plugin's own (tests).
     pub fn with_registry(mut self, registry: &'static Registry<EqShared>) -> Self {
         self.registry = registry;
         self
     }
 
+    /// Keeps the user's presets in `dir` instead of the settings folder (tests, a portable setup).
     pub fn with_preset_dir(mut self, dir: std::path::PathBuf) -> Self {
-        self.preset_dir = Some(dir);
-        self.reload_user_presets();
+        self.session = self.session.with_preset_dir(dir);
         self
     }
 
-    fn reload_user_presets(&mut self) {
-        self.user = self.preset_dir.as_deref().map(crate::presets::user_in).unwrap_or_default();
+    /// The header's session (presets, undo, snapshots), for tests and tools.
+    pub fn session(&self) -> &Session {
+        &self.session
     }
 
-    /// Factory presets, then the user's.
-    fn preset(&self, i: usize) -> Option<&Preset> {
-        self.factory.get(i).or_else(|| self.user.get(i - self.factory.len().min(i)))
-    }
-
-    fn preset_count(&self) -> usize {
-        self.factory.len() + self.user.len()
-    }
-
-    /// Where the current preset is in the list (Init until one is loaded, as the header says).
-    fn preset_index(&self) -> Option<usize> {
-        let Some(name) = self.shared.preset.get() else { return (!self.factory.is_empty()).then_some(0) };
-        // A user preset of the same name shadows a factory one.
-        (0..self.preset_count()).rev().find(|&i| self.preset(i).is_some_and(|p| p.name == name))
-    }
-
-    /// The normalized values preset `name` sets, every sound parameter included (what it leaves
-    /// out is at its default).
-    fn preset_values(&self, host: &dyn ParamHost, name: &str) -> Option<std::collections::HashMap<String, f32>> {
-        let preset = (0..self.preset_count()).rev().filter_map(|i| self.preset(i)).find(|p| p.name == name)?;
-        Some(
-            self.history_ids
-                .iter()
-                .map(|id| {
-                    let v = preset.values.get(id).map_or_else(|| host.default_normalized(id), |&plain| host.normalize(id, plain));
-                    (id.clone(), v)
-                })
-                .collect(),
-        )
-    }
-
-    /// Loads preset `i` into the snapshot being edited.
-    fn load_preset(&mut self, host: &dyn ParamHost, i: usize) {
-        let Some(name) = self.preset(i).map(|p| p.name.clone()) else { return };
-        let Some(values) = self.preset_values(host, &name) else { return };
-        for id in &self.history_ids {
-            let v = values[id];
-            if (host.normalized(id) - v).abs() > 1e-7 {
-                host.begin_gesture(id);
-                host.set_normalized(id, v);
-                host.end_gesture(id);
-            }
-        }
-        self.shared.preset.set(Some(name));
-        self.loaded = Some(values);
-        self.edited = true;
-        if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
-            self.select(None);
-        }
-        self.panel_knobs.clear();
-    }
-
-    /// Steps to the previous (-1) or next (+1) preset, wrapping.
-    fn step_preset(&mut self, host: &dyn ParamHost, by: isize) {
-        let n = self.preset_count() as isize;
-        if n == 0 {
-            return;
-        }
-        let i = self.preset_index().map_or(if by > 0 { 0 } else { n - 1 }, |i| (i as isize + by).rem_euclid(n));
-        self.load_preset(host, i as usize);
-    }
-
-    /// Saves the sound now as user preset `name` (only what differs from the defaults).
-    fn save_preset(&mut self, host: &dyn ParamHost, name: &str) {
-        let name = name.trim();
-        if name.is_empty() {
-            return;
-        }
-        let values: PresetValues = self
-            .history_ids
-            .iter()
-            .filter(|id| (host.normalized(id) - host.default_normalized(id)).abs() > 1e-7)
-            .map(|id| (id.clone(), host.plain(id, host.normalized(id))))
-            .collect();
-        let Some(dir) = self.preset_dir.clone() else { return };
-        if crate::presets::save_in(&dir, name, &values).is_ok() {
-            self.reload_user_presets();
-            self.shared.preset.set(Some(name.to_owned()));
-            self.loaded = self.preset_values(host, name);
-            self.edited = true;
-        }
-    }
-
-    /// Whether the sound has moved on from the preset last loaded or saved.
-    fn preset_modified(&self, host: &dyn ParamHost) -> bool {
-        self.loaded.as_ref().is_some_and(|values| self.history_ids.iter().any(|id| (host.normalized(id) - values[id]).abs() > 1e-6))
-    }
-
-    /// The preset list's rows.
-    fn preset_rows(&self) -> Vec<PresetRow> {
-        let mut rows = vec![PresetRow::Save, PresetRow::Section("FACTORY")];
-        rows.extend((0..self.factory.len()).map(PresetRow::Preset));
-        if !self.user.is_empty() {
-            rows.push(PresetRow::Section("YOURS"));
-            rows.extend((self.factory.len()..self.preset_count()).map(PresetRow::Preset));
-        }
-        rows
-    }
-
-    /// The rectangle of visible row `k` of the list.
-    fn preset_row_rect(k: usize) -> Rect {
-        let y = HEADER_ROW.1 + 6.0 + k as f64 * PRESET_ROW_H;
-        Rect::new(PRESET_NAME.0, y, PRESET_NAME.0 + PRESET_MENU_W, y + PRESET_ROW_H)
-    }
-
-    fn preset_menu_bounds(&self) -> Rect {
-        let n = self.preset_rows().len().min(PRESET_ROWS);
-        let (first, last) = (Self::preset_row_rect(0), Self::preset_row_rect(n.saturating_sub(1)));
-        Rect::new(first.x0, first.y0 - 4.0, first.x1, last.y1 + 4.0)
-    }
-
-    /// The row under `p`, as an index into [`Self::preset_rows`].
-    fn preset_row_at(&self, p: Point) -> Option<usize> {
-        let menu = self.preset_menu.as_ref()?;
-        let rows = self.preset_rows();
-        (0..rows.len().saturating_sub(menu.scroll).min(PRESET_ROWS)).find(|&k| Self::preset_row_rect(k).contains(p)).map(|k| k + menu.scroll)
-    }
-
-    /// Events while the preset list is open.
-    fn preset_menu_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
-        match *event {
-            UiEvent::PointerMove { pos, .. } => {
-                self.pointer = Some(pos);
-                let hover = self.preset_row_at(pos);
-                if let Some(m) = &mut self.preset_menu {
-                    m.hover = hover;
-                }
-                true
-            }
-            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
-                let rows = self.preset_rows();
-                match self.preset_row_at(pos).map(|i| rows[i]) {
-                    Some(PresetRow::Save) => {
-                        let typed = self.preset_menu.as_ref().and_then(|m| m.naming.clone());
-                        match typed {
-                            // Clicking the row again (its tick) saves.
-                            Some(name) => {
-                                self.save_preset(host, &name);
-                                self.preset_menu = None;
-                            }
-                            None => {
-                                let n = self.user.len() + 1;
-                                let suggested = self.shared.preset.get().filter(|_| self.preset_index().is_some_and(|i| i >= self.factory.len())).unwrap_or(format!("My preset {n}"));
-                                if let Some(m) = &mut self.preset_menu {
-                                    m.naming = Some(suggested);
-                                }
-                            }
-                        }
-                    }
-                    Some(PresetRow::Preset(i)) => {
-                        self.load_preset(host, i);
-                        self.preset_menu = None;
-                    }
-                    Some(PresetRow::Section(_)) => {}
-                    None => self.preset_menu = None,
-                }
-                true
-            }
-            UiEvent::Wheel { lines, .. } => {
-                let max = self.preset_rows().len().saturating_sub(PRESET_ROWS);
-                if let Some(m) = &mut self.preset_menu {
-                    m.scroll = (m.scroll as isize - lines.round() as isize).clamp(0, max as isize) as usize;
-                }
-                true
-            }
-            UiEvent::PointerLeft => {
-                if let Some(m) = &mut self.preset_menu {
-                    m.hover = None;
-                }
-                true
-            }
-            _ => true,
-        }
-    }
-
-    /// Keys: typing a preset name, Esc, undo and redo. Others go to the host.
+    /// Keys: the session's (a preset name, undo, redo), then Esc. Others go to the host.
     fn key_event(&mut self, key: Key, mods: mite_ui::Modifiers, host: &dyn ParamHost) -> bool {
-        if let Some(name) = self.preset_menu.as_mut().and_then(|m| m.naming.as_mut()) {
-            match key {
-                Key::Character(c) if !(mods.ctrl || mods.meta) => {
-                    if name.chars().count() < 48 {
-                        name.push(c);
-                    }
-                }
-                Key::Backspace => {
-                    name.pop();
-                }
-                Key::Enter => {
-                    let name = name.clone();
-                    self.save_preset(host, &name);
-                    self.preset_menu = None;
-                }
-                Key::Escape => {
-                    if let Some(m) = &mut self.preset_menu {
-                        m.naming = None;
-                    }
-                }
-                _ => return false,
-            }
-            return true;
+        if let Some(used) = self.session.key(key, mods, host) {
+            return used;
         }
         match key {
-            Key::Escape => self.preset_menu.take().is_some() || self.menu.take().is_some() || self.grab.take().is_some() || self.matcher.take().is_some(),
-            Key::Character(c) if mods.ctrl || mods.meta => match c.to_ascii_lowercase() {
-                'z' if mods.shift => {
-                    self.redo(host);
-                    true
-                }
-                'z' => {
-                    self.undo(host);
-                    true
-                }
-                'y' => {
-                    self.redo(host);
-                    true
-                }
-                _ => false,
-            },
+            Key::Escape => self.menu.take().is_some() || self.grab.take().is_some() || self.matcher.take().is_some(),
             _ => false,
+        }
+    }
+
+    /// After the session replaced the parameters (a preset, a snapshot, undo): drop what was
+    /// derived from them.
+    fn after_session(&mut self, host: &dyn ParamHost) {
+        if self.session.take_replaced() {
+            if self.selected.is_some_and(|b| !self.band(host, b).enabled) {
+                self.select(None);
+            }
+            self.panel_knobs.clear();
         }
     }
 
@@ -3613,33 +3131,8 @@ impl EqView {
     fn draw_menu(&self, cx: &mut DrawCx<'_>) {
         let Some(menu) = &self.menu else { return };
         let theme = cx.theme;
-        let bounds = menu.bounds();
-        if theme.shadows {
-            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 8.0)), bounds, Color::from_rgba8(0, 0, 0, 150), 8.0, 14.0);
-        }
-        glass_panel(cx, RoundedRect::from_rect(bounds, 8.0), theme.blur_menu);
         let color = if menu.kind == MenuKind::Resolution { theme.accent } else { Self::band_color(theme, &self.band(cx.host, menu.band)) };
-        for (k, r) in menu.item_rects().into_iter().enumerate() {
-            let i = menu.shown[k];
-            let item = menu.items[i];
-            let r = r.inset((-4.0, -1.0));
-            let shape = RoundedRect::from_rect(r, 6.0);
-            let current = i == menu.current;
-            let hovered = menu.hover == Some(k);
-            // The current choice glows in the band's colour; hover is a quiet lift.
-            if current {
-                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if hovered { 0.24 } else { 0.16 }), None, &shape);
-                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.55), None, &shape);
-            } else if hovered {
-                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &shape);
-            }
-            let icon = if current { color } else if hovered { theme.text_hi } else { theme.text_mid };
-            let mid = r.center().y;
-            draw_icon(cx.scene, menu.icon(i), Point::new(r.x0 + 12.0, mid - 6.0), icon);
-            let text = if current { theme.text_strong } else { theme.text_hi };
-            let style = TextStyle::BODY.weighted(if current { 700.0 } else { 500.0 });
-            cx.text.draw(cx.scene, item, r.x0 + 44.0, mid - 8.0, style, text, Align::Left);
-        }
+        menu.list.draw(cx, color, |scene, i, at, ink| draw_icon(scene, menu.icon(i), at, ink));
     }
 
     /// Opens (or, if it is already open, closes) a band's dropdown.
@@ -3669,45 +3162,41 @@ impl EqView {
         } else {
             (0..items.len()).collect()
         };
-        self.menu = Some(Menu { kind, band, band_kind, anchor, items, shown, current, hover: None });
+        let width = if kind == MenuKind::Type { 184.0 } else { 150.0 };
+        let list = Dropdown::new(anchor, items, current, (DISPLAY_TOP, HELP_TOP)).with_shown(shown).with_min_width(width);
+        self.menu = Some(Menu { kind, band, band_kind, list });
     }
 
     /// Routes an event to the open dropdown. It is modal: everything is consumed, and a click
     /// outside closes it.
     fn menu_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         let Some(menu) = &mut self.menu else { return false };
-        let item_at = |p: Point| menu.item_rects().iter().position(|r| r.contains(p));
-        match *event {
-            UiEvent::PointerMove { pos, .. } => {
-                menu.hover = item_at(pos);
-                self.pointer = Some(pos);
-            }
-            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
-                if let Some(i) = item_at(pos).map(|k| menu.shown[k]) {
-                    let ids = &self.ids[menu.band];
-                    let id: &str = match menu.kind {
-                        MenuKind::Type => &ids.kind,
-                        MenuKind::Slope => &ids.slope,
-                        MenuKind::Stereo => &ids.stereo,
-                        MenuKind::Resolution => LP_RES.id,
-                        MenuKind::Source => &ids.dsrc,
-                    };
-                    Self::set(host, id, i as f32);
-                    if menu.kind == MenuKind::Type {
-                        // Cuts are Butterworth (flat) at Q 0.71; a Q carried over from a bell would
-                        // add a resonant bump.
-                        if BandType::from_index(i).has_slope() {
-                            Self::set(host, &ids.q, std::f32::consts::FRAC_1_SQRT_2);
-                        }
-                        self.panel_knobs.clear();
+        if let UiEvent::PointerMove { pos, .. } = *event {
+            self.pointer = Some(pos);
+        }
+        match menu.list.event(event) {
+            DropdownEvent::Open => {}
+            DropdownEvent::Picked(i) => {
+                let ids = &self.ids[menu.band];
+                let id: &str = match menu.kind {
+                    MenuKind::Type => &ids.kind,
+                    MenuKind::Slope => &ids.slope,
+                    MenuKind::Stereo => &ids.stereo,
+                    MenuKind::Resolution => LP_RES.id,
+                    MenuKind::Source => &ids.dsrc,
+                };
+                Self::set(host, id, i as f32);
+                if menu.kind == MenuKind::Type {
+                    // Cuts are Butterworth (flat) at Q 0.71; a Q carried over from a bell would
+                    // add a resonant bump.
+                    if BandType::from_index(i).has_slope() {
+                        Self::set(host, &ids.q, std::f32::consts::FRAC_1_SQRT_2);
                     }
+                    self.panel_knobs.clear();
                 }
-                // A pick, a click outside, or the button again: all close the menu.
                 self.menu = None;
             }
-            UiEvent::PointerDown { .. } => self.menu = None,
-            UiEvent::PointerLeft => menu.hover = None,
-            _ => {}
+            DropdownEvent::Closed => self.menu = None,
         }
         true
     }
@@ -3798,121 +3287,12 @@ impl EqView {
         draw_title(cx, 52.0, 18.0, "EQ");
         let (y0, y1) = HEADER_ROW;
         let hot = |r: Rect| self.pointer.is_some_and(|p| r.contains(p));
-        let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
-
-        // Presets: ‹ name ›.
-        let open = self.preset_menu.is_some();
-        for (x, dir) in [(PRESET_PREV, -1.0), (PRESET_NEXT, 1.0)] {
-            let r = Rect::new(x.0, y0, x.1, y1);
-            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), false, theme.accent);
-            let c = r.center();
-            let mut chevron = BezPath::new();
-            chevron.move_to((c.x - 2.0 * dir, c.y - 5.0));
-            chevron.line_to((c.x + 2.5 * dir, c.y));
-            chevron.line_to((c.x - 2.0 * dir, c.y + 5.0));
-            cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &chevron);
-        }
-        let name_rect = Rect::new(PRESET_NAME.0, y0, PRESET_NAME.1, y1);
-        let ink = icon_button(cx.scene, theme, name_rect, theme.panel_control, hot(name_rect), open, theme.accent);
-        let lens = Point::new(name_rect.x0 + 16.0, name_rect.center().y - 1.0);
-        cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, ink, None, &Circle::new(lens, 4.0));
-        cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &Line::new(lens + (2.9, 2.9), lens + (6.0, 6.0)));
-        let name = self.shared.preset.get().unwrap_or_else(|| "Init".to_owned());
-        let width = cx.text.draw(cx.scene, &name, name_rect.x0 + 30.0, y0 + 9.0, TextStyle::BODY.weighted(600.0), theme.text_hi, Align::Left);
-        if self.preset_modified(cx.host) {
-            // The sound has moved on from the preset: a dot after its name.
-            let dot = Point::new(name_rect.x0 + 30.0 + f64::from(width) + 7.0, name_rect.center().y);
-            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent, None, &Circle::new(dot, 2.5));
-        }
-
-        // Undo and redo: curved arrows, dim when there is nothing to go back or forward to.
-        // `dir` is the side the arrow's tip points to: left for undo, right for redo.
-        for (x, dir, has) in [(UNDO_X, 1.0, !self.undo.is_empty()), (REDO_X, -1.0, !self.redo.is_empty())] {
-            let r = Rect::new(x.0, y0, x.1, y1);
-            let ink = icon_button(cx.scene, theme, r, theme.panel_control, has && hot(r), false, theme.accent);
-            let ink = if has { ink } else { theme.text_disabled };
-            let c = r.center();
-            let mut arrow = BezPath::new();
-            arrow.move_to((c.x + 5.0 * dir, c.y + 5.0));
-            arrow.curve_to((c.x + 6.0 * dir, c.y - 3.0), (c.x - 1.0 * dir, c.y - 5.0), (c.x - 5.0 * dir, c.y - 2.0));
-            arrow.move_to((c.x - 5.0 * dir, c.y - 6.5));
-            arrow.line_to((c.x - 5.0 * dir, c.y - 2.0));
-            arrow.line_to((c.x - 0.5 * dir, c.y - 1.5));
-            cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &arrow);
-        }
-
-        // Snapshots: the letters A–D, the edited one lit, empty ones dim.
-        let active = self.shared.snapshots.active();
-        for (i, name) in SLOT_NAMES.iter().enumerate() {
-            let c = SLOT_X0 + SLOT_STEP * i as f64;
-            let r = Rect::new(c - SLOT_W / 2.0, y0, c + SLOT_W / 2.0, y1);
-            let target = self.slot_press.is_some_and(|from| from != i) && hot(r);
-            let ink = icon_button(cx.scene, theme, r, theme.panel_control, target || hot(r), active == i, theme.accent);
-            let ink = if active != i && !hot(r) && !self.shared.snapshots.filled(i) { theme.text_lo } else { ink };
-            cx.text.draw(cx.scene, name, c, y0 + 9.0, TextStyle::LABEL.sized(11.0), ink, Align::Center);
-            self.slot_hits[i] = r;
-        }
+        self.session.draw(cx);
 
         // EQ Match.
         let r = Rect::new(MATCH_X.0, y0, MATCH_X.1, y1);
         let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), self.matcher.is_some(), theme.accent);
         draw_match_glyph(cx.scene, r.center(), ink);
-    }
-
-    /// The open preset list, drawn over everything: "Save as…" (or the name being typed), then
-    /// the factory presets and the user's.
-    fn draw_preset_menu(&self, cx: &mut DrawCx<'_>) {
-        let Some(menu) = &self.preset_menu else { return };
-        let theme = cx.theme;
-        let bounds = self.preset_menu_bounds();
-        if theme.shadows {
-            cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 10.0)), bounds, Color::from_rgba8(0, 0, 0, 140), 10.0, 16.0);
-        }
-        glass_panel(cx, RoundedRect::from_rect(bounds, 10.0), theme.blur_menu);
-        let current = self.preset_index();
-        let rows = self.preset_rows();
-        for (k, row) in rows.iter().enumerate().skip(menu.scroll).take(PRESET_ROWS) {
-            let r = Self::preset_row_rect(k - menu.scroll).inset((-4.0, 0.0));
-            let hovered = menu.hover == Some(k);
-            match *row {
-                PresetRow::Save => {
-                    let shape = RoundedRect::from_rect(r.inset((0.0, -2.0)), 6.0);
-                    if let Some(name) = &menu.naming {
-                        // The name field: the text, a caret, and a tick that saves.
-                        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &shape);
-                        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent, None, &shape);
-                        let w = cx.text.draw(cx.scene, name, r.x0 + 10.0, r.y0 + 7.0, TextStyle::BODY, theme.text_strong, Align::Left);
-                        let caret = r.x0 + 11.0 + f64::from(w);
-                        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.accent, None, &Line::new((caret, r.y0 + 7.0), (caret, r.y1 - 7.0)));
-                        let k = Point::new(r.x1 - 16.0, r.center().y);
-                        let mut tick = BezPath::new();
-                        tick.move_to((k.x - 5.0, k.y));
-                        tick.line_to((k.x - 1.5, k.y + 3.5));
-                        tick.line_to((k.x + 5.0, k.y - 3.5));
-                        let stroke = Stroke::new(1.6).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
-                        cx.scene.stroke(&stroke, Affine::IDENTITY, theme.accent, None, &tick);
-                    } else {
-                        if hovered {
-                            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.16), None, &shape);
-                        }
-                        cx.text.draw(cx.scene, "Save as…", r.x0 + 10.0, r.y0 + 7.0, TextStyle::BODY.weighted(600.0), if hovered { theme.text_hi } else { theme.text_mid }, Align::Left);
-                    }
-                }
-                PresetRow::Section(label) => {
-                    cx.text.draw(cx.scene, label, r.x0 + 10.0, r.y0 + 10.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
-                }
-                PresetRow::Preset(i) => {
-                    let Some(p) = self.preset(i) else { continue };
-                    let on = current == Some(i);
-                    let shape = RoundedRect::from_rect(r.inset((0.0, -2.0)), 6.0);
-                    if on || hovered {
-                        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(if on { 0.2 } else { 0.12 }), None, &shape);
-                    }
-                    let ink = if on { theme.text_strong } else if hovered { theme.text_hi } else { theme.text_mid };
-                    cx.text.draw(cx.scene, &p.name, r.x0 + 10.0, r.y0 + 7.0, TextStyle::BODY, ink, Align::Left);
-                }
-            }
-        }
     }
 
     /// Masking: each collision as a 45° hatch with lit edges (tokens.json `masking`), and the
@@ -4186,17 +3566,7 @@ impl EqView {
     }
 
     fn draw_help(&self, cx: &mut DrawCx<'_>) {
-        let theme = cx.theme;
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.help_strip, None, &Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HELP_TOP + 0.5), (WIDTH, HELP_TOP + 0.5)));
-        // Tabular digits, so every number in a slot takes the same width.
-        let style = TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0) };
-        let mut x = 14.0;
-        for (text, widest) in self.help_text(cx.host).0 {
-            let width = cx.text.draw(cx.scene, &text, x, HELP_TOP + 7.0, style, theme.text_mid, Align::Left);
-            let slot = widest.map_or(0.0, |w| cx.text.measure(&w, style));
-            x += f64::from(width.max(slot));
-        }
+        self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
     }
 }
 
@@ -4236,23 +3606,18 @@ impl View for EqView {
             k.draw(cx);
         }
         self.draw_menu(cx);
-        self.draw_preset_menu(cx);
+        self.session.draw_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         // The editor's own writes are noted; once nothing is being dragged, they become one undo
         // step.
-        if self.committed.is_none() {
-            self.committed = Some(self.undo_state(host));
-        }
-        let recording = Recording { inner: host, wrote: Cell::new(false) };
+        self.session.begin(host);
+        let recording = RecordingHost::new(host);
         let changed = self.handle_event(event, &recording);
-        if recording.wrote.get() {
-            self.edited = true;
-        }
-        if self.edited && !self.busy() {
-            self.commit(host);
-        }
+        let busy = self.busy();
+        self.session.end(host, recording.wrote(), busy);
+        self.after_session(host);
         changed
     }
 
@@ -4260,21 +3625,8 @@ impl View for EqView {
         self.ticks = self.ticks.wrapping_add(1);
         // Changes from outside the editor (automation, the host's own undo, a state load) are
         // not undo steps: the history just follows them.
-        if !self.edited && !self.busy() {
-            match &mut self.committed {
-                Some(c) => {
-                    for (v, id) in c.params.iter_mut().zip(&self.history_ids) {
-                        *v = host.normalized(id);
-                    }
-                }
-                None => self.committed = Some(self.undo_state(host)),
-            }
-        }
-        if self.loaded.is_none() {
-            if let Some(name) = self.shared.preset.get() {
-                self.loaded = self.preset_values(host, &name);
-            }
-        }
+        let busy = self.busy();
+        self.session.follow(host, busy);
         let (l, r) = self.shared.meter.load();
         let mut dirty = self.meter.set_levels(l, r);
         // Dynamic bands and the spectral stage move with the audio. Their telemetry arrives once
@@ -4415,16 +3767,18 @@ impl View for EqView {
 }
 
 impl EqView {
-    /// Every event, with the editor's writes going through `host` (a [`Recording`]).
+    /// Every event, with the editor's writes going through `host` (a [`RecordingHost`]).
     fn handle_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         if let UiEvent::KeyDown { key, mods } = *event {
             return self.key_event(key, mods, host);
         }
-        if self.preset_menu.is_some() {
-            return self.preset_menu_event(event, host);
-        }
-        if self.menu.is_some() {
+        // The preset list is modal, and so is an open dropdown; otherwise the header's session
+        // controls come first.
+        if self.menu.is_some() && !self.session.menu_open() {
             return self.menu_event(event, host);
+        }
+        if let Some(answer) = self.session.event(event, host) {
+            return answer;
         }
         // Footer dials.
         for k in &mut self.footer_knobs {
@@ -4440,9 +3794,6 @@ impl EqView {
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
-                if self.slot_press.is_some() {
-                    return true;
-                }
                 if let Some(g) = &mut self.grab {
                     // The ghost Bell stays on the peak; up and down set its gain.
                     let factor = if mods.fine() { 0.1 } else { 1.0 };
@@ -4545,26 +3896,11 @@ impl EqView {
                 changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP || pos.y < HEADER
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => {
-                // Header: presets, undo and redo, snapshot letters.
+                // Header (the session's controls answered already): EQ Match.
                 if pos.y < HEADER {
                     let (y0, y1) = HEADER_ROW;
-                    let at = |x: (f64, f64)| Rect::new(x.0, y0, x.1, y1).contains(pos);
-                    if at(PRESET_PREV) {
-                        self.step_preset(host, -1);
-                    } else if at(PRESET_NEXT) {
-                        self.step_preset(host, 1);
-                    } else if at(PRESET_NAME) {
-                        self.reload_user_presets();
-                        let scroll = self.preset_index().map_or(0, |i| (i + 3).saturating_sub(PRESET_ROWS / 2)).min(self.preset_rows().len().saturating_sub(PRESET_ROWS));
-                        self.preset_menu = Some(PresetMenu { hover: None, scroll, naming: None });
-                    } else if at(UNDO_X) {
-                        self.undo(host);
-                    } else if at(REDO_X) {
-                        self.redo(host);
-                    } else if at(MATCH_X) {
+                    if Rect::new(MATCH_X.0, y0, MATCH_X.1, y1).contains(pos) {
                         self.toggle_match();
-                    } else if let Some(i) = self.slot_hits.iter().position(|r| r.contains(pos)) {
-                        self.slot_press = Some(i);
                     }
                     return true;
                 }
@@ -4685,15 +4021,7 @@ impl EqView {
                 }
                 false
             }
-            UiEvent::PointerUp { pos, button: MouseButton::Left, .. } => {
-                if let Some(from) = self.slot_press.take() {
-                    match self.slot_hits.iter().position(|r| r.contains(pos)) {
-                        Some(to) if to == from => self.select_slot(host, from),
-                        Some(to) => self.copy_slot(host, from, to),
-                        None => {}
-                    }
-                    return true;
-                }
+            UiEvent::PointerUp { button: MouseButton::Left, .. } => {
                 if let Some(g) = self.grab.take() {
                     // Released after a drag: the ghost becomes a band. A plain click on a peak
                     // is a click on the display (clears the selection).

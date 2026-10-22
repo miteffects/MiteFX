@@ -1,0 +1,10 @@
+{
+  "fields": {
+    "mitefx_state": "1"
+  },
+  "params": {
+    "gain": {
+      "f32": -7.5
+    }
+  }
+}

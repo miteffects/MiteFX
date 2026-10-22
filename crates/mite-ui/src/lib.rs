@@ -14,6 +14,7 @@ pub mod paint;
 mod host_sync;
 mod present;
 pub mod render;
+pub mod session;
 pub mod text;
 pub mod tokens;
 pub mod view;
@@ -21,7 +22,7 @@ pub mod widgets;
 pub mod window;
 
 pub use effects::Effects;
-pub use host::{MemoryParamHost, ParamHost};
+pub use host::{write_if_changed, MemoryParamHost, ParamHost, RecordingHost};
 pub use text::{Align, TextStyle, Typesetter};
 pub use tokens::{Theme, ThemeKind};
 pub use view::{DrawCx, Key, Modifiers, MouseButton, UiEvent, View};
