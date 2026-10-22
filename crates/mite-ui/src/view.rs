@@ -1,8 +1,9 @@
 //! The contract between a plugin's editor and the window.
 
-use vello::kurbo::Point;
+use vello::kurbo::{Point, RoundedRect};
 use vello::Scene;
 
+use crate::effects::{Effects, Glass};
 use crate::host::ParamHost;
 use crate::text::Typesetter;
 use crate::tokens::Theme;
@@ -63,6 +64,27 @@ pub struct DrawCx<'a> {
     pub host: &'a dyn ParamHost,
     /// Logical size of the window.
     pub size: (f64, f64),
+    /// Glow sources and glass layers (see [`DrawCx::glow`], [`DrawCx::glass`]).
+    pub fx: &'a mut Effects,
+}
+
+impl DrawCx<'_> {
+    /// What is drawn here (logical px, like the scene) glows: it is blurred and laid over the
+    /// layer. Draw the shape itself into the scene as well.
+    pub fn glow(&mut self) -> &mut Scene {
+        &mut self.fx.glow
+    }
+
+    /// Call right before drawing a glass panel: everything drawn so far is blurred (`blur` is
+    /// the σ in logical px, `blur.*` in tokens.json) into `shape`, and drawing goes on above it.
+    /// Returns `false` when the theme has no blur (high contrast): draw the panel opaque.
+    pub fn glass(&mut self, shape: RoundedRect, blur: f64) -> bool {
+        if !self.theme.shadows {
+            return false;
+        }
+        self.fx.split(self.scene, Some(Glass { shape, blur }));
+        true
+    }
 }
 
 /// A plugin editor's root. Drawn every frame the window asks for.

@@ -16,9 +16,10 @@ use baseview::{
 use raw_window_handle::HasWindowHandle;
 use vello::kurbo::{Affine, BezPath, Point, Stroke};
 use vello::util::RenderContext;
-use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
+use vello::{AaSupport, Renderer, RendererOptions, Scene};
 
 use crate::host::ParamHost;
+use crate::effects::{Compositor, Effects};
 use crate::present::{Offscreen, PresentMode, Presenter};
 use crate::text::Typesetter;
 use crate::tokens::{Theme, ThemeKind};
@@ -113,6 +114,7 @@ struct Gpu {
     presenter: Presenter,
     frame: Offscreen,
     renderer: Renderer,
+    compositor: Compositor,
 }
 
 struct State {
@@ -121,7 +123,7 @@ struct State {
     theme: Theme,
     text: Typesetter,
     logical: Scene,
-    scene: Scene,
+    fx: Effects,
     scale: f64,
     logical_size: (f64, f64),
     last_click: Option<(Instant, Point)>,
@@ -208,6 +210,7 @@ impl UiWindow {
             },
         )
         .map_err(handler_error)?;
+        let compositor = Compositor::new(device);
         trace(&format!("init done {size:?} present {mode:?} adapter {:?}", cx.devices[dev_id].adapter().get_info().name));
         let timer = ctx.create_timer(TICK).ok();
         let state = State {
@@ -216,7 +219,7 @@ impl UiWindow {
             theme,
             text: Typesetter::new(),
             logical: Scene::new(),
-            scene: Scene::new(),
+            fx: Effects::default(),
             scale: size.scale_factor,
             logical_size: (size.logical.width, size.logical.height),
             last_click: None,
@@ -225,7 +228,7 @@ impl UiWindow {
         Ok(Self {
             #[cfg(target_os = "linux")]
             host_sync: RefCell::new(HostSyncLookup { found: None, handle: ctx.platform_handle(), attempts: 0, last: None }),
-            gpu: RefCell::new(Gpu { cx, presenter, frame, renderer }),
+            gpu: RefCell::new(Gpu { cx, presenter, frame, renderer, compositor }),
             state: RefCell::new(state),
             dirty: Cell::new(true),
             frame_period: animation_period(),
@@ -390,12 +393,11 @@ impl UiWindow {
     fn render(&self) -> Result<(), HandlerError> {
         let t0 = Instant::now();
         let mut st = self.state.borrow_mut();
-        let State { view, host, theme, text, logical, scene, scale, logical_size, .. } = &mut *st;
+        let State { view, host, theme, text, logical, fx, scale, logical_size, .. } = &mut *st;
         logical.reset();
         let (zoom, offset) = self.layout(*logical_size);
-        view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: self.design });
-        scene.reset();
-        scene.append(logical, Some(Affine::scale(*scale) * Affine::translate(offset.to_vec2()) * Affine::scale(zoom)));
+        view.draw(&mut DrawCx { scene: logical, theme, text, host: host.as_ref(), size: self.design, fx });
+        let transform = Affine::scale(*scale) * Affine::translate(offset.to_vec2()) * Affine::scale(zoom);
         // Resize grip: three short diagonals in the bottom-right corner, in window logical px.
         let (w, h) = *logical_size;
         let mut grip = BezPath::new();
@@ -404,26 +406,20 @@ impl UiWindow {
             grip.line_to((w - 3.0 - k, h - 3.0));
         }
         let color = if self.over_grip.get() || self.resize_drag.get().is_some() { theme.text_mid } else { theme.text_lo };
-        scene.stroke(&Stroke::new(1.0), Affine::scale(*scale), color, None, &grip);
+        let grip_scale = *scale;
+        let overlay = move |scene: &mut Scene| scene.stroke(&Stroke::new(1.0), Affine::scale(grip_scale), color, None, &grip);
         let t_scene = t0.elapsed();
 
         let mut gpu = self.gpu.borrow_mut();
-        let Gpu { cx, presenter, frame, renderer } = &mut *gpu;
+        let Gpu { cx, presenter, frame, renderer, compositor } = &mut *gpu;
         let handle = &cx.devices[presenter.dev_id()];
-        renderer
-            .render_to_texture(
-                &handle.device,
-                &handle.queue,
-                scene,
-                &frame.view,
-                &RenderParams {
-                    base_color: theme.window,
-                    width: frame.width,
-                    height: frame.height,
-                    antialiasing_method: AaConfig::Area,
-                },
-            )
-            .map_err(handler_error)?;
+        compositor
+            .render(&handle.device, &handle.queue, renderer, fx, logical, transform, theme, frame, &overlay)
+            .map_err(message_error)?;
+        if gpu_timing() {
+            // Diagnostic: wait for the GPU so "render" includes its work, not just the encoding.
+            let _ = handle.device.poll(vello::wgpu::PollType::Wait { submission_index: None, timeout: None });
+        }
         let t_gpu = t0.elapsed();
         let shown = presenter.present(cx, frame).map_err(message_error)?;
         trace(&format!(
@@ -609,6 +605,13 @@ fn mods(m: keyboard_types::Modifiers) -> Modifiers {
 pub(crate) fn tracing() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("MITE_UI_TRACE").is_some())
+}
+
+/// `MITE_UI_GPU_TIME=1` (with `MITE_UI_TRACE=1`): each frame waits for the GPU, so the traced
+/// render time is the whole frame's GPU work. Slows the UI; for measuring only.
+fn gpu_timing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("MITE_UI_GPU_TIME").is_some())
 }
 
 /// Half a display refresh (XRandR on Linux, otherwise 60 Hz). Rendering animation at twice the

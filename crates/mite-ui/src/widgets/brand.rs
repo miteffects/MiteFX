@@ -25,7 +25,7 @@ pub fn draw_mark(cx: &mut DrawCx<'_>, x: f64, y: f64, size: f64) {
     cx.scene.stroke(&round(1.4), Affine::IDENTITY, theme.text_lo, None, &legs);
     cx.scene.stroke(&round(1.6), Affine::IDENTITY, theme.text_hi, None, &body);
     cx.scene.stroke(&round(1.6), Affine::IDENTITY, theme.text_hi, None, &head);
-    glow_stroke(cx.scene, &signal, 1.8 * s, theme.accent, theme.accent, 3.0 * s);
+    glow_stroke(cx, &signal, 1.8 * s, theme.accent, theme.accent, 3.0 * s);
 }
 
 /// "Mite" in ExtraBold followed by the plugin name in Medium, as in the header mockups.

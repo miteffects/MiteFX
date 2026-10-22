@@ -27,9 +27,10 @@ use vello::wgpu::{self, util::TextureBlitter, CurrentSurfaceTexture};
 
 /// A storage texture Vello can render into.
 pub(crate) struct Offscreen {
-    /// Kept alive alongside its view.
-    _texture: wgpu::Texture,
+    pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
+    /// The same texture viewed as sRGB: effect passes blend into it in linear light.
+    pub srgb_view: wgpu::TextureView,
     pub width: u32,
     pub height: u32,
 }
@@ -45,11 +46,17 @@ impl Offscreen {
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::STORAGE_BINDING
                 | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
+            view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { _texture: texture, view, width, height }
+        let srgb_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            usage: Some(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT),
+            ..Default::default()
+        });
+        Self { texture, view, srgb_view, width, height }
     }
 
 }

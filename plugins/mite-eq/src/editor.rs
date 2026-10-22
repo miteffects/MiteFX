@@ -13,7 +13,7 @@ use mite_dsp::analyzer::{spectrum_point_freq, spectrum_point_oct, Analyzer, LogS
 use mite_dsp::matching::{self, Collision, LongTermSpectrum};
 use mite_dsp::eq::{analog_response_db, design, BandSettings, BandType, DetectSource, Dynamics, DynamicsMode, Placement, ShapeDetector, GAIN_LIMIT_DB, Sections, FREQ_MAX, FREQ_MIN};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
-use mite_ui::paint::{glow_stroke, panel, raised};
+use mite_ui::paint::{glass_panel, glow_stroke, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::{Knob, KnobKind, LevelMeter};
@@ -2964,7 +2964,7 @@ impl EqView {
             flat.line_to((PLOT_W, MID));
             flat
         };
-        glow_stroke(cx.scene, &curve, 2.2, theme.curve, theme.curve, 5.0);
+        glow_stroke(cx, &curve, 2.2, theme.curve, theme.curve, 5.0);
     }
 
     /// Spectrum grab: the marker on the peak under the pointer, and the ghost Bell being dragged
@@ -2983,7 +2983,7 @@ impl EqView {
         }
         let (p, alpha) = self.peak_marker;
         if alpha > 0.01 {
-            glow_stroke(cx.scene, &Circle::new(p, 5.0), 1.5, theme.needle.multiply_alpha(alpha), theme.accent.multiply_alpha(alpha), 6.0);
+            glow_stroke(cx, &Circle::new(p, 5.0), 1.5, theme.needle.multiply_alpha(alpha), theme.accent.multiply_alpha(alpha), 6.0);
         }
         let Some(g) = &self.grab else { return };
         let s = BandSettings { enabled: true, kind: BandType::Bell, freq: g.freq, gain_db: g.gain, q: PEAK_Q, ..Default::default() };
@@ -3000,7 +3000,7 @@ impl EqView {
         cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, color.multiply_alpha(0.7), None, &curve);
         let node = Point::new(fx(s.freq), gy(g.gain.clamp(-18.0, 18.0)));
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.6), None, &Circle::new(node, 7.0));
-        glow_stroke(cx.scene, &Circle::new(node, 7.0), 1.6, color.multiply_alpha(0.8), color, 4.0);
+        glow_stroke(cx, &Circle::new(node, 7.0), 1.6, color.multiply_alpha(0.8), color, 4.0);
     }
 
     /// A band's drawn response at `xs`, designed fresh (not cached).
@@ -3028,7 +3028,7 @@ impl EqView {
             let hovered = self.hover == Some(b);
             if self.soloed == Some(b) {
                 // The soloed band wears a white ring.
-                glow_stroke(cx.scene, &Circle::new(p, 13.0), 1.6, theme.needle, theme.needle, 5.0);
+                glow_stroke(cx, &Circle::new(p, 13.0), 1.6, theme.needle, theme.needle, 5.0);
             }
             let r = if selected { 9.0 } else if hovered { 8.0 } else { 7.0 };
             if s.is_dynamic() {
@@ -3044,7 +3044,7 @@ impl EqView {
                 }
                 if (now - p.y).abs() > 0.5 {
                     cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.85), None, &bar(p.y, now));
-                    glow_stroke(cx.scene, &Circle::new((p.x, now), 3.5), 1.5, theme.needle, color, 5.0);
+                    glow_stroke(cx, &Circle::new((p.x, now), 3.5), 1.5, theme.needle, color, 5.0);
                 }
                 if !selected && !transient {
                     cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.8), None, &Circle::new((p.x, end), 3.0));
@@ -3052,7 +3052,7 @@ impl EqView {
             }
             if selected {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.2), None, &Circle::new(p, r + 5.0));
-                glow_stroke(cx.scene, &Circle::new(p, r - 1.0), 2.0, theme.needle, color, 6.0);
+                glow_stroke(cx, &Circle::new(p, r - 1.0), 2.0, theme.needle, color, 6.0);
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new(p, r - 2.0));
                 let num = format!("{}", b + 1);
                 cx.text.draw(cx.scene, &num, p.x, p.y - 6.5, TextStyle::LABEL.sized(9.0).weighted(800.0), Color::from_rgba8(14, 17, 22, 255), Align::Center);
@@ -3061,7 +3061,7 @@ impl EqView {
                     cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.13), None, &Circle::new(p, r + 6.0));
                 }
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if hovered { 0.33 } else { 0.2 }), None, &Circle::new(p, r - 1.0));
-                glow_stroke(cx.scene, &Circle::new(p, r - 1.0), 2.0, color, color, 3.0);
+                glow_stroke(cx, &Circle::new(p, r - 1.0), 2.0, color, color, 3.0);
             }
         }
         self.draw_grips(cx, bands);
@@ -3085,7 +3085,7 @@ impl EqView {
                 // A pill handle at the end of the range, ridged so it reads as grabbable.
                 let pill = RoundedRect::new(g.x - 10.0, g.y - 5.5, g.x + 10.0, g.y + 5.5, 5.5);
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &pill);
-                glow_stroke(cx.scene, &pill, 1.6, color, color, if hot { 6.0 } else { 2.5 });
+                glow_stroke(cx, &pill, 1.6, color, color, if hot { 6.0 } else { 2.5 });
                 let mut ridges = BezPath::new();
                 for dx in [-3.5, 0.0, 3.5] {
                     ridges.move_to((g.x + dx, g.y - 2.0));
@@ -3100,7 +3100,7 @@ impl EqView {
                 cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.3 * alpha), None, &Line::new((p.x, p.y + dir * 11.0), (g.x, g.y - dir * 7.0)));
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.85), None, &Circle::new(g, 7.0));
                 if hot {
-                    glow_stroke(cx.scene, &Circle::new(g, 7.0), 1.4, color, color, 5.0);
+                    glow_stroke(cx, &Circle::new(g, 7.0), 1.4, color, color, 5.0);
                 } else {
                     cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, color.multiply_alpha(alpha), None, &Circle::new(g, 7.0));
                 }
@@ -3134,7 +3134,7 @@ impl EqView {
             // Not a control in transient mode: just the band's live motion.
             let now = to_deg(s.gain_db + self.dynamic_now(b, s));
             if (now - gain).abs() > 0.5 {
-                glow_stroke(cx.scene, &arc(gain, now), 3.0, color, color, 3.0);
+                glow_stroke(cx, &arc(gain, now), 3.0, color, color, 3.0);
             }
         } else if s.is_dynamic() {
             let end = to_deg(s.gain_db + s.dynamics.range_db);
@@ -3142,11 +3142,11 @@ impl EqView {
             cx.scene.stroke(&round, Affine::IDENTITY, theme.tick_off.multiply_alpha(0.5), None, &arc(-135.0, 135.0));
             cx.scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.35), None, &arc(gain, end));
             if (now - gain).abs() > 0.5 {
-                glow_stroke(cx.scene, &arc(gain, now), 3.0, color, color, 3.0);
+                glow_stroke(cx, &arc(gain, now), 3.0, color, color, 3.0);
             }
             let grip = polar(end);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.needle, None, &Circle::new(grip, if hot { 5.0 } else { 4.0 }));
-            glow_stroke(cx.scene, &Circle::new(grip, if hot { 5.0 } else { 4.0 }), 1.5, color, color, if hot { 5.0 } else { 2.0 });
+            glow_stroke(cx, &Circle::new(grip, if hot { 5.0 } else { 4.0 }), 1.5, color, color, if hot { 5.0 } else { 2.0 });
         } else if near || hot {
             let alpha = if hot { 1.0 } else { 0.6 };
             cx.scene.stroke(&Stroke::new(2.0).with_caps(mite_ui::kurbo::Cap::Round), Affine::IDENTITY, color.multiply_alpha(0.25 * alpha), None, &arc(-135.0, 135.0));
@@ -3214,14 +3214,14 @@ impl EqView {
         fill.line_to((r.x0, mid));
         fill.close_path();
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.18), None, &fill);
-        glow_stroke(cx.scene, &curve, 1.8, color, color, 3.0);
+        glow_stroke(cx, &curve, 1.8, color, color, 3.0);
         let level = f64::from(self.last_level);
         if s.is_dynamic() && level > SCOPE_FLOOR_DB {
             let lx = x_of(level);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.5), None, &RoundedRect::new(r.x0 + 3.0, r.y1 - 5.0, lx, r.y1 - 3.0, 1.0));
             let dot = Point::new(lx, y_of(self.dynamic_now(b, s)));
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.needle, None, &Circle::new(dot, 4.0));
-            glow_stroke(cx.scene, &Circle::new(dot, 4.0), 1.5, color, color, 5.0);
+            glow_stroke(cx, &Circle::new(dot, 4.0), 1.5, color, color, 5.0);
         }
     }
 
@@ -3287,7 +3287,7 @@ impl EqView {
         change.close_path();
         cx.scene.fill(Fill::EvenOdd, Affine::IDENTITY, color.multiply_alpha(0.35), None, &change);
         cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.text_lo, None, &inp);
-        glow_stroke(cx.scene, &out, 1.8, color, color, 3.0);
+        glow_stroke(cx, &out, 1.8, color, color, 3.0);
         // The crossfade from attack to sustain, shaded around the line.
         let width = (s.dynamics.transition * s.dynamics.transient_ms).max(1.5) / 1000.0;
         let (z0, z1) = (scope_x(r, s.dynamics.transient_ms / 1000.0 - 0.5 * width), scope_x(r, s.dynamics.transient_ms / 1000.0 + 0.5 * width));
@@ -3355,7 +3355,7 @@ impl EqView {
             change.close_path();
             cx.scene.fill(Fill::EvenOdd, Affine::IDENTITY, color.multiply_alpha(0.4), None, &change);
             cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.text_lo, None, &inp);
-            glow_stroke(cx.scene, &out, 1.6, color, color, 3.0);
+            glow_stroke(cx, &out, 1.6, color, color, 3.0);
         }
         // The threshold, with a grip on its right end: a line across at a fixed level, or
         // (relative) a curve riding the surroundings, the engine's own per-bin thresholds.
@@ -3452,13 +3452,12 @@ impl EqView {
         if theme.shadows {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 14.0)), rect, Color::from_rgba8(0, 0, 0, 140), 14.0, 20.0);
         }
-        // Backdrop blur is a later shader pass; the glass tint is drawn nearly opaque until then.
-        panel(cx.scene, shape, theme.glass.with_alpha(0.94), theme.glass_border);
+        glass_panel(cx, shape, theme.blur_panel);
 
         // Left: band title over a row of dropdown buttons.
         let color = Self::band_color(theme, &s);
         let dot = Point::new(origin.x + 22.0, origin.y + 24.0);
-        glow_stroke(cx.scene, &Circle::new(dot, 4.0), 2.0, color, color, 4.0);
+        glow_stroke(cx, &Circle::new(dot, 4.0), 2.0, color, color, 4.0);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new(dot, 5.0));
         let title = format!("Band {}", b + 1);
         cx.text.draw(cx.scene, &title, origin.x + 34.0, origin.y + 16.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
@@ -3618,7 +3617,7 @@ impl EqView {
         if theme.shadows {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 8.0)), bounds, Color::from_rgba8(0, 0, 0, 150), 8.0, 14.0);
         }
-        panel(cx.scene, RoundedRect::from_rect(bounds, 8.0), theme.glass.with_alpha(0.98), theme.glass_border);
+        glass_panel(cx, RoundedRect::from_rect(bounds, 8.0), theme.blur_menu);
         let color = if menu.kind == MenuKind::Resolution { theme.accent } else { Self::band_color(theme, &self.band(cx.host, menu.band)) };
         for (k, r) in menu.item_rects().into_iter().enumerate() {
             let i = menu.shown[k];
@@ -3869,7 +3868,7 @@ impl EqView {
         if theme.shadows {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 10.0)), bounds, Color::from_rgba8(0, 0, 0, 140), 10.0, 16.0);
         }
-        panel(cx.scene, RoundedRect::from_rect(bounds, 10.0), theme.glass.with_alpha(0.97), theme.glass_border);
+        glass_panel(cx, RoundedRect::from_rect(bounds, 10.0), theme.blur_menu);
         let current = self.preset_index();
         let rows = self.preset_rows();
         for (k, row) in rows.iter().enumerate().skip(menu.scroll).take(PRESET_ROWS) {
@@ -3969,7 +3968,7 @@ impl EqView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.6 * a), None, &ring);
         let dashed = Stroke::new(2.0).with_dashes(0.0, [4.0, 3.0]);
         cx.scene.stroke(&dashed, Affine::IDENTITY, theme.accent.multiply_alpha(a), None, &ring);
-        glow_stroke(cx.scene, &Circle::new(self.carve_pos(i), CARVE_RING - 4.0), 1.2, theme.accent.multiply_alpha(0.5 * a), theme.accent, 6.0);
+        glow_stroke(cx, &Circle::new(self.carve_pos(i), CARVE_RING - 4.0), 1.2, theme.accent.multiply_alpha(0.5 * a), theme.accent, 6.0);
         // Carve on the other instance: a dashed ring in its colour with an arrow leaving it, dim
         // while that instance cannot be written yet.
         if let Some(c) = self.carve_there_pos(i) {
@@ -4016,7 +4015,7 @@ impl EqView {
         }
         let total: Vec<f64> = current.iter().zip(&ghost).map(|(c, g)| c + g).collect();
         let ghost_path = Self::curve_path(&total, clamp);
-        glow_stroke(cx.scene, &ghost_path, 1.8, theme.accent.multiply_alpha(0.75), theme.accent, 5.0);
+        glow_stroke(cx, &ghost_path, 1.8, theme.accent.multiply_alpha(0.75), theme.accent, 5.0);
         let dashed = Stroke::new(1.6).with_dashes(0.0, [3.0, 3.0]);
         for s in &fitted {
             let p = Point::new(fx(s.freq), gy(s.gain_db.clamp(-18.0, 18.0)));
@@ -4037,7 +4036,7 @@ impl EqView {
         if theme.shadows {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 14.0)), rect, Color::from_rgba8(0, 0, 0, 140), 14.0, 20.0);
         }
-        panel(cx.scene, RoundedRect::from_rect(rect, 14.0), theme.glass.with_alpha(0.94), theme.glass_border);
+        glass_panel(cx, RoundedRect::from_rect(rect, 14.0), theme.blur_panel);
         let color = theme.accent;
         draw_match_glyph(cx.scene, Point::new(o.x + 22.0, o.y + 24.0), color);
         let width = cx.text.draw(cx.scene, "Match", o.x + 40.0, o.y + 16.0, TextStyle::TITLE.sized(13.0), theme.text_hi, Align::Left);
@@ -4133,7 +4132,7 @@ impl EqView {
         cross.line_to((k.x - 3.0, k.y + 3.0));
         cx.scene.stroke(&round, Affine::IDENTITY, ink, None, &cross);
 
-        let mut local = DrawCx { scene: &mut *cx.scene, theme, text: &mut *cx.text, host: &m.controls, size: cx.size };
+        let mut local = DrawCx { scene: &mut *cx.scene, theme, text: &mut *cx.text, host: &m.controls, size: cx.size, fx: &mut *cx.fx };
         for knob in &m.knobs {
             knob.draw(&mut local);
         }

@@ -32,7 +32,7 @@ fn draw(view: &mut EqView, host: &MemoryParamHost) {
     let theme = Theme::load(ThemeKind::Dark, ACCENT);
     let mut text = Typesetter::new();
     let size = view.logical_size();
-    view.draw(&mut DrawCx { scene: &mut Scene::new(), theme: &theme, text: &mut text, host, size });
+    view.draw(&mut DrawCx { scene: &mut Scene::new(), theme: &theme, text: &mut text, host, size, fx: &mut Default::default() });
 }
 
 fn mods() -> Modifiers {

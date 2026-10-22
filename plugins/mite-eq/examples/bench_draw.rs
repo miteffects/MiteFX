@@ -44,7 +44,7 @@ fn main() {
     let size = view.logical_size();
     let mut draw = |view: &mut EqView| {
         let mut scene = Scene::new();
-        view.draw(&mut DrawCx { scene: &mut scene, theme: &theme, text: &mut text, host: &host, size });
+        view.draw(&mut DrawCx { scene: &mut scene, theme: &theme, text: &mut text, host: &host, size, fx: &mut Default::default() });
     };
     // Select band 4 (480 Hz, +2 dB) by clicking its node, so the dynamic panel is open.
     draw(&mut view);

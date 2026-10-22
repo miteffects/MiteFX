@@ -86,6 +86,9 @@ pub struct Theme {
     pub border_width: f64,
     /// Dial disc drop-shadow opacity (`elevation.dialDisc`).
     pub disc_shadow_alpha: f32,
+    /// Backdrop blur σ of glass panels and of menus, logical px (`blur.glassPanel`, `blur.menu`).
+    pub blur_panel: f64,
+    pub blur_menu: f64,
 }
 
 impl Theme {
@@ -158,6 +161,8 @@ impl Theme {
                 let key = if kind == ThemeKind::Light { "alphaLight" } else { "alphaDark" };
                 disc[key].as_f64().expect("elevation.dialDisc alpha") as f32
             },
+            blur_panel: root["blur"]["glassPanel"].as_f64().expect("blur.glassPanel"),
+            blur_menu: root["blur"]["menu"].as_f64().expect("blur.menu"),
         }
     }
 }

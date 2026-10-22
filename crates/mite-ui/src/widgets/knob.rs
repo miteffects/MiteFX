@@ -146,7 +146,7 @@ impl Knob {
             self.tick(&mut centre, origin_deg, 22.5, 30.0);
             cx.scene.stroke(&tick_stroke, vello::kurbo::Affine::IDENTITY, theme.text_mid, None, &centre);
         }
-        glow_stroke(cx.scene, &lit, 2.0 * s, color, color, 1.8 * s);
+        glow_stroke(cx, &lit, 2.0 * s, color, color, 1.8 * s);
 
         // Disc with its drop shadow (mockup: dy 2.5, blur 2.5, black 75 %).
         let r = 19.5 * s;
@@ -166,7 +166,7 @@ impl Knob {
 
         let mut pointer = BezPath::new();
         self.tick(&mut pointer, value_deg, 21.5, 31.0);
-        glow_stroke(cx.scene, &pointer, 2.5 * s, theme.needle, color, 2.2 * s);
+        glow_stroke(cx, &pointer, 2.5 * s, theme.needle, color, 2.2 * s);
 
         // Value + unit inside the disc.
         let plain = cx.host.plain(&self.id, norm);

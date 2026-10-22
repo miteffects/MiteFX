@@ -4,7 +4,9 @@
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_eq --example preview
 //!
 //! PREVIEW_SPECTRAL=1 makes band 3 a spectral compressor (PREVIEW_RELATIVE=1: relative) and adds a
-//! ringing 2.8 kHz tone to the noise.
+//! ringing 2.8 kHz tone to the noise. PREVIEW_CLICK="x,y[;x,y…]" clicks there (design units) once
+//! the editor is up, e.g. on a node to open its panel; with MITE_UI_GPU_TIME=1 the traced render
+//! time includes the GPU's work (bloom, glass).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,7 +16,8 @@ use mite_eq::dsp::EqEngine;
 use mite_eq::editor::{EqView, ACCENT};
 use mite_eq::params::{band_id, BANDS, DYN, SPECTRAL, SREL, FREQ, GAIN, ON, Q, RANGE, THRESH, TYPE};
 use mite_eq::EqShared;
-use mite_ui::{run_standalone, ThemeKind, View, WindowOptions};
+use mite_ui::kurbo::Point;
+use mite_ui::{run_standalone, DrawCx, Modifiers, MouseButton, ParamHost, ThemeKind, UiEvent, View, WindowOptions};
 
 fn main() -> Result<(), String> {
     let host = mite_eq::editor::memory_host();
@@ -102,7 +105,15 @@ fn main() -> Result<(), String> {
         }
     });
 
-    let view = EqView::new(shared);
+    let clicks = std::env::var("PREVIEW_CLICK")
+        .unwrap_or_default()
+        .split(';')
+        .filter_map(|p| {
+            let (x, y) = p.split_once(',')?;
+            Some(Point::new(x.trim().parse().ok()?, y.trim().parse().ok()?))
+        })
+        .collect();
+    let view = Clicking { view: EqView::new(shared), clicks, ticks: 0 };
     let (w, h) = view.logical_size();
     let zoom = view.zoom();
     let options = WindowOptions {
@@ -115,4 +126,42 @@ fn main() -> Result<(), String> {
         host_resize: None,
     };
     run_standalone(options, Box::new(view), Box::new(host)).map_err(|e| format!("{e:?}"))
+}
+
+/// The editor, plus clicks sent a few ticks after it has drawn (so it knows its layout).
+struct Clicking {
+    view: EqView,
+    clicks: Vec<Point>,
+    ticks: u32,
+}
+
+impl View for Clicking {
+    fn logical_size(&self) -> (f64, f64) {
+        self.view.logical_size()
+    }
+
+    fn zoom(&self) -> f64 {
+        self.view.zoom()
+    }
+
+    fn draw(&mut self, cx: &mut DrawCx<'_>) {
+        self.view.draw(cx);
+    }
+
+    fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        self.view.event(event, host)
+    }
+
+    fn tick(&mut self, host: &dyn ParamHost) -> bool {
+        self.ticks += 1;
+        if self.ticks == 10 && !self.clicks.is_empty() {
+            let mods = Modifiers::default();
+            for pos in std::mem::take(&mut self.clicks) {
+                self.view.event(&UiEvent::PointerMove { pos, mods }, host);
+                self.view.event(&UiEvent::PointerDown { pos, button: MouseButton::Left, mods }, host);
+                self.view.event(&UiEvent::PointerUp { pos, button: MouseButton::Left, mods }, host);
+            }
+        }
+        self.view.tick(host) || self.ticks == 10
+    }
 }

@@ -8,9 +8,11 @@ use std::num::NonZeroUsize;
 use vello::kurbo::Affine;
 use vello::util::RenderContext;
 use vello::wgpu;
-use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
+use vello::{AaSupport, Renderer, RendererOptions, Scene};
 
+use crate::effects::{Compositor, Effects};
 use crate::host::ParamHost;
+use crate::present::Offscreen;
 use crate::text::Typesetter;
 use crate::tokens::Theme;
 use crate::view::{DrawCx, View};
@@ -31,9 +33,8 @@ pub fn render_view(view: &mut dyn View, host: &dyn ParamHost, theme: &Theme, sca
 
     let mut logical = Scene::new();
     let mut text = Typesetter::new();
-    view.draw(&mut DrawCx { scene: &mut logical, theme, text: &mut text, host, size: (lw, lh) });
-    let mut scene = Scene::new();
-    scene.append(&logical, Some(Affine::scale(scale)));
+    let mut fx = Effects::default();
+    view.draw(&mut DrawCx { scene: &mut logical, theme, text: &mut text, host, size: (lw, lh), fx: &mut fx });
 
     let mut cx = RenderContext::new();
     let dev_id = pollster::block_on(cx.device(None)).ok_or("no compatible GPU device")?;
@@ -49,27 +50,10 @@ pub fn render_view(view: &mut dyn View, host: &dyn ParamHost, theme: &Theme, sca
         },
     )
     .map_err(|e| e.to_string())?;
-
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("mite-ui offscreen"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view_tex = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    renderer
-        .render_to_texture(
-            device,
-            queue,
-            &scene,
-            &view_tex,
-            &RenderParams { base_color: theme.window, width, height, antialiasing_method: AaConfig::Area },
-        )
-        .map_err(|e| e.to_string())?;
+    let frame = Offscreen::new(device, width, height);
+    let mut compositor = Compositor::new(device);
+    compositor.render(device, queue, &mut renderer, &mut fx, &mut logical, Affine::scale(scale), theme, &frame, &|_| {})?;
+    let texture = &frame.texture;
 
     let padded_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -81,7 +65,7 @@ pub fn render_view(view: &mut dyn View, host: &dyn ParamHost, theme: &Theme, sca
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: &texture,
+            texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,

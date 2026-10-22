@@ -1,32 +1,59 @@
 //! Shared painting helpers that stand in for the design's CSS/SVG effects.
 //!
-//! Phase 0 approximates glow with stacked translucent strokes. The real WGSL bloom pass
-//! (docs/design/README.md, "How the mockup's CSS/SVG effects map to the Rust renderer") replaces
-//! [`glow_stroke`] without changing call sites.
+//! Glow is real bloom: the glowing shape also goes into the frame's glow layer, which the
+//! compositor blurs and lays over it (see [`crate::effects`]).
 
 use vello::kurbo::{Affine, Cap, RoundedRect, Shape, Stroke};
 use vello::peniko::{Color, Fill};
 use vello::Scene;
 
-/// Strokes `shape` in `color` with a soft `glow` halo of radius ≈ `sigma` underneath, like the
+use crate::view::DrawCx;
+
+/// Strokes `shape` in `color` with a soft `glow` halo of radius ≈ `sigma` around it, like the
 /// mockups' `feGaussianBlur` + merge (glow = same colour) or `feDropShadow` (glow = accent).
-pub fn glow_stroke(scene: &mut Scene, shape: &impl Shape, width: f64, color: Color, glow: Color, sigma: f64) {
-    glow_halo(scene, shape, width, glow, sigma);
-    scene.stroke(&Stroke::new(width).with_caps(Cap::Round), Affine::IDENTITY, color, None, shape);
+pub fn glow_stroke(cx: &mut DrawCx<'_>, shape: &impl Shape, width: f64, color: Color, glow: Color, sigma: f64) {
+    glow_source(cx, shape, width, glow, sigma);
+    cx.scene.stroke(&Stroke::new(width).with_caps(Cap::Round), Affine::IDENTITY, color, None, shape);
 }
 
-/// Fills `shape` with a glow halo around its outline.
-pub fn glow_fill(scene: &mut Scene, shape: &impl Shape, color: Color, sigma: f64) {
-    glow_halo(scene, shape, 0.0, color, sigma);
-    scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, shape);
-}
-
-fn glow_halo(scene: &mut Scene, shape: &impl Shape, width: f64, glow: Color, sigma: f64) {
-    const LAYERS: [(f64, f32); 3] = [(1.6, 0.06), (1.0, 0.11), (0.5, 0.18)];
-    for (spread, alpha) in LAYERS {
-        let stroke = Stroke::new(width + 2.0 * sigma * spread).with_caps(Cap::Round);
-        scene.stroke(&stroke, Affine::IDENTITY, glow.multiply_alpha(alpha), None, shape);
+/// Fills `shape` with a glow halo around it.
+pub fn glow_fill(cx: &mut DrawCx<'_>, shape: &impl Shape, color: Color, sigma: f64) {
+    if cx.theme.shadows {
+        cx.glow().fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(GLOW_ALPHA), None, shape);
     }
+    glow_source(cx, shape, 0.0, color, sigma);
+    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, shape);
+}
+
+/// How strongly a glow source shines into the bloom at `sigma` = [`GLOW_REFERENCE`].
+const GLOW_ALPHA: f32 = 0.55;
+const GLOW_REFERENCE: f64 = 4.0;
+
+/// The bloom blurs every glow by the same two Gaussians, so `sigma` sets the halo's strength
+/// (a wider glow in the mockups reads as a brighter one at these sizes). The source is the
+/// shape itself, as an SVG glow blurs the graphic. Off in high contrast (no glow there).
+fn glow_source(cx: &mut DrawCx<'_>, shape: &impl Shape, width: f64, glow: Color, sigma: f64) {
+    if !cx.theme.shadows {
+        return;
+    }
+    let strength = GLOW_ALPHA * (sigma / GLOW_REFERENCE).clamp(0.5, 1.6) as f32;
+    let stroke = Stroke::new(width.max(1.0)).with_caps(Cap::Round);
+    cx.glow().stroke(&stroke, Affine::IDENTITY, glow.multiply_alpha(strength.min(1.0)), None, shape);
+}
+
+/// A glass panel (`elevation.glass`): the frame under it frosted with a `blur` σ, then the
+/// theme's glass tint, its 1 px border and a faint top highlight. Draw its drop shadow first.
+pub fn glass_panel(cx: &mut DrawCx<'_>, rect: RoundedRect, blur: f64) {
+    let theme = cx.theme;
+    let fill = if cx.glass(rect, blur) { theme.glass } else { theme.glass.with_alpha(0.97) };
+    panel(cx.scene, rect, fill, theme.glass_border);
+    let (r, b) = (rect.radii().top_left, rect.rect());
+    let mut highlight = vello::kurbo::BezPath::new();
+    highlight.move_to((b.x0 + r, b.y0 + 1.5));
+    highlight.line_to((b.x1 - r, b.y0 + 1.5));
+    // `elevation.glass`: inset 0 1px 0, white at 5 % (dark) or 80 % (light).
+    let alpha = if theme.kind == crate::tokens::ThemeKind::Light { 204 } else { 13 };
+    cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, Color::from_rgba8(255, 255, 255, alpha), None, &highlight);
 }
 
 /// The design's `raised` elevation: a two-layer drop shadow under a rounded rect.
