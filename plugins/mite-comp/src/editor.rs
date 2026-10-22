@@ -687,9 +687,13 @@ impl CompView {
     fn draw_history(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
         let theme = cx.theme;
         let grid = theme.grid_minor;
-        // Gridlines and labels every 6 dB (24 dB range) or 12 dB, from the range it glides to.
+        // Gridlines and labels every 6 dB (24 dB range, plus −3) or 12 dB, from the range it glides to.
         let step = if self.range_target <= 24.5 { 6.0 } else { 12.0 };
-        let levels: Vec<f32> = (1..).map(|k| -step * k as f32).take_while(|&db| db > -self.range_target + 0.5).collect();
+        let mut levels: Vec<f32> = (1..).map(|k| -step * k as f32).take_while(|&db| db > -self.range_target + 0.5).collect();
+        // At 24 dB, −3 as well: the top few dB are where a mix bus lives.
+        if self.range_target <= 24.5 {
+            levels.insert(0, -3.0);
+        }
         for &db in &levels {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, grid, None, &Line::new((0.0, lv_y(db)), (HIST_W, lv_y(db))));
         }
