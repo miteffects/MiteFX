@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mite Comp component additions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>body{margin:0;background:#0A0C0F}button{font:inherit;color:inherit}</style>
+</helmet>
+<div style="width: 1440px; height: 1660px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 22px; background: {{c.win}}; color: {{c.hi}}; font-family: Manrope, system-ui, sans-serif; font-size: 12px">
+<div style="display: flex; align-items: baseline; gap: 16px"><h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em">Mite Comp · component additions</h1><span style="font-size: 13px; color: {{c.mid}}">Ember accent for selection and interaction · GR is always amber and hangs · upward gain is ice-violet and rises</span></div>
+
+<div style="display: flex; gap: 20px">
+<section style="flex: 0 0 520px; box-sizing: border-box; background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">COLOUR ROLES · MEASURED</h2>
+<sc-for list="{{roles}}" as="r" hint-placeholder-count="4">
+<div style="display: flex; align-items: center; gap: 14px; padding: 6px 0; border-bottom: 1px solid {{c.line}}">
+<span style="width: 44px; height: 44px; flex: 0 0 44px; border-radius: 10px; background: {{r.c}}; box-shadow: 0 0 16px {{r.c}}"></span>
+<span style="display: flex; flex-direction: column; gap: 2px; flex: 1"><span style="font-weight: 700; font-size: 13px">{{r.k}} <span style="font-feature-settings: 'tnum' 1; font-weight: 600; color: {{c.mid}}">{{r.c}}</span></span><span style="font-size: 11.5px; line-height: 1.45; color: {{c.mid}}">{{r.d}}</span></span>
+</div>
+</sc-for>
+</section>
+<section style="flex: 1; background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">GAIN METERS · NO NUMBERS ON THEM</h2>
+<div style="display: flex; gap: 28px; align-items: flex-end">
+<sc-for list="{{meters}}" as="m" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+<div style="padding: 4px; background: {{c.meterWell}}; border: 1px solid {{c.wellB}}; border-radius: 6px; box-shadow: {{c.wellSh}}; display: flex; gap: 4px">
+<sc-for list="{{m.bars}}" as="b" hint-placeholder-count="2">
+<svg width="10" height="200" viewBox="0 0 10 200" aria-hidden="true"><path d="M5 0 V200" stroke="{{c.meterOff}}" stroke-width="10" stroke-dasharray="2 2"></path><path d="{{b.d}}" stroke="{{b.c}}" stroke-width="10" stroke-dasharray="2 2" style="filter: drop-shadow(0 0 3px {{b.c}})"></path><path d="{{b.mark}}" stroke="{{c.gr}}" stroke-width="2"></path></svg>
+</sc-for>
+</div>
+<span style="font-size: 11px; color: {{c.mid}}; text-align: center; max-width: 110px">{{m.t}}</span>
+</div>
+</sc-for>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 8px">
+<div role="img" aria-label="History strip: input dim, output lit, gain reduction hanging from the top, upward gain rising from the bottom" style="position: relative; height: 200px; border-radius: 10px; background: {{c.disp}}; border: 1px solid {{c.line}}; overflow: hidden">
+<svg width="100%" height="200" viewBox="0 0 560 200" preserveAspectRatio="none" aria-hidden="true">
+<path d="{{hist.inF}}" fill="{{c.pre}}" fill-opacity="0.16"></path>
+<path d="{{hist.out}}" stroke="{{c.curve}}" stroke-width="1.6" fill="none" vector-effect="non-scaling-stroke" style="filter: drop-shadow(0 0 3px {{c.curve}})"></path>
+<path d="{{hist.grF}}" fill="{{c.gr}}" fill-opacity="0.38"></path>
+<path d="{{hist.gr}}" stroke="{{c.gr}}" stroke-width="1.6" fill="none" vector-effect="non-scaling-stroke" style="filter: drop-shadow(0 0 3px {{c.gr}})"></path>
+<path d="{{hist.gr2}}" stroke="{{c.gr}}" stroke-width="1.4" stroke-dasharray="4 3" fill="none" vector-effect="non-scaling-stroke"></path>
+<path d="{{hist.upF}}" fill="{{c.up}}" fill-opacity="0.32"></path>
+<path d="{{hist.up}}" stroke="{{c.up}}" stroke-width="1.6" fill="none" vector-effect="non-scaling-stroke" style="filter: drop-shadow(0 0 3px {{c.up}})"></path>
+</svg>
+</div>
+<span style="font-size: 11px; color: {{c.mid}}">History: GR hangs from the top (solid = mid or left, dashed = side or right when link &lt; 100 %); upward gain rises from the bottom. Smooth, never stepped.</span>
+</div>
+</div>
+</section>
+</div>
+
+<div style="display: flex; gap: 20px">
+<section style="flex: 1; background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">STAGE NODES · SAME STATES AS EQ BANDS</h2>
+<div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 18px 8px; background: {{c.disp}}; border: 1px solid {{c.line}}; border-radius: 10px">
+<sc-for list="{{nodeStates}}" as="n" hint-placeholder-count="6">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 12px">
+<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; opacity: {{n.op}}"><span style="width: {{n.s}}px; height: {{n.s}}px; box-sizing: border-box; border-radius: 50%; background: {{n.fill}}; border: 2px {{n.bs}} {{n.stroke}}; box-shadow: {{n.sh}}; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: {{n.ink}}">{{n.num}}</span></div>
+<span style="font-weight: 700">{{n.k}}</span><span style="font-size: 10.5px; color: {{c.mid}}; text-align: center">{{n.d}}</span>
+</div>
+</sc-for>
+</div>
+<h2 style="margin: 4px 0 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">QUADRANT GLYPHS · DIAGONAL = 1:1</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{quads}}" as="q" hint-placeholder-count="4">
+<div style="display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; background: {{c.well}}; border: 1px solid {{c.wellB}}; box-shadow: {{c.wellSh}}">
+<svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 21 L21 3" stroke="{{c.zero}}" stroke-width="1" stroke-dasharray="2 2"></path><path d="{{q.d}}" stroke="{{q.c}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 3px {{q.c}})"></path></svg>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 700">{{q.k}}</span><span style="font-size: 10.5px; color: {{c.mid}}">{{q.d2}}</span></span>
+</div>
+</sc-for>
+</div>
+</section>
+<section style="flex: 0 0 470px; box-sizing: border-box; background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">THRESHOLD LINE + GRIP</h2>
+<div style="position: relative; height: 210px; border-radius: 10px; background: {{c.disp}}; border: 1px solid {{c.line}}; overflow: hidden">
+<sc-for list="{{thr}}" as="t" hint-placeholder-count="4">
+<div aria-hidden="true" style="position: absolute; left: 0; top: {{t.y}}px; width: 230px; border-top: 1.5px {{t.style}} {{t.c}}; opacity: {{t.op}}; filter: drop-shadow(0 0 4px {{t.c}})"></div>
+<span style="position: absolute; left: 234px; top: {{t.gy}}px; width: 34px; height: 22px; border-radius: 11px; box-sizing: border-box; background: {{t.bg}}; border: 1.5px {{t.style}} {{t.c}}; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: {{t.fg}}; box-shadow: {{t.sh}}; opacity: {{t.op}}">{{t.n}}</span>
+<span style="position: absolute; left: 278px; top: {{t.gy}}px; height: 22px; display: flex; align-items: center; white-space: nowrap; font-size: 11px; color: {{c.mid}}">{{t.k}}</span>
+</sc-for>
+</div>
+<span style="font-size: 11px; line-height: 1.5; color: {{c.mid}}">Grips sit at the right end of the history, 34 × 22 drawn, 34 × 32 hit area. Lines never carry numbers; values go to the help strip while dragging.</span>
+</section>
+</div>
+
+<section style="background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">GLYPHS · 24 PX GRID, 1.7 PX STROKE · CURRENT CHOICE LIT IN THE ACCENT, NEVER A CHECKMARK</h2>
+<sc-for list="{{glyphRows}}" as="g" hint-placeholder-count="5">
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="width: 130px; flex: 0 0 130px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">{{g.k}}</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{g.items}}" as="i" hint-placeholder-count="7">
+<span style="width: 92px; height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-radius: 9px; background: {{i.bg}}; border: 1px solid {{i.b}}; box-shadow: {{i.sh}}"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{i.d}}" stroke="{{i.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{i.glow}}"></path></svg><span style="font-size: 11px; font-weight: 600">{{i.t}}</span></span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</section>
+
+<div style="display: flex; gap: 20px">
+<section style="flex: 0 0 520px; box-sizing: border-box; background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">ENVELOPE SCOPE · REAL DETECTOR, SYNTHETIC HIT</h2>
+<div role="img" aria-label="Envelope scope: attack 10 ms, release 120 ms" style="position: relative; width: 476px; height: 190px; border-radius: 8px; background: {{c.well}}; border: 1px solid {{c.wellB}}; box-shadow: {{c.wellSh}}; overflow: hidden">
+<svg width="476" height="190" viewBox="0 0 476 190" aria-hidden="true">
+<path d="{{scope.inF}}" fill="{{c.pre}}" fill-opacity="0.14"></path>
+<path d="{{scope.grF}}" fill="{{c.gr}}" fill-opacity="0.28"></path>
+<path d="{{scope.gr}}" stroke="{{c.gr}}" stroke-width="2" fill="none" style="filter: drop-shadow(0 0 3px {{c.gr}})"></path>
+<path d="{{scope.marks}}" stroke="{{c.accent}}" stroke-width="1" stroke-dasharray="2 3" fill="none"></path>
+<circle cx="{{scope.ax}}" cy="{{scope.ay}}" r="6" fill="{{c.accent}}" stroke="{{c.needle}}" stroke-width="2" style="filter: drop-shadow(0 0 6px {{c.accent}})"></circle>
+<circle cx="{{scope.rx}}" cy="{{scope.ry}}" r="6" fill="{{c.accent}}" stroke="{{c.needle}}" stroke-width="2" style="filter: drop-shadow(0 0 6px {{c.accent}})"></circle>
+</svg>
+</div>
+<span style="font-size: 11px; line-height: 1.5; color: {{c.mid}}">A test hit runs through the selected stage’s gain computer and ballistics. Drag the left handle sideways for attack, the right one for release. The curves are the real ones — S-shaped knees, no ramps.</span>
+</section>
+<section style="flex: 1; background: {{c.s1}}; border: 1px solid {{c.line}}; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {{c.mid}}">STAGE STRIP CARD · GAIN PER STAGE</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; height: 190px">
+<sc-for list="{{cards}}" as="k" hint-placeholder-count="4">
+<div style="position: relative; border-radius: 10px; box-sizing: border-box; border: 1px {{k.bs}} {{k.b}}; background: {{k.bg}}; box-shadow: {{k.sh}}; overflow: hidden">
+<sc-if value="{{k.live}}" hint-placeholder-val="{{ true }}">
+<div style="position: absolute; left: 10px; top: 9px; display: flex; align-items: center; gap: 6px"><span style="width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: {{k.nb}}; color: {{k.nf}}">{{k.n}}</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{k.d}}" stroke="{{k.qc}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg></div>
+<svg width="100%" height="100%" viewBox="0 0 88 190" preserveAspectRatio="none" style="position: absolute; left: 0; top: 0" aria-hidden="true"><path d="M44 42 V182" stroke="{{c.meterOff}}" stroke-width="14" stroke-dasharray="2 2"></path><path d="{{k.bar}}" stroke="{{k.barC}}" stroke-width="14" stroke-dasharray="2 2" style="filter: drop-shadow(0 0 3px {{k.barC}})"></path></svg>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<span style="font-size: 11px; line-height: 1.5; color: {{c.mid}}">Sits under the transfer curve. Selected stage has the ember ring. Empty slots are dashed outlines with nothing in them — stages come from pulling the curve, not from a button.</span>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1660}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.4.0","date":"2026-10-22","note":"Fourth pass: Mite Comp. Comp accent moved from azure to ember (user decision); new semantic gainUp."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity","gainUp":"gainUp clears ramp, semantics, the curve and the Comp accent by >= 15 in dark/light/hc. It sits closer than 15 to a few pale accents of plugins that never draw upward gain (listed in semanticChecks)."},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"},"gainUp":{"dark":"#B5C0F8","light":"#260384","hc":"#ADC3F9","cb":"#944B40","cbCue":"dotted top edge; always rises from the bottom or the 0 dB line","use":"upward gain (upward compression and upward expansion); mirrors gr, which always hangs from the top"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"ember","dark":"#E44A08","light":"#AC1D03","hc":"#DD410D","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"blush","dark":"#FEBCCF","light":"#763F51","hc":"#FEBCCF","cb":"#238EA9"},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":15.1,"light":16.3,"hc":16.1,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":17.3,"light":15.6,"hc":17.3,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6},"semanticChecks":{"gainUp":{"dark":{"gainUp_vs_ramp_sem_curve":17.1,"gainUp_vs_comp":46.8,"gainUp_contrast":10.7,"comp_vs_ramp_sem":15.1,"comp_contrast":4.8,"gainUp_near_accents":[["mod",9.0],["verb",9.4],["meter",14.2]]},"light":{"gainUp_vs_ramp_sem_curve":15.5,"gainUp_vs_comp":45.8,"gainUp_contrast":14.2,"comp_vs_ramp_sem":16.3,"comp_contrast":6.9,"gainUp_near_accents":[]},"hc":{"gainUp_vs_ramp_sem_curve":20.2,"gainUp_vs_comp":48.5,"gainUp_contrast":12.0,"comp_vs_ramp_sem":16.1,"comp_contrast":4.8,"gainUp_near_accents":[["verb",10.7],["mod",11.5],["utility",12.4],["limit",13.2],["meter",13.2]]},"cb":{"gainUp_vs_cb":18.1,"gainUp_contrast":3.0}}}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"}}/*END*/;
+    const N = TOK.color.neutral.dark, S = TOK.color.semantic, E = TOK.elevation, A = TOK.color.accent;
+    const accent = A.comp.dark;
+    const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; };
+    const c = { win: N.window, disp: N.display, s1: N.surface1, line: N.line, well: N.well, wellB: N.wellBorder, wellSh: E.inset.dark, meterWell: N.meterWell, meterOff: N.meterOff,
+      hi: N.textHi, mid: N.textMid, pre: N.preSpectrum, curve: N.curve, zero: N.zeroLine, needle: N.needle, accent, gr: S.gr.dark, up: S.gainUp.dark, ctl: N.ctlBg, ctlB: N.ctlBorder, raised: E.raised.dark };
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const ck = TOK.color.semanticChecks.gainUp.dark;
+    const roles = [
+      { k: 'Ember · accent.comp', c: accent, d: 'Selection, thresholds, nodes, grips, dials, toggles. ΔE ' + TOK.color.accentMinDeltaE.comp.dark + ' to the nearest band or semantic colour.' },
+      { k: 'Amber · sem.gr', c: S.gr.dark, d: 'Gain reduction only. Always hangs from the top or the 0 dB line.' },
+      { k: 'Ice-violet · sem.gainUp (new)', c: S.gainUp.dark, d: 'Upward gain. Always rises from the bottom. ΔE ' + ck.gainUp_vs_ramp_sem_curve + ' to ramp, semantics and curve; ' + ck.gainUp_vs_comp + ' to ember.' },
+      { k: 'Near-white · curve', c: N.curve, d: 'Output level and the transfer curve: the measured result, never orange.' }
+    ];
+    const seg = (len, fromTop) => fromTop ? 'M5 0 V' + Math.round(len / 4) * 4 : 'M5 200 V' + (200 - Math.round(len / 4) * 4);
+    const meters = [
+      { t: 'GR, hanging', bars: [{ d: seg(64, true), c: c.gr, mark: '' }, { d: seg(52, true), c: c.gr, mark: '' }] },
+      { t: 'GR with Smart target', bars: [{ d: seg(72, true), c: c.gr, mark: 'M0 84 H10' }] },
+      { t: 'Upward gain, rising', bars: [{ d: seg(48, false), c: c.up, mark: '' }] },
+      { t: 'In / out level', bars: [{ d: seg(132, false), c: c.pre, mark: '' }, { d: seg(116, false), c: c.curve, mark: '' }] }
+    ];
+    let inF = 'M0 200', out = '', gr = '', gr2 = '', up = '';
+    for (let i = 0; i <= 140; i++) {
+      const x = i * 4, beat = i % 28;
+      const lv = 0.45 + 0.12 * Math.sin(i * 0.2) + 0.35 * Math.exp(-beat / 3);
+      const g = Math.max(0, lv - 0.55) * 120;
+      const u = lv < 0.42 ? (0.42 - lv) * 160 : 0;
+      inF += ' L' + x + ' ' + r1(200 - lv * 170); out += (i ? 'L' : 'M') + x + ' ' + r1(200 - (lv * 170 - g * 0.6 + u * 0.3));
+      gr += (i ? 'L' : 'M') + x + ' ' + r1(g); gr2 += (i ? 'L' : 'M') + x + ' ' + r1(g * 0.7); up += (i ? 'L' : 'M') + x + ' ' + r1(200 - u);
+    }
+    const hist = { inF: inF + ' L560 200 Z', out, gr, gr2, grF: 'M0 0 L' + gr.slice(1) + ' L560 0 Z', up, upF: up + ' L560 200 L0 200 Z' };
+    const node = (k, d, o) => Object.assign({ k, d, s: 16, fill: hexA(accent, 0.25), stroke: accent, bs: 'solid', sh: '0 0 10px ' + hexA(accent, 0.6), num: '2', ink: '#0E1116', op: 1 }, o);
+    const nodeStates = [
+      node('Idle', 'tinted fill'), node('Hover', 'grows, brighter', { s: 18, fill: hexA(accent, 0.45), sh: '0 0 0 6px ' + hexA(accent, 0.15) + ', 0 0 12px ' + hexA(accent, 0.7) }),
+      node('Selected', 'solid + white ring', { s: 18, fill: accent, stroke: '#FFFFFF', sh: '0 0 0 5px ' + hexA(accent, 0.25) + ', 0 0 18px ' + accent }),
+      node('Solo', 'white ring + S, others dim', { s: 18, fill: accent, stroke: '#FFFFFF', num: 'S', sh: '0 0 0 3px #0E1116, 0 0 0 5px #FFFFFF, 0 0 18px rgba(255,255,255,0.55)' }),
+      node('Being created', 'dashed, follows the pull', { fill: 'transparent', bs: 'dashed', ink: accent }),
+      node('Disabled', 'stage off', { s: 14, fill: '#2A313C', stroke: '#3A4250', sh: 'none', num: '', op: 0.6 })
+    ];
+    const G = {
+      comp: 'M3 21 L12 12 C14.5 9.5 16.5 9.2 21 8.4', exp: 'M6 23 C8 21 9.5 16 12 12 L21 3', up: 'M3 14.5 C6 14 9.5 13.2 12 12 L21 3', upx: 'M3 21 L12 12 C13.8 10.2 14.6 6 15 2.5',
+      clean: 'M3 16 H8 C10.5 16 11 10 13.5 10 H21', punch: 'M3 18 H6.5 C7.5 18 8 5 9.5 5 C11 5 11.5 14 13 14 H21', fet: 'M3 18 H6 L7.5 6 L10 6 L11 13 H21 M14 9 L16 7 L18 9',
+      opto: 'M12 3.5 a6 6 0 0 1 3.5 10.9 V17 H8.5 V14.4 A6 6 0 0 1 12 3.5 Z M9 20.5 H15', bus: 'M3 6 C10 6 10 12 21 12 M3 18 C10 18 10 12 21 12 M3 12 H8',
+      varimu: 'M7 21 V10 a5 5 0 0 1 10 0 V21 Z M10 21 V15 M14 21 V15 M10 15 C11 13 13 13 14 15', custom: 'M6 4 V20 M12 4 V20 M18 4 V20 M4 8 H8 M10 15 H14 M16 10 H20',
+      off: 'M12 3.5 a8.5 8.5 0 1 0 .01 0 M6 18 L18 6', adaptive: 'M3 15 C6 15 7 8 10 8 C13 8 14 15 17 15 C18.5 15 19.5 13 21 11 M17.5 10.5 L21 11 L21 7.5',
+      vocal: 'M9.5 4.5 a2.5 2.5 0 0 1 5 0 V11 a2.5 2.5 0 0 1 -5 0 Z M6 10.5 a6 6 0 0 0 12 0 M12 16.5 V20.5 M9 20.5 H15', master: 'M12 3.5 a8.5 8.5 0 1 0 .01 0 M12 9.5 a2.5 2.5 0 1 0 .01 0 M12 3.5 a8.5 8.5 0 0 1 8.5 8.5',
+      peak: 'M3 18 H9 C10.5 18 11 4 12 4 C13 4 13.5 18 15 18 H21', rms: 'M3 18 C7 18 8.5 9 12 9 C15.5 9 17 18 21 18', loud: 'M4 18 V15 M8 18 V11 M12 18 V8 M16 18 V11 M20 18 V14',
+      ff: 'M3 12 H21 M7 12 V6 H15 M15 6 L13 4 M15 6 L13 8 M11 9 h4 v6 h-4 Z', fb: 'M3 12 H21 M17 12 V18 H9 V15 M9 15 L7 17 M9 15 L11 17 M11 9 h4 v6 h-4 Z',
+      internal: 'M5 12 a7 7 0 1 0 2.1-5 M5 4.5 V8.5 H9', external: 'M9 3 V7.5 M15 3 V7.5 M7 7.5 H17 V11 a5 5 0 0 1 -10 0 Z M12 16 V21', listen: 'M4 14 V12 a8 8 0 0 1 16 0 V14 M4 14 h3 v6 h-3 Z M20 14 h-3 v6 h3 Z',
+      key: 'M7.5 15.5 a3.5 3.5 0 1 1 0.01 0 M10.5 13.5 L20 7 M17 9 L19 12 M14.5 10.7 L16 13', lr: 'M8.5 7 a5 5 0 1 0 0.01 0 M15.5 7 a5 5 0 1 0 0.01 0', ms: 'M12 4 a8 8 0 1 0 .01 0 M12 9.5 a2.5 2.5 0 1 0 .01 0',
+      auto: 'M3 16 H21 M6.5 16 C9 16 10 7.5 12 7.5 C14 7.5 15 16 17.5 16 M12 3.5 V6'
+    };
+    const quads = [['Compress', G.comp, accent, 'above threshold, below the line'], ['Expand · gate', G.exp, accent, 'below threshold, below the line'], ['Upward compress', G.up, c.up, 'below threshold, above the line'], ['Upward expand', G.upx, c.up, 'above threshold, above the line']].map(([k, d, col, d2]) => ({ k, d, c: col, d2 }));
+    const it = (t, d, on) => ({ t, d, bg: on ? hexA(accent, 0.16) : c.ctl, b: on ? accent : c.ctlB, sh: on ? '0 0 12px ' + hexA(accent, 0.3) : c.raised, fg: on ? accent : c.hi, glow: on ? 'drop-shadow(0 0 3px ' + accent + ')' : 'none' });
+    const glyphRows = [
+      { k: 'CHARACTER', items: [it('Clean', G.clean), it('Punch', G.punch), it('FET', G.fet), it('Opto', G.opto, true), it('Bus', G.bus), it('Vari-Mu', G.varimu), it('Custom', G.custom)] },
+      { k: 'SMART', items: [it('Off', G.off), it('Adaptive', G.adaptive), it('Vocal', G.vocal, true), it('Master', G.master)] },
+      { k: 'DETECTOR · TOPOLOGY', items: [it('Peak', G.peak), it('RMS', G.rms, true), it('Loudness', G.loud), it('Feed-forward', G.ff, true), it('Feedback', G.fb)] },
+      { k: 'SIDECHAIN', items: [it('Sidechain', G.key), it('Internal', G.internal), it('External', G.external, true), it('Listen', G.listen)] },
+      { k: 'STEREO · OUTPUT', items: [it('L / R', G.lr), it('Mid / Side', G.ms, true), it('Link (header)', 'M9 7.5 a4.5 4.5 0 1 0 .01 0 M15 7.5 a4.5 4.5 0 1 0 .01 0'), it('Auto makeup', G.auto, true)] }
+    ];
+    const thr = [
+      { k: 'Idle', y: 30, gy: 19, n: '1', c: accent, style: 'solid', bg: '#0E1116', fg: accent, sh: '0 0 10px ' + hexA(accent, 0.5), op: 0.55 },
+      { k: 'Selected stage', y: 80, gy: 69, n: '2', c: accent, style: 'solid', bg: accent, fg: '#0E1116', sh: '0 0 12px ' + accent, op: 1 },
+      { k: 'Smart: where you set it', y: 130, gy: 119, n: '1', c: c.mid, style: 'dashed', bg: '#0E1116', fg: c.mid, sh: 'none', op: 0.75 },
+      { k: 'Being created', y: 180, gy: 169, n: '3', c: accent, style: 'dashed', bg: '#0E1116', fg: accent, sh: 'none', op: 0.85 }
+    ];
+    // envelope scope: real compressor maths, same as the stage panel
+    const sp = (u, w) => { if (u <= -w / 2) return 0; if (u >= w / 2) return u; return (u + w / 2) * (u + w / 2) / (2 * w); };
+    const Wms = 520, n = 476, dt = Wms / n, aA = Math.exp(-dt / 10), aR = Math.exp(-dt / 120);
+    let g = 0, sIn = 'M0 190', grp = '', iA = -1, iR = -1, gMax = 0, gOff = 0; const gs = [];
+    for (let i = 0; i <= n; i++) {
+      const tm = i * dt; const x = tm < 220 ? (tm < 3 ? -60 + 18 * tm : -6 - 14 * (1 - Math.exp(-(tm - 3) / 90))) : -60;
+      const tg = -(1 - 1 / 4) * sp(x + 18, 6); g = tg < g ? aA * g + (1 - aA) * tg : aR * g + (1 - aR) * tg; gs.push(g);
+      sIn += ' L' + i + ' ' + r1(184 - (x + 60) / 60 * 170); grp += (i ? 'L' : 'M') + i + ' ' + r1(Math.abs(g) * 9);
+    }
+    gMax = Math.max(...gs.map((v) => Math.abs(v))); iA = gs.findIndex((v) => Math.abs(v) >= 0.63 * gMax);
+    const iOff = Math.round(220 / dt); gOff = Math.abs(gs[iOff]); iR = iOff + gs.slice(iOff).findIndex((v) => Math.abs(v) <= 0.37 * gOff);
+    const scope = { inF: sIn + ' L476 190 Z', gr: grp, grF: 'M0 0 L' + grp.slice(1) + ' L476 0 Z', marks: 'M' + iA + ' 0 V190 M' + iR + ' 0 V190', ax: iA, ay: r1(Math.abs(gs[iA]) * 9), rx: iR, ry: r1(Math.abs(gs[iR]) * 9) };
+    const card = (o) => Object.assign({ live: true, bs: 'solid', b: c.wellB, bg: c.well, sh: c.wellSh, nb: hexA(accent, 0.25), nf: '#FFB08A', qc: accent, barC: c.gr }, o);
+    const cards = [
+      card({ n: 1, d: G.exp, bar: 'M44 42 V58' }), card({ n: 2, d: G.up, qc: c.up, barC: c.up, bar: 'M44 182 V150' }),
+      card({ n: 3, d: G.comp, b: accent, sh: '0 0 12px ' + hexA(accent, 0.35), nb: accent, nf: '#0E1116', bar: 'M44 42 V94' }),
+      { live: false, bs: 'dashed', b: '#2A313C', bg: 'transparent', sh: 'none', n: '', d: '', qc: '', nb: '', nf: '', bar: '', barC: '' }
+    ];
+    return { c, roles, meters, hist, nodeStates, quads, glyphRows, thr, scope, cards };
+  }
+}
+</script>
+</body>
+</html>

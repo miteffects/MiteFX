@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mite Comp — main screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
+.dial>span:first-child{transition:transform 140ms cubic-bezier(.2,0,0,1)}
+.dial:hover>span:first-child{transform:scale(1.1)}
+</style>
+</helmet>
+<div style="position: relative; width: 1280px; height: 760px; display: flex; flex-direction: column; background: {{th.win}}; color: {{th.hi}}; font-family: Manrope, system-ui, sans-serif; font-size: 12px; overflow: hidden">
+
+<header style="height: 56px; flex: 0 0 56px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: {{th.win}}; border-bottom: 1px solid {{th.line}}">
+<button aria-label="Mite Comp menu" style="height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 12px 0 4px; background: transparent; border: none; border-radius: 8px">
+<svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true" style="overflow: visible"><path d="M10.5 15 L5 12 M10 19 L4 19 M10.5 23 L5 26 M21.5 15 L27 12 M22 19 L28 19 M21.5 23 L27 26" stroke="{{th.lo}}" stroke-width="1.4" stroke-linecap="round"></path><path d="M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z" stroke="{{th.hi}}" stroke-width="1.6"></path><circle cx="16" cy="7.4" r="2.6" stroke="{{th.hi}}" stroke-width="1.6"></circle><path d="M12 24 L16 19.5 C17.2 18.2 18.4 17.8 20 17.4" stroke="{{th.accent}}" stroke-width="1.8" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path></svg>
+<span style="font-size: 16px; font-weight: 800; letter-spacing: -0.01em">Mite<span style="font-weight: 500; color: {{th.mid}}"> Comp</span></span>
+</button>
+<div style="width: 36px"></div>
+<button aria-label="Previous preset" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M7.5 2.5 L4 6 L7.5 9.5" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<button aria-label="Preset: {{presetName}}. Open the preset list" aria-expanded="{{isPresets}}" style="height: 36px; width: 300px; display: flex; align-items: center; gap: 9px; padding: 0 12px; background: {{presetBtn.bg}}; border: 1px solid {{presetBtn.b}}; border-radius: 7px; box-shadow: {{presetBtn.sh}}; text-align: left">
+<svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="4.2" stroke="{{th.mid}}" stroke-width="1.5"></circle><path d="M9.2 9.2 L12.5 12.5" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg>
+<span style="flex: 1; font-size: 13px; font-weight: 600; color: {{th.hi}}">{{presetName}}<span style="color: {{th.accent}}; font-weight: 800">{{presetDirty}}</span></span>
+</button>
+<button aria-label="Next preset" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2.5 L8 6 L4.5 9.5" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<div style="width: 18px"></div>
+<button aria-label="Undo" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5.5 3.5 L2.5 6.5 L5.5 9.5" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M3 6.5 H9.5 A3.8 3.8 0 0 1 9.5 14 H7" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<button aria-label="Redo, nothing to redo" disabled style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}; cursor: default"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10.5 3.5 L13.5 6.5 L10.5 9.5" stroke="{{th.dis}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M13 6.5 H6.5 A3.8 3.8 0 0 0 6.5 14 H9" stroke="{{th.dis}}" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<div style="width: 18px"></div>
+<div role="group" aria-label="Snapshots — drag a letter onto another to copy it" style="display: flex; gap: 8px">
+<sc-for list="{{snaps}}" as="s" hint-placeholder-count="4">
+<button aria-label="Snapshot {{s.k}}" aria-pressed="{{s.on}}" onClick="{{s.pick}}" style="width: 36px; height: 36px; border-radius: 7px; font-weight: 700; font-size: 13px; background: {{s.bg}}; border: 1px solid {{s.b}}; color: {{s.fg}}; box-shadow: {{s.sh}}">{{s.k}}</button>
+</sc-for>
+</div>
+<div style="width: 26px"></div>
+<sc-for list="{{headBtns}}" as="h" hint-placeholder-count="3">
+<button aria-label="{{h.aria}}" aria-pressed="{{h.on}}" onClick="{{h.pick}}" style="width: 40px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{h.bg}}; border: 1px solid {{h.b}}; border-radius: 7px; box-shadow: {{h.sh}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{h.d}}" stroke="{{h.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{h.glow}}"></path></svg></button>
+</sc-for>
+</header>
+
+<main style="position: relative; height: 620px; flex: 0 0 620px; background: {{th.disp}}; overflow: hidden; box-shadow: {{listenFrame}}">
+<svg width="1280" height="620" viewBox="0 0 1280 620" style="position: absolute; left: 0; top: 0" role="img" aria-label="{{displayAria}}">
+<defs>
+<linearGradient id="outFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{outColor}}" stop-opacity="{{outFillA}}"></stop><stop offset="1" stop-color="{{outColor}}" stop-opacity="0.01"></stop></linearGradient>
+<linearGradient id="grFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{th.sem.gr}}" stop-opacity="0.55"></stop><stop offset="1" stop-color="{{th.sem.gr}}" stop-opacity="0.18"></stop></linearGradient>
+<linearGradient id="upFill" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="{{th.sem.up}}" stop-opacity="0.50"></stop><stop offset="1" stop-color="{{th.sem.up}}" stop-opacity="0.14"></stop></linearGradient>
+<pattern id="upDots" width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1.1" fill="{{th.sem.up}}"></circle></pattern>
+<filter id="glow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1320" height="660"><feGaussianBlur stdDeviation="5" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+<filter id="sglow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1320" height="660"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+</defs>
+<path d="{{hGrid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none"></path>
+<path d="M0 24 H776" stroke="{{th.zero}}" stroke-width="1"></path>
+<path d="{{inFill}}" fill="{{th.pre}}" fill-opacity="0.16"></path>
+<path d="{{inLine}}" stroke="{{th.pre}}" stroke-opacity="0.55" stroke-width="1" fill="none"></path>
+<path d="{{upFillP}}" fill="url(#upFill)"></path>
+<path d="{{upFillP}}" fill="{{upPattern}}" fill-opacity="0.6"></path>
+<path d="{{upEdge}}" stroke="{{th.sem.up}}" stroke-width="1.6" fill="none" filter="url(#sglow)"></path>
+<path d="{{outFillP}}" fill="url(#outFill)"></path>
+<path d="{{outLine}}" stroke="{{outColor}}" stroke-width="1.8" fill="none" filter="url(#sglow)"></path>
+<path d="{{grFillP}}" fill="url(#grFill)"></path>
+<path d="{{grEdge}}" stroke="{{th.sem.gr}}" stroke-width="1.8" fill="none" filter="url(#sglow)"></path>
+<path d="{{grEdge2}}" stroke="{{th.sem.gr}}" stroke-width="1.6" stroke-dasharray="4 3" fill="none" filter="url(#sglow)"></path>
+<path d="M776.5 0 V620" stroke="{{th.line}}" stroke-width="1"></path>
+<rect x="796.5" y="16.5" width="384" height="384" rx="10" fill="{{th.well}}" stroke="{{th.wellB}}"></rect>
+<path d="{{cGrid}}" stroke="{{th.gridMajor}}" stroke-width="1" fill="none"></path>
+<path d="{{cDiag}}" stroke="{{th.zero}}" stroke-width="1.2" stroke-dasharray="3 4" fill="none"></path>
+<path d="{{shadeDown}}" fill="{{th.sem.gr}}" fill-opacity="0.20"></path>
+<path d="{{shadeUp}}" fill="{{th.sem.up}}" fill-opacity="0.22"></path>
+<path d="{{shadeUp}}" fill="{{upPattern}}" fill-opacity="0.6"></path>
+<path d="{{ghostCurve}}" stroke="{{th.accent}}" stroke-width="1.6" stroke-dasharray="5 4" fill="none" filter="url(#sglow)"></path>
+<path d="{{cCurve}}" stroke="{{th.curve}}" stroke-width="2.4" fill="none" filter="url(#glow)" stroke-linejoin="round"></path>
+<path d="{{trail}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" fill="none" stroke-opacity="0.28" stroke-dasharray="1 5"></path>
+<path d="{{meterWells}}" fill="{{th.meterWell}}" stroke="{{th.wellB}}"></path>
+<path d="M1199 588 V24 M1209 588 V24 M1225 24 V588 M1235 24 V588 M1251 588 V24 M1261 588 V24" stroke="{{th.meterOff}}" stroke-width="8" stroke-dasharray="2 2"></path>
+<path d="{{mIn}}" stroke="{{th.pre}}" stroke-width="8" stroke-dasharray="2 2"></path>
+<path d="{{mGr}}" stroke="{{th.sem.gr}}" stroke-width="8" stroke-dasharray="2 2" filter="url(#sglow)"></path>
+<path d="{{mOut}}" stroke="{{outColor}}" stroke-width="8" stroke-dasharray="2 2" filter="url(#sglow)"></path>
+<path d="{{mTarget}}" stroke="{{th.sem.gr}}" stroke-width="2" fill="none"></path>
+</svg>
+
+<sc-for list="{{dbLabels}}" as="l" hint-placeholder-count="5">
+<span style="position: absolute; left: 744px; top: {{l.y}}px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{th.lo}}">{{l.t}}</span>
+</sc-for>
+<sc-for list="{{axisLabels}}" as="l" hint-placeholder-count="6">
+<span style="position: absolute; left: {{l.x}}px; top: {{l.y}}px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{th.lo}}">{{l.t}}</span>
+</sc-for>
+<sc-for list="{{meterLabels}}" as="l" hint-placeholder-count="3">
+<span aria-hidden="true" style="position: absolute; left: {{l.x}}px; top: 596px; width: 28px; text-align: center; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{l.t}}</span>
+</sc-for>
+<sc-for list="{{meterIcons}}" as="m" hint-placeholder-count="0">
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" style="position: absolute; left: {{m.x}}px; top: 6px"><path d="{{m.d}}" stroke="{{th.mid}}" stroke-width="1.3" stroke-linecap="round"></path></svg>
+</sc-for>
+
+<sc-for list="{{thrLines}}" as="t" hint-placeholder-count="1">
+<div aria-hidden="true" style="position: absolute; left: 0; top: {{t.y}}px; width: 736px; height: 0; border-top: 1.5px {{t.style}} {{t.c}}; opacity: {{t.op}}; filter: drop-shadow(0 0 4px {{t.c}})"></div>
+<button aria-label="{{t.aria}}" style="position: absolute; left: 738px; top: {{t.gy}}px; width: 34px; height: 22px; padding: 0; border-radius: 11px; background: {{t.gbg}}; border: 1.5px {{t.style}} {{t.c}}; display: flex; align-items: center; justify-content: center; gap: 3px; font-size: 10px; font-weight: 800; color: {{t.gfg}}; box-shadow: {{t.gsh}}; opacity: {{t.op}}"><svg width="8" height="10" viewBox="0 0 8 10" aria-hidden="true"><path d="M1 3.5 L4 1 L7 3.5 M1 6.5 L4 9 L7 6.5" stroke="{{t.gfg}}" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>{{t.n}}</button>
+</sc-for>
+<sc-if value="{{hasTarget}}" hint-placeholder-val="{{ false }}">
+<div aria-hidden="true" style="position: absolute; left: 0; top: {{target.y}}px; width: 736px; height: 0; border-top: 1.5px dashed {{th.sem.gr}}; opacity: 0.9"></div>
+<button aria-label="Smart target gain reduction {{target.v}}, drag to change" style="position: absolute; left: 708px; top: {{target.gy}}px; height: 22px; padding: 0 8px; border-radius: 11px; background: {{th.disp}}; border: 1.5px dashed {{th.sem.gr}}; font-feature-settings: 'tnum' 1; font-size: 10px; font-weight: 800; color: {{th.sem.gr}}">{{target.v}}</button>
+</sc-if>
+
+<div role="list" aria-label="Gain change per stage" style="position: absolute; left: 796px; top: 420px; width: 384px; height: 176px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{strip}}" as="c" hint-placeholder-count="4">
+<div role="listitem" aria-label="{{c.aria}}" style="position: relative; border-radius: 10px; box-sizing: border-box; border: 1px {{c.bs}} {{c.b}}; background: {{c.bg}}; box-shadow: {{c.sh}}; opacity: {{c.op}}; overflow: hidden">
+<sc-if value="{{c.live}}" hint-placeholder-val="{{ true }}">
+<div style="position: absolute; left: 10px; top: 9px; display: flex; align-items: center; gap: 6px"><span style="width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: {{c.nb}}; color: {{c.nf}}; box-shadow: 0 0 8px {{c.glowC}}">{{c.n}}</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 21 L21 3" stroke="{{th.zero}}" stroke-width="1" stroke-dasharray="2 2"></path><path d="{{c.d}}" stroke="{{c.qc}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg></div>
+<svg width="100%" height="100%" viewBox="0 0 88 176" preserveAspectRatio="none" style="position: absolute; left: 0; top: 0" aria-hidden="true"><path d="M44 40 V168" stroke="{{th.meterOff}}" stroke-width="14" stroke-dasharray="2 2"></path><path d="{{c.bar}}" stroke="{{c.barC}}" stroke-width="14" stroke-dasharray="2 2" style="filter: drop-shadow(0 0 3px {{c.barC}})"></path></svg>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<sc-for list="{{diamonds}}" as="d" hint-placeholder-count="1">
+<span aria-hidden="true" style="position: absolute; left: {{d.x}}px; top: {{d.y}}px; width: 8px; height: 8px; transform: rotate(45deg); background: {{d.c}}; opacity: {{d.op}}; box-shadow: 0 0 6px {{d.c}}"></span>
+</sc-for>
+<sc-for list="{{nodes}}" as="n" hint-placeholder-count="1">
+<button aria-label="{{n.aria}}" aria-pressed="{{n.on}}" onClick="{{n.pick}}" style="position: absolute; left: {{n.x}}px; top: {{n.y}}px; width: 32px; height: 32px; padding: 0; background: transparent; border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; opacity: {{n.op}}">
+<span style="width: {{n.size}}px; height: {{n.size}}px; box-sizing: border-box; border-radius: 50%; background: {{n.fill}}; border: 2px {{n.bs}} {{n.stroke}}; box-shadow: {{n.shadow}}; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: {{n.ink}}">{{n.num}}</span>
+</button>
+</sc-for>
+<sc-if value="{{hasDot}}" hint-placeholder-val="{{ true }}">
+<span aria-hidden="true" style="position: absolute; left: {{dot.x}}px; top: {{dot.y}}px; width: 12px; height: 12px; border-radius: 50%; background: {{th.needle}}; box-shadow: 0 0 0 3px {{th.accentSoft}}, 0 0 14px {{th.accent}}"></span>
+</sc-if>
+<sc-for list="{{grips}}" as="g" hint-placeholder-count="0">
+<span aria-hidden="true" style="position: absolute; left: {{g.x}}px; top: {{g.y}}px; width: 22px; height: 14px; border-radius: 7px; border: 1.5px dashed {{g.c}}; background: {{g.bg}}; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px {{g.glow}}"><svg width="8" height="6" viewBox="0 0 8 6"><path d="{{g.d}}" stroke="{{g.c}}" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+</sc-for>
+
+<sc-if value="{{isEmpty}}" hint-placeholder-val="{{ false }}">
+<div aria-hidden="true" style="position: absolute; left: 800px; top: 410px; width: 380px; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none">
+<svg width="120" height="40" viewBox="0 0 120 40" fill="none"><path d="M10 34 L110 6" stroke="{{th.zero}}" stroke-width="1.5" stroke-dasharray="3 4"></path><path d="M60 20 V8 M55 13 L60 8 L65 13 M60 21 V33 M55 28 L60 33 L65 28" stroke="{{th.accent}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 4px {{th.accent}})"></path></svg>
+<span style="font-size: 14px; font-weight: 700; color: {{th.hi}}">Pull the line to make a stage</span>
+</div>
+</sc-if>
+
+<sc-if value="{{isDelta}}" hint-placeholder-val="{{ false }}">
+<div role="status" style="position: absolute; left: 330px; top: 14px; height: 32px; padding: 0 14px 0 10px; display: flex; align-items: center; gap: 8px; border-radius: 16px; background: {{th.accentSoft}}; border: 1.5px solid {{th.accent}}; box-shadow: 0 0 18px {{th.accentSoft}}; font-weight: 800; color: {{th.hi}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4 L20.5 19 H3.5 Z" stroke="{{th.accent}}" stroke-width="2" stroke-linejoin="round"></path></svg>Removed signal</div>
+</sc-if>
+<sc-if value="{{isListen}}" hint-placeholder-val="{{ false }}">
+<div role="status" style="position: absolute; left: 270px; top: 14px; height: 32px; padding: 0 14px 0 10px; display: flex; align-items: center; gap: 8px; border-radius: 16px; background: {{th.scSoft}}; border: 1.5px solid {{th.sem.sc}}; box-shadow: 0 0 18px {{th.sem.sc}}; font-weight: 800; color: {{th.hi}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 14 V12 a8 8 0 0 1 16 0 V14 M4 14 h3 v6 h-3 Z M20 14 h-3 v6 h3 Z" stroke="{{th.sem.sc}}" stroke-width="1.8" stroke-linejoin="round"></path></svg>Detector</div>
+</sc-if>
+
+<sc-if value="{{hasStage}}" hint-placeholder-val="{{ false }}">
+<section aria-label="{{sp.title}} controls" style="position: absolute; left: 12px; top: 402px; width: 708px; height: 208px; box-sizing: border-box; padding: 12px 14px; display: flex; gap: 12px; background: {{th.glass}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 14px; box-shadow: {{th.glassSh}}">
+<div style="width: 250px; display: flex; flex-direction: column; gap: 10px">
+<div role="img" aria-label="{{sp.scopeAria}}" style="position: relative; width: 250px; height: 124px; border-radius: 8px; background: {{th.well}}; border: 1px solid {{th.wellB}}; box-shadow: {{th.wellSh}}; overflow: hidden">
+<svg width="250" height="124" viewBox="0 0 250 124" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+<path d="{{sp.scGrid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none"></path>
+<path d="{{sp.scIn}}" fill="{{th.pre}}" fill-opacity="0.12"></path>
+<path d="{{sp.scGr}}" fill="{{th.sem.gr}}" fill-opacity="0.28"></path>
+<path d="{{sp.scGrEdge}}" stroke="{{th.sem.gr}}" stroke-width="1.8" fill="none" style="filter: drop-shadow(0 0 3px {{th.sem.gr}})"></path>
+<path d="{{sp.scMarks}}" stroke="{{th.accent}}" stroke-width="1" stroke-dasharray="2 3" fill="none"></path>
+</svg>
+<sc-for list="{{sp.handles}}" as="h" hint-placeholder-count="2">
+<button aria-label="{{h.aria}}" style="position: absolute; left: {{h.x}}px; top: {{h.y}}px; width: 24px; height: 24px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center"><span style="width: 11px; height: 11px; border-radius: 50%; background: {{th.accent}}; border: 2px solid {{th.needle}}; box-sizing: border-box; box-shadow: 0 0 10px {{th.accent}}"></span></button>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px"><span style="width: 9px; height: 9px; border-radius: 50%; background: {{th.accent}}; box-shadow: 0 0 8px {{th.accent}}"></span><span style="font-size: 15px; font-weight: 700">{{sp.title}}</span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 21 L21 3" stroke="{{th.zero}}" stroke-width="1.2" stroke-dasharray="2 2"></path><path d="{{sp.qGlyph}}" stroke="{{sp.qColor}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg></div>
+</div>
+<div style="width: 116px; display: flex; flex-direction: column; gap: 10px">
+<div role="radiogroup" aria-label="Quadrant, normally set by where you pull the curve" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{sp.quads}}" as="q" hint-placeholder-count="4">
+<button role="radio" aria-checked="{{q.on}}" aria-label="{{q.aria}}" style="height: 40px; display: flex; align-items: center; justify-content: center; background: {{q.bg}}; border: 1px solid {{q.b}}; border-radius: 7px; box-shadow: {{q.sh}}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 21 L21 3" stroke="{{th.zero}}" stroke-width="1" stroke-dasharray="2 2"></path><path d="{{q.d}}" stroke="{{q.fg}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="filter: {{q.glow}}"></path></svg></button>
+</sc-for>
+</div>
+<button aria-label="Detector: {{sp.det}}" style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 7px; box-shadow: {{th.raised}}; font-weight: 600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{sp.detD}}" stroke="{{th.accent}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="flex: 1; text-align: left">{{sp.det}}</span><svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="{{th.lo}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 2px">
+<sc-for list="{{sp.knobs}}" as="k" hint-placeholder-count="6">
+<button class="dial" aria-label="{{k.aria}}" style="height: 92px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: none; border-radius: 8px">
+<span style="position: relative; width: 62px; height: 62px; display: block">
+<svg width="62" height="62" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<path d="{{k.dim}}" stroke="{{th.tickOff}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.ctr}}" stroke="{{th.mid}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{th.accent}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="{{th.disc}}" stroke="{{th.discB}}" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,{{th.discAlpha}}))"></circle>
+<path d="{{k.ptr}}" stroke="{{th.needle}}" stroke-width="2.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 62px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: {{th.strong}}">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: {{th.lo}}; margin-top: 2px">{{k.u}}</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{k.label}}</span>
+</button>
+</sc-for>
+</div>
+<div style="width: 36px; display: flex; flex-direction: column; justify-content: space-between">
+<button aria-label="Close stage panel" onClick="{{closePanel}}" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round"></path></svg></button>
+<button aria-label="Remove {{sp.title}}" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13.5 H10.8 L11.5 4.5 M7 7 V11 M9 7 V11" stroke="{{th.mid}}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{hasWide}}" hint-placeholder-val="{{ false }}">
+<section aria-label="{{wp.title}}" style="position: absolute; left: 12px; top: {{wp.top}}px; width: {{wp.w}}px; height: {{wp.h}}px; box-sizing: border-box; padding: 14px 16px; display: flex; gap: 16px; align-items: stretch; background: {{th.glass}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 14px; box-shadow: {{th.glassSh}}">
+<div style="width: 170px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{wp.icon}}" stroke="{{wp.iconC}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font-size: 15px; font-weight: 700">{{wp.title}}</span></div>
+<sc-for list="{{wp.side}}" as="s" hint-placeholder-count="2">
+<sc-if value="{{s.isDrop}}" hint-placeholder-val="{{ true }}">
+<button aria-label="{{s.aria}}" style="height: 36px; display: flex; align-items: center; gap: 7px; padding: 0 9px; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 7px; box-shadow: {{th.raised}}; font-weight: 600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{s.d}}" stroke="{{s.c}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="flex: 1; text-align: left">{{s.t}}</span><svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" stroke="{{th.lo}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-if>
+<sc-if value="{{s.isIcons}}" hint-placeholder-val="{{ false }}">
+<div role="radiogroup" aria-label="{{s.aria}}" style="display: flex; gap: 6px">
+<sc-for list="{{s.opts}}" as="o" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{o.on}}" aria-label="{{o.aria}}" style="flex: 1; height: 38px; display: flex; align-items: center; justify-content: center; background: {{o.bg}}; border: 1px solid {{o.b}}; border-radius: 7px; box-shadow: {{o.sh}}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{o.glow}}"></path></svg></button>
+</sc-for>
+</div>
+</sc-if>
+</sc-for>
+</div>
+<sc-if value="{{wp.isEq}}" hint-placeholder-val="{{ false }}">
+<div role="img" aria-label="Sidechain EQ: high-pass at 120 Hz, cut at 300 Hz, boost at 4.5 kHz" style="position: relative; flex: 1; border-radius: 8px; background: {{th.well}}; border: 1px solid {{th.wellB}}; box-shadow: {{th.wellSh}}; overflow: hidden">
+<svg width="100%" height="100%" viewBox="0 0 620 192" preserveAspectRatio="none" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+<path d="{{sce.grid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none" vector-effect="non-scaling-stroke"></path>
+<path d="M0 96 H620" stroke="{{th.zero}}" stroke-width="1" vector-effect="non-scaling-stroke"></path>
+<path d="{{sce.specFill}}" fill="{{th.sem.sc}}" fill-opacity="0.18"></path>
+<path d="{{sce.spec}}" stroke="{{th.sem.sc}}" stroke-width="1.2" fill="none" stroke-dasharray="{{th.scDash}}" vector-effect="non-scaling-stroke"></path>
+<path d="{{sce.curve}}" stroke="{{th.curve}}" stroke-width="2" fill="none" vector-effect="non-scaling-stroke" style="filter: drop-shadow(0 0 4px {{th.curve}})"></path>
+</svg>
+<sc-for list="{{sce.nodes}}" as="n" hint-placeholder-count="3">
+<button aria-label="{{n.aria}}" style="position: absolute; left: {{n.x}}%; top: {{n.y}}%; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center"><span style="width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; background: {{n.fill}}; border: 2px solid {{n.c}}; box-shadow: 0 0 8px {{n.c}}; font-size: 8px; font-weight: 800; color: {{th.nodeInk}}; display: flex; align-items: center; justify-content: center">{{n.num}}</span></button>
+</sc-for>
+<span style="position: absolute; left: 10px; top: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">SIDECHAIN EQ</span>
+</div>
+</sc-if>
+<sc-if value="{{wp.isDials}}" hint-placeholder-val="{{ true }}">
+<div style="flex: 1; display: flex; align-items: center; justify-content: space-around">
+<sc-for list="{{wp.knobs}}" as="k" hint-placeholder-count="5">
+<div style="display: flex; align-items: center; gap: 6px">
+<button class="dial" aria-label="{{k.aria}}" style="height: 96px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: none; border-radius: 8px">
+<span style="position: relative; width: 62px; height: 62px; display: block">
+<svg width="62" height="62" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<path d="{{k.dim}}" stroke="{{th.tickOff}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.ctr}}" stroke="{{th.mid}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{th.accent}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="{{th.disc}}" stroke="{{th.discB}}" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,{{th.discAlpha}}))"></circle>
+<path d="{{k.ptr}}" stroke="{{th.needle}}" stroke-width="2.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 62px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: {{th.strong}}">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: {{th.lo}}; margin-top: 2px">{{k.u}}</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{k.label}}</span>
+</button>
+<sc-if value="{{k.hasToggle}}" hint-placeholder-val="{{ false }}">
+<button aria-label="{{k.tAria}}" aria-pressed="{{k.tOn}}" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{k.tBg}}; border: 1px solid {{k.tB}}; border-radius: 7px; box-shadow: {{k.tSh}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{k.tD}}" stroke="{{k.tFg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<div style="width: 36px; display: flex; flex-direction: column; justify-content: flex-start">
+<button aria-label="Close {{wp.title}}" onClick="{{closePanel}}" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round"></path></svg></button>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{hasPop}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Stereo" style="position: absolute; left: 870px; top: 8px; width: 236px; box-sizing: border-box; padding: 12px; display: flex; align-items: center; gap: 12px; background: {{th.glass}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 14px; box-shadow: {{th.glassSh}}">
+<div role="radiogroup" aria-label="Stereo mode" style="display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{pop.opts}}" as="o" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{o.on}}" aria-label="{{o.aria}}" style="width: 52px; height: 38px; display: flex; align-items: center; justify-content: center; background: {{o.bg}}; border: 1px solid {{o.b}}; border-radius: 7px; box-shadow: {{o.sh}}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{o.glow}}"></path></svg></button>
+</sc-for>
+</div>
+<button class="dial" aria-label="{{pop.k.aria}}" style="flex: 1; height: 96px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: none">
+<span style="position: relative; width: 62px; height: 62px; display: block">
+<svg width="62" height="62" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<path d="{{pop.k.dim}}" stroke="{{th.tickOff}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{pop.k.lit}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{th.accent}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="{{th.disc}}" stroke="{{th.discB}}"></circle>
+<path d="{{pop.k.ptr}}" stroke="{{th.needle}}" stroke-width="2.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 62px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: {{th.strong}}">{{pop.k.n}}</span><span style="font-size: 9px; font-weight: 600; color: {{th.lo}}; margin-top: 2px">{{pop.k.u}}</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">LINK</span>
+</button>
+</section>
+</sc-if>
+
+<sc-if value="{{hasMenu}}" hint-placeholder-val="{{ false }}">
+<div role="menu" aria-label="{{menu.aria}}" style="position: absolute; left: {{menu.x}}px; top: {{menu.y}}px; width: {{menu.w}}px; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; background: {{th.menu}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 12px; box-shadow: {{th.glassSh}}">
+<sc-for list="{{menu.items}}" as="m" hint-placeholder-count="7">
+<sc-if value="{{m.head}}" hint-placeholder-val="{{ false }}"><div role="presentation" style="padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{m.t}}</div></sc-if>
+<sc-if value="{{m.item}}" hint-placeholder-val="{{ true }}">
+<button role="menuitemradio" aria-checked="{{m.on}}" tabindex="{{m.ti}}" style="width: 100%; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 1px solid {{m.b}}; border-radius: 7px; text-align: left; background: {{m.bg}}; color: {{m.fg}}; font-weight: 600; font-size: 13px">
+<sc-if value="{{m.hasIcon}}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{m.d}}" stroke="{{m.ic}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+<span style="flex: 1">{{m.t}}</span></button>
+</sc-if>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isHelp}}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; left: 470px; top: 12px; height: 32px; padding: 0 14px; display: flex; align-items: center; border-radius: 16px; background: {{th.accentSoft}}; border: 1px solid {{th.accent}}; color: {{th.accentText}}; font-weight: 700; box-shadow: 0 0 16px {{th.accentSoft}}">Help mode — hover anything · ? or Esc exits</div>
+</sc-if>
+</main>
+
+<div style="height: 28px; flex: 0 0 28px; box-sizing: border-box; display: flex; align-items: center; padding: 0 16px; background: {{th.help}}; border-top: 1px solid {{th.line}}; font-size: 12px; color: {{th.mid}}; white-space: nowrap; overflow: hidden">
+<sc-for list="{{helpSlots}}" as="h" hint-placeholder-count="4">
+<span style="display: inline-block; min-width: {{h.w}}px; font-feature-settings: 'tnum' 1; color: {{h.c}}">{{h.t}}</span>
+</sc-for>
+<span style="color: {{th.mid}}">{{helpText}}</span>
+</div>
+
+<footer style="height: 56px; flex: 0 0 56px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: {{th.win}}; border-top: 1px solid {{th.line}}">
+<sc-for list="{{footDrops}}" as="f" hint-placeholder-count="2">
+<button aria-label="{{f.aria}}" aria-haspopup="menu" aria-expanded="{{f.open}}" style="height: 38px; min-width: {{f.w}}px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: {{f.bg}}; border: 1px solid {{f.b}}; border-radius: 8px; box-shadow: {{f.sh}}; font-weight: 600; font-size: 13px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{f.d}}" stroke="{{f.ic}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{f.glow}}"></path></svg><span style="flex: 1; text-align: left">{{f.t}}</span><svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 7.5 L6 4.5 L9 7.5" stroke="{{th.lo}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-for>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 0 8px; min-width: 90px">
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">LATENCY</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 13px; color: {{latC}}">{{latency}}</span>
+</div>
+<div style="flex: 1"></div>
+<sc-for list="{{toggles}}" as="t" hint-placeholder-count="3">
+<button aria-label="{{t.aria}}" aria-pressed="{{t.on}}" onClick="{{t.pick}}" style="width: 44px; height: 38px; display: flex; align-items: center; justify-content: center; background: {{t.bg}}; border: 1px solid {{t.b}}; border-radius: 8px; box-shadow: {{t.sh}}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{t.d}}" stroke="{{t.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{t.glow}}"></path></svg></button>
+</sc-for>
+<div style="width: 18px"></div>
+<sc-for list="{{footDials}}" as="d" hint-placeholder-count="3">
+<button class="dial" aria-label="{{d.aria}}" style="height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 6px; background: transparent; border: none">
+<span style="display: block; width: 36px; height: 36px"><svg width="36" height="36" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{d.dim}}" stroke="{{th.tickOff}}" stroke-width="3.5" stroke-linecap="round"></path><path d="{{d.ctr}}" stroke="{{th.mid}}" stroke-width="3.5" stroke-linecap="round"></path><path d="{{d.lit}}" stroke="{{th.accent}}" stroke-width="3.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path><circle cx="32" cy="32" r="17" fill="{{th.disc}}" stroke="{{th.discB}}" stroke-width="2"></circle><path d="{{d.ptr}}" stroke="{{th.needle}}" stroke-width="4" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path></svg></span>
+<span style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 52px"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{d.label}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 13px">{{d.v}}</span></span>
+</button>
+</sc-for>
+</footer>
+
+<sc-if value="{{isHelp}}" hint-placeholder-val="{{ false }}">
+<div role="list" aria-label="Help mode annotations" style="position: absolute; inset: 0; pointer-events: none">
+<sc-for list="{{helpSpots}}" as="h" hint-placeholder-count="8">
+<div aria-hidden="true" style="position: absolute; left: {{h.x}}px; top: {{h.y}}px; width: {{h.w}}px; height: {{h.h}}px; border: 1.5px solid {{th.accent}}; border-radius: 8px; box-shadow: 0 0 12px {{th.accentSoft}}, inset 0 0 12px {{th.accentSoft}}"></div>
+<div role="listitem" style="position: absolute; left: {{h.lx}}px; top: {{h.ly}}px; max-width: 230px; display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px 7px 7px; background: {{th.menu}}; border: 1px solid {{th.glassB}}; border-radius: 10px; box-shadow: {{th.glassSh}}">
+<span aria-hidden="true" style="width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: {{th.accent}}; color: {{th.nodeInk}}; font-size: 11px; font-weight: 800; box-shadow: 0 0 10px {{th.accent}}">{{h.n}}</span>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 700; font-size: 12px">{{h.t}}</span><span style="font-size: 11px; line-height: 1.4; color: {{th.mid}}">{{h.d}}</span></span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","cb","hc"],"default":"dark"},"variant":{"editor":"enum","options":["default","stages","stage-selected","create","character","custom","smart","sidechain","listen","stereo","lookahead","delta","empty","presets","help","menu"],"default":"default"},"animate":{"editor":"boolean","default":true},"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      if (this.props.animate ?? true) { const st = this.state || {}; this.setState({ t: (st.t || 0) + 1 }); }
+    }, 60);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+  renderVals() {
+    const themeKey = this.props.theme || 'dark';
+    const variant = this.props.variant || 'default';
+    const st = this.state || {};
+    const t = st.t || 0;
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.4.0","date":"2026-10-22","note":"Fourth pass: Mite Comp. Comp accent moved from azure to ember (user decision); new semantic gainUp."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity","gainUp":"gainUp clears ramp, semantics, the curve and the Comp accent by >= 15 in dark/light/hc. It sits closer than 15 to a few pale accents of plugins that never draw upward gain (listed in semanticChecks)."},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"},"gainUp":{"dark":"#B5C0F8","light":"#260384","hc":"#ADC3F9","cb":"#944B40","cbCue":"dotted top edge; always rises from the bottom or the 0 dB line","use":"upward gain (upward compression and upward expansion); mirrors gr, which always hangs from the top"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"ember","dark":"#E44A08","light":"#AC1D03","hc":"#DD410D","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"blush","dark":"#FEBCCF","light":"#763F51","hc":"#FEBCCF","cb":"#238EA9"},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":15.1,"light":16.3,"hc":16.1,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":17.3,"light":15.6,"hc":17.3,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6},"semanticChecks":{"gainUp":{"dark":{"gainUp_vs_ramp_sem_curve":17.1,"gainUp_vs_comp":46.8,"gainUp_contrast":10.7,"comp_vs_ramp_sem":15.1,"comp_contrast":4.8,"gainUp_near_accents":[["mod",9.0],["verb",9.4],["meter",14.2]]},"light":{"gainUp_vs_ramp_sem_curve":15.5,"gainUp_vs_comp":45.8,"gainUp_contrast":14.2,"comp_vs_ramp_sem":16.3,"comp_contrast":6.9,"gainUp_near_accents":[]},"hc":{"gainUp_vs_ramp_sem_curve":20.2,"gainUp_vs_comp":48.5,"gainUp_contrast":12.0,"comp_vs_ramp_sem":16.1,"comp_contrast":4.8,"gainUp_near_accents":[["verb",10.7],["mod",11.5],["utility",12.4],["limit",13.2],["meter",13.2]]},"cb":{"gainUp_vs_cb":18.1,"gainUp_contrast":3.0}}}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"}}/*END*/;
+    const base = themeKey === 'light' ? 'light' : themeKey === 'hc' ? 'hc' : 'dark';
+    const key = themeKey === 'cb' ? 'cb' : base;
+    const NT = TOK.color.neutral[base], TC = TOK.color, E = TOK.elevation;
+    const semOf = (k) => TC.semantic[k][key];
+    const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; };
+    const accent = TC.accent.comp[key];
+    const th = {
+      win: NT.window, disp: NT.display, help: NT.helpStrip, line: NT.line, div: NT.divider,
+      ctl: NT.ctlBg, ctlB: NT.ctlBorder, raised: base === 'hc' ? 'none' : E.raised[base],
+      well: NT.well, wellB: NT.wellBorder, wellSh: base === 'hc' ? 'none' : E.inset[base],
+      pCtl: NT.panelCtlBg, pCtlB: NT.panelCtlBorder, glass: NT.glass, glassB: NT.glassBorder, glassSh: base === 'hc' ? 'none' : E.glass[base],
+      menu: NT.menu, disc: NT.dialDisc, discB: NT.dialDiscBorder, discAlpha: base === 'dark' ? 0.7 : base === 'light' ? 0.2 : 0,
+      tickOff: NT.tickOff, needle: NT.needle, gridMinor: NT.gridMinor, gridMajor: NT.gridMajor, zero: NT.zeroLine,
+      curve: NT.curve, pre: NT.preSpectrum, hi: NT.textHi, mid: NT.textMid, lo: NT.textLo, strong: NT.textStrong, dis: NT.textDisabled,
+      meterOff: NT.meterOff, meterWell: NT.meterWell, nodeInk: base === 'light' ? '#FFFFFF' : base === 'hc' ? '#000000' : '#0E1116',
+      accent, accentSoft: hexA(accent, base === 'light' ? 0.12 : 0.2), accentText: base === 'light' ? accent : base === 'hc' ? '#FFFFFF' : '#FFB08A',
+      ramp: TC.ramp[key],
+      sem: { gr: semOf('gr'), warn: semOf('warn'), danger: semOf('danger'), ok: semOf('ok'), sc: semOf('sidechain'), up: semOf('gainUp') },
+      scDash: key === 'cb' ? '6 4' : 'none', alwaysNum: key === 'cb' || base === 'hc'
+    };
+    th.scSoft = hexA(th.sem.sc, 0.18);
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const V = (n) => variant === n;
+
+    // ---------------- glyphs (24 x 24, stroke)
+    const G = {
+      comp: 'M3 21 L12 12 C14.5 9.5 16.5 9.2 21 8.4', exp: 'M6 23 C8 21 9.5 16 12 12 L21 3', up: 'M3 14.5 C6 14 9.5 13.2 12 12 L21 3', upx: 'M3 21 L12 12 C13.8 10.2 14.6 6 15 2.5',
+      clean: 'M3 16 H8 C10.5 16 11 10 13.5 10 H21', punch: 'M3 18 H6.5 C7.5 18 8 5 9.5 5 C11 5 11.5 14 13 14 H21', fet: 'M3 18 H6 L7.5 6 L10 6 L11 13 H21 M14 9 L16 7 L18 9',
+      opto: 'M12 3.5 a6 6 0 0 1 3.5 10.9 V17 H8.5 V14.4 A6 6 0 0 1 12 3.5 Z M9 20.5 H15', bus: 'M3 6 C10 6 10 12 21 12 M3 18 C10 18 10 12 21 12 M3 12 H8',
+      varimu: 'M7 21 V10 a5 5 0 0 1 10 0 V21 Z M10 21 V15 M14 21 V15 M10 15 C11 13 13 13 14 15', custom: 'M6 4 V20 M12 4 V20 M18 4 V20 M4 8 H8 M10 15 H14 M16 10 H20',
+      off: 'M12 3.5 a8.5 8.5 0 1 0 .01 0 M6 18 L18 6', adaptive: 'M3 15 C6 15 7 8 10 8 C13 8 14 15 17 15 C18.5 15 19.5 13 21 11 M17.5 10.5 L21 11 L21 7.5',
+      vocal: 'M9.5 4.5 a2.5 2.5 0 0 1 5 0 V11 a2.5 2.5 0 0 1 -5 0 Z M6 10.5 a6 6 0 0 0 12 0 M12 16.5 V20.5 M9 20.5 H15', master: 'M12 3.5 a8.5 8.5 0 1 0 .01 0 M12 9.5 a2.5 2.5 0 1 0 .01 0 M12 3.5 a8.5 8.5 0 0 1 8.5 8.5',
+      peak: 'M3 18 H9 C10.5 18 11 4 12 4 C13 4 13.5 18 15 18 H21', rms: 'M3 18 C7 18 8.5 9 12 9 C15.5 9 17 18 21 18', loud: 'M4 18 V15 M8 18 V11 M12 18 V8 M16 18 V11 M20 18 V14',
+      ff: 'M3 12 H21 M7 12 V6 H15 M15 6 L13 4 M15 6 L13 8 M11 9 h4 v6 h-4 Z', fb: 'M3 12 H21 M17 12 V18 H9 V15 M9 15 L7 17 M9 15 L11 17 M11 9 h4 v6 h-4 Z',
+      key: 'M7.5 15.5 a3.5 3.5 0 1 1 0.01 0 M10.5 13.5 L20 7 M17 9 L19 12 M14.5 10.7 L16 13', link: 'M9 7.5 a4.5 4.5 0 1 0 .01 0 M15 7.5 a4.5 4.5 0 1 0 .01 0',
+      sliders: 'M4 7 H20 M4 12 H20 M4 17 H20 M8.5 5 V9 M15 10 V14 M10.5 15 V19',
+      internal: 'M5 12 a7 7 0 1 0 2.1-5 M5 4.5 V8.5 H9', external: 'M9 3 V7.5 M15 3 V7.5 M7 7.5 H17 V11 a5 5 0 0 1 -10 0 Z M12 16 V21',
+      listen: 'M4 14 V12 a8 8 0 0 1 16 0 V14 M4 14 h3 v6 h-3 Z M20 14 h-3 v6 h3 Z',
+      auto: 'M3 16 H21 M6.5 16 C9 16 10 7.5 12 7.5 C14 7.5 15 16 17.5 16 M12 3.5 V6', delta: 'M12 4 L20.5 19 H3.5 Z', power: 'M12 3.5 V11 M7.2 6.3 a7.5 7.5 0 1 0 9.6 0',
+      lr: 'M8.5 7 a5 5 0 1 0 0.01 0 M15.5 7 a5 5 0 1 0 0.01 0', ms: 'M12 4 a8 8 0 1 0 .01 0 M12 9.5 a2.5 2.5 0 1 0 .01 0',
+      save: 'M5 4 H16 L20 8 V20 H5 Z M8 4 V9 H15 V4 M8 20 V14 H16 V20'
+    };
+    const QUADS = [
+      { k: 'comp', n: 'Compress', d: G.comp, side: 'down' }, { k: 'exp', n: 'Expand (gate)', d: G.exp, side: 'down' },
+      { k: 'up', n: 'Upward compress', d: G.up, side: 'up' }, { k: 'upx', n: 'Upward expand', d: G.upx, side: 'up' }
+    ];
+    const QD = {}; QUADS.forEach((q) => { QD[q.k] = q; });
+
+    // ---------------- stages (series; numbered and processed in threshold order, low to high)
+    const S_COMP = { q: 'comp', T: -18, R: 4, K: 6, A: 10, Rel: 120, range: 60, det: 'RMS' };
+    const S_LEV = { q: 'up', T: -32, R: 2, K: 6, A: 30, Rel: 800, range: 12, det: 'RMS' };
+    const S_GATE = { q: 'exp', T: -48, R: 4, K: 4, A: 0.5, Rel: 60, range: 60, det: 'Peak' };
+    const S_LIM = { q: 'comp', T: -6, R: 20, K: 2, A: 0.3, Rel: 50, range: 60, det: 'Peak' };
+    let stages = [S_COMP];
+    if (V('stages') || V('stage-selected') || V('help')) stages = [S_LEV, S_GATE, S_COMP, S_LIM];
+    if (V('empty')) stages = [];
+    const smartOff = V('smart') ? -3.5 + 0.8 * Math.sin(t * 0.05) : 0;
+    stages = stages.map((s) => Object.assign({}, s, { T0: s.T, T: s.T + smartOff })).sort((a, b) => a.T - b.T);
+    stages.forEach((s, i) => { s.id = i + 1; });
+    const creating = V('create') ? { q: 'comp', T: -8, R: 6, K: 3, A: 1, Rel: 60, range: 60, id: 2, ghost: true } : null;
+
+    const sp = (u, w) => { const k = Math.max(w, 1); if (u <= -k / 2) return 0; if (u >= k / 2) return u; return (u + k / 2) * (u + k / 2) / (2 * k); };
+    const softCap = (m, r) => m - sp(m - r, 3);
+    const stageGain = (x, s) => {
+      if (s.q === 'comp') return -softCap((1 - 1 / s.R) * sp(x - s.T, s.K), s.range);
+      if (s.q === 'exp') return -softCap((s.R - 1) * sp(s.T - x, s.K), s.range);
+      if (s.q === 'up') return softCap((1 - 1 / s.R) * sp(s.T - x, s.K), s.range);
+      return softCap((s.R - 1) * sp(x - s.T, s.K), s.range);
+    };
+    const curveOf = (list) => (x) => list.reduce((y, s) => y + stageGain(y, s), x);
+    const curve = curveOf(stages);
+
+    // ---------------- history (level envelope per block, 6 s window, newest at the right)
+    const NC = 195, HW = 776, dtMs = 6000 / NC;
+    const lvY = (db) => 24 + (-Math.max(-60, Math.min(0, db)) / 60) * 572;
+    const level = (k) => {
+      const beat = ((k % 32) + 32) % 32;
+      let v = -27 + 5 * Math.sin(k * 0.13) + 3 * Math.sin(k * 0.41 + 1) + 1.5 * Math.sin(k * 1.7);
+      v += 17 * Math.exp(-beat / 2.2) + 12 * (beat >= 16 ? Math.exp(-(beat - 16) / 3) : 0);
+      const ph = ((k % 150) + 150) % 150;
+      if (ph > 118 && ph < 138) v = -52 + 2 * Math.sin(k * 0.9);
+      return Math.max(-60, Math.min(-1, v));
+    };
+    const prim = stages.find((s) => s.q === 'comp' && s.T > -25) || stages[0] || S_COMP;
+    const aA = Math.exp(-dtMs / Math.max(prim.A, 0.05)), aR = Math.exp(-dtMs / prim.Rel);
+    const hist = (lvShift, link) => {
+      const out = []; let g = 0;
+      for (let i = -60; i < NC; i++) {
+        const k = i + t;
+        const x = level(k) + lvShift;
+        const target = curve(x) - x;
+        g = target < g ? aA * g + (1 - aA) * target : aR * g + (1 - aR) * target;
+        if (i >= 0) out.push({ x, g: g * link });
+      }
+      return out;
+    };
+    const H1 = hist(0, 1);
+    const H2 = V('stereo') ? hist(-7, 1).map((p, i) => ({ x: p.x, g: 0.5 * p.g + 0.5 * Math.min(p.g, H1[i].g) })) : null;
+    const H1s = V('stereo') ? H1.map((p, i) => ({ x: p.x, g: 0.5 * p.g + 0.5 * Math.min(p.g, H2[i].g) })) : H1;
+    const xs = (i) => r1(i * HW / (NC - 1));
+    const lineOf = (arr, f) => arr.map((p, i) => (i ? 'L' : 'M') + xs(i) + ' ' + r1(f(p))).join(' ');
+    const makeup = 0;
+    let outArr = H1s.map((p) => ({ y: p.x + p.g + makeup }));
+    let outColor = th.curve;
+    if (V('delta')) outArr = H1s.map((p) => { const a = Math.pow(10, p.x / 20), b = Math.pow(10, (p.x + p.g) / 20); return { y: 20 * Math.log10(Math.max(1e-4, Math.abs(a - b))) }; });
+    if (V('listen')) { outArr = H1s.map((p, i) => ({ y: p.x - 4 + 3 * Math.sin(i * 0.7) })); outColor = th.sem.sc; }
+    const inLine = lineOf(H1s, (p) => lvY(p.x));
+    const outLine = lineOf(outArr, (p) => lvY(p.y));
+    const grY = (g) => Math.min(250, Math.max(0, -g) * 10);
+    const upY = (g) => 620 - Math.min(160, Math.max(0, g) * 10);
+    const grEdge = lineOf(H1s, (p) => grY(p.g));
+    const upEdge = lineOf(H1s, (p) => upY(p.g));
+    const hasUp = H1s.some((p) => p.g > 0.05);
+    const hGrid = [-12, -24, -36, -48].map((d) => 'M0 ' + r1(lvY(d)) + ' H776').join(' ') + ' ' + [1, 2, 3, 4, 5].map((s) => 'M' + r1(s * HW / 6) + ' 0 V620').join(' ');
+    const dbLabels = [[0, '0'], [-12, '−12'], [-24, '−24'], [-36, '−36'], [-48, '−48']].map(([d, s]) => ({ y: r1(lvY(d) + 3), t: s }));
+
+    // ---------------- transfer curve square
+    const CX = 796, CY = 16, CS = 384;
+    const cx = (db) => CX + (db + 60) / 60 * CS, cy = (db) => CY + (-Math.max(-60, Math.min(0, db)) / 60) * CS;
+    const pts = []; for (let i = 0; i <= 240; i++) pts.push(-60 + i * 0.25);
+    const cpath = (f) => pts.map((x, i) => (i ? 'L' : 'M') + r1(cx(x)) + ' ' + r1(cy(f(x)))).join(' ');
+    const shade = (f, lower) => {
+      const fwd = pts.map((x, i) => (i ? 'L' : 'M') + r1(cx(x)) + ' ' + r1(cy(lower ? Math.min(f(x), x) : Math.max(f(x), x)))).join(' ');
+      return fwd + ' L' + r1(cx(0)) + ' ' + r1(cy(0)) + ' L' + r1(cx(-60)) + ' ' + r1(cy(-60)) + ' Z';
+    };
+    let cGrid = '';
+    for (let d = -48; d <= -12; d += 12) cGrid += 'M' + r1(cx(d)) + ' ' + CY + ' V' + (CY + CS) + ' M' + CX + ' ' + r1(cy(d)) + ' H' + (CX + CS) + ' ';
+    const allForShade = creating ? stages.concat([creating]).sort((a, b) => a.T - b.T) : stages;
+    const shapeF = curveOf(allForShade);
+    const ghostCurve = creating ? cpath(shapeF) : V('smart') ? cpath(curveOf(stages.map((s) => Object.assign({}, s, { T: s.T0 })))) : '';
+    const axisLabels = [{ x: CX + 22, y: CY + CS - 16, t: '−60' }, { x: CX + CS - 18, y: CY + CS - 16, t: '0' }, { x: CX + 6, y: CY + 6, t: 'OUT' }, { x: CX + CS - 30, y: CY + CS + 6, t: 'IN' }];
+
+    // nodes on the curve: on the stage's active side, 12 dB from its threshold
+    const sel = st.sel !== undefined ? st.sel : (V('stage-selected') ? stages.findIndex((s) => s.q === 'comp' && s.T > -25) : -1);
+    const handleX = (s) => (s.q === 'comp' || s.q === 'upx') ? Math.min(-1.5, s.T + 12) : Math.max(-58.5, s.T - 12);
+    const nodeOf = (s, i, f, ghost) => {
+      const on = i === sel; const hx = handleX(s); const y = f(hx);
+      return {
+        x: r1(cx(hx) - 16), y: r1(cy(y) - 16), on: on ? 'true' : 'false', op: 1, num: on || th.alwaysNum || stages.length > 1 || ghost ? s.id : '',
+        size: on ? 18 : 16, fill: ghost ? 'transparent' : on ? accent : hexA(accent, 0.25), stroke: on ? th.needle : accent, bs: ghost ? 'dashed' : 'solid', ink: ghost ? accent : th.nodeInk,
+        shadow: on ? '0 0 0 5px ' + hexA(accent, 0.25) + ', 0 0 18px ' + accent : '0 0 10px ' + hexA(accent, 0.6) + ', 0 2px 6px rgba(0,0,0,0.5)',
+        aria: 'Stage ' + s.id + ', ' + QD[s.q].n + ', threshold ' + fmtDb(s.T) + ', ratio ' + fmtR(s.R) + (ghost ? ', being created' : ''),
+        pick: () => this.setState({ sel: i })
+      };
+    };
+    function fmtDb(g) { return (g > 0.05 ? '+' : g < -0.05 ? '−' : '') + Math.abs(g).toFixed(1) + ' dB'; }
+    function fmtR(R) { return R >= 30 ? '∞:1' : (R < 10 ? R.toFixed(1) : Math.round(R)) + ':1'; }
+    const nodes = stages.map((s, i) => nodeOf(s, i, curve, false));
+    if (creating) nodes.push(nodeOf(creating, 99, shapeF, true));
+    const diamonds = stages.map((s, i) => ({ x: r1(cx(s.T) - 4), y: r1(cy(s.T) - 4), c: accent, op: i === sel || sel < 0 ? 0.9 : 0.45 }));
+    const nowX = H1s[H1s.length - 1].x;
+    const dot = { x: r1(cx(nowX) - 6), y: r1(cy(curve(nowX)) - 6) };
+    const trail = H1s.slice(-14, -1).map((p, i) => (i ? 'L' : 'M') + r1(cx(p.x)) + ' ' + r1(cy(curve(p.x)))).join(' ');
+    let grips = [];
+    if (V('create') || V('empty')) {
+      const gx = V('create') ? -8 : -24;
+      const gy = curve(gx);
+      grips = [
+        { x: r1(cx(gx) - 11), y: r1(cy(gy) - 34), d: 'M1 5 L4 1.5 L7 5', c: th.sem.up, bg: hexA(th.sem.up, 0.12), glow: hexA(th.sem.up, 0.4) },
+        { x: r1(cx(gx) - 11), y: r1(cy(gy) + 20), d: 'M1 1 L4 4.5 L7 1', c: accent, bg: hexA(accent, 0.12), glow: hexA(accent, 0.4) }
+      ];
+    }
+
+    // threshold lines on the history
+    const thrLines = stages.map((s, i) => ({
+      y: r1(lvY(s.T)), gy: r1(lvY(s.T) - 11), n: s.id, c: accent, style: 'solid', op: sel < 0 || i === sel ? 1 : 0.55,
+      gbg: i === sel ? accent : th.disp, gfg: i === sel ? th.nodeInk : accent, gsh: '0 0 10px ' + hexA(accent, 0.5),
+      aria: 'Stage ' + s.id + ' threshold ' + fmtDb(s.T) + ', drag up or down'
+    }));
+    if (V('smart')) stages.forEach((s) => thrLines.push({ y: r1(lvY(s.T0)), gy: r1(lvY(s.T0) - 11), n: s.id, c: th.mid, style: 'dashed', op: 0.7, gbg: th.disp, gfg: th.mid, gsh: 'none', aria: 'Stage ' + s.id + ' threshold as you set it, ' + fmtDb(s.T0) }));
+    if (creating) thrLines.push({ y: r1(lvY(creating.T)), gy: r1(lvY(creating.T) - 11), n: 2, c: accent, style: 'dashed', op: 0.85, gbg: th.disp, gfg: accent, gsh: 'none', aria: 'New stage threshold ' + fmtDb(creating.T) });
+    const perStage = (() => { let y = Math.max(...H1s.slice(-6).map((p) => p.x)); const o = []; stages.forEach((s) => { const g = stageGain(y, s); o.push(g); y += g; }); return o; })();
+    const stageNow = (s) => perStage[stages.indexOf(s)];
+    const strip = [0, 1, 2, 3].map((i) => {
+      const s = stages[i];
+      if (!s) return { live: false, n: '', aria: 'Empty stage slot — pull the curve to add a stage', bs: 'dashed', b: th.gridMajor, bg: 'transparent', sh: 'none', op: 0.7, d: '', qc: th.mid, nb: '', nf: '', glowC: 'transparent', bar: '', barC: th.sem.gr };
+      const g = stageNow(s), on = i === sel, up = g > 0;
+      const len = Math.min(128, Math.abs(g) * 8), y0 = 40;
+      const bar = up ? 'M44 168 V' + r1(168 - Math.round(len / 4) * 4) : 'M44 40 V' + r1(y0 + Math.round(len / 4) * 4);
+      return { live: true, n: s.id, aria: 'Stage ' + s.id + ', ' + QD[s.q].n + ', now ' + fmtDb(g), bs: 'solid', b: on ? accent : th.wellB, bg: th.well, sh: on ? '0 0 12px ' + hexA(accent, 0.35) + ', ' + th.wellSh : th.wellSh, op: 1,
+        d: QD[s.q].d, qc: QD[s.q].side === 'up' ? th.sem.up : accent, nb: on ? accent : hexA(accent, 0.25), nf: on ? th.nodeInk : th.accentText, glowC: hexA(accent, 0.5), bar, barC: up ? th.sem.up : th.sem.gr };
+    });
+    const hasTarget = V('smart');
+    const target = { y: r1(grY(-6)), gy: r1(grY(-6) - 11), v: '6 dB' };
+
+    // meters (2 px segments, no numbers)
+    const my = (d) => { const y = 24 + (-Math.max(-60, d) / 60) * 564; return 588 - Math.round((588 - y) / 4) * 4; };
+    const gy4 = (g) => 24 + Math.round(Math.min(560, Math.max(0, -g) * 14) / 4) * 4;
+    const last = H1s[H1s.length - 1], last2 = H2 ? H2[H2.length - 1] : { x: last.x - 1.5, g: last.g * 0.92 };
+    const oNow = outArr[outArr.length - 1].y;
+    const mIn = 'M1199 588 V' + my(last.x) + ' M1209 588 V' + my(last2.x);
+    const mOut = 'M1251 588 V' + my(oNow) + ' M1261 588 V' + my(oNow - 1.2);
+    const mGr = 'M1225 24 V' + gy4(Math.min(0, last.g)) + ' M1235 24 V' + gy4(Math.min(0, last2.g));
+    const mTarget = hasTarget ? 'M1218 ' + (24 + 6 * 14) + ' H1242' : '';
+    const meterWells = 'M1194 20 h20 v572 h-20 Z M1220 20 h20 v572 h-20 Z M1246 20 h20 v572 h-20 Z';
+    const meterLabels = [{ x: 1190, t: 'IN' }, { x: 1216, t: 'GR' }, { x: 1242, t: 'OUT' }];
+    const meterIcons = V('stereo') ? [{ x: 1220, d: 'M6 1.5 a4.5 4.5 0 1 0 .01 0 M6 4.5 a1.5 1.5 0 1 0 .01 0' }, { x: 1230, d: 'M3.5 2 a4 4 0 0 0 0 8 M8.5 2 a4 4 0 0 1 0 8' }] : [];
+
+    // ---------------- dials
+    const polar = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [32 + r * Math.cos(a), 32 + r * Math.sin(a)]; };
+    const tk = (deg, ra, rb) => { const [x0, y0] = polar(deg, ra), [x1, y1] = polar(deg, rb); return 'M' + r1(x0) + ' ' + r1(y0) + ' L' + r1(x1) + ' ' + r1(y1) + ' '; };
+    const geo = (frac, bip, n) => {
+      const cnt = n || 31, step = 270 / (cnt - 1), fr = Math.max(0, Math.min(1, frac)), dv = -135 + 270 * fr;
+      let lit = '', dim = '';
+      for (let i = 0; i < cnt; i++) { const d = -135 + i * step; const s = tk(d, 25, 29); const on = bip ? (d >= Math.min(0, dv) - 0.01 && d <= Math.max(0, dv) + 0.01) : d <= dv + 0.01; if (on) lit += s; else dim += s; }
+      return { lit, dim, ctr: bip ? tk(0, 22.5, 30) : '', ptr: tk(dv, 21.5, 31) };
+    };
+    const lg = (v, a, b) => Math.log(v / a) / Math.log(b / a);
+    const knob = (label, n, u, frac, bip) => Object.assign({ label, n, u, aria: label + ' ' + n + ' ' + u, hasToggle: false }, geo(frac, bip));
+    const timeP = (ms) => ms < 1 ? [ms.toFixed(2), 'ms'] : ms < 10 ? [ms.toFixed(1), 'ms'] : ms < 1000 ? [String(Math.round(ms)), 'ms'] : [(ms / 1000).toFixed(2), 's'];
+    const dbN = (g) => (g > 0.05 ? '+' : g < -0.05 ? '−' : '') + Math.abs(g).toFixed(1);
+
+    // ---------------- stage panel
+    const btn = (on, color) => on ? { bg: hexA(color || accent, 0.16), b: color || accent, sh: '0 0 12px ' + hexA(color || accent, 0.3), fg: color || accent, glow: 'drop-shadow(0 0 3px ' + (color || accent) + ')' } : { bg: th.pCtl, b: th.pCtlB, sh: th.raised, fg: th.mid, glow: 'none' };
+    let spv = { knobs: [], quads: [], handles: [], title: '', scopeAria: '', scGrid: '', scIn: '', scGr: '', scGrEdge: '', scMarks: '', qGlyph: '', qColor: '', det: '', detD: '' };
+    const selStage = sel >= 0 ? stages[sel] : null;
+    if (selStage) {
+      const s = selStage;
+      // envelope scope: synthetic hit through this stage's real gain computer and ballistics
+      const Wms = Math.min(1600, Math.max(300, 260 + s.Rel * 2.2)), SW = 250, SH = 124, n = 250;
+      const hit = (tm) => tm < 260 ? (tm < 3 ? -60 + 18 * tm : -6 - 14 * (1 - Math.exp(-(tm - 3) / 90))) : -60;
+      let g = 0; const gArr = [], inArr = []; const dt = Wms / n;
+      const a1 = Math.exp(-dt / Math.max(s.A, 0.05)), r2 = Math.exp(-dt / s.Rel);
+      for (let i = 0; i <= n; i++) { const x = hit(i * dt); const tg = stageGain(x, s); g = tg < g ? a1 * g + (1 - a1) * tg : r2 * g + (1 - r2) * tg; gArr.push(g); inArr.push(x); }
+      const sx = (i) => r1(i * SW / n), syIn = (x) => r1(SH - 6 - (x + 60) / 60 * (SH - 16)), syG = (gv) => r1(Math.min(SH - 8, Math.abs(gv) * 4.5));
+      const gMin = Math.min(...gArr.map((v) => -Math.abs(v)));
+      const iA = gArr.findIndex((v) => Math.abs(v) >= 0.63 * Math.abs(gMin)); const iOff = Math.round(260 / dt);
+      const iR = iOff + gArr.slice(iOff).findIndex((v) => Math.abs(v) <= 0.37 * Math.abs(gArr[iOff]));
+      spv = {
+        title: 'Stage ' + s.id, qGlyph: QD[s.q].d, qColor: QD[s.q].side === 'up' ? th.sem.up : accent, det: s.det, detD: G[s.det === 'Peak' ? 'peak' : s.det === 'RMS' ? 'rms' : 'loud'],
+        scGrid: 'M0 ' + syIn(-12) + ' H250 M0 ' + syIn(-36) + ' H250 M' + sx(iOff) + ' 0 V124',
+        scIn: 'M0 124 ' + inArr.map((x, i) => 'L' + sx(i) + ' ' + syIn(x)).join(' ') + ' L250 124 Z',
+        scGr: 'M0 0 ' + gArr.map((v, i) => 'L' + sx(i) + ' ' + syG(v)).join(' ') + ' L250 0 Z',
+        scGrEdge: gArr.map((v, i) => (i ? 'L' : 'M') + sx(i) + ' ' + syG(v)).join(' '),
+        scMarks: 'M' + sx(Math.max(iA, 0)) + ' 0 V124 M' + sx(Math.max(iR, iOff)) + ' 0 V124',
+        handles: [
+          { x: r1(sx(Math.max(iA, 0)) - 12), y: r1(syG(gArr[Math.max(iA, 0)]) - 12), aria: 'Attack ' + timeP(s.A).join(' ') + ', drag sideways' },
+          { x: r1(sx(Math.max(iR, iOff)) - 12), y: r1(syG(gArr[Math.max(iR, iOff)]) - 12), aria: 'Release ' + timeP(s.Rel).join(' ') + ', drag sideways' }
+        ],
+        scopeAria: 'Envelope scope: a test hit through stage ' + s.id + '; gain reduction rises over the attack and falls over the release',
+        quads: QUADS.map((q) => { const on = q.k === s.q, col = q.side === 'up' ? th.sem.up : accent, b = btn(on, col); return { on: on ? 'true' : 'false', aria: q.n, d: q.d, bg: b.bg, b: b.b, sh: b.sh, fg: on ? col : th.mid, glow: b.glow }; }),
+        knobs: [
+          knob('THRESHOLD', dbN(s.T), 'dB', (s.T + 60) / 60, false),
+          knob('RATIO', s.R >= 30 ? '∞' : s.R < 10 ? s.R.toFixed(1) : String(Math.round(s.R)), ':1', 1 - 1 / s.R, false),
+          knob('KNEE', s.K.toFixed(1), 'dB', s.K / 24, false),
+          knob('ATTACK', ...timeP(s.A), lg(s.A, 0.05, 250), false),
+          knob('RELEASE', ...timeP(s.Rel), lg(s.Rel, 5, 2500), false),
+          knob('RANGE', String(Math.round(s.range)), 'dB', QD[s.q].side === 'up' ? s.range / 24 : s.range / 60, false)
+        ]
+      };
+    }
+
+    // ---------------- wide panels: global, sidechain, custom
+    let wp = null;
+    const iconOpts = (list, cur) => list.map(([k, d, aria]) => { const b = btn(k === cur); return { on: k === cur ? 'true' : 'false', aria, d, bg: b.bg, b: b.b, sh: b.sh, fg: b.fg, glow: b.glow }; });
+    if (V('lookahead')) {
+      const tb = btn(true);
+      wp = { title: 'Detector & output', icon: G.sliders, iconC: accent, top: 402, w: 760, h: 208, isEq: false, isDials: true,
+        side: [{ isDrop: false, isIcons: true, aria: 'Topology', opts: iconOpts([['ff', G.ff, 'Feed-forward'], ['fb', G.fb, 'Feedback']], 'ff') },
+               { isDrop: true, isIcons: false, aria: 'Oversampling 4 times', d: 'M4 16 C6 16 7 8 9 8 C11 8 12 16 14 16 C16 16 17 8 19 8', c: accent, t: '4×' }],
+        knobs: [knob('LOOKAHEAD', '5.0', 'ms', 1, false), knob('HOLD', '20', 'ms', 0.2, false),
+          Object.assign(knob('MAKEUP', '+4.2', 'dB', 4.2 / 24, false), { hasToggle: true, tAria: 'Auto makeup', tOn: 'true', tD: G.auto, tBg: tb.bg, tB: tb.b, tSh: tb.sh, tFg: tb.fg }),
+          knob('SC LISTEN', '0', '%', 0, false)].slice(0, 3) };
+    }
+    if (V('custom')) {
+      wp = { title: 'Custom', icon: G.custom, iconC: accent, top: 402, w: 760, h: 208, isEq: false, isDials: true,
+        side: [{ isDrop: true, isIcons: false, aria: 'Start from character Opto', d: G.opto, c: th.mid, t: 'from Opto' }],
+        knobs: [knob('ATTACK ×', '1.40', '', lg(1.4, 0.1, 4), false), knob('RELEASE ×', '2.20', '', lg(2.2, 0.1, 4), false), knob('DRIVE', '+3.0', 'dB', (3 + 6) / 18, false),
+          knob('TAIL', '35', '%', 0.35, false), knob('PROGRAM', '60', '%', 0.6, false), knob('BEND', '20', '%', 0.2, false)] };
+    }
+    let sce = { nodes: [], grid: '', specFill: '', spec: '', curve: '' };
+    if (V('sidechain') || V('listen')) {
+      const lb = btn(V('listen'), th.sem.sc);
+      wp = { title: 'Sidechain', icon: G.key, iconC: th.sem.sc, top: 378, w: 760, h: 232, isEq: true, isDials: false, knobs: [],
+        side: [{ isDrop: true, isIcons: false, aria: 'Source: external sidechain input', d: G.external, c: th.sem.sc, t: 'External' },
+               { isDrop: false, isIcons: true, aria: 'Listen to the detector', opts: [{ on: V('listen') ? 'true' : 'false', aria: 'Listen', d: G.listen, bg: lb.bg, b: lb.b, sh: lb.sh, fg: lb.fg, glow: lb.glow }] }] };
+      const FS = 96000, W2 = 620, H2 = 192;
+      const fx2 = (f) => W2 * Math.log(f / 20) / Math.log(1000), xf2 = (x) => 20 * Math.pow(1000, x / W2), gy2 = (g) => 96 - g * (80 / 18);
+      const mag = (c, w) => { const [b0, b1, b2, a0, a1, a2] = c; const cw = Math.cos(w), c2 = Math.cos(2 * w); return 10 * Math.log10((b0 * b0 + b1 * b1 + b2 * b2 + 2 * (b0 * b1 + b1 * b2) * cw + 2 * b0 * b2 * c2) / (a0 * a0 + a1 * a1 + a2 * a2 + 2 * (a0 * a1 + a1 * a2) * cw + 2 * a0 * a2 * c2)); };
+      const pre = (f0, q) => { const w0 = 2 * Math.PI * f0 / FS; return { cs: Math.cos(w0), al: Math.sin(w0) / (2 * q) }; };
+      const peak = (f0, g, q) => { const A = Math.pow(10, g / 40); const { cs, al } = pre(f0, q); return [1 + al * A, -2 * cs, 1 - al * A, 1 + al / A, -2 * cs, 1 - al / A]; };
+      const hp = (f0, q) => { const { cs, al } = pre(f0, q); return [(1 + cs) / 2, -(1 + cs), (1 + cs) / 2, 1 + al, -2 * cs, 1 - al]; };
+      const bands = [{ f: 120, g: 0, c: [hp(120, 0.54), hp(120, 1.31)] }, { f: 300, g: -4, c: [peak(300, -4, 1.0)] }, { f: 4500, g: 6, c: [peak(4500, 6, 1.5)] }];
+      let cur = '', spec = '';
+      for (let i = 0; i <= 160; i++) {
+        const x = i * W2 / 160, f = xf2(x), w = 2 * Math.PI * f / FS;
+        let s = 0; bands.forEach((b) => b.c.forEach((c) => { s += mag(c, w); }));
+        cur += (i ? 'L' : 'M') + r1(x) + ' ' + r1(gy2(Math.max(-20, s)));
+        const lv = -30 - 0.9 * Math.log2(f / 1000) + 6 * Math.exp(-Math.pow(Math.log2(f / 90), 2) / 0.6) + 4 * Math.exp(-Math.pow(Math.log2(f / 5000), 2) / 0.4) + 1.4 * Math.sin(i * 0.9 + t * 0.6) - 25 * Math.max(0, Math.log2(f / 14000));
+        spec += (i ? 'L' : 'M') + r1(x) + ' ' + r1(10 + (-lv / 70) * 180);
+      }
+      let grid = ''; [100, 1000, 10000].forEach((f) => { grid += 'M' + r1(fx2(f)) + ' 0 V192 '; }); [-12, -6, 6, 12].forEach((g) => { grid += 'M0 ' + r1(gy2(g)) + ' H620 '; });
+      sce = { grid, curve: cur, spec, specFill: spec + ' L620 192 L0 192 Z',
+        nodes: bands.map((b, i) => ({ x: r1(fx2(b.f) / W2 * 100), y: r1(gy2(b.g) / H2 * 100), c: th.ramp[0], fill: th.ramp[0], num: i + 1, aria: 'Sidechain band ' + (i + 1) + (i === 0 ? ', low cut 120 Hz' : i === 1 ? ', bell 300 Hz −4 dB' : ', bell 4.5 kHz +6 dB') })) };
+    }
+    const pop = { k: Object.assign({ n: '50', u: '%', aria: 'Stereo link 50 percent' }, geo(0.5, false)), opts: iconOpts([['lr', G.lr, 'Left / Right'], ['ms', G.ms, 'Mid / Side']], 'ms') };
+
+    // ---------------- menus
+    const charList = [['Clean', G.clean], ['Punch', G.punch], ['FET', G.fet], ['Opto', G.opto], ['Bus', G.bus], ['Vari-Mu', G.varimu], ['Custom', G.custom]];
+    const smartList = [['Off', G.off], ['Adaptive', G.adaptive], ['Vocal', G.vocal], ['Master', G.master]];
+    const curChar = V('character') ? 'Opto' : V('custom') ? 'Custom' : V('stages') || V('stage-selected') ? 'Bus' : 'Clean';
+    const curSmart = V('smart') ? 'Vocal' : V('menu') ? 'Adaptive' : 'Off';
+    const mItem = (t2, d, on) => ({ head: false, item: true, hasIcon: !!d, t: t2, d: d || '', on: on ? 'true' : 'false', ti: on ? '0' : '-1', bg: on ? hexA(accent, 0.18) : 'transparent', b: on ? accent : 'transparent', fg: th.hi, ic: on ? accent : th.mid });
+    let menu = null;
+    if (V('character')) menu = { aria: 'Character', x: 16, y: 362, w: 210, items: charList.map(([n, d]) => mItem(n, d, n === curChar)) };
+    if (V('menu')) menu = { aria: 'Smart', x: 196, y: 460, w: 200, items: smartList.map(([n, d]) => mItem(n, d, n === curSmart)) };
+    if (V('presets')) {
+      const fac = ['Vocal Leveller', 'Drum Bus Glue', 'Gentle Master', 'Bass Control', 'Snare Snap', 'Gate + Comp', 'Room Tamer'];
+      menu = { aria: 'Presets', x: 196, y: 6, w: 300, items: [mItem('Save as…', G.save, false), { head: true, item: false, t: 'FACTORY' }].concat(fac.map((n) => mItem(n, '', n === 'Vocal Leveller')), [{ head: true, item: false, t: 'YOURS' }, mItem('Podcast Voice', '', false), mItem('Live Kick', '', false)]) };
+    }
+
+    // ---------------- header + footer
+    const snaps = ['A', 'B', 'C', 'D'].map((k, i) => {
+      const cur = (st.snap || 0) === i, empty = i > 1;
+      return { k, on: cur ? 'true' : 'false', bg: cur ? hexA(accent, 0.16) : th.ctl, b: cur ? accent : th.ctlB, fg: cur ? th.accentText : empty ? th.dis : th.mid, sh: cur ? '0 0 12px ' + hexA(accent, 0.3) : th.raised, pick: () => this.setState({ snap: i }) };
+    });
+    const hb = (aria, d, on, color) => { const b = btn(on, color); return { aria, d, on: on ? 'true' : 'false', bg: on ? b.bg : th.ctl, b: on ? b.b : th.ctlB, sh: on ? b.sh : th.raised, fg: on ? b.fg : th.mid, glow: b.glow, pick: () => {} }; };
+    const headBtns = [
+      hb('Sidechain', G.key, V('sidechain') || V('listen'), th.sem.sc),
+      hb('Stereo: Mid/Side, link 50 %', V('stereo') ? G.ms : G.link, V('stereo')),
+      hb('Detector and output settings', G.sliders, V('lookahead'))
+    ];
+    const presetBtn = V('presets') ? { bg: th.ctl, b: accent, sh: '0 0 12px ' + hexA(accent, 0.3) } : { bg: th.ctl, b: th.ctlB, sh: th.raised };
+    const charD = charList.find((c) => c[0] === curChar)[1], smartD = smartList.find((c) => c[0] === curSmart)[1];
+    const fd = (aria, d, t2, w, open, lit) => ({ aria, d, t: t2, w, open: open ? 'true' : 'false', bg: th.ctl, b: open ? accent : th.ctlB, sh: open ? '0 0 12px ' + hexA(accent, 0.3) : th.raised, ic: lit ? accent : th.mid, glow: lit ? 'drop-shadow(0 0 3px ' + accent + ')' : 'none' });
+    const footDrops = [fd('Character: ' + curChar, charD, curChar, 150, V('character'), curChar !== 'Clean'), fd('Smart: ' + curSmart, smartD, curSmart, 140, V('menu'), curSmart !== 'Off')];
+    const lat = V('lookahead') ? '5.0 ms' : '0 ms';
+    const tg = (aria, d, on, pick) => { const b = btn(on); return { aria, d, on: on ? 'true' : 'false', bg: on ? b.bg : th.ctl, b: on ? b.b : th.ctlB, sh: on ? b.sh : th.raised, fg: on ? b.fg : th.mid, glow: b.glow, pick }; };
+    const toggles = [tg('Auto makeup', G.auto, !V('empty'), () => {}), tg('Delta: hear only what the compressor takes away', G.delta, V('delta'), () => {}), tg('Bypass', G.power, false, () => {})];
+    const footDials = [
+      Object.assign({ label: 'MIX', v: '100 %', aria: 'Mix 100 percent' }, geo(1, false, 15)),
+      Object.assign({ label: 'PAN', v: '0 %', aria: 'Pan centre' }, geo(0.5, true, 15)),
+      Object.assign({ label: 'OUTPUT', v: '0.0 dB', aria: 'Output 0.0 dB' }, geo(0.5, true, 15))
+    ];
+
+    // ---------------- help strip
+    const slot = (t2, w, c) => ({ t: t2, w, c: c || th.hi });
+    let helpSlots = [], helpText = '';
+    const s0 = selStage || prim;
+    const grNow = Math.min(0, last.g);
+    if (selStage) { helpSlots = [slot('Stage ' + s0.id, 74), slot(QD[s0.q].n, 128, th.mid), slot(fmtDb(s0.T), 74), slot(fmtR(s0.R), 50)]; helpText = '— drag across to move the threshold, away from the line for ratio, Alt-drag for knee, double-click resets'; }
+    else { helpSlots = [slot('IN ' + dbN(last.x), 74), slot('GR ' + dbN(grNow), 74, th.sem.gr), slot('OUT ' + dbN(oNow), 82)]; helpText = '— pull the curve below the line to compress, above it to lift; drag a threshold grip on the history'; }
+    if (V('create')) { helpSlots = [slot('New stage 2', 96), slot('Compress', 90, th.mid), slot('−8.0 dB', 74), slot('6.0:1', 50)]; helpText = '— pulled below the line above stage 1: release to create, Esc cancels'; }
+    if (V('empty')) { helpSlots = [slot('No stages', 92)]; helpText = '— the curve is on the line, so the plugin passes audio unchanged. Pull it below the line to compress.'; }
+    if (V('smart')) { helpSlots = [slot('Smart Vocal', 96), slot('slide ' + dbN(smartOff) + ' dB', 104, th.mid), slot('target 6 dB', 90, th.sem.gr)]; helpText = '— the curve follows the voice to hold the target; dashed lines are where you set it'; }
+    if (V('sidechain')) { helpSlots = [slot('Sidechain', 86), slot('External', 72, th.mid), slot('3 bands', 64)]; helpText = '— the detector hears the key input through this EQ; Listen to hear it'; }
+    if (V('listen')) { helpSlots = [slot('Listening', 86, th.sem.sc), slot('detector', 76, th.mid)]; helpText = '— the plugin outputs the filtered sidechain, not your track. Click the headphones again to stop.'; }
+    if (V('stereo')) { helpSlots = [slot('Mid/Side', 76), slot('link 50 %', 76, th.mid), slot('M ' + dbN(Math.min(0, last.g)), 70, th.sem.gr), slot('S ' + dbN(Math.min(0, last2.g)), 70, th.sem.gr)]; helpText = '— solid trace is mid, dashed is side; raise link to make them move together'; }
+    if (V('lookahead')) { helpSlots = [slot('Lookahead', 86), slot('5.0 ms', 64), slot('4×', 40, th.mid)]; helpText = '— the plugin reports 5.0 ms latency to the host'; }
+    if (V('delta')) { helpSlots = [slot('Delta', 60, th.accentText), slot('GR ' + dbN(grNow), 74, th.sem.gr)]; helpText = '— you hear only what the compressor takes away; the lit trace is that difference'; }
+    if (V('character')) { helpSlots = [slot('Opto', 60), slot('slow, smooth release', 160, th.mid)]; helpText = '— character changes how the stages move, not the curve'; }
+    if (V('custom')) { helpSlots = [slot('Custom', 70), slot('from Opto', 80, th.mid)]; helpText = '— shape attack, release, drive and program dependence by hand'; }
+    if (V('menu')) { helpSlots = [slot('Smart', 54), slot('Adaptive', 76, th.mid)]; helpText = '— bends the release to the material'; }
+    if (V('presets')) { helpSlots = [slot('Vocal Leveller', 120), slot('Factory', 70, th.mid)]; helpText = '— the dot after a name means the sound has moved on from the preset'; }
+    if (V('help')) { helpSlots = [slot('Help mode', 86)]; helpText = '— hover any control for its explanation'; }
+
+    const helpSpots = [
+      { n: 1, t: 'History', d: 'Input dim, output lit, gain reduction hangs from the top.', x: 8, y: 64, w: 760, h: 250, lx: 40, ly: 330 },
+      { n: 2, t: 'Threshold grips', d: 'Drag a numbered grip up or down.', x: 732, y: 56 + r1(lvY(-18)) - 14, w: 44, h: 28, lx: 520, ly: 56 + r1(lvY(-18)) + 22 },
+      { n: 3, t: 'Transfer curve', d: 'Pull below the line to compress, above it to lift.', x: 792, y: 68, w: 392, h: 392, lx: 830, ly: 470 },
+      { n: 4, t: 'Meters', d: 'In, gain reduction, out. Values in the help strip.', x: 1188, y: 68, w: 84, h: 588, lx: 1000, ly: 600 },
+      { n: 5, t: 'Character + Smart', d: 'How the stages move, and what adapts.', x: 12, y: 704, w: 310, h: 46, lx: 12, ly: 610 },
+      { n: 6, t: 'Sidechain · stereo · detector', d: 'Comp’s own header buttons.', x: 754, y: 8, w: 150, h: 42, lx: 760, ly: 62 }
+    ];
+
+    return {
+      th, presetName: V('empty') ? 'Init' : 'Vocal Leveller', presetDirty: V('smart') || V('create') ? ' •' : '', isPresets: V('presets') ? 'true' : 'false', presetBtn,
+      snaps, headBtns,
+      listenFrame: V('listen') ? 'inset 0 0 0 2px ' + th.sem.sc + ', inset 0 0 36px ' + hexA(th.sem.sc, 0.35) : 'none',
+      displayAria: 'Comp display: 6 second level history with gain reduction, transfer curve with ' + stages.length + ' stage' + (stages.length === 1 ? '' : 's') + ', and meters',
+      outColor, outFillA: V('delta') ? 0.3 : 0.12, strip, hGrid, inFill: inLine + ' L776 620 L0 620 Z', inLine, outLine, outFillP: outLine + ' L776 620 L0 620 Z',
+      grEdge, grFillP: 'M0 0 ' + grEdge.slice(1).replace(/^/, 'L') + ' L776 0 Z', grEdge2: H2 ? lineOf(H2, (p) => grY(p.g)) : '',
+      upEdge: hasUp ? upEdge : '', upFillP: hasUp ? upEdge + ' L776 620 L0 620 Z' : '', upPattern: key === 'cb' ? 'url(#upDots)' : 'transparent',
+      cGrid, cDiag: 'M' + cx(-60) + ' ' + cy(-60) + ' L' + cx(0) + ' ' + cy(0), cCurve: cpath(curve),
+      shadeDown: shade(V('create') ? shapeF : curve, true), shadeUp: shade(V('create') ? shapeF : curve, false), ghostCurve, trail,
+      meterWells, mIn, mOut, mGr, mTarget, meterLabels, meterIcons, dbLabels, axisLabels,
+      thrLines, hasTarget, target, diamonds, nodes, hasDot: !V('empty'), dot, grips, isEmpty: V('empty'), isListen: V('listen'), isDelta: V('delta'),
+      hasStage: !!selStage, sp: spv, closePanel: () => this.setState({ sel: -1 }),
+      hasWide: !!wp, wp: wp || { title: '', icon: '', iconC: accent, top: 0, w: 0, h: 0, isEq: false, isDials: false, side: [], knobs: [] }, sce,
+      hasPop: V('stereo'), pop, hasMenu: !!menu, menu: menu || { aria: '', x: 0, y: 0, w: 0, items: [] },
+      isHelp: V('help'), helpSpots, helpSlots, helpText,
+      footDrops, latency: lat, latC: V('lookahead') ? th.accentText : th.hi, toggles, footDials
+    };
+  }
+}
+</script>
+</body>
+</html>

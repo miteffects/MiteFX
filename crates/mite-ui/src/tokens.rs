@@ -78,6 +78,9 @@ pub struct Theme {
     pub danger: Color,
     pub gain_reduction: Color,
     pub sidechain: Color,
+    /// Upward gain (upward compression and expansion); rises from the bottom, as `gain_reduction`
+    /// hangs from the top.
+    pub gain_up: Color,
     pub masking: Color,
     pub band_ramp: Vec<Color>,
     /// Drop shadows and glow are off in high contrast (`elevation.*.hc` = none).
@@ -152,6 +155,7 @@ impl Theme {
             danger: semantic("danger"),
             gain_reduction: semantic("gr"),
             sidechain: semantic("sidechain"),
+            gain_up: semantic("gainUp"),
             masking: semantic("masking"),
             band_ramp,
             shadows: !hc,

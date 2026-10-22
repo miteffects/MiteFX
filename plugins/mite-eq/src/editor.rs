@@ -16,7 +16,8 @@ use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel, raised};
 use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::session::{Session, SessionConfig};
-use mite_ui::widgets::{Dropdown, DropdownEvent, Help, Knob, KnobKind, LevelMeter};
+use mite_ui::widgets::footer::draw_dropdown_button;
+use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, LevelMeter, ToggleGlyph};
 use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{PhaseMode, LP_RESOLUTIONS};
@@ -128,9 +129,6 @@ const PANEL_DIAL_STEP: f64 = 84.0;
 /// part; see `mite_ui::session::HeaderLayout`).
 const HEADER_ROW: (f64, f64) = (12.0, 44.0);
 
-/// Footer: the distance between dial centres, and the toggles' size.
-const FOOTER_DIAL_STEP: f64 = 92.0;
-const TOGGLE: f64 = 34.0;
 /// The gain dial's dynamics ring: its radius, and the radial band that grabs it.
 const RING_R: f64 = PANEL_DIAL / 2.0 + 7.0;
 const RING_HIT: (f64, f64) = (PANEL_DIAL / 2.0 + 1.0, PANEL_DIAL / 2.0 + 14.0);
@@ -796,43 +794,6 @@ fn draw_headphones(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
     }
 }
 
-/// The footer toggles' glyphs centred on `c`: auto gain (a boost brought back to the line),
-/// delta (Δ), bypass (power).
-fn draw_toggle_glyph(scene: &mut mite_ui::vello::Scene, which: usize, c: Point, color: Color) {
-    let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
-    match which {
-        0 => {
-            let mut bump = BezPath::new();
-            bump.move_to((c.x - 8.0, c.y + 1.0));
-            bump.curve_to((c.x - 3.0, c.y + 1.0), (c.x - 3.0, c.y - 7.0), (c.x, c.y - 7.0));
-            bump.curve_to((c.x + 3.0, c.y - 7.0), (c.x + 3.0, c.y + 1.0), (c.x + 8.0, c.y + 1.0));
-            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.5), None, &bump);
-            let mut line = BezPath::new();
-            line.move_to((c.x - 8.0, c.y + 6.0));
-            line.line_to((c.x + 8.0, c.y + 6.0));
-            scene.stroke(&round, Affine::IDENTITY, color, None, &line);
-        }
-        1 => {
-            let mut delta = BezPath::new();
-            delta.move_to((c.x, c.y - 6.5));
-            delta.line_to((c.x + 7.0, c.y + 5.5));
-            delta.line_to((c.x - 7.0, c.y + 5.5));
-            delta.close_path();
-            scene.stroke(&round, Affine::IDENTITY, color, None, &delta);
-        }
-        _ => {
-            let mut stem = BezPath::new();
-            stem.move_to((c.x, c.y - 6.5));
-            stem.line_to((c.x, c.y - 1.0));
-            scene.stroke(&round, Affine::IDENTITY, color, None, &stem);
-            scene.stroke(&round, Affine::IDENTITY, color, None, &mite_ui::kurbo::Arc::new(c + (0.0, 0.5), (5.5, 5.5), -1.0, 5.3, 0.0));
-        }
-    }
-}
-
-/// The footer toggles' parameters, in their order.
-const TOGGLES: [&str; 3] = [AUTO_GAIN.id, DELTA.id, BYPASS.id];
-
 fn draw_icon(scene: &mut mite_ui::vello::Scene, icon: Icon, at: Point, color: Color) {
     match icon {
         Icon::Type(kind) => draw_type_icon(scene, kind, at, color),
@@ -934,10 +895,8 @@ pub struct EqView {
     panel_knobs: Vec<Knob>,
     panel_hits: Option<PanelHits>,
     menu: Option<Menu>,
-    /// Footer dials: mix, balance, output.
-    footer_knobs: Vec<Knob>,
-    /// Footer toggles, set while drawing: auto gain, delta, bypass.
-    toggle_hits: [Rect; 3],
+    /// Footer: auto gain, delta and bypass; mix, balance and output.
+    footer: Footer,
     /// The band being listened to alone, as last drawn.
     soloed: Option<usize>,
     /// Whether the EQ runs Linear Phase, as last drawn (a Brickwall is drawn as it plays).
@@ -1033,16 +992,20 @@ impl EqView {
     pub fn new(shared: Arc<EqShared>) -> Self {
         let analyzer = Analyzer::new(ANALYZER_SIZE);
         let bins = analyzer.bins();
-        // Footer dials, right to left from the output; each has its label and value beside it.
-        let footer_knobs = [(MIX, KnobKind::Unipolar), (OUT_PAN, KnobKind::Bipolar), (OUT_GAIN, KnobKind::Bipolar)]
-            .into_iter()
-            .enumerate()
-            .map(|(i, (spec, kind))| {
-                let mut k = Knob::new(spec, "", kind, Point::new(1196.0 - FOOTER_DIAL_STEP * (2 - i) as f64, FOOTER_TOP + 28.0), 34.0);
-                k.value_inside = false;
-                k
-            })
-            .collect();
+        let footer = Footer::new(
+            FOOTER_TOP,
+            (WIDTH, HEIGHT),
+            vec![
+                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — keeps the loudness as the curve changes (worked out from the curve, so it never pumps)" },
+                FooterToggle { id: DELTA.id, glyph: ToggleGlyph::Delta, words: "Delta — hear only what the EQ changes" },
+                FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the whole EQ, latency kept" },
+            ],
+            vec![
+                FooterDial { spec: MIX, kind: KnobKind::Unipolar, name: "MIX", words: "Mix — the EQ against the dry signal, delay-compensated" },
+                FooterDial { spec: OUT_PAN, kind: KnobKind::Bipolar, name: "PAN", words: "Output balance" },
+                FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" },
+            ],
+        );
         Self {
             ids: (0..BANDS).map(BandIds::new).collect(),
             selected: None,
@@ -1052,8 +1015,7 @@ impl EqView {
             panel_knobs: Vec::new(),
             panel_hits: None,
             menu: None,
-            footer_knobs,
-            toggle_hits: [Rect::ZERO; 3],
+            footer,
             soloed: None,
             linear: false,
             session: Session::new(
@@ -1702,28 +1664,11 @@ impl EqView {
             return help;
         }
         if let Some(p) = self.pointer {
-            const WORDS: [&str; 3] = [
-                "Auto gain — keeps the loudness as the curve changes (worked out from the curve, so it never pumps)",
-                "Delta — hear only what the EQ changes",
-                "Bypass — the whole EQ, latency kept",
-            ];
             if let Some(help) = self.session.help() {
                 return help;
             }
-            if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(p)) {
-                let on = Self::plain(host, TOGGLES[i]) >= 0.5;
-                return Help::default().text(WORDS[i]).text(if on { " · on" } else { "" });
-            }
-            if let Some(k) = self.footer_knobs.iter().find(|k| k.bounds().contains(p)) {
-                let what = match k.spec.id {
-                    id if id == MIX.id => "Mix — the EQ against the dry signal, delay-compensated",
-                    id if id == OUT_PAN.id => "Output balance",
-                    _ => "Output gain",
-                };
-                // The slot fits the widest value the dial can show.
-                let (lo, hi) = (k.spec.format(k.spec.min), k.spec.format(k.spec.max));
-                let widest = if lo.chars().count() >= hi.chars().count() { lo } else { hi };
-                return Help::default().text(what).text(" · ").slot(k.spec.format(Self::plain(host, k.spec.id)), widest).text(" — drag; double-click resets");
+            if let Some(help) = self.footer.help(host) {
+                return help;
             }
             if let (Some(b), Some(h)) = (self.selected, self.panel_hits) {
                 if h.solo.is_some_and(|r| r.contains(p)) {
@@ -1851,7 +1796,7 @@ impl EqView {
         self.drag.is_some()
             || self.grab.is_some()
             || self.panel_knobs.iter().any(Knob::is_dragging)
-            || self.footer_knobs.iter().any(Knob::is_dragging)
+            || self.footer.busy()
     }
 
     /// Looks for other instances in `registry` instead of the plugin's own (tests).
@@ -3204,8 +3149,7 @@ impl EqView {
     fn draw_footer(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let top = FOOTER_TOP;
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, top, WIDTH, HEIGHT));
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, top + 0.5), (WIDTH, top + 0.5)));
+        self.footer.draw_frame(cx);
 
         // Processing mode.
         let mode = PhaseMode::from_index(Self::plain(cx.host, MODE.id).round().max(0.0) as usize);
@@ -3238,45 +3182,15 @@ impl EqView {
             let r = Rect::new(388.0, track.y0, 388.0 + 112.0, track.y1);
             let open = self.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Resolution);
             let hot = self.pointer.is_some_and(|p| r.contains(p));
-            raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, if open || hot { theme.accent } else { theme.panel_control_border }, theme.shadows);
-            draw_icon(cx.scene, Icon::Resolution(res), Point::new(r.x0 + 10.0, r.y0 + 12.0), theme.accent);
-            cx.text.draw(cx.scene, LP_RESOLUTIONS[res], r.x0 + 40.0, r.y0 + 11.0, TextStyle::BODY.weighted(600.0), theme.text_hi, Align::Left);
-            let mut chevron = BezPath::new();
-            let (cxr, cy) = (r.x1 - 14.0, r.center().y);
-            chevron.move_to((cxr - 4.0, cy - 2.0));
-            chevron.line_to((cxr, cy + 2.0));
-            chevron.line_to((cxr + 4.0, cy - 2.0));
-            let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round).with_join(mite_ui::kurbo::Join::Round);
-            cx.scene.stroke(&round, Affine::IDENTITY, theme.text_mid, None, &chevron);
+            draw_dropdown_button(cx, r, LP_RESOLUTIONS[res], open, hot, |scene, at| draw_icon(scene, Icon::Resolution(res), at, theme.accent));
             label_x = r.x1 + 16.0;
             r
         });
 
         // The latency the engine reports to the host.
         let latency_ms = f64::from(self.shared.latency.load()) / self.sample_rate() * 1000.0;
-        let latency = if latency_ms < 0.05 { "0 ms".to_owned() } else { format!("{latency_ms:.1} ms") };
-        cx.text.draw(cx.scene, "LATENCY", label_x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
-        cx.text.draw(cx.scene, &latency, label_x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
-
-        // Auto gain, delta and bypass: icon toggles, lit while on.
-        let first_dial = self.footer_knobs[0].center.x;
-        for (i, id) in TOGGLES.into_iter().enumerate() {
-            let x = first_dial - 40.0 - (3 - i) as f64 * (TOGGLE + 6.0);
-            let r = Rect::new(x, top + 11.0, x + TOGGLE, top + 11.0 + TOGGLE);
-            let on = Self::plain(cx.host, id) >= 0.5;
-            let hot = self.pointer.is_some_and(|p| r.contains(p));
-            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, on, theme.accent);
-            draw_toggle_glyph(cx.scene, i, r.center(), ink);
-            self.toggle_hits[i] = r;
-        }
-
-        // Each dial's name and value beside it.
-        for (k, name) in self.footer_knobs.iter().zip(["MIX", "PAN", "OUTPUT"]) {
-            let plain = cx.host.plain(k.spec.id, cx.host.normalized(k.spec.id));
-            let x = k.center.x + 22.0;
-            cx.text.draw(cx.scene, name, x, top + 15.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
-            cx.text.draw(cx.scene, &k.spec.format(plain), x, top + 28.0, TextStyle::READOUT.sized(11.0), theme.text_hi, Align::Left);
-        }
+        self.footer.draw_latency(cx, label_x, latency_ms);
+        self.footer.draw_controls(cx);
     }
 
     fn draw_header(&mut self, cx: &mut DrawCx<'_>) {
@@ -3602,9 +3516,6 @@ impl View for EqView {
         self.draw_match_panel(cx);
         self.draw_help(cx);
         self.draw_footer(cx);
-        for k in &self.footer_knobs {
-            k.draw(cx);
-        }
         self.draw_menu(cx);
         self.session.draw_menu(cx);
     }
@@ -3780,11 +3691,9 @@ impl EqView {
         if let Some(answer) = self.session.event(event, host) {
             return answer;
         }
-        // Footer dials.
-        for k in &mut self.footer_knobs {
-            if k.event(event, host) {
-                return true;
-            }
+        // Footer dials and toggles.
+        if self.footer.event(event, host) {
+            return true;
         }
         if let Some(answer) = self.match_event(event, host) {
             return answer;
@@ -3912,11 +3821,6 @@ impl EqView {
                     }
                     if let Some(r) = self.resolution_hit.filter(|r| r.contains(pos)) {
                         self.toggle_menu(MenuKind::Resolution, 0, r, host);
-                        return true;
-                    }
-                    if let Some(i) = self.toggle_hits.iter().position(|r| r.contains(pos)) {
-                        let id = TOGGLES[i];
-                        Self::set(host, id, if Self::plain(host, id) >= 0.5 { 0.0 } else { 1.0 });
                         return true;
                     }
                 }

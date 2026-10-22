@@ -45,7 +45,7 @@
       "x": 2880,
       "y": 0,
       "w": 1440,
-      "h": 2780,
+      "h": 2840,
       "title": "Brand + tokens"
     },
     "EqEmpty.dc.html": {
@@ -157,6 +157,155 @@
       "w": 1440,
       "h": 2920,
       "title": "Interaction spec (interaction.md)"
+    },
+    "CompHighContrast.dc.html": {
+      "x": -4080,
+      "y": 6400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Comp — high-contrast theme · stage 3 open"
+    },
+    "CompLight.dc.html": {
+      "x": -2720,
+      "y": 6400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Comp — light theme · stage 3 open"
+    },
+    "CompColourBlind.dc.html": {
+      "x": -1360,
+      "y": 6400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Comp — colour-blind theme · stage 3 open"
+    },
+    "CompMain.dc.html": {
+      "x": 0,
+      "y": 6400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Comp — default dark · two stages working",
+      "is_interactive": true
+    },
+    "CompComponents.dc.html": {
+      "x": 1360,
+      "y": 6400,
+      "w": 1440,
+      "h": 1660,
+      "title": "Comp component sheet"
+    },
+    "CompCompact.dc.html": {
+      "x": 2880,
+      "y": 6400,
+      "w": 640,
+      "h": 400,
+      "title": "Comp compact 640 × 400",
+      "is_interactive": true
+    },
+    "CompStages.dc.html": {
+      "x": 0,
+      "y": 8400,
+      "w": 1280,
+      "h": 760,
+      "title": "Four stages working"
+    },
+    "CompStageSelected.dc.html": {
+      "x": 1360,
+      "y": 8400,
+      "w": 1280,
+      "h": 760,
+      "title": "Stage panel open (docked, away from the curve)"
+    },
+    "CompCreate.dc.html": {
+      "x": 2720,
+      "y": 8400,
+      "w": 1280,
+      "h": 760,
+      "title": "Pulling the line to create stage 2"
+    },
+    "CompEmpty.dc.html": {
+      "x": 4080,
+      "y": 8400,
+      "w": 1280,
+      "h": 760,
+      "title": "Init · no stages, audio unchanged"
+    },
+    "CompCharacter.dc.html": {
+      "x": 0,
+      "y": 9280,
+      "w": 1280,
+      "h": 760,
+      "title": "Character picker · Opto"
+    },
+    "CompCustom.dc.html": {
+      "x": 1360,
+      "y": 9280,
+      "w": 1280,
+      "h": 760,
+      "title": "Custom character panel"
+    },
+    "CompSmart.dc.html": {
+      "x": 2720,
+      "y": 9280,
+      "w": 1280,
+      "h": 760,
+      "title": "Smart Vocal · thresholds slide, set-points dashed"
+    },
+    "CompMenu.dc.html": {
+      "x": 4080,
+      "y": 9280,
+      "w": 1280,
+      "h": 760,
+      "title": "Smart menu"
+    },
+    "CompSidechain.dc.html": {
+      "x": 0,
+      "y": 10160,
+      "w": 1280,
+      "h": 760,
+      "title": "Sidechain · external key + detector EQ"
+    },
+    "CompListen.dc.html": {
+      "x": 1360,
+      "y": 10160,
+      "w": 1280,
+      "h": 760,
+      "title": "Listen · hearing the detector"
+    },
+    "CompStereo.dc.html": {
+      "x": 2720,
+      "y": 10160,
+      "w": 1280,
+      "h": 760,
+      "title": "Mid/Side, link 50 % · two GR traces"
+    },
+    "CompLookahead.dc.html": {
+      "x": 4080,
+      "y": 10160,
+      "w": 1280,
+      "h": 760,
+      "title": "Detector & output · lookahead, latency"
+    },
+    "CompDelta.dc.html": {
+      "x": 0,
+      "y": 11040,
+      "w": 1280,
+      "h": 760,
+      "title": "Delta · removed signal"
+    },
+    "CompPresets.dc.html": {
+      "x": 1360,
+      "y": 11040,
+      "w": 1280,
+      "h": 760,
+      "title": "Preset list"
+    },
+    "CompHelp.dc.html": {
+      "x": 2720,
+      "y": 11040,
+      "w": 1280,
+      "h": 760,
+      "title": "Help mode"
     }
   },
   "order": [
@@ -179,7 +328,28 @@
     "EqCompact.dc.html",
     "Shared.dc.html",
     "EqSolo.dc.html",
-    "Interaction.dc.html"
+    "Interaction.dc.html",
+    "CompHighContrast.dc.html",
+    "CompLight.dc.html",
+    "CompColourBlind.dc.html",
+    "CompMain.dc.html",
+    "CompComponents.dc.html",
+    "CompCompact.dc.html",
+    "CompStages.dc.html",
+    "CompStageSelected.dc.html",
+    "CompCreate.dc.html",
+    "CompEmpty.dc.html",
+    "CompCharacter.dc.html",
+    "CompCustom.dc.html",
+    "CompSmart.dc.html",
+    "CompMenu.dc.html",
+    "CompSidechain.dc.html",
+    "CompListen.dc.html",
+    "CompStereo.dc.html",
+    "CompLookahead.dc.html",
+    "CompDelta.dc.html",
+    "CompPresets.dc.html",
+    "CompHelp.dc.html"
   ],
   "notes": {
     "suiteTitle": {
@@ -213,6 +383,29 @@
       "maxH": 980,
       "fill": "orange",
       "size": "m"
+    },
+    "compTitle": {
+      "x": -4080,
+      "y": 6100,
+      "text": "Mite Comp — fourth pass · ember accent",
+      "kind": "title1",
+      "maxW": 11440
+    },
+    "compScreensTitle": {
+      "x": 0,
+      "y": 8160,
+      "text": "Mite Comp — every state from the brief",
+      "kind": "title1",
+      "maxW": 5360
+    },
+    "compAnswers": {
+      "x": 2880,
+      "y": 6900,
+      "w": 1280,
+      "maxH": 1200,
+      "fill": "yellow",
+      "size": "m",
+      "text": "COMP BRIEF §7 — DESIGN ANSWERS (pass 4, 2026-10-22)\n\n1 LAYOUT / HERO\nThe GR history is the hero: 6 s across the left 776 px. Input is grey, output white, GR hangs amber from the top (10 px/dB), and upward gain rises from the bottom. The transfer square (384 px) sits to the right with the stage strip under it, then the IN/GR/OUT meters. At 640×400 the history stays full width and the curve becomes a 132 px glass inset. The stage panel becomes a strip of THR · RATIO · ATK · REL plus More.\n\n2 CHARACTER AND SMART\nBoth are footer dropdowns with glyphs, next to the mode controls, because they change how the stages move, not the curve. Custom opens a docked six-dial panel. The header holds only Comp's own 32 px buttons: sidechain, stereo/link, detector & output.\n\n3 QUADRANTS\nPull below the line to compress or expand; pull above it to lift. You can tell them apart four ways: the side of the diagonal, the shading (amber GR vs ice-violet gainUp), the quadrant glyph on the node and its strip card, and the position of the threshold diamond.\n\n4 RANGE\nThe curve bends back parallel to the diagonal once the range is used. There is no extra mark.\n\n5 TWO-CHANNEL GR\nWhen unlinked: a solid trace for L/M and a dashed trace for R/S on the history. The GR meter splits in two, with L·R or M·S icons under it. The stereo popover holds the L/R vs M/S choice and a LINK dial.\n\nCOLOUR\nEmber accent #E44A08 is ΔE 15.1 from GR #F88A3D. Output therefore stays white, and ember is used only for what you touch. sem.gainUp #B5C0F8 is ΔE ≥ 15 from the ramp, the semantics and the curve in dark, light and hc. Colour-blind: rust #944B40 with a dotted edge."
     }
   },
   "designSystems": []

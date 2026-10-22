@@ -2,7 +2,16 @@
 
 **Source canvas:** https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5 (Claude Design). The canvas is the living version. The files here are a snapshot and the implementation contract.
 
-**Status:** third pass received on 2026-10-14, and the design system is complete enough to build on.
+**Status:** fourth pass (Mite Comp) received on 2026-10-22, answering `comp-brief.md`:
+- the Comp accent moved from azure to **ember** (`#E44A08` dark; your decision, ΔE 15.1 from `gr`, so OUT stays white and ember marks only what you touch);
+- a new semantic colour, **`gainUp`** (`#B5C0F8` dark), for upward gain, which rises from the bottom while `gr` hangs from the top;
+- the Comp boards (`CompMain` in 16 variants × 4 themes, components, compact) and the "Mite Comp" part of `interaction.md`.
+
+**Design's answers to the brief (canvas note `compAnswers`):** the GR history is the hero (6 s across the left 776 px), with the 384 px transfer square, the stage strip under it, then the IN/GR/OUT meters. Character and Smart are footer dropdowns; the header holds sidechain, stereo/link and detector & output. Quadrants read from the side of the diagonal, the shading (`gr` vs `gainUp`), the node's glyph and the threshold diamond. Range shows as the curve bending back parallel to the diagonal. Unlinked stereo draws two GR traces (solid L/M, dashed R/S) and a split GR meter.
+
+**Engineering deviation (Comp):** stages are *numbered* by threshold, as drawn, but the host parameters are four fixed slots (`s1_*` … `s4_*`) that never swap values: when thresholds cross, only the displayed numbers re-rank, so automation stays on its stage.
+
+Third pass (2026-10-14), still binding:
 - **`tokens.json`** is now the board's own token object (`mitefx-tokens/3`), extracted verbatim:
   - one fixed band ramp;
   - semantic colours, including `danger` and `masking`;
@@ -18,6 +27,10 @@ The "Third pass" list below is kept as history; the design addressed all of it.
 | `tokens.json` | Machine-readable tokens. `mite-ui::tokens` is generated from this file. Theme colours come from the second pass (see the note in its `source` field). |
 | `mockups/eq-main.dc.html` | **The EQ screen in every state.** Props: `theme` = `dark` · `light` · `cb`, and `variant` = `bands` · `empty` · `linear` · `collision` · `grab` · `spectral` · `multi` · `menu` · `presets` · `settings` · `help`. Each EQ artboard on the canvas is this file with one combination of the two. |
 | `mockups/eq-compact.dc.html` | Compact layout, 640×400. |
+| `mockups/comp-main.dc.html` | **The Comp screen in every state.** Props: `theme` = `dark` · `light` · `cb` · `hc`, and `variant` = `default` · `stages` · `stage-selected` · `create` · `character` · `custom` · `smart` · `sidechain` · `listen` · `stereo` · `lookahead` · `delta` · `empty` · `presets` · `help` · `menu`. Its script holds the curve maths, the glyph paths (`G`) and the help-strip strings. |
+| `mockups/comp-components.dc.html` | Comp component sheet: stage nodes and quadrant glyphs, Character and Smart glyphs, GR meter, envelope scope, threshold grip. |
+| `mockups/comp-compact.dc.html` | Comp compact layout, 640×400 (built later, with the EQ's). |
+| `comp-brief.md` | The brief this pass answers. |
 | `mockups/shared.dc.html` | Shared components: modulation matrix, 4-node transfer curve, waveform/GR history, spectrogram, and their usage rules. |
 | `mockups/components.dc.html` | Component sheet. Still **first pass**: knobs, sliders, fields, meters, node states, buttons, crossover, piano strip. |
 | `mockups/tokens.dc.html` | Brand and token sheet. Still **first pass** and stale; `tokens.json` supersedes it. |
