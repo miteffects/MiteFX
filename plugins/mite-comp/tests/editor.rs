@@ -129,6 +129,23 @@ fn double_clicking_a_node_makes_it_inert_then_removes_it() {
 }
 
 #[test]
+fn clicking_a_stage_card_selects_that_stage() {
+    let (mut view, host, _) = setup();
+    drag(&mut view, &host, sq(-40.0, -40.0), sq(-40.0, -40.0) + (0.0, 60.0));
+    drag(&mut view, &host, sq(-15.0, -15.0) + (0.0, 8.0), sq(-15.0, -15.0) + (0.0, 70.0));
+    let s = stages(&host);
+    assert!(s[0].on && s[1].on);
+    // Card 2 (x 796 + 98…) is the stage with the higher threshold, slot 1.
+    let card2 = Point::new(796.0 + 98.0 + 45.0, 56.0 + 420.0 + 88.0);
+    view.event(&UiEvent::PointerDown { pos: card2, button: MouseButton::Left, mods: MODS }, &host);
+    view.event(&UiEvent::PointerUp { pos: card2, button: MouseButton::Left, mods: MODS }, &host);
+    // The stage panel's Delete removes the selected stage: slot 1 goes.
+    view.event(&UiEvent::KeyDown { key: Key::Delete, mods: MODS }, &host);
+    let s = stages(&host);
+    assert!(s[0].on && !s[1].on, "card 2 selected stage 2");
+}
+
+#[test]
 fn a_factory_preset_loads_its_stages() {
     let (mut view, host, _) = setup();
     // ‹ › steps: next from Init is Vocal Leveller (a leveller and a compressor).

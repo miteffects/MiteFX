@@ -1002,14 +1002,25 @@ impl CompView {
         (0..STAGES).find(|&i| Self::on(host, &stage_id(i, S_SOLO.id)) && Self::on(host, &stage_id(i, S_ON.id)))
     }
 
+    /// Card `k` of the stage strip (stage k + 1 in threshold order).
+    fn strip_rect(k: usize) -> Rect {
+        let w = (SQ - 24.0) / 4.0;
+        let x = SQ_X + k as f64 * (w + 8.0);
+        Rect::new(x, STRIP_TOP, x + w, STRIP_TOP + STRIP_H)
+    }
+
+    /// The stage whose strip card is under `p`.
+    fn card_at(stages: &[Stage; STAGES], p: Point) -> Option<usize> {
+        let k = (0..STAGES).find(|&k| Self::strip_rect(k).contains(p))?;
+        Self::ranked(stages).get(k).copied()
+    }
+
     fn draw_strip(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
         let theme = cx.theme;
         let ranked = Self::ranked(stages);
         let now = self.history.back();
-        let w = (SQ - 24.0) / 4.0;
         for k in 0..STAGES {
-            let x = SQ_X + k as f64 * (w + 8.0);
-            let r = Rect::new(x, STRIP_TOP, x + w, STRIP_TOP + STRIP_H);
+            let r = Self::strip_rect(k);
             let shape = RoundedRect::from_rect(r, 10.0);
             let Some(&slot) = ranked.get(k) else {
                 cx.scene.stroke(&Stroke::new(1.0).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.grid_major.multiply_alpha(0.7), None, &shape);
@@ -1019,7 +1030,9 @@ impl CompView {
             let selected = self.selected == Some(slot);
             let inert = s.ratio <= 1.001;
             let alpha = if inert { 0.35 } else { 1.0 };
-            panel(cx.scene, shape, theme.well, if selected { theme.accent } else { theme.well_border });
+            let hot = !selected && self.pointer.is_some_and(|p| r.contains(p));
+            let border = if selected { theme.accent } else if hot { theme.accent.multiply_alpha(0.6) } else { theme.well_border };
+            panel(cx.scene, shape, theme.well, border);
             // Number and quadrant.
             let badge = Point::new(r.x0 + 19.0, r.y0 + 18.0);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if selected { theme.accent } else { theme.accent.multiply_alpha(0.25) }, None, &Circle::new(badge, 9.0));
@@ -1510,6 +1523,18 @@ impl CompView {
         let last = self.history.back();
         let now = |k: usize| last.map_or(-150.0, |r| r[k].max(r[k + 1]));
         let gr = last.map_or(0.0, |r| r[record::CUT].min(r[record::CUT + 1]));
+        if let Some(slot) = Self::card_at(&stages, p) {
+            let s = stages[slot];
+            return Help::default()
+                .slot(format!("Stage {}", Self::number(&stages, slot)), "Stage 4")
+                .text(" · ")
+                .slot(Quadrant::NAMES[s.quadrant as usize], "Upward compress")
+                .text(" · ")
+                .slot(db(s.threshold_db), "−60.0 dB")
+                .text(" · ")
+                .slot(ratio(s.ratio), "100:1")
+                .text(" — click to edit it; the bar is its gain now");
+        }
         match self.hot {
             Some(Hot::Node(slot)) | Some(Hot::Diamond(slot)) => {
                 let s = stages[slot];
@@ -1870,6 +1895,11 @@ impl CompView {
             return true;
         }
         let _ = mods;
+        // A stage's card in the strip selects it (as its node does).
+        if let Some(slot) = Self::card_at(stages, pos) {
+            self.select(Some(slot));
+            return true;
+        }
         match self.hot_at(host, pos) {
             Some(Hot::Node(slot)) => {
                 self.select(Some(slot));
