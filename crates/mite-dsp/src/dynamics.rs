@@ -5,8 +5,11 @@
 //!
 //! 1. **The curve.** Up to four [`Stage`]s, each a full dynamics stage working in one quadrant
 //!    (compress, expand, upward compress, upward expand), composed **in series** in threshold
-//!    order, like compressors patched one into the next. Every stage's level map is monotone, so
-//!    the composed curve is too, whatever the stages. [`curve_db`] is the one function the audio
+//!    order, like compressors patched one into the next. Thresholds are set on the input, so a
+//!    stage starts where the input reaches its threshold whatever the stages below it do, and a
+//!    stage never changes anything the stages below it do: the curve up to a stage's node is its
+//!    own and theirs (user decision, 2026-10-23). Every stage's level map is monotone, so the
+//!    composed curve is too, whatever the stages. [`curve_db`] is the one function the audio
 //!    thread, the editor's transfer square and its history all evaluate, so what is drawn is what
 //!    is applied. A stage's range caps its gain softly: the curve bends back parallel to the
 //!    diagonal with no corner.
@@ -132,10 +135,11 @@ impl Detector {
 pub struct Stage {
     pub on: bool,
     pub quadrant: Quadrant,
+    /// The input level where the stage starts acting, dB.
     pub threshold_db: f32,
     /// 1 … [`RATIO_MAX`]; from [`INF_RATIO`] it is ∞:1.
     pub ratio: f32,
-    /// Knee width centred on the threshold, dB.
+    /// Knee width centred on the threshold, dB of input.
     pub knee_db: f32,
     /// How far the stage may move the level, dB (positive).
     pub range_db: f32,
@@ -218,44 +222,74 @@ pub fn order(stages: &[Stage; STAGES]) -> [usize; STAGES] {
     idx
 }
 
+/// Each stage's threshold in the level it works on: what the stages below it make of the input
+/// at its threshold. A stage's input threshold never moves; this is where it lands after them.
+pub fn level_thresholds(stages: &[Stage; STAGES]) -> [f32; STAGES] {
+    let chained = chained(stages);
+    std::array::from_fn(|i| chained[i].threshold_db)
+}
+
+/// The stages with their thresholds and knees in the level they work on: the threshold where
+/// the stages below put the input threshold, the knee scaled by their slope there, so it spans
+/// its width of input (and a stage reaches no further below its threshold than half its knee).
+fn chained(stages: &[Stage; STAGES]) -> [Stage; STAGES] {
+    let mut out = *stages;
+    let order = order(stages);
+    for (n, &k) in order.iter().enumerate() {
+        let (threshold, slope) = into_level(stages[k].threshold_db, |level| {
+            order[..n].iter().fold(level, |l, &j| l + stage_gain_db(&out[j], l, 0.0))
+        });
+        out[k].threshold_db = threshold;
+        out[k].knee_db = stages[k].knee_db * slope;
+    }
+    out
+}
+
+/// Where input level `t` lands through `lower` (the stages below a stage), and their slope there.
+#[inline]
+pub(crate) fn into_level(t: f32, lower: impl Fn(f32) -> f32) -> (f32, f32) {
+    let (down, up) = (lower(t - 0.01), lower(t + 0.01));
+    (lower(t), ((up - down) / 0.02).max(0.0))
+}
+
+/// The output of the stages in threshold order, up to and including `last` (all of them when
+/// `None`), for input `input_db`, every threshold moved by `offset_db` (Smart's slide).
+fn run(stages: &[Stage; STAGES], last: Option<usize>, input_db: f32, offset_db: f32) -> f32 {
+    let chained = chained(stages);
+    let mut level = input_db;
+    for i in order(stages) {
+        level += stage_gain_db(&chained[i], level - offset_db, 0.0);
+        if Some(i) == last {
+            break;
+        }
+    }
+    level
+}
+
 /// The static curve: the output level for input level `input_db`, the stages in series in
 /// threshold order, every threshold moved by `offset_db` (Smart's slide).
 pub fn curve_db(stages: &[Stage; STAGES], input_db: f32, offset_db: f32) -> f32 {
-    let mut level = input_db;
-    for i in order(stages) {
-        level += stage_gain_db(&stages[i], level - offset_db, 0.0);
-    }
-    level
+    run(stages, None, input_db, offset_db)
+}
+
+/// The curve as stage `slot` and the stages below it make it: where its node sits. The stages
+/// above it never change it.
+pub fn partial_curve_db(stages: &[Stage; STAGES], slot: usize, input_db: f32, offset_db: f32) -> f32 {
+    run(stages, Some(slot), input_db, offset_db)
 }
 
 /// The level stage `slot` sees for input `input_db`: what the stages before it (lower
 /// thresholds) have made of the input.
 pub fn level_before(stages: &[Stage; STAGES], slot: usize, input_db: f32, offset_db: f32) -> f32 {
+    let chained = chained(stages);
     let mut level = input_db;
     for i in order(stages) {
         if i == slot {
             break;
         }
-        level += stage_gain_db(&stages[i], level - offset_db, 0.0);
+        level += stage_gain_db(&chained[i], level - offset_db, 0.0);
     }
     level
-}
-
-/// The input level at which stage `slot` reaches its threshold: where the transfer plot shows it
-/// (its threshold lives in the level domain the stages before it leave). The map is monotone, so
-/// bisection finds it; flat stretches (an ∞:1 stage before it) converge to their edge.
-pub fn input_level_at_threshold(stages: &[Stage; STAGES], slot: usize, offset_db: f32) -> f32 {
-    let target = stages[slot].threshold_db + offset_db;
-    let (mut lo, mut hi) = (-160.0f32, 40.0f32);
-    for _ in 0..40 {
-        let mid = 0.5 * (lo + hi);
-        if level_before(stages, slot, mid, offset_db) < target {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    0.5 * (lo + hi)
 }
 
 /// How each Character moves the stages.
@@ -576,6 +610,10 @@ impl StageGlide {
         }
     }
 
+    fn is_smoothing(&self) -> bool {
+        [&self.threshold, &self.inv_ratio, &self.knee, &self.range, &self.weight, &self.fade].iter().any(|sm| sm.is_smoothing())
+    }
+
     /// The stage as it plays this sample: (stage, weight, crossfade from the old quadrant).
     #[inline]
     fn next(&mut self, base: &Stage) -> (Stage, f32, f32) {
@@ -620,6 +658,9 @@ pub struct Compressor {
     sib_avg: f32,
     sib_guard: f32,
     offset_db: f32,
+    /// The stages' thresholds and knees in the level they work on, while nothing glides.
+    levels: [(f32, f32); STAGES],
+    levels_valid: bool,
     prepared: bool,
 }
 
@@ -650,6 +691,8 @@ impl Compressor {
             sib_avg: 0.0,
             sib_guard: 0.0,
             offset_db: 0.0,
+            levels: [(0.0, 0.0); STAGES],
+            levels_valid: false,
             prepared: false,
         };
         c.prepare(sample_rate, &s);
@@ -703,6 +746,7 @@ impl Compressor {
         self.sib_avg = 0.0;
         self.sib_guard = 0.0;
         self.offset_db = 0.0;
+        self.levels_valid = false;
         self.makeup.reset(s.makeup_total_db(0.0));
     }
 
@@ -877,6 +921,32 @@ impl Compressor {
             for (k, g) in self.glides.iter_mut().enumerate() {
                 stages_now[k] = g.next(&s.stages[k]);
             }
+            // Thresholds and knees are on the input: each stage's, in the level it works on, is
+            // what the stages below it (as they play now) make of them. Worked out again only
+            // while something glides.
+            let moving = self.glides.iter().any(StageGlide::is_smoothing);
+            if !moving && self.levels_valid {
+                for (k, (stage, _, _)) in stages_now.iter_mut().enumerate() {
+                    (stage.threshold_db, stage.knee_db) = self.levels[k];
+                }
+            }
+            for (n, &k) in order.iter().enumerate().filter(|_| moving || !self.levels_valid) {
+                let glides = &self.glides;
+                let (threshold, slope) = into_level(stages_now[k].0.threshold_db, |level| {
+                    order[..n].iter().fold(level, |l, &j| {
+                        let (stage, weight, fade) = stages_now[j];
+                        let mut g = stage_gain_db(&stage, l, 0.0);
+                        if fade < 1.0 {
+                            g = fade * g + (1.0 - fade) * stage_gain_db(&Stage { quadrant: glides[j].from_quadrant, ..stage }, l, 0.0);
+                        }
+                        l + weight * g
+                    })
+                });
+                stages_now[k].0.threshold_db = threshold;
+                stages_now[k].0.knee_db *= slope;
+                self.levels[k] = (threshold, stages_now[k].0.knee_db);
+            }
+            self.levels_valid = !moving;
             let makeup = db_to_gain(self.makeup.next_value());
             let mut out = [0.0f32; 2];
             for c in 0..n_ch {
@@ -1251,18 +1321,35 @@ mod tests {
     }
 
     #[test]
-    fn a_later_stage_shows_where_the_input_reaches_its_threshold() {
-        // A 2:1 compressor from −30 dB, then a limiter at −12 dB (in the compressed domain): the
-        // limiter starts where the compressor's output reaches −12, at an input of +6 → clamp.
+    fn a_stage_starts_where_the_input_reaches_its_threshold() {
+        // 2:1 from −30 dB, then ∞:1 from −20 dB on the input: the limiter holds what the
+        // compressor makes of −20 (−25) from there on.
         let comp = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -30.0, 2.0) };
         let limit = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -20.0, RATIO_MAX) };
         let stages = settings(&[comp, limit]).stages;
-        let x = input_level_at_threshold(&stages, 1, 0.0);
-        // −30 + (x + 30) / 2 = −20  →  x = −10.
-        assert!((x + 10.0).abs() < 0.01, "{x}");
-        assert!((level_before(&stages, 1, x, 0.0) + 20.0).abs() < 0.01);
-        // The first stage sees the input itself.
-        assert!((input_level_at_threshold(&stages, 0, 0.0) + 30.0).abs() < 0.01);
+        assert!((curve_db(&stages, -20.0, 0.0) + 25.0).abs() < 0.01);
+        assert!((curve_db(&stages, -5.0, 0.0) + 25.0).abs() < 0.01);
+        assert_eq!(level_thresholds(&stages)[..2], [-30.0, -25.0]);
+    }
+
+    #[test]
+    fn a_higher_stage_never_changes_anything_below_it() {
+        let low = Stage { knee_db: 6.0, ..stage(Quadrant::Compress, -40.0, 2.0) };
+        let high = Stage { knee_db: 6.0, ..stage(Quadrant::Compress, -20.0, 4.0) };
+        let before = settings(&[low, high]).stages;
+        for moved in [Stage { threshold_db: -26.0, ratio: 20.0, ..high }, Stage { threshold_db: -12.0, ratio: 1.5, ..high }, Stage { on: false, ..high }] {
+            let after = settings(&[low, moved]).stages;
+            // The curve below the higher stage's knee (3 dB of level each side of its threshold,
+            // 6 dB of input behind the 2:1 stage), and the lower stage's own curve (where its
+            // node sits) everywhere, are untouched.
+            for i in 0..=300 {
+                let x = -60.0 + 0.2 * i as f32;
+                if x < moved.threshold_db.min(high.threshold_db) - 6.1 {
+                    assert_eq!(curve_db(&after, x, 0.0), curve_db(&before, x, 0.0), "at {x}");
+                }
+                assert_eq!(partial_curve_db(&after, 0, x, 0.0), partial_curve_db(&before, 0, x, 0.0), "at {x}");
+            }
+        }
     }
 
     #[test]
@@ -1272,8 +1359,9 @@ mod tests {
         let both = steady_gain(&settings(&[a, b]), -10.0, 0.2);
         let solo = steady_gain(&CompSettings { solo: Some(1), ..settings(&[a, b]) }, -10.0, 0.2);
         // Stage b (lower threshold) runs first: −10 dB is 20 over −30 at 2:1, so it takes 10 dB;
-        // then a takes 3.75 dB more (−20 is 5 over −25 at 4:1).
-        assert!((solo + 10.0).abs() < 0.05 && (both + 13.75).abs() < 0.05, "solo {solo}, both {both}");
+        // a starts at an input of −25, which b leaves at −27.5, so it takes 5.625 dB more (−20 is
+        // 7.5 over at 4:1).
+        assert!((solo + 10.0).abs() < 0.05 && (both + 15.625).abs() < 0.05, "solo {solo}, both {both}");
     }
 
     #[test]

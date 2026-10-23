@@ -125,6 +125,8 @@ Comp follows everything above. This part covers only what Comp adds or changes. 
 
 A stage is one threshold with one quadrant, ratio, knee, attack, release and range. There are up to 4 stages, and they run in series.
 
+**A higher stage never changes a lower one (user decision, 2026-10-23).** Thresholds and knees are set on the input: a stage starts where the input reaches its threshold, whatever the stages below it do. Editing a stage changes only the curve from its knee up; the stages below it, their nodes and their diamonds stay exactly where they are. A stage rides on what the stages below it leave, so editing a lower stage can move the nodes above it up or down (never sideways). A stage acting below its threshold (expand, upward compress) moves everything under it, by nature.
+
 **Numbering and order**
 - Stages are numbered by threshold, from low to high. The number always matches the order of the grips on the history and of the nodes on the curve.
 - If a drag carries a threshold past a neighbour's, the two numbers swap when the threshold is released, not during the drag. While dragging, the curve is still drawn monotone.
@@ -153,7 +155,7 @@ The quadrant is chosen by which side of the diagonal the curve is pulled to, and
 |---|---|---|---|
 | Hover | Help strip shows IN → OUT at the pointer | Node grows (micro); help strip names the stage, quadrant, threshold and ratio | Diamond grows; help strip shows the threshold |
 | Click | Clears selection | Selects; the stage panel opens (base, enter) | Selects the stage |
-| Drag | **Pull the line to create a stage** (below). Lasso does not exist here. | Along the diagonal moves the threshold. Away from the diagonal sets the ratio, using the node's distance from the line. | Threshold only |
+| Drag | **Pull the line to create a stage** (below). Lasso does not exist here. | Along the diagonal moves the threshold. Away from the line sets the ratio, from the node's distance to the curve the stages below make. | Threshold only |
 | Shift-drag | — | Fine ×0.1 | Fine ×0.1 |
 | Alt-drag | — | Knee: 0–24 dB over 120 px, horizontal | Knee |
 | Cmd/Ctrl-drag | — | Axis lock after 6 px (threshold only or ratio only) | — |
@@ -162,7 +164,7 @@ The quadrant is chosen by which side of the diagonal the curve is pulled to, and
 | Right-click | Square menu: Reset all, Copy curve, Paste curve | Stage menu: quadrant icons, Solo, Bypass, Delete | Stage menu |
 | Delete / Backspace | — | Deletes the stage (fast, exit); the curve springs back | Same |
 
-The node sits on the curve 12 dB into the active side of its threshold. That puts it where the ratio is visible, rather than on the knee.
+The node sits 12 dB into the active side of its threshold, on the curve its stage and those below it make. That puts it where the ratio is visible, rather than on the knee. When a higher stage starts before the node, the node keeps its place and its stage's own continuation to it is drawn dashed. The threshold diamond sits where the stage starts, on the curve the stages below it make.
 
 ## Creating and removing stages
 

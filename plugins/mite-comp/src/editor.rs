@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::dynamics::{curve_db, input_level_at_threshold, level_before, order, simulate_stage, Detector, Quadrant, Smart, Stage, CHARACTERS, CUSTOM, INF_RATIO, KEY_BANDS, RATIO_MAX, STAGES, STYLES};
+use mite_dsp::dynamics::{curve_db, level_before, level_thresholds, order, partial_curve_db, simulate_stage, Detector, Quadrant, Smart, Stage, CHARACTERS, CUSTOM, INF_RATIO, KEY_BANDS, RATIO_MAX, STAGES, STYLES};
 use mite_dsp::eq::{analog_response_db, BandSettings, BandType};
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel};
@@ -531,22 +531,30 @@ impl CompView {
         Smart::from_index(Self::index(host, SMART.id))
     }
 
-    /// Where stage `slot` starts acting, on the input axis (its threshold is in the level
-    /// domain the stages before it leave).
+    /// Where stage `slot` starts acting, on the input axis (thresholds are set on the input),
+    /// with Smart's slide.
     fn threshold_input(stages: &[Stage; STAGES], slot: usize, offset: f32) -> f32 {
-        input_level_at_threshold(stages, slot, offset).clamp(-60.0, 0.0)
+        (stages[slot].threshold_db + offset).clamp(-60.0, 0.0)
     }
 
-    fn node_pos(stages: &[Stage; STAGES], slot: usize, offset: f32) -> Point {
-        let stage = &stages[slot];
+    /// The node's input level: 12 dB into the stage's active side, kept inside the square.
+    fn node_input(stages: &[Stage; STAGES], slot: usize, offset: f32) -> f32 {
         let t = Self::threshold_input(stages, slot, offset);
-        let x = if stage.quadrant.acts_above() { (t + NODE_OFFSET_DB).min(-1.5) } else { (t - NODE_OFFSET_DB).max(-58.5) };
-        Point::new(sq_x(x), sq_y(curve_db(stages, x, offset)))
+        if stages[slot].quadrant.acts_above() { (t + NODE_OFFSET_DB).min(-1.5) } else { (t - NODE_OFFSET_DB).max(-58.5) }
     }
 
+    /// The node, on the curve this stage and those below it make: the stages above it never move
+    /// it. When one of them starts before the node, the node sits on this stage's own
+    /// continuation (drawn dashed), off the final curve.
+    fn node_pos(stages: &[Stage; STAGES], slot: usize, offset: f32) -> Point {
+        let x = Self::node_input(stages, slot, offset);
+        Point::new(sq_x(x), sq_y(partial_curve_db(stages, slot, x, offset)))
+    }
+
+    /// The threshold diamond: where the stage starts, on the curve the stages below it make.
     fn diamond_pos(stages: &[Stage; STAGES], slot: usize, offset: f32) -> Point {
         let t = Self::threshold_input(stages, slot, offset);
-        Point::new(sq_x(t), sq_y(t))
+        Point::new(sq_x(t), sq_y(level_before(stages, slot, t, offset)))
     }
 
     fn grip_rect(stages: &[Stage; STAGES], slot: usize, offset: f32) -> Rect {
@@ -611,17 +619,7 @@ impl CompView {
         };
         let quadrant = Quadrant::from_pull(up, above);
         let (knee_db, attack_ms, release_ms, range_db, detector) = quadrant_defaults(quadrant);
-        let mut stage = Stage { on: true, quadrant, threshold_db: input_db.clamp(-60.0, 0.0), ratio: pull_ratio(d), knee_db, range_db, attack_ms, release_ms, detector };
-        // The threshold is in the level domain the stages before it leave: the level the pulled
-        // input reaches there (settles in a few rounds, the order depending on the threshold).
-        if let Some(slot) = Self::free_slot(host) {
-            let mut with = stages;
-            for _ in 0..4 {
-                with[slot] = stage;
-                stage.threshold_db = level_before(&with, slot, input_db, 0.0).clamp(-60.0, 0.0);
-            }
-        }
-        Some(stage)
+        Some(Stage { on: true, quadrant, threshold_db: input_db.clamp(-60.0, 0.0), ratio: pull_ratio(d), knee_db, range_db, attack_ms, release_ms, detector })
     }
 
     /// Writes `stage` into `slot` (one gesture per parameter).
@@ -646,10 +644,10 @@ impl CompView {
         }
     }
 
-    /// Ratio from how far a point in the square sits off the diagonal at the node (`gain_db`
-    /// signed), per quadrant: the node shows the ratio's gain 12 dB into the stage.
-    fn ratio_from_gain(q: Quadrant, gain_db: f32) -> f32 {
-        let g = gain_db / NODE_OFFSET_DB;
+    /// Ratio from how far a point sits off the curve the stages below make at the node (`gain_db`
+    /// signed), per quadrant, `depth_db` into the stage (in the level it works on).
+    fn ratio_from_gain(q: Quadrant, gain_db: f32, depth_db: f32) -> f32 {
+        let g = gain_db / depth_db.max(0.5);
         let r = match q {
             Quadrant::Compress => 1.0 / (1.0 - (-g).clamp(0.0, 0.995)),
             Quadrant::UpCompress => 1.0 / (1.0 - g.clamp(0.0, 0.995)),
@@ -925,7 +923,8 @@ impl CompView {
         glow_stroke(cx, &curve, 2.4, theme.curve, theme.curve, 5.0);
         cx.scene.pop_layer();
 
-        // Threshold diamonds on the diagonal, then the nodes.
+        // Threshold diamonds where each stage starts, on the curve the stages below it make; then
+        // the nodes.
         for slot in Self::ranked(stages) {
             let alpha = if self.selected.is_none() || self.selected == Some(slot) { 0.9 } else { 0.45 };
             let c = Self::diamond_pos(stages, slot, offset);
@@ -936,6 +935,17 @@ impl CompView {
             d.line_to((c.x - 5.0, c.y));
             d.close_path();
             mite_ui::paint::glow_fill(cx, &d, theme.accent.multiply_alpha(alpha), 3.0);
+        }
+        // A node a higher stage has taken the curve away from: this stage's own continuation to it.
+        for slot in Self::ranked(stages) {
+            let x = Self::node_input(stages, slot, offset);
+            if (partial_curve_db(stages, slot, x, offset) - curve_db(stages, x, offset)).abs() < 0.1 {
+                continue;
+            }
+            let t = Self::threshold_input(stages, slot, offset);
+            let n = 48;
+            let pts: Vec<Point> = (0..=n).map(|i| t + (x - t) * i as f32 / n as f32).map(|u| Point::new(sq_x(u), sq_y(partial_curve_db(stages, slot, u, offset)))).collect();
+            cx.scene.stroke(&Stroke::new(1.4).with_dashes(0.0, [3.0, 4.0]), Affine::IDENTITY, theme.accent.multiply_alpha(0.55), None, &polyline(&pts));
         }
         for slot in Self::ranked(stages) {
             let p = Self::node_pos(stages, slot, offset);
@@ -1974,9 +1984,12 @@ impl CompView {
                     Self::set_raw(host, &stage_id(slot, S_THRESH.id), t);
                 }
                 if lock != Some(true) {
-                    let (x, y) = sq_db(pos);
-                    let gain = y - x;
-                    let r = Self::ratio_from_gain(s.quadrant, gain);
+                    // Against what the stages below make of the node's input.
+                    let (_, y) = sq_db(pos);
+                    let x = Self::node_input(stages, slot, 0.0);
+                    let base = level_before(stages, slot, x, 0.0);
+                    let depth = (base - level_thresholds(stages)[slot]).abs();
+                    let r = Self::ratio_from_gain(s.quadrant, y - base, depth);
                     Self::set_raw(host, &stage_id(slot, S_RATIO.id), r);
                 }
             }
@@ -2225,7 +2238,7 @@ mod tests {
             stages[0] = s;
             let x = if q.acts_above() { -30.0 + NODE_OFFSET_DB } else { -30.0 - NODE_OFFSET_DB };
             let gain = curve_db(&stages, x, 0.0) - x;
-            assert!((CompView::ratio_from_gain(q, gain) - 3.0).abs() < 0.01, "{q:?}");
+            assert!((CompView::ratio_from_gain(q, gain, NODE_OFFSET_DB) - 3.0).abs() < 0.01, "{q:?}");
         }
     }
 }

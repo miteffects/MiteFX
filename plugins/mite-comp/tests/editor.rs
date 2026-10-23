@@ -78,6 +78,42 @@ fn pulling_the_line_down_makes_a_compressor_and_up_lifts() {
 }
 
 #[test]
+fn editing_a_higher_stage_never_moves_a_lower_one() {
+    let (mut view, host, _) = setup();
+    for db in [-44.0, -20.0] {
+        let at = sq(db, curve_db(&stages(&host), db, 0.0));
+        drag(&mut view, &host, at, at + (0.0, 50.0));
+    }
+    let s = stages(&host);
+    assert!(s[0].on && s[1].on);
+    let before = partial(&s, 0);
+    // Stage 2: its ratio up (its node pulled down), then its threshold 8 dB down on the history
+    // grip, still above stage 1's.
+    let x = s[1].threshold_db + 12.0;
+    let node = sq(x, curve_db(&s, x, 0.0));
+    drag(&mut view, &host, node, node + (0.0, 30.0));
+    let t = stages(&host)[1].threshold_db;
+    let y = 80.0 + f64::from(-t) / 60.0 * 572.0;
+    drag(&mut view, &host, Point::new(755.0, y), Point::new(755.0, y + 572.0 * 8.0 / 60.0));
+    let after = stages(&host);
+    assert!((after[1].threshold_db - (t - 8.0)).abs() < 0.5, "{t} → {}", after[1].threshold_db);
+    assert!(after[1].ratio > s[1].ratio, "{} → {}", s[1].ratio, after[1].ratio);
+    // Stage 1's node, and the curve below stage 2's knee, are where they were.
+    assert_eq!(after[0], s[0]);
+    let only_low = { let mut l = after; l[1].on = false; l };
+    assert!((partial(&after, 0) - before).abs() < 1e-4);
+    for i in 0..=20 {
+        let x = -60.0 + i as f32;
+        assert!((curve_db(&after, x, 0.0) - curve_db(&only_low, x, 0.0)).abs() < 1e-4, "at {x}");
+    }
+}
+
+/// Stage `slot`'s node height, on the curve it and the stages below it make.
+fn partial(s: &[Stage; STAGES], slot: usize) -> f32 {
+    mite_dsp::dynamics::partial_curve_db(s, slot, s[slot].threshold_db + 12.0, 0.0)
+}
+
+#[test]
 fn a_short_press_makes_nothing_and_a_fifth_stage_is_refused() {
     let (mut view, host, _) = setup();
     drag(&mut view, &host, sq(-30.0, -30.0), sq(-30.0, -30.0) + (0.0, 3.0));

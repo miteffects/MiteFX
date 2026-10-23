@@ -16,7 +16,10 @@ use nih_plug::prelude::*;
 /// The state format version (`mite_plugin::state`). Bump it, with a migration step in
 /// `MiteComp::filter_state` and a new golden state file, when a release changes what a state
 /// means.
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 2 (2026-10-23): thresholds are on the input, so a higher stage never changes a lower one
+///   (`crate::migrate::v1_to_v2`).
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
