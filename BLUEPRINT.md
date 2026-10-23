@@ -193,7 +193,8 @@ Working names are placeholders; Claude Design may propose the brand naming.
 
 ### 1. Mite EQ (flagship, MVP). Rival: FabFilter Pro-Q 4
 
-Full specification in §8.
+Full specification in §8. Measured against Pro-Q 4 feature by feature in
+[`docs/compare/pro-q-4.md`](docs/compare/pro-q-4.md) (`cargo xtask compare eq`).
 
 **Headline features beyond Pro-Q 4:**
 - Per-band **resonance suppression** (soothe-style) as the spectral compressor's relative threshold (decided 2026-10-16: no separate band type).
@@ -203,6 +204,9 @@ Full specification in §8.
 - **Cross-instance masking map** with one-click "carve" suggestions.
 
 ### 2. Mite Comp. Rival: FabFilter Pro-C 3
+
+Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/compare/pro-c-3.md)
+(`cargo xtask compare comp`).
 
 - Starts from Nova's 4-node series curve.
 - 7 Characters (Clean, Punch, FET, Opto, Bus, Vari-Mu, Custom).
@@ -603,6 +607,39 @@ Ordered steps:
 **Exit criteria:** everything in §8.6.
 
 **MVP review (2026-10-22):** feature-complete for the MVP. Before plugin 2 the shared parts were taken out of the EQ (see §3, "What a new plugin reuses"), state got its version and golden tests, and CI validates the EQ. Measured locally the same day: clap-validator 34 passed, 0 failed (10 not applicable); pluginval strictness 10 passes with and without its GUI tests. Still open before a public release: hosts other than Reaper on Linux, the §10 gates without EQ tests yet (ramp test over every parameter, block-size invariance, 44.1–384 kHz, NaN/Inf recovery through `reset()`, the CPU-fallback render), and the GUI frame-time target. Deferred past the MVP: `character`, the full preset browser, the piano-roll strip, transient/sustain focus.
+
+### Parity with FabFilter (from `docs/compare`, 2026-10-23)
+
+`cargo xtask compare <eq|comp>` renders the same signals through Pro-Q 4 / Pro-C 3 and ours in
+Reaper and measures both (`xtask/src/compare/`). The bar is to be as good or better on every
+shared feature. To do, in order of impact:
+
+**Mite EQ (89 pass, 1 close, 12 fail):**
+1. Linear Phase resolution for narrow low bands: a Q 8 bell at 100 Hz is 2.95 dB off at Max (96 ms)
+   against Pro-Q 4's 0.53 dB at High (209 ms). Longer kernels or a resolution above Max, still
+   under Pro-Q 4's latency.
+2. Natural Phase pre-ringing on high bands: 1.0–1.5 ms against Pro-Q 4's 0.7–0.9 ms at the same
+   level. Shape the correction FIR (window, centring).
+3. Zero Latency phase near Nyquist: a few degrees behind Pro-Q 4 on the 16 kHz bell and the high
+   cuts.
+4. Features Pro-Q 4 has and we have not: Character modes; fractional slopes; analyzer settings
+   and freeze; typed value entry; phase invert; gain-Q interaction; split into L/R or M/S;
+   horizontal zoom; piano display; EQ Sketch; resizing; MIDI learn; EQ Match from another
+   instance; instance list; surround.
+5. Measure next: spectral dynamics, click-free automation, EQ Match, auto gain.
+
+**Mite Comp (11 pass, 1 close, 2 fail):**
+1. Oversampling: aliasing −72.9 dB against Pro-C 3's −86.6 dB at 4× (level without it). Already
+   the next Comp slice.
+2. CPU: 0.20 s against 0.15 s for 20 s of noise, one stage, even with Pro-C 3 through the wine
+   bridge. Profile the per-sample path.
+3. Features Pro-C 3 has and we have not: Character saturation; more styles (Versatile, Smooth,
+   Upward, TTM, Op-El, Classic, Vocal, Mastering, Pumping); a 6-band side chain EQ with every shape
+   and M/S bands; M>S and S>M stereo modes; auto release; input level; mix above 100 %; knee to
+   72 dB; attack down to 0.005 ms; host-tempo and MIDI triggering; loudness meters; compact layout
+   and resizing; MIDI learn; instance list; surround.
+4. Measure next: hold, transient overshoot, program-dependent release, side chain EQ and
+   external key, the GR meter, click-free automation.
 
 ### Phase 2: Dynamics core
 

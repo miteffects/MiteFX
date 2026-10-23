@@ -3,17 +3,21 @@
 //!     cargo xtask bundle <package> --release   CLAP + VST3 bundles into target/bundled (nih_plug_xtask)
 //!     cargo xtask install <package>            bundle (release), then copy into the user's plugin folders
 //!     cargo xtask validate <package>           clap-validator + pluginval on the bundles
+//!     cargo xtask compare <eq|comp>            measure against FabFilter in Reaper (docs/compare)
 //!
 //! Everything else is forwarded to nih_plug_xtask.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod compare;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("install") => with_package(&args, install),
         Some("validate") => with_package(&args, validate),
+        Some("compare") => compare::run(&args),
         _ => nih_plug_xtask::main_with_args("cargo xtask", args).map_err(|e| e.to_string()),
     };
     match result {
