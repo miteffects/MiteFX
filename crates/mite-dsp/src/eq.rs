@@ -676,6 +676,8 @@ const CONTROL_INTERVAL: u32 = 16;
 const DYNAMIC_INTERVAL: u32 = 32;
 /// Dynamic gain changes smaller than this don't redesign the filter, dB.
 const DYNAMIC_STEP_DB: f64 = 0.01;
+/// A dynamic gain moving less than this per control update has settled, dB.
+const DYNAMIC_SETTLED_DB: f64 = 1e-4;
 /// Crossfade time for changes that can't be smoothed (type, slope, on/off).
 const STRUCTURE_FADE_MS: f32 = 8.0;
 
@@ -709,6 +711,8 @@ pub struct BandProcessor {
     /// Dynamic gain the current sections were designed with, and the detector's design key
     /// (frequency, Q, type): redesigns happen only when these move.
     designed_dynamic_db: f64,
+    /// The dynamic gain at the previous control update (to tell when it has settled).
+    previous_dynamic_db: f64,
     /// Samples since the previous control update (the interval last scheduled).
     interval: u32,
     detector_key: (f64, f64, BandType),
@@ -738,6 +742,7 @@ impl BandProcessor {
             curve: Dynamics::default(),
             dynamic_db: 0.0,
             designed_dynamic_db: 0.0,
+            previous_dynamic_db: 0.0,
             interval: CONTROL_INTERVAL,
             detector_key: (0.0, 0.0, BandType::Bell),
             detect_region: None,
@@ -957,7 +962,12 @@ impl BandProcessor {
                 if dynamic {
                     self.update_dynamic_gain();
                 }
-                if smoothing || (self.dynamic_db - self.designed_dynamic_db).abs() >= DYNAMIC_STEP_DB {
+                // Redesign once the gain has moved a step, and once more when it settles short of
+                // a step from the last design, so a steady level lands exactly on its gain.
+                let off = (self.dynamic_db - self.designed_dynamic_db).abs();
+                let settling = (self.dynamic_db - self.previous_dynamic_db).abs() < DYNAMIC_SETTLED_DB;
+                self.previous_dynamic_db = self.dynamic_db;
+                if smoothing || off >= DYNAMIC_STEP_DB || (settling && off > DYNAMIC_SETTLED_DB) {
                     self.redesign();
                 }
                 self.interval = if smoothing { CONTROL_INTERVAL } else { DYNAMIC_INTERVAL };
@@ -1132,6 +1142,30 @@ mod tests {
         assert!(ducking(&quiet, Some(&loud), None) < -10.0);
         // And a silent sidechain leaves a loud signal alone.
         assert!(ducking(&loud, Some(&silence), None).abs() < 0.1);
+    }
+
+    #[test]
+    fn a_steady_level_lands_exactly_on_its_gain() {
+        // A tone climbing 1 dB every 0.4 s far over the threshold (the comparison's test): at
+        // each step the band settles on its gain, not a redesign step short of it.
+        let fs = 44_100.0;
+        let f = fs / 50.0;
+        let mut s = band(BandType::Bell, f, 0.0, 1.0);
+        s.dynamics = Dynamics { enabled: true, threshold_db: -30.0, range_db: -12.0, ..Default::default() };
+        let mut p = BandProcessor::new(fs, 20.0);
+        p.reset(&s);
+        let step = (0.4 * fs) as usize;
+        for (k, level_db) in (-20..=0).enumerate() {
+            let a = 10f64.powf(f64::from(level_db) / 20.0);
+            let x: Vec<f32> = (0..step).map(|i| (a * (std::f64::consts::TAU * f * (k * step + i) as f64 / fs).sin()) as f32).collect();
+            let mut y = x.clone();
+            p.process(&mut [&mut y]);
+            let want = s.dynamics.gain_db(f64::from(level_db) - 3.0103);
+            let got = 20.0 * (rms(&y[step * 6 / 10..]) / rms(&x[step * 6 / 10..])).log10();
+            if level_db >= -10 {
+                assert!((got + 12.0).abs() < 0.002, "{level_db} dBFS: {got:.4} dB (curve {want:.4})");
+            }
+        }
     }
 
     #[test]

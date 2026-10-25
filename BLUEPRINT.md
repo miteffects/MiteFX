@@ -614,12 +614,14 @@ Ordered steps:
 Reaper (off screen, under gamescope's headless backend) and measures both
 (`xtask/src/compare/`). The bar is to be as good or better on every shared feature.
 
-**Mite EQ (85 pass, 2 close, 0 fail; was 89 / 1 / 12 under the old scoring):** Natural Phase
+**Mite EQ (86 pass, 1 close, 0 fail; was 89 / 1 / 12 under the old scoring):** Natural Phase
 pre-ringing, Linear Phase resolution and Zero Latency phase now beat Pro-Q 4 (§8, 2026-10-25
 notes). Zero Latency's phase is scored as a reading (the mode is minimum phase by design; a
 96 dB/oct cut at 15 kHz cannot follow its analog phase without latency, Natural Phase does), and
-render times within 5 % are close (a render swings more than that). Close: dynamic EQ depth at
-0 dBFS (0.01 dB), the single-band Zero Latency render total (2 %; each instance designs its
+render times within 5 % are close (a render swings more than that). A dynamic band now redesigns
+once more when its gain settles short of a 0.01 dB redesign step, so a steady level lands
+exactly on its gain (was up to 0.005 dB short; tested). Close, and left as is (user decision,
+2026-10-25): the single-band Zero Latency render total (each new instance designs its
 correction, about 3 ms, before rendering). Measure next: spectral dynamics, click-free
 automation, EQ Match, auto gain.
 
