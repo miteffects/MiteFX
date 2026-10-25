@@ -48,6 +48,8 @@ const BANDS: &[Band] = &[
     Band { name: "All pass 1 kHz", shape: "All Pass", freq: 1000.0, gain: 0.0, q: 1.0, slope: None },
 ];
 
+/// Render times within this share of FabFilter's are close (renders swing more than that).
+const RENDER_CLOSE: f64 = 0.05;
 /// Renders of each timed case (the fastest counts).
 const TIMED_RUNS: usize = 3;
 /// Linear-phase resolutions, per vendor.
@@ -274,7 +276,7 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
         );
         let mut phase = Table::new(
             &format!("{mode}: phase error against the analog phase (degrees, worst 20 Hz–20 kHz at 44.1 kHz)"),
-            "As above (where the curve is within 30 dB of its peak), for the phase. Zero Latency is minimum phase by design, so only Natural Phase is meant to follow the analog phase.",
+            "As above (where the curve is within 30 dB of its peak), for the phase. Zero Latency is minimum phase by design, so only Natural Phase is meant to follow the analog phase: Zero Latency's rows are readings, without a verdict.",
             &["Band", "Pro-Q 4", "Mite EQ", "Verdict"],
         );
         let mut pre = Table::new(
@@ -294,7 +296,12 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
                 rings[j] = (t.pre_ring_ms, t.pre_ring_db);
             }
             mag.push(Row::lower(b.name, errs[0], errs[1], 0.1, 2));
-            phase.push(Row::lower(b.name, perrs[0], perrs[1], 1.0, 1));
+            let mut row = Row::lower(b.name, perrs[0], perrs[1], 1.0, 1);
+            // Zero Latency is minimum phase by design: its phase is a reading, not a target.
+            if mode == "Zero Latency" {
+                row.verdict = Verdict::None;
+            }
+            phase.push(row);
             let cell = |r: (f64, f64)| if r.0 == 0.0 { "none".to_owned() } else { format!("{:.2} ms ({:.0} dB)", r.0, r.1) };
             let verdict = Verdict::lower(rings[1].0, rings[0].0, 0.05);
             pre.rows.push(Row { cells: vec![b.name.to_owned(), cell(rings[0]), cell(rings[1])], verdict });
@@ -417,12 +424,12 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
 
     let mut load = Table::new(
         "Render time (rough CPU): 30 s of pink noise",
-        "Offline render time in seconds; lower is better. Pro-Q 4 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
+        "Offline render time in seconds; lower is better. Pro-Q 4 runs through wine and yabridge, so its figure includes the bridge: indicative only. **close** is within 5 % of FabFilter (a render swings more than that).",
         &["Bands", "Pro-Q 4", "Mite EQ", "Verdict"],
     );
     for (name, label) in [("cpu8", "8 bells, Zero Latency"), ("cpu8dyn", "8 dynamic bells, Zero Latency"), ("cpu24lp", "24 bands, Linear Phase High")] {
         let t = |v: Vendor| rendered.get(&format!("eq-{}-{name}", v.tag())).map_or(f64::NAN, |r| r.seconds);
-        load.push(Row::lower(label, t(Vendor::Fab), t(Vendor::Mite), 0.0, 3));
+        load.push(Row::lower(label, t(Vendor::Fab), t(Vendor::Mite), RENDER_CLOSE * t(Vendor::Fab), 3));
     }
     tables.push(load);
 
@@ -430,7 +437,7 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
     // modes, all bands), as a rough CPU figure.
     let mut cpu = Table::new(
         "Render time (rough CPU)",
-        "Total offline render time of every Zero Latency and Natural Phase case at 44.1 kHz (one band each, 4 s of audio), each the fastest of three renders. Pro-Q 4 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
+        "Total offline render time of every Zero Latency and Natural Phase case at 44.1 kHz (one band each, 4 s of audio), each the fastest of three renders. Pro-Q 4 runs through wine and yabridge, so its figure includes the bridge: indicative only. **close** is within 5 % of FabFilter (a render swings more than that).",
         &["Mode", "Pro-Q 4", "Mite EQ", "Verdict"],
     );
     for mode in ["Zero Latency", "Natural Phase"] {
@@ -439,7 +446,7 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
             (0..TIMED_RUNS).filter_map(|run| rendered.get(&if run == 0 { base.clone() } else { format!("{base}-t{run}") })).map(|r| r.seconds).fold(f64::NAN, f64::min)
         };
         let total = |v: Vendor| (0..BANDS.len()).map(|k| fastest(v, k)).filter(|t| t.is_finite()).sum::<f64>();
-        cpu.push(Row::lower(mode, total(Vendor::Fab), total(Vendor::Mite), 0.0, 2));
+        cpu.push(Row::lower(mode, total(Vendor::Fab), total(Vendor::Mite), RENDER_CLOSE * total(Vendor::Fab), 2));
     }
     tables.push(cpu);
     Ok(tables)

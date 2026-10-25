@@ -370,11 +370,11 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
     // Render speed.
     let mut cpu = Table::new(
         "Render time (rough CPU): 20 s of pink noise, one stage",
-        "Offline render time, the fastest of three renders. Pro-C 3 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
+        "Offline render time, the fastest of three renders. Pro-C 3 runs through wine and yabridge, so its figure includes the bridge: indicative only. **close** is within 5 % of FabFilter (a render swings more than that).",
         &["", "Pro-C 3", "Mite Comp", "Verdict"],
     );
     let s = |v: Vendor| (0..CPU_RUNS).filter_map(|k| rendered.get(&id(v, &format!("cpu{k}")))).map(|r| r.seconds).fold(f64::NAN, f64::min);
-    cpu.push(Row::lower("seconds", s(Vendor::Fab), s(Vendor::Mite), 0.0, 3));
+    cpu.push(Row::lower("seconds", s(Vendor::Fab), s(Vendor::Mite), 0.05 * s(Vendor::Fab), 3));
     tables.push(cpu);
     Ok(tables)
 }

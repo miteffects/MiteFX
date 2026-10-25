@@ -200,7 +200,7 @@ The gains of the left and right channels (the right is under the threshold on it
 
 ### Render time (rough CPU): 20 s of pink noise, one stage
 
-Offline render time, the fastest of three renders. Pro-C 3 runs through wine and yabridge, so its figure includes the bridge: indicative only.
+Offline render time, the fastest of three renders. Pro-C 3 runs through wine and yabridge, so its figure includes the bridge: indicative only. **close** is within 5 % of FabFilter (a render swings more than that).
 
 |  | Pro-C 3 | Mite Comp | Verdict |
 |---|---|---|---|
