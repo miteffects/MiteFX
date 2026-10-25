@@ -7,3 +7,6 @@ name = "Mite EQ"
 
 [mite_comp]
 name = "Mite Comp"
+
+[mite_shape]
+name = "Mite Shape"

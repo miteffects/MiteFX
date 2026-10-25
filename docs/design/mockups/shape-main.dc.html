@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mite Shape — main screen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
+.dial>span:first-child{transition:transform 140ms cubic-bezier(.2,0,0,1)}
+.dial:hover>span:first-child{transform:scale(1.1)}
+</style>
+</helmet>
+<div style="position: relative; width: 1280px; height: 760px; display: flex; flex-direction: column; background: {{th.win}}; color: {{th.hi}}; font-family: Manrope, system-ui, sans-serif; font-size: 12px; overflow: hidden">
+
+<header style="height: 56px; flex: 0 0 56px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: {{th.win}}; border-bottom: 1px solid {{th.line}}">
+<button aria-label="Mite Shape menu" style="height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 12px 0 4px; background: transparent; border: none; border-radius: 8px">
+<svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true" style="overflow: visible"><path d="M10.5 15 L5 12 M10 19 L4 19 M10.5 23 L5 26 M21.5 15 L27 12 M22 19 L28 19 M21.5 23 L27 26" stroke="{{th.lo}}" stroke-width="1.4" stroke-linecap="round"></path><path d="M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z" stroke="{{th.hi}}" stroke-width="1.6"></path><circle cx="16" cy="7.4" r="2.6" stroke="{{th.hi}}" stroke-width="1.6"></circle><path d="M11.5 23 L13.2 23 C14 23 14.2 15.5 15.4 15.5 C16.6 15.5 16.6 20.5 17.8 20.5 L20.5 20.5" stroke="{{th.accent}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path></svg>
+<span style="font-size: 16px; font-weight: 800; letter-spacing: -0.01em">Mite<span style="font-weight: 500; color: {{th.mid}}"> Shape</span></span>
+</button>
+<div style="width: 30px"></div>
+<button aria-label="Previous preset" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M7.5 2.5 L4 6 L7.5 9.5" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<button aria-label="Preset: {{presetName}}. Open the preset list" aria-expanded="{{isPresets}}" style="height: 36px; width: 300px; display: flex; align-items: center; gap: 9px; padding: 0 12px; background: {{presetBtn.bg}}; border: 1px solid {{presetBtn.b}}; border-radius: 7px; box-shadow: {{presetBtn.sh}}; text-align: left">
+<svg width="15" height="15" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="4.2" stroke="{{th.mid}}" stroke-width="1.5"></circle><path d="M9.2 9.2 L12.5 12.5" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg>
+<span style="flex: 1; font-size: 13px; font-weight: 600; color: {{th.hi}}">{{presetName}}<span style="color: {{th.accent}}; font-weight: 800">{{presetDirty}}</span></span>
+</button>
+<button aria-label="Next preset" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2.5 L8 6 L4.5 9.5" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+<div style="width: 18px"></div>
+<button aria-label="Undo" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5.5 3.5 L2.5 6.5 L5.5 9.5" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M3 6.5 H9.5 A3.8 3.8 0 0 1 9.5 14 H7" stroke="{{th.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<button aria-label="Redo, nothing to redo" disabled style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 7px; box-shadow: {{th.raised}}; cursor: default"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10.5 3.5 L13.5 6.5 L10.5 9.5" stroke="{{th.dis}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M13 6.5 H6.5 A3.8 3.8 0 0 0 6.5 14 H9" stroke="{{th.dis}}" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+<div style="width: 18px"></div>
+<div role="group" aria-label="Snapshots — drag a letter onto another to copy it" style="display: flex; gap: 8px">
+<sc-for list="{{snaps}}" as="s" hint-placeholder-count="4">
+<button aria-label="Snapshot {{s.k}}" aria-pressed="{{s.on}}" onClick="{{s.pick}}" style="width: 36px; height: 36px; border-radius: 7px; font-weight: 700; font-size: 13px; background: {{s.bg}}; border: 1px solid {{s.b}}; color: {{s.fg}}; box-shadow: {{s.sh}}">{{s.k}}</button>
+</sc-for>
+</div>
+<div style="width: 26px"></div>
+<sc-for list="{{headBtns}}" as="h" hint-placeholder-count="2">
+<button aria-label="{{h.aria}}" aria-pressed="{{h.on}}" style="width: 40px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{h.bg}}; border: 1px solid {{h.b}}; border-radius: 7px; box-shadow: {{h.sh}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{h.d}}" stroke="{{h.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{h.glow}}"></path></svg></button>
+</sc-for>
+</header>
+
+<main style="position: relative; height: 620px; flex: 0 0 620px; background: {{th.disp}}; overflow: hidden; box-shadow: {{listenFrame}}">
+<svg width="1280" height="620" viewBox="0 0 1280 620" style="position: absolute; left: 0; top: 0" role="img" aria-label="{{displayAria}}">
+<defs>
+<linearGradient id="outFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{outColor}}" stop-opacity="{{outFillA}}"></stop><stop offset="1" stop-color="{{outColor}}" stop-opacity="0.01"></stop></linearGradient>
+<linearGradient id="softBand" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{{th.accent}}" stop-opacity="0.16"></stop><stop offset="1" stop-color="{{th.accent}}" stop-opacity="0"></stop></linearGradient>
+<pattern id="upDots" width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1.1" fill="{{th.sem.up}}"></circle></pattern>
+<pattern id="muteHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="{{th.lo}}" fill-opacity="0.30"></rect></pattern>
+<filter id="glow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1320" height="660"><feGaussianBlur stdDeviation="5" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+<filter id="sglow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1320" height="660"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+</defs>
+<path d="{{hGrid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none"></path>
+<path d="{{laneSep}}" stroke="{{th.line}}" stroke-width="1"></path>
+<path d="{{zeroLine}}" stroke="{{th.zero}}" stroke-width="1.2"></path>
+<path d="{{inFill}}" fill="{{th.pre}}" fill-opacity="0.16"></path>
+<path d="{{inLine}}" stroke="{{th.pre}}" stroke-opacity="0.55" stroke-width="1" fill="none"></path>
+<path d="{{clipFill}}" fill="{{th.sem.gr}}" fill-opacity="0.55"></path>
+<path d="{{outFillP}}" fill="url(#outFill)"></path>
+<path d="{{outLine}}" stroke="{{outColor}}" stroke-width="1.6" fill="none" filter="url(#sglow)"></path>
+<path d="{{otherGain}}" stroke="{{th.lo}}" stroke-opacity="0.7" stroke-width="1.2" fill="none"></path>
+<path d="{{upLight}}" fill="{{th.sem.up}}" fill-opacity="0.28"></path>
+<path d="{{upLight}}" fill="{{upPattern}}" fill-opacity="0.6"></path>
+<path d="{{upSolid}}" fill="{{th.sem.up}}" fill-opacity="0.70" filter="url(#sglow)"></path>
+<path d="{{dnLight}}" fill="{{th.sem.gr}}" fill-opacity="0.28"></path>
+<path d="{{dnSolid}}" fill="{{th.sem.gr}}" fill-opacity="0.70" filter="url(#sglow)"></path>
+<path d="{{upEdge}}" stroke="{{th.sem.up}}" stroke-width="1.5" fill="none"></path>
+<path d="{{dnEdge}}" stroke="{{th.sem.gr}}" stroke-width="1.5" fill="none"></path>
+<path d="{{gainEdge2}}" stroke="{{th.hi}}" stroke-opacity="0.85" stroke-width="1.4" stroke-dasharray="4 3" fill="none"></path>
+<path d="{{hitTicks}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" fill="none" filter="url(#sglow)"></path>
+<path d="{{ceilBand}}" fill="url(#softBand)"></path>
+<path d="{{ceilLine}}" stroke="{{th.accent}}" stroke-width="1.5" fill="none" filter="url(#sglow)"></path>
+<path d="M1180.5 0 V620" stroke="{{th.line}}" stroke-width="1"></path>
+
+<rect x="0" y="{{rail.y}}" width="1180" height="{{rail.h}}" fill="{{th.well}}"></rect>
+<path d="{{rail.edges}}" stroke="{{th.wellB}}" stroke-width="1"></path>
+<path d="{{rail.grid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none"></path>
+<rect x="{{rg.r0.x}}" y="{{rail.y}}" width="{{rg.r0.w}}" height="{{rail.h}}" fill="{{rg.r0.fill}}" fill-opacity="{{rg.r0.op}}" stroke="{{rg.r0.stroke}}" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="{{rg.r0.x}}" y="{{rail.y}}" width="{{rg.r0.w}}" height="{{rail.h}}" fill="{{rg.r0.hatch}}"></rect>
+<rect x="{{rg.r1.x}}" y="{{rail.y}}" width="{{rg.r1.w}}" height="{{rail.h}}" fill="{{rg.r1.fill}}" fill-opacity="{{rg.r1.op}}" stroke="{{rg.r1.stroke}}" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="{{rg.r1.x}}" y="{{rail.y}}" width="{{rg.r1.w}}" height="{{rail.h}}" fill="{{rg.r1.hatch}}"></rect>
+<rect x="{{rg.r2.x}}" y="{{rail.y}}" width="{{rg.r2.w}}" height="{{rail.h}}" fill="{{rg.r2.fill}}" fill-opacity="{{rg.r2.op}}" stroke="{{rg.r2.stroke}}" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="{{rg.r2.x}}" y="{{rail.y}}" width="{{rg.r2.w}}" height="{{rail.h}}" fill="{{rg.r2.hatch}}"></rect>
+<rect x="{{rg.r3.x}}" y="{{rail.y}}" width="{{rg.r3.w}}" height="{{rail.h}}" fill="{{rg.r3.fill}}" fill-opacity="{{rg.r3.op}}" stroke="{{rg.r3.stroke}}" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="{{rg.r3.x}}" y="{{rail.y}}" width="{{rg.r3.w}}" height="{{rail.h}}" fill="{{rg.r3.hatch}}"></rect>
+<rect x="{{rg.r4.x}}" y="{{rail.y}}" width="{{rg.r4.w}}" height="{{rail.h}}" fill="{{rg.r4.fill}}" fill-opacity="{{rg.r4.op}}" stroke="{{rg.r4.stroke}}" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="{{rg.r4.x}}" y="{{rail.y}}" width="{{rg.r4.w}}" height="{{rail.h}}" fill="{{rg.r4.hatch}}"></rect>
+<path d="{{rail.specFill}}" fill="{{th.pre}}" fill-opacity="{{rail.specA}}"></path>
+<path d="{{rail.spec}}" stroke="{{th.pre}}" stroke-opacity="0.6" stroke-width="1" fill="none"></path>
+<path d="{{rail.out}}" stroke="{{th.curve}}" stroke-width="1.6" fill="none" filter="url(#sglow)"></path>
+<path d="{{rail.xLines}}" stroke="{{th.accent}}" stroke-width="1.5" stroke-opacity="0.75" fill="none"></path>
+<path d="{{rail.ghostLines}}" stroke="{{th.accent}}" stroke-width="1.5" stroke-dasharray="4 3" fill="none"></path>
+<path d="{{fn.f0.d}}" fill="{{th.accent}}" fill-opacity="{{fn.f0.op}}" stroke="{{th.accent}}" stroke-opacity="{{fn.f0.sop}}" stroke-width="1"></path>
+<path d="{{fn.f1.d}}" fill="{{th.accent}}" fill-opacity="{{fn.f1.op}}" stroke="{{th.accent}}" stroke-opacity="{{fn.f1.sop}}" stroke-width="1"></path>
+<path d="{{fn.f2.d}}" fill="{{th.accent}}" fill-opacity="{{fn.f2.op}}" stroke="{{th.accent}}" stroke-opacity="{{fn.f2.sop}}" stroke-width="1"></path>
+<path d="{{fn.f3.d}}" fill="{{th.accent}}" fill-opacity="{{fn.f3.op}}" stroke="{{th.accent}}" stroke-opacity="{{fn.f3.sop}}" stroke-width="1"></path>
+<path d="{{fn.f4.d}}" fill="{{th.accent}}" fill-opacity="{{fn.f4.op}}" stroke="{{th.accent}}" stroke-opacity="{{fn.f4.sop}}" stroke-width="1"></path>
+
+<path d="{{meterWells}}" fill="{{th.meterWell}}" stroke="{{th.wellB}}"></path>
+<path d="M1203 588 V24 M1213 588 V24 M1245 24 V588 M1255 24 V588" stroke="{{th.meterOff}}" stroke-width="8" stroke-dasharray="2 2"></path>
+<path d="{{mIn}}" stroke="{{th.pre}}" stroke-width="8" stroke-dasharray="2 2"></path>
+<path d="{{mOut}}" stroke="{{th.curve}}" stroke-width="8" stroke-dasharray="2 2" filter="url(#sglow)"></path>
+</svg>
+
+<sc-for list="{{dbLabels}}" as="l" hint-placeholder-count="6">
+<span aria-hidden="true" style="position: absolute; left: 1148px; top: {{l.y}}px; width: 28px; text-align: right; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{l.c}}; text-shadow: 0 0 3px {{th.disp}}, 0 0 3px {{th.disp}}">{{l.t}}</span>
+</sc-for>
+<sc-for list="{{fLabels}}" as="l" hint-placeholder-count="3">
+<span aria-hidden="true" style="position: absolute; left: {{l.x}}px; top: {{l.y}}px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{th.lo}}">{{l.t}}</span>
+</sc-for>
+<span aria-hidden="true" style="position: absolute; left: 1196px; top: 596px; width: 26px; text-align: center; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">IN</span>
+<span aria-hidden="true" style="position: absolute; left: 1238px; top: 596px; width: 26px; text-align: center; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">OUT</span>
+
+<sc-for list="{{xGrips}}" as="g" hint-placeholder-count="2">
+<button aria-label="{{g.aria}}" style="position: absolute; left: {{g.x}}px; top: {{g.y}}px; width: 32px; height: 32px; padding: 0; background: transparent; border: none; display: flex; align-items: center; justify-content: center; opacity: {{g.op}}">
+<span style="width: 14px; height: 28px; box-sizing: border-box; border-radius: 7px; background: {{g.bg}}; border: 1.5px {{g.bs}} {{g.c}}; box-shadow: {{g.sh}}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px"><span style="width: 4px; height: 1.5px; background: {{g.ink}}; border-radius: 1px"></span><span style="width: 4px; height: 1.5px; background: {{g.ink}}; border-radius: 1px"></span><span style="width: 4px; height: 1.5px; background: {{g.ink}}; border-radius: 1px"></span></span>
+</button>
+</sc-for>
+<sc-for list="{{xLabels}}" as="l" hint-placeholder-count="2">
+<span aria-hidden="true" style="position: absolute; left: {{l.x}}px; top: {{l.y}}px; font-feature-settings: 'tnum' 1; font-weight: 700; font-size: 10px; color: {{l.c}}; white-space: nowrap; transform: translateX(-100%)">{{l.t}}</span>
+</sc-for>
+<sc-for list="{{badges}}" as="b" hint-placeholder-count="3">
+<span aria-hidden="true" style="position: absolute; left: {{b.x}}px; top: {{b.y}}px; display: flex; gap: 4px; opacity: {{b.op}}"><span style="width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: {{b.bg}}; color: {{b.fg}}; border: {{b.ring}}; box-shadow: {{b.sh}}">{{b.n}}</span><sc-if value="{{b.hasTag}}" hint-placeholder-val="{{ false }}"><span style="height: 18px; min-width: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: {{b.tagBg}}; color: {{b.tagFg}}">{{b.tag}}</span></sc-if></span>
+</sc-for>
+
+<sc-for list="{{cards}}" as="c" hint-placeholder-count="3">
+<section aria-label="{{c.aria}}" style="position: absolute; left: {{c.x}}px; top: {{card.y}}px; width: {{c.w}}px; height: {{card.h}}px; box-sizing: border-box; padding: 10px; border-radius: 12px; background: {{c.bg}}; border: {{c.border}}; box-shadow: {{c.sh}}; opacity: {{c.op}}; overflow: hidden">
+<sc-if value="{{c.hatch}}" hint-placeholder-val="{{ false }}"><div aria-hidden="true" style="position: absolute; inset: 0; background: repeating-linear-gradient(45deg, {{th.loA}} 0 3px, transparent 3px 6px)"></div></sc-if>
+<div style="position: relative; display: flex; gap: 12px; height: 100%">
+<div style="width: {{c.colW}}px; display: flex; flex-direction: column; gap: 6px">
+<sc-if value="{{c.hasHead}}" hint-placeholder-val="{{ true }}">
+<div style="height: 32px; display: flex; align-items: center; gap: 6px">
+<span style="width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; background: {{c.nb}}; color: {{c.nf}}; border: {{c.ring}}; box-shadow: {{c.nsh}}">{{c.n}}</span>
+<span style="flex: 1; min-width: 0; font-feature-settings: 'tnum' 1; font-size: 12px; font-weight: 600; color: {{th.mid}}; white-space: nowrap; overflow: hidden">{{c.range}}</span>
+<sc-for list="{{c.btns}}" as="b" hint-placeholder-count="2">
+<button aria-label="{{b.aria}}" aria-pressed="{{b.on}}" style="width: 32px; height: 32px; flex: 0 0 32px; padding: 0; display: flex; align-items: center; justify-content: center; background: {{b.bg}}; border: 1px solid {{b.b}}; border-radius: 7px; box-shadow: {{b.sh}}; font-size: 13px; font-weight: 800; color: {{b.fg}}"><sc-if value="{{b.isText}}" hint-placeholder-val="{{ true }}"><span style="text-shadow: {{b.tglow}}">{{b.t}}</span></sc-if><sc-if value="{{b.isIcon}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{b.d}}" stroke="{{b.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{b.glow}}"></path></svg></sc-if></button>
+</sc-for>
+</div>
+</sc-if>
+<div role="img" aria-label="{{c.scopeAria}}" style="position: relative; width: {{c.sw}}px; height: {{c.sh2}}px; border-radius: 8px; background: {{th.well}}; border: 1px solid {{th.wellB}}; box-shadow: {{th.wellSh}}; overflow: hidden">
+<svg width="{{c.sw}}" height="{{c.sh2}}" viewBox="{{c.vb}}" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+<path d="{{c.sc.grid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none"></path>
+<path d="{{c.sc.trans}}" fill="{{th.accent}}" fill-opacity="0.12"></path>
+<path d="{{c.sc.inFill}}" fill="{{th.pre}}" fill-opacity="0.12"></path>
+<path d="{{c.sc.outLine}}" stroke="{{th.mid}}" stroke-opacity="0.55" stroke-width="1" fill="none"></path>
+<path d="{{c.sc.zero}}" stroke="{{th.zero}}" stroke-width="1"></path>
+<path d="{{c.sc.upLight}}" fill="{{th.sem.up}}" fill-opacity="0.28"></path>
+<path d="{{c.sc.upLight}}" fill="{{upPattern}}" fill-opacity="0.6"></path>
+<path d="{{c.sc.upSolid}}" fill="{{th.sem.up}}" fill-opacity="0.65"></path>
+<path d="{{c.sc.dnLight}}" fill="{{th.sem.gr}}" fill-opacity="0.28"></path>
+<path d="{{c.sc.dnSolid}}" fill="{{th.sem.gr}}" fill-opacity="0.65"></path>
+<path d="{{c.sc.hand}}" stroke="{{th.accent}}" stroke-width="1.2" stroke-dasharray="3 3" fill="none"></path>
+<path d="{{c.sc.gain}}" stroke="{{th.curve}}" stroke-width="{{c.gw}}" fill="none" stroke-linejoin="round" style="filter: drop-shadow(0 0 3px {{th.curveGlow}})"></path>
+<path d="{{c.sc.la}}" stroke="{{th.pre}}" stroke-width="1" stroke-dasharray="2 2" fill="none"></path>
+</svg>
+<sc-for list="{{c.sc.handles}}" as="h" hint-placeholder-count="0">
+<button aria-label="{{h.aria}}" style="position: absolute; left: {{h.x}}px; top: {{h.y}}px; width: 28px; height: 28px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center"><span style="width: {{h.w}}px; height: {{h.h}}px; border-radius: {{h.r}}px; box-sizing: border-box; background: {{th.accent}}; border: 2px solid {{th.needle}}; box-shadow: 0 0 10px {{th.accent}}"></span></button>
+</sc-for>
+<sc-for list="{{c.sc.labels}}" as="l" hint-placeholder-count="0">
+<span aria-hidden="true" style="position: absolute; left: {{l.x}}px; top: {{l.y}}px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{th.lo}}">{{l.t}}</span>
+</sc-for>
+</div>
+<sc-if value="{{c.isSmall}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; gap: 2px 8px">
+<sc-for list="{{c.mini}}" as="d" hint-placeholder-count="2">
+<button class="dial" aria-label="{{d.aria}}" style="height: 40px; min-width: 96px; display: flex; align-items: center; gap: 7px; padding: 0 2px; background: transparent; border: none">
+<span style="display: block; width: 34px; height: 34px"><svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{d.dim}}" stroke="{{th.tickOff}}" stroke-width="3.5" stroke-linecap="round"></path><path d="{{d.ctr}}" stroke="{{th.mid}}" stroke-width="3.5" stroke-linecap="round"></path><path d="{{d.lit}}" stroke="{{th.accent}}" stroke-width="3.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path><circle cx="32" cy="32" r="17" fill="{{th.disc}}" stroke="{{th.discB}}" stroke-width="2"></circle><path d="{{d.ptr}}" stroke="{{th.needle}}" stroke-width="4" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path></svg></span>
+<span style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{d.label}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 12px">{{d.v}}</span></span>
+</button>
+</sc-for>
+</div>
+</sc-if>
+</div>
+<sc-if value="{{c.isBig}}" hint-placeholder-val="{{ true }}">
+<div style="flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: center; gap: 4px 2px">
+<sc-for list="{{c.knobs}}" as="k" hint-placeholder-count="6">
+<button class="dial" aria-label="{{k.aria}}" style="height: 94px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: none; border-radius: 8px">
+<span style="position: relative; width: 62px; height: 62px; display: block">
+<svg width="62" height="62" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<path d="{{k.dim}}" stroke="{{th.tickOff}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.ctr}}" stroke="{{th.mid}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{th.accent}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="{{th.disc}}" stroke="{{th.discB}}" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,{{th.discAlpha}}))"></circle>
+<path d="{{k.ptr}}" stroke="{{th.needle}}" stroke-width="2.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 62px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: {{th.strong}}">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: {{th.lo}}; margin-top: 2px">{{k.u}}</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{k.label}}</span>
+</button>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</section>
+</sc-for>
+
+<sc-if value="{{hasStatus}}" hint-placeholder-val="{{ false }}">
+<div role="status" aria-label="{{status.aria}}" style="position: absolute; left: 14px; top: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: {{status.bg}}; border: 1.5px solid {{status.c}}; box-shadow: 0 0 18px {{status.c}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{status.d}}" stroke="{{status.c}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 3px {{status.c}})"></path></svg></div>
+</sc-if>
+<sc-if value="{{hasCeil}}" hint-placeholder-val="{{ false }}">
+<button aria-label="Clip ceiling −6.0 dB, softness 40 %. Drag up or down; Alt-drag for softness" style="position: absolute; left: 1110px; top: {{ceil.gy}}px; width: 34px; height: 22px; padding: 0; border-radius: 11px; background: {{th.accent}}; border: 1.5px solid {{th.accent}}; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px {{th.accentSoft}}"><svg width="16" height="12" viewBox="0 0 24 18" fill="none" aria-hidden="true"><path d="M2 16 L8 16 C10.5 16 11 4 14 4 H22" stroke="{{th.nodeInk}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-if>
+
+<sc-if value="{{hasSheet}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Detector" style="position: absolute; left: 12px; top: 392px; width: 820px; height: 218px; box-sizing: border-box; padding: 14px 16px; display: flex; gap: 16px; background: {{th.glass}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 14px; box-shadow: {{th.glassSh}}">
+<div style="width: 132px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{G.sliders}}" stroke="{{th.accent}}" stroke-width="1.8" stroke-linecap="round"></path></svg><span style="font-size: 15px; font-weight: 700">Detector</span></div>
+<button aria-label="Listen to what the detector hears" aria-pressed="{{sheet.listenOn}}" style="width: 52px; height: 40px; display: flex; align-items: center; justify-content: center; background: {{sheet.lb.bg}}; border: 1px solid {{sheet.lb.b}}; border-radius: 8px; box-shadow: {{sheet.lb.sh}}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{G.listen}}" stroke="{{sheet.lb.fg}}" stroke-width="1.8" stroke-linejoin="round" style="filter: {{sheet.lb.glow}}"></path></svg></button>
+</div>
+<div role="img" aria-label="Detector filter: high-pass 90 Hz, low-pass 6 kHz; the detector hears only this range" style="position: relative; width: 380px; height: 188px; border-radius: 8px; background: {{th.well}}; border: 1px solid {{th.wellB}}; box-shadow: {{th.wellSh}}; overflow: hidden">
+<svg width="380" height="188" viewBox="0 0 380 188" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+<path d="{{sheet.grid}}" stroke="{{th.gridMinor}}" stroke-width="1" fill="none"></path>
+<path d="{{sheet.specFill}}" fill="{{th.pre}}" fill-opacity="0.14"></path>
+<path d="{{sheet.heard}}" fill="{{sheet.heardC}}" fill-opacity="0.22"></path>
+<path d="{{sheet.curve}}" stroke="{{th.curve}}" stroke-width="2" fill="none" style="filter: drop-shadow(0 0 4px {{th.curveGlow}})"></path>
+</svg>
+<sc-for list="{{sheet.nodes}}" as="n" hint-placeholder-count="2">
+<button aria-label="{{n.aria}}" style="position: absolute; left: {{n.x}}px; top: {{n.y}}px; width: 28px; height: 28px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center"><span style="width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; background: {{th.accent}}; border: 2px solid {{th.needle}}; box-shadow: 0 0 10px {{th.accent}}"></span></button>
+</sc-for>
+<sc-for list="{{sheet.labels}}" as="l" hint-placeholder-count="3">
+<span aria-hidden="true" style="position: absolute; left: {{l.x}}px; top: 170px; font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 10px; color: {{th.lo}}">{{l.t}}</span>
+</sc-for>
+</div>
+<div style="flex: 1; display: flex; align-items: center; justify-content: space-around">
+<sc-for list="{{sheet.knobs}}" as="k" hint-placeholder-count="2">
+<button class="dial" aria-label="{{k.aria}}" style="height: 96px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: none; border-radius: 8px">
+<span style="position: relative; width: 62px; height: 62px; display: block">
+<svg width="62" height="62" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<path d="{{k.dim}}" stroke="{{th.tickOff}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{k.lit}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{th.accent}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="{{th.disc}}" stroke="{{th.discB}}" style="filter: drop-shadow(0 2px 3px rgba(0,0,0,{{th.discAlpha}}))"></circle>
+<path d="{{k.ptr}}" stroke="{{th.needle}}" stroke-width="2.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 62px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: {{th.strong}}">{{k.n}}</span><span style="font-size: 9px; font-weight: 600; color: {{th.lo}}; margin-top: 2px">{{k.u}}</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{k.label}}</span>
+</button>
+</sc-for>
+</div>
+<div style="width: 36px">
+<button aria-label="Close detector" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: {{th.pCtl}}; border: 1px solid {{th.pCtlB}}; border-radius: 7px; box-shadow: {{th.raised}}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="{{th.mid}}" stroke-width="1.6" stroke-linecap="round"></path></svg></button>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{hasPop}}" hint-placeholder-val="{{ false }}">
+<section aria-label="Stereo" style="position: absolute; left: 852px; top: 8px; width: 236px; box-sizing: border-box; padding: 12px; display: flex; align-items: center; gap: 12px; background: {{th.glass}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 14px; box-shadow: {{th.glassSh}}">
+<div role="radiogroup" aria-label="Stereo mode" style="display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{pop.opts}}" as="o" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{o.on}}" aria-label="{{o.aria}}" style="width: 52px; height: 38px; display: flex; align-items: center; justify-content: center; background: {{o.bg}}; border: 1px solid {{o.b}}; border-radius: 7px; box-shadow: {{o.sh}}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{o.d}}" stroke="{{o.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{o.glow}}"></path></svg></button>
+</sc-for>
+</div>
+<button class="dial" aria-label="Stereo link 50 percent" style="flex: 1; height: 96px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: transparent; border: none">
+<span style="position: relative; width: 62px; height: 62px; display: block">
+<svg width="62" height="62" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible">
+<path d="{{pop.k.dim}}" stroke="{{th.tickOff}}" stroke-width="2" stroke-linecap="round"></path>
+<path d="{{pop.k.lit}}" stroke="{{th.accent}}" stroke-width="2" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{th.accent}})"></path>
+<circle cx="32" cy="32" r="19.5" fill="{{th.disc}}" stroke="{{th.discB}}"></circle>
+<path d="{{pop.k.ptr}}" stroke="{{th.needle}}" stroke-width="2.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path>
+</svg>
+<span style="position: absolute; left: 0; top: 0; width: 62px; height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1"><span style="font-size: 12px; font-weight: 700; font-feature-settings: 'tnum' 1; color: {{th.strong}}">50</span><span style="font-size: 9px; font-weight: 600; color: {{th.lo}}; margin-top: 2px">%</span></span>
+</span>
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">LINK</span>
+</button>
+</section>
+</sc-if>
+
+<sc-if value="{{hasMenu}}" hint-placeholder-val="{{ false }}">
+<div role="menu" aria-label="{{menu.aria}}" style="position: absolute; left: {{menu.x}}px; top: {{menu.y}}px; width: {{menu.w}}px; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; background: {{th.menu}}; backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); border: 1px solid {{th.glassB}}; border-radius: 12px; box-shadow: {{th.glassSh}}">
+<sc-for list="{{menu.items}}" as="m" hint-placeholder-count="7">
+<sc-if value="{{m.head}}" hint-placeholder-val="{{ false }}"><div role="presentation" style="padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{m.t}}</div></sc-if>
+<sc-if value="{{m.sep}}" hint-placeholder-val="{{ false }}"><div role="separator" style="height: 1px; margin: 3px 6px; background: {{th.line}}"></div></sc-if>
+<sc-if value="{{m.item}}" hint-placeholder-val="{{ true }}">
+<button role="{{m.role}}" aria-checked="{{m.on}}" tabindex="{{m.ti}}" style="width: 100%; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 1px solid {{m.b}}; border-radius: 7px; text-align: left; background: {{m.bg}}; color: {{m.fg}}; font-weight: 600; font-size: 13px">
+<sc-if value="{{m.hasIcon}}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{m.d}}" stroke="{{m.ic}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+<span style="flex: 1">{{m.t}}</span><span style="font-size: 11px; font-weight: 600; color: {{th.lo}}">{{m.key}}</span></button>
+</sc-if>
+</sc-for>
+</div>
+</sc-if>
+
+</main>
+
+<div role="status" aria-live="polite" style="height: 28px; flex: 0 0 28px; box-sizing: border-box; display: flex; align-items: center; padding: 0 16px; background: {{th.help}}; border-top: 1px solid {{th.line}}; font-size: 12px; color: {{th.mid}}; white-space: nowrap; overflow: hidden">
+<sc-for list="{{helpSlots}}" as="h" hint-placeholder-count="4">
+<span style="display: inline-block; min-width: {{h.w}}px; font-feature-settings: 'tnum' 1; color: {{h.c}}">{{h.t}}</span>
+</sc-for>
+<span style="color: {{th.mid}}">{{helpText}}</span>
+</div>
+
+<footer style="height: 56px; flex: 0 0 56px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: {{th.win}}; border-top: 1px solid {{th.line}}">
+<sc-for list="{{footDrops}}" as="f" hint-placeholder-count="0">
+<button aria-label="{{f.aria}}" aria-haspopup="menu" style="height: 38px; min-width: {{f.w}}px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: {{th.ctl}}; border: 1px solid {{th.ctlB}}; border-radius: 8px; box-shadow: {{th.raised}}; font-weight: 600; font-size: 13px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{f.d}}" stroke="{{th.mid}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="flex: 1; text-align: left">{{f.t}}</span><svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 7.5 L6 4.5 L9 7.5" stroke="{{th.lo}}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-for>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 0 8px; min-width: 90px">
+<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">LATENCY</span>
+<span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 13px; color: {{latC}}">{{latency}}</span>
+</div>
+<div style="flex: 1"></div>
+<sc-for list="{{toggles}}" as="t" hint-placeholder-count="4">
+<button aria-label="{{t.aria}}" aria-pressed="{{t.on}}" style="width: 44px; height: 38px; display: flex; align-items: center; justify-content: center; background: {{t.bg}}; border: 1px solid {{t.b}}; border-radius: 8px; box-shadow: {{t.sh}}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{t.d}}" stroke="{{t.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="filter: {{t.glow}}"></path></svg></button>
+</sc-for>
+<div style="width: 18px"></div>
+<sc-for list="{{footDials}}" as="d" hint-placeholder-count="3">
+<button class="dial" aria-label="{{d.aria}}" style="height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 6px; background: transparent; border: none">
+<span style="display: block; width: 36px; height: 36px"><svg width="36" height="36" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{d.dim}}" stroke="{{th.tickOff}}" stroke-width="3.5" stroke-linecap="round"></path><path d="{{d.ctr}}" stroke="{{th.mid}}" stroke-width="3.5" stroke-linecap="round"></path><path d="{{d.lit}}" stroke="{{th.accent}}" stroke-width="3.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path><circle cx="32" cy="32" r="17" fill="{{th.disc}}" stroke="{{th.discB}}" stroke-width="2"></circle><path d="{{d.ptr}}" stroke="{{th.needle}}" stroke-width="4" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{th.accent}})"></path></svg></span>
+<span style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 52px"><span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: {{th.lo}}">{{d.label}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 13px">{{d.v}}</span></span>
+</button>
+</sc-for>
+</footer>
+<sc-if value="{{isHelp}}" hint-placeholder-val="{{ false }}">
+<div role="list" aria-label="Help mode annotations" style="position: absolute; inset: 0; pointer-events: none">
+<sc-for list="{{helpSpots}}" as="h" hint-placeholder-count="6">
+<div aria-hidden="true" style="position: absolute; left: {{h.x}}px; top: {{h.y}}px; width: {{h.w}}px; height: {{h.h}}px; border: 1.5px solid {{th.accent}}; border-radius: 8px; box-shadow: 0 0 12px {{th.accentSoft}}, inset 0 0 12px {{th.accentSoft}}"></div>
+<div role="listitem" style="position: absolute; left: {{h.lx}}px; top: {{h.ly}}px; max-width: 240px; display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px 7px 7px; background: {{th.menu}}; border: 1px solid {{th.glassB}}; border-radius: 10px; box-shadow: {{th.glassSh}}">
+<span aria-hidden="true" style="width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: {{th.accent}}; color: {{th.nodeInk}}; font-size: 11px; font-weight: 800; box-shadow: 0 0 10px {{th.accent}}">{{h.n}}</span>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 700; font-size: 12px">{{h.t}}</span><span style="font-size: 11px; line-height: 1.4; color: {{th.mid}}">{{h.d}}</span></span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light","cb","hc"],"default":"dark"},"variant":{"editor":"enum","options":["default","multiband","band-selected","split","merge","solo","mute","stereo","detector","lookahead","delta","clip","empty","presets","help","menu"],"default":"default"},"animate":{"editor":"boolean","default":true},"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      if (this.props.animate ?? true) { const st = this.state || {}; this.setState({ t: (st.t || 0) + 1 }); }
+    }, 60);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+  renderVals() {
+    const themeKey = this.props.theme || 'dark';
+    const variant = this.props.variant || 'default';
+    const st = this.state || {};
+    const t = st.t || 0;
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.5.0","date":"2026-10-25","note":"Fifth pass: Mite Shape. Shape accent moved from blush to leaf (user decision); band colouring for frequency bands; attack/sustain rendering rules."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity","gainUp":"gainUp clears ramp, semantics, the curve and the Comp accent by >= 15 in dark/light/hc. It sits closer than 15 to a few pale accents of plugins that never draw upward gain (listed in semanticChecks).","frequencyBands":"Bands that are frequency regions (Mite Shape, Mite Multiband) are drawn in the plugin accent with their number, never in the ramp: the ramp means stereo placement (EQ). Selected band: accent at 100 % with glow. Other bands: accent edge at 55 %, region fill 10 %. Soloed: white ring + S badge, others at 35 %. Muted: region fill removed, 45° hatch in text.lo at 30 %, M badge in text.hi, its gain trace hidden.","shaping":"Shaping gain is signed: boost rises in gainUp, cut hangs in gr, from a 0 dB line. Attack and sustain share those colours and differ by weight: the attack part (gain while the detector weight w > 0.5) is a solid fill at 70 % with glow; the sustain part is a 28 % fill with a 1.5 px edge and no glow. Each detected hit gets a 2 px accent tick hanging from the divider between the level and gain lanes; its height is the hit sharpness."},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"},"gainUp":{"dark":"#B5C0F8","light":"#260384","hc":"#ADC3F9","cb":"#944B40","cbCue":"dotted top edge; always rises from the bottom or the 0 dB line","use":"upward gain (upward compression and upward expansion); mirrors gr, which always hangs from the top"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"ember","dark":"#E44A08","light":"#AC1D03","hc":"#DD410D","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"leaf","dark":"#6BA208","light":"#495E21","hc":"#5DFF2B","cb":"#238EA9","text":{"dark":"#B2E37E","light":"#495E21","hc":"#FFFFFF","cb":"#9ED3E2"}},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":15.1,"light":16.3,"hc":16.1,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":16.8,"light":16.3,"hc":16.0,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6},"semanticChecks":{"gainUp":{"dark":{"gainUp_vs_ramp_sem_curve":17.1,"gainUp_vs_comp":46.8,"gainUp_contrast":10.7,"comp_vs_ramp_sem":15.1,"comp_contrast":4.8,"gainUp_near_accents":[["mod",9.0],["verb",9.4],["meter",14.2]]},"light":{"gainUp_vs_ramp_sem_curve":15.5,"gainUp_vs_comp":45.8,"gainUp_contrast":14.2,"comp_vs_ramp_sem":16.3,"comp_contrast":6.9,"gainUp_near_accents":[]},"hc":{"gainUp_vs_ramp_sem_curve":20.2,"gainUp_vs_comp":48.5,"gainUp_contrast":12.0,"comp_vs_ramp_sem":16.1,"comp_contrast":4.8,"gainUp_near_accents":[["verb",10.7],["mod",11.5],["utility",12.4],["limit",13.2],["meter",13.2]]},"cb":{"gainUp_vs_cb":18.1,"gainUp_contrast":3.0}}},"accentChecks":{"shape":{"dark":{"nearest":"ramp lime 16.8, sem.ok 17.1","gainUp":53.6,"gr":45.7,"contrastOnDisplay":6.12},"light":{"nearest":"ramp lime 16.3, sem.ok 16.6","gainUp":67.4,"gr":41.3,"contrastOnDisplay":6.97,"note":"9.1 from the Gate light accent #294C22; Gate is not designed yet, so its light value moves when it is (accent-accent is not a checked pair)"},"hc":{"nearest":"ramp lime 16.0","gainUp":53.6,"gr":58.3,"contrastOnDisplay":15.8},"why":"Shape draws boosts in gainUp (violet) and cuts in gr (amber). Blush sat between the two in hue (23.5 and 31.0); leaf is far from both."}}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"},"shape":{"history":{"single":{"levelLane":[12,194],"divider":204,"gainZero":268,"bottom":332},"multi":{"levelLane":[12,164],"divider":174,"gainZero":234,"bottom":292},"gainPxPerDb":5,"gainSoftClampDb":11.5,"attackFill":0.7,"sustainFill":0.28,"levelRangeDb":[-48,0]},"hitMarker":{"width":2,"maxHeight":14,"heightIs":"sharpness (3–12 dB lead → 30–100 %)"},"band":{"regionFillIdle":0.1,"regionFillSelected":0.22,"edgeIdle":0.55,"mutedHatch":0.3,"soloDim":0.35},"crossover":{"grip":[14,28],"hit":32,"minGapOct":0.333,"ghostFromEdgePx":24,"range":[20,20000],"defaults":[120,500,2000,8000]},"dial":{"attackSustainTravel":"S-curve: ±6 dB uses 60 % of the sweep, ±6–18 dB the outer 40 %"},"rail":{"single":{"y":340,"h":36},"multi":{"y":300,"h":80},"funnel":16},"cards":{"selectedWidth":644,"gap":8,"single":{"scope":[788,206]},"wide":{"scope":[284,160]},"compact":{"scopeH":[112,80],"switchAtWidth":220},"mutedOpacity":0.55,"mergingOpacity":0.6}}}/*END*/;
+    const base = themeKey === 'light' ? 'light' : themeKey === 'hc' ? 'hc' : 'dark';
+    const key = themeKey === 'cb' ? 'cb' : base;
+    const NT = TOK.color.neutral[base], TC = TOK.color, E = TOK.elevation;
+    const semOf = (k) => TC.semantic[k][key];
+    const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; };
+    const ACC = TC.accent.shape, accent = ACC[key];
+    const th = {
+      win: NT.window, disp: NT.display, help: NT.helpStrip, line: NT.line,
+      ctl: NT.ctlBg, ctlB: NT.ctlBorder, raised: base === 'hc' ? 'none' : E.raised[base],
+      well: NT.well, wellB: NT.wellBorder, wellSh: base === 'hc' ? 'none' : E.inset[base],
+      pCtl: NT.panelCtlBg, pCtlB: NT.panelCtlBorder, glass: NT.glass, glassB: NT.glassBorder, glassSh: base === 'hc' ? 'none' : E.glass[base],
+      menu: NT.menu, disc: NT.dialDisc, discB: NT.dialDiscBorder, discAlpha: base === 'dark' ? 0.7 : base === 'light' ? 0.2 : 0,
+      tickOff: NT.tickOff, needle: NT.needle, gridMinor: NT.gridMinor, gridMajor: NT.gridMajor, zero: NT.zeroLine,
+      curve: NT.curve, curveGlow: base === 'light' ? 'rgba(15,27,38,0.25)' : NT.curve, pre: NT.preSpectrum, hi: NT.textHi, mid: NT.textMid, lo: NT.textLo, strong: NT.textStrong, dis: NT.textDisabled,
+      meterOff: NT.meterOff, meterWell: NT.meterWell, nodeInk: base === 'light' ? '#FFFFFF' : '#0E1116',
+      accent, accentSoft: hexA(accent, base === 'light' ? 0.12 : 0.2), accentText: ACC.text[key],
+      sem: { gr: semOf('gr'), warn: semOf('warn'), danger: semOf('danger'), ok: semOf('ok'), sc: semOf('sidechain'), up: semOf('gainUp') }
+    };
+    th.loA = hexA(NT.textLo, 0.22);
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const V = (n) => variant === n;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const smooth = (x) => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+    const dbN = (g) => (g > 0.05 ? '+' : g < -0.05 ? '−' : '') + Math.abs(g).toFixed(1);
+    const fmtF = (f) => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1) + ' kHz' : Math.round(f) + ' Hz';
+
+    // ---------------- glyphs
+    const G = {
+      link: 'M9 7.5 a4.5 4.5 0 1 0 .01 0 M15 7.5 a4.5 4.5 0 1 0 .01 0', ms: 'M12 4 a8 8 0 1 0 .01 0 M12 9.5 a2.5 2.5 0 1 0 .01 0', lr: 'M8.5 7 a5 5 0 1 0 0.01 0 M15.5 7 a5 5 0 1 0 0.01 0',
+      sliders: 'M4 7 H20 M4 12 H20 M4 17 H20 M8.5 5 V9 M15 10 V14 M10.5 15 V19',
+      listen: 'M4 14 V12 a8 8 0 0 1 16 0 V14 M4 14 h3 v6 h-3 Z M20 14 h-3 v6 h3 Z',
+      auto: 'M3 16 H21 M6.5 16 C9 16 10 7.5 12 7.5 C14 7.5 15 16 17.5 16 M12 3.5 V6', delta: 'M12 4 L20.5 19 H3.5 Z', power: 'M12 3.5 V11 M7.2 6.3 a7.5 7.5 0 1 0 9.6 0',
+      clip: 'M3 18 H7 C10 18 10.5 6 14 6 H21 M3 6 H21', mute: 'M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z M15.5 9.5 L20.5 14.5 M20.5 9.5 L15.5 14.5',
+      bin: 'M5 7 H19 M10 7 V5 H14 V7 M7 7 L8 20 H16 L17 7 M10.5 10.5 V16.5 M13.5 10.5 V16.5',
+      reset: 'M5 12 a7 7 0 1 0 2.1-5 M5 4.5 V8.5 H9', copy: 'M8 8 H19 V20 H8 Z M5 16 V4 H15', paste: 'M7 5 H5 V21 H19 V5 H17 M9 3 H15 V7 H9 Z',
+      merge: 'M4 6 C10 6 11 12 20 12 M4 18 C10 18 11 12 20 12 M17 9 L20 12 L17 15', save: 'M5 4 H16 L20 8 V20 H5 Z M8 4 V9 H15 V4 M8 20 V14 H16 V20',
+      lr4: 'M3 7 H8 C12 7 13 17 21 17 M3 17 C11 17 12 7 16 7 H21', solo: 'M12 3.5 a8.5 8.5 0 1 0 .01 0', help: 'M9 9 a3 3 0 1 1 4.2 2.8 C12.4 12.2 12 12.8 12 14 M12 17.5 V18'
+    };
+
+    // ---------------- bands
+    const B = (a, s, T, tr, extra) => Object.assign({ a, s, T, tr, mix: 100, out: 0, solo: false, mute: false }, extra || {});
+    let xovers = [], bands = [B(6, -4, 25, 100)], sel = 0, ghostX = null, mergeIdx = -1;
+    const MB = () => [B(5, -3, 30, 100), B(3, -6, 40, 80), B(-3, -2, 15, 120)];
+    if (V('multiband') || V('band-selected') || V('solo') || V('mute') || V('help') || V('menu') || V('merge')) { xovers = [150, 3500]; bands = MB(); }
+    if (V('multiband') || V('mute')) sel = 0;
+    if (V('band-selected') || V('solo') || V('menu') || V('help')) sel = 1;
+    if (V('solo')) bands[1].solo = true;
+    if (V('mute')) bands[2].mute = true;
+    if (V('merge')) { xovers = [150, 290]; sel = 2; mergeIdx = 1; }
+    if (V('split')) { xovers = [2000]; bands = [B(6, -4, 25, 100), B(6, -4, 25, 100, { forming: true })]; ghostX = 0; }
+    if (V('empty')) bands = [B(0, 0, 25, 100)];
+    const multi = bands.length > 1;
+    const la = V('lookahead') ? 2 : 0;
+    const detW = V('detector') ? [0.5, 1, 0.12] : [1, 1, 1];
+    const anySolo = bands.some((b) => b.solo);
+    const audible = (b) => !b.mute && (!anySolo || b.solo);
+
+    // ---------------- layout
+    const Lt = multi ? { lv0: 12, lv1: 164, sep: 174, gz: 234, h1: 292, ry: 300, rh: 80, fy: 380, cy: 396, ch: 216 }
+                     : { lv0: 12, lv1: 194, sep: 204, gz: 268, h1: 332, ry: 340, rh: 36, fy: 376, cy: 384, ch: 228 };
+    const PXDB = 5, GCL = 11.5;
+    const softG = (g) => { const a = Math.abs(g); const c = a < GCL - 2 ? a : GCL - 2 + 2 * Math.tanh((a - GCL + 2) / 2); return Math.sign(g) * c; };
+    const lvY = (db) => Lt.lv0 + (-clamp(db, -48, 0) / 48) * (Lt.lv1 - Lt.lv0);
+    const gY = (g) => Lt.gz - softG(g) * PXDB;
+
+    // ---------------- drum loop (120 bpm 16ths) through the real detector model
+    const REG = [[20, 150], [150, 3500], [3500, 20000]];
+    const HIT = { kick: [[1, 220], [0.35, 45], [0.06, 12]], snare: [[0.15, 70], [0.8, 150], [0.45, 95]], hat: [[0, 1], [0.04, 20], [0.36, 45]] };
+    const FLOOR = [0.010, 0.009, 0.0035];
+    const pattern = (step) => { const s = ((step % 16) + 16) % 16, out = []; if (s === 0 || s === 7 || s === 10) out.push(['kick', s === 7 ? 0.55 : 1]); if (s === 4 || s === 12) out.push(['snare', 1]); if (s === 14) out.push(['snare', 0.3]); if (s % 2 === 0) out.push(['hat', s % 4 === 0 ? 0.6 : 1]); return out; };
+    const lg2 = Math.log2;
+    const ovOf = (f0, f1) => REG.map(([a, b]) => Math.max(0, Math.min(lg2(f1), lg2(b)) - Math.max(lg2(f0), lg2(a))) / (lg2(b) - lg2(a)));
+    const edges = [20].concat(xovers, [20000]);
+    const ov = bands.map((b, i) => ovOf(edges[i], edges[i + 1]));
+    const tNow = t * 60 + 2000, SPAN = 6000, NPT = 590, DT = SPAN / NPT, HW = 1180;
+    const buildHits = (scale) => {
+      const hits = [];
+      for (let s = Math.floor((tNow - SPAN - 1600) / 125); s <= Math.floor(tNow / 125); s++) pattern(s).forEach(([k, v]) => hits.push({ th: s * 125, k, v: v * (scale ? scale[k] : 1) }));
+      return hits;
+    };
+    const ampAt = (bi, tau, hits, flScale, upto) => {
+      let a = 0; for (let r = 0; r < 3; r++) a += ov[bi][r] * FLOOR[r] * flScale;
+      for (let h = 0; h < upto; h++) { const H = hits[h]; if (H.th > tau) break; const dtt = tau - H.th; for (let r = 0; r < 3; r++) { const [v, tc] = HIT[H.k][r]; if (v) a += ov[bi][r] * H.v * v * Math.exp(-dtt / tc); } }
+      return a * 0.25;
+    };
+    const channel = (scale, flScale) => {
+      const hits = buildHits(scale);
+      // onsets per band: lead of the new hit over what was ringing
+      const onsets = bands.map((b, bi) => {
+        const list = [];
+        hits.forEach((H, hi) => {
+          let add = 0; for (let r = 0; r < 3; r++) add += ov[bi][r] * H.v * HIT[H.k][r][0] * detW[r];
+          add *= 0.25; if (add <= 0) return;
+          const before = ampAt(bi, H.th - 0.01, hits, flScale, hi);
+          const lead = 20 * Math.log10((before + add) / before);
+          if (lead >= 3) list.push({ th: H.th - la, peak: clamp(lead / 12, 0, 1), lead });
+        });
+        return list;
+      });
+      const pts = [];
+      for (let i = 0; i < NPT; i++) {
+        const tau = tNow - SPAN + i * DT;
+        const pb = bands.map((b, bi) => {
+          const A = ampAt(bi, tau, hits, flScale, hits.length);
+          const lvl = 20 * Math.log10(A);
+          let o = null; const ol = onsets[bi]; for (let k = ol.length - 1; k >= 0; k--) if (ol[k].th <= tau) { o = ol[k]; break; }
+          let w = 0;
+          if (o) { const d = tau - o.th, Wd = Math.max(1.5, b.T * b.tr / 100); w = o.peak * (1 - smooth((d - (b.T - Wd / 2)) / Wd)); }
+          let s = b.s; if (s > 0 && lvl < -60) s *= clamp((lvl + 66) / 6, 0, 1);
+          let g = b.a * w + s * (1 - w); if (lvl < -80) g = 0;
+          return { A, w, g, hit: o && tau - o.th < DT ? o.peak : 0 };
+        });
+        pts.push(pb);
+      }
+      return { pts, onsets };
+    };
+    const CH1 = channel(null, 1);
+    const CH2 = V('stereo') ? channel({ kick: 0.25, snare: 0.55, hat: 1.4 }, 0.7) : null;
+    if (CH2) { const k = 0.5; CH1.pts.forEach((p, i) => { const q = CH2.pts[i]; p.forEach((pb, bi) => { const a = pb.g, b2 = q[bi].g; pb.g = (1 - k / 2) * a + (k / 2) * b2; q[bi].g = (1 - k / 2) * b2 + (k / 2) * a; }); }); }
+    const xs = (i) => r1(i * HW / (NPT - 1));
+    const sumOut = (p) => p.reduce((s, pb, bi) => s + (audible(bands[bi]) ? pb.A * Math.pow(10, pb.g / 20) : 0), 0);
+    const inDb = CH1.pts.map((p) => 20 * Math.log10(p.reduce((s, pb) => s + pb.A, 0)));
+    let outDb = CH1.pts.map((p) => 20 * Math.log10(Math.max(1e-6, sumOut(p))));
+    if (V('delta')) outDb = CH1.pts.map((p) => 20 * Math.log10(Math.max(1e-6, Math.abs(p.reduce((s, pb, bi) => s + (audible(bands[bi]) ? pb.A * (Math.pow(10, pb.g / 20) - 1) : 0), 0)))));
+    if (V('listen') || V('detector')) outDb = outDb.map((d, i) => inDb[i] - 3 + 1.5 * Math.sin(i * 0.37));
+    let clipFill = '', ceilLine = '', ceilBand = '', ceil = { gy: 0 };
+    const CEIL = -6;
+    const clipped = (d) => { if (d < CEIL - 2) return d; return CEIL - 2 + 2 * Math.tanh((d - CEIL + 2) / 2); };
+    if (V('clip')) {
+      const raw = outDb.map((d) => d + 3);
+      outDb = raw.map(clipped);
+      const top = raw.map((d, i) => (i ? 'L' : 'M') + xs(i) + ' ' + r1(lvY(d))).join(' ');
+      const bot = outDb.map((d, i) => 'L' + xs(NPT - 1 - i) + ' ' + r1(lvY(outDb[NPT - 1 - i]))).join(' ');
+      clipFill = top + ' ' + bot + ' Z';
+      ceilLine = 'M0 ' + r1(lvY(CEIL)) + ' H1100';
+      ceilBand = 'M0 ' + r1(lvY(CEIL)) + ' H1100 V' + r1(lvY(CEIL - 2)) + ' H0 Z';
+      ceil = { gy: r1(lvY(CEIL) - 11) };
+    }
+    const lineOf = (arr) => arr.map((d, i) => (i ? 'L' : 'M') + xs(i) + ' ' + r1(lvY(d))).join(' ');
+    const inLine = lineOf(inDb), outLine = lineOf(outDb);
+
+    // gain lane: the shown band (selected, or the soloed one)
+    const show = anySolo ? bands.findIndex((b) => b.solo) : sel;
+    const gArr = CH1.pts.map((p) => p[show]);
+    const area = (vals) => 'M0 ' + Lt.gz + ' ' + vals.map((g, i) => 'L' + xs(i) + ' ' + r1(gY(g))).join(' ') + ' L1180 ' + Lt.gz + ' Z';
+    const edgeOf = (vals) => vals.map((g, i) => (i ? 'L' : 'M') + xs(i) + ' ' + r1(gY(g))).join(' ');
+    const upV = gArr.map((p) => Math.max(0, p.g)), dnV = gArr.map((p) => Math.min(0, p.g));
+    const hasUp = upV.some((v) => v > 0.05), hasDn = dnV.some((v) => v < -0.05);
+    const bandMuted = bands[show].mute;
+    const upLight = hasUp && !bandMuted ? area(upV) : '', dnLight = hasDn && !bandMuted ? area(dnV) : '';
+    const upSolid = hasUp && !bandMuted ? area(gArr.map((p) => Math.max(0, p.g) * p.w)) : '';
+    const dnSolid = hasDn && !bandMuted ? area(gArr.map((p) => Math.min(0, p.g) * p.w)) : '';
+    const upEdge = hasUp && !bandMuted ? edgeOf(upV) : '', dnEdge = hasDn && !bandMuted ? edgeOf(dnV) : '';
+    const gainEdge2 = CH2 ? edgeOf(CH2.pts.map((p) => p[show].g)) : '';
+    const otherGain = multi ? bands.map((b, bi) => bi === show || !audible(b) ? '' : edgeOf(CH1.pts.map((p) => p[bi].g))).join(' ') : '';
+    let hitTicks = '';
+    gArr.forEach((p, i) => { if (p.hit > 0) hitTicks += 'M' + xs(i) + ' ' + Lt.sep + ' V' + r1(Lt.sep + 4 + 10 * p.hit) + ' '; });
+    const hGrid = [-12, -24, -36].map((d) => 'M0 ' + r1(lvY(d)) + ' H1180').join(' ') + ' ' + [-6, 6].map((g) => 'M0 ' + r1(gY(g)) + ' H1180').join(' ') + ' ' + [1, 2, 3, 4, 5].map((s) => 'M' + r1(s * HW / 6) + ' 0 V' + Lt.h1).join(' ');
+    const dbLabels = [[lvY(0) - 2, '0', th.lo], [lvY(-12), '−12', th.lo], [lvY(-24), '−24', th.lo], [lvY(-36), '−36', th.lo], [gY(6) - 6, '+6', th.sem.up], [gY(0) - 6, '0', th.lo], [gY(-6) - 6, '−6', th.sem.gr]].map(([y, s, c]) => ({ y: r1(y), t: s, c }));
+
+    // ---------------- spectrum rail + crossovers
+    const RX0 = 14, RXW = 1152;
+    const fx = (f) => RX0 + RXW * Math.log(f / 20) / Math.log(1000);
+    const ry = Lt.ry, rh = Lt.rh;
+    const specLv = (f, i) => -40 + 12 * Math.exp(-Math.pow(lg2(f / 60), 2) / 0.9) + 6 * Math.exp(-Math.pow(lg2(f / 230), 2) / 1.0) + 4 * Math.exp(-Math.pow(lg2(f / 1800), 2) / 1.4) + 8 * Math.exp(-Math.pow(lg2(f / 9000), 2) / 0.9) - 18 * Math.max(0, lg2(f / 15000)) + 0.6 * Math.sin(i * 0.22 + t * 0.4);
+    const sy = (db) => ry + 6 + (-clamp(db, -52, -20) - 20) / 32 * (rh - 12);
+    const nowG = bands.map((b, bi) => { let m = 0; CH1.pts.slice(-4).forEach((p) => { if (Math.abs(p[bi].g) > Math.abs(m)) m = p[bi].g; }); return m; });
+    const wOf = (f) => { // LR4 band weights (smooth)
+      const w = bands.map(() => 1);
+      xovers.forEach((xf, k) => { const s = 1 / (1 + Math.pow(2, -(lg2(f / xf)) / 0.12)); for (let b = 0; b < bands.length; b++) w[b] *= b <= k ? 1 - s : s; });
+      return w;
+    };
+    let spec = '', outSpec = '';
+    for (let i = 0; i <= 200; i++) {
+      const f = 20 * Math.pow(1000, i / 200), x = r1(fx(f)), lv = specLv(f, i);
+      spec += (i ? 'L' : 'M') + x + ' ' + r1(sy(lv));
+      if (multi) { const w = wOf(f); let a = 0; bands.forEach((b, bi) => { if (audible(b)) a += w[bi] * Math.pow(10, nowG[bi] / 20); }); outSpec += (i ? 'L' : 'M') + x + ' ' + r1(sy(lv + 20 * Math.log10(Math.max(1e-3, a)))); }
+    }
+    const rail = {
+      y: ry, h: rh, edges: 'M0 ' + (ry + 0.5) + ' H1180 M0 ' + (ry + rh - 0.5) + ' H1180',
+      grid: [100, 1000, 10000].map((f) => 'M' + r1(fx(f)) + ' ' + ry + ' V' + (ry + rh)).join(' '),
+      spec, specFill: spec + ' L' + r1(fx(20000)) + ' ' + (ry + rh) + ' L' + RX0 + ' ' + (ry + rh) + ' Z', specA: multi ? 0.2 : 0.12,
+      out: multi ? outSpec : '',
+      xLines: xovers.map((xf, k) => k === ghostX || k === mergeIdx ? '' : 'M' + r1(fx(xf)) + ' ' + ry + ' V' + (ry + rh)).join(' '),
+      ghostLines: xovers.map((xf, k) => k === ghostX || k === mergeIdx ? 'M' + r1(fx(xf)) + ' ' + ry + ' V' + (ry + rh) : '').join(' ')
+    };
+    const fLabels = multi ? [[100, '100'], [1000, '1k'], [10000, '10k']].map(([f, s]) => ({ x: r1(fx(f) + 4), y: ry + rh - 15, t: s })) : [];
+    const regions = multi ? bands.map((b, bi) => {
+      const x0 = fx(edges[bi]), x1 = fx(edges[bi + 1]);
+      const on = bi === sel, aud = audible(b);
+      const breath = Math.min(0.12, Math.abs(nowG[bi]) / 6 * 0.12);
+      return { x: r1(bi === 0 ? 0 : x0), w: r1((bi === bands.length - 1 ? 1180 : x1) - (bi === 0 ? 0 : x0)), fill: b.mute ? 'transparent' : accent,
+        op: b.forming ? 0.08 : r1((on ? 0.22 : 0.10) + (aud ? breath : 0)) * (anySolo && !b.solo ? 0.35 : 1), stroke: b.forming || bi === mergeIdx ? accent : 'none', sw: 1.5, dash: '4 3', hatch: b.mute ? 'url(#muteHatch)' : 'transparent' };
+    }) : [];
+    const gripOf = (x, aria, ghost, on, op) => ({ x: r1(x - 16), y: r1(ry + rh / 2 - 16), aria, op: op || 1, bs: ghost ? 'dashed' : 'solid', c: accent, bg: on ? accent : ghost ? hexA(accent, 0.12) : th.disp, ink: on ? th.nodeInk : accent, sh: ghost ? '0 0 10px ' + hexA(accent, 0.35) : '0 0 10px ' + hexA(accent, 0.5) + ', 0 2px 6px rgba(0,0,0,0.5)' });
+    const xGrips = xovers.map((xf, k) => gripOf(fx(xf), (k === ghostX ? 'New crossover being made at ' : k === mergeIdx ? 'Crossover being dragged onto its neighbour, ' : 'Crossover ' + (k + 1) + ', ') + fmtF(xf), k === ghostX || k === mergeIdx, k === mergeIdx));
+    if (bands.length < 5 && !V('split') && !V('merge')) { xGrips.push(gripOf(fx(20) + 6, 'Make a band: pull a crossover in from the low edge', true, false, 0.55)); xGrips.push(gripOf(fx(20000) - 6, 'Make a band: pull a crossover in from the high edge', true, false, 0.55)); }
+    const xLabels = xovers.map((xf, k) => ({ x: r1(fx(xf) - 8), y: ry + 5, t: fmtF(xf), c: k === mergeIdx || k === ghostX ? th.accentText : th.mid }));
+    const badges = multi ? bands.map((b, bi) => {
+      const x0 = bi === 0 ? 0 : fx(edges[bi]), on = bi === sel;
+      return { x: r1(x0 + (bi === 0 ? 34 : 18)), y: ry + 6, n: bi + 1, op: b.forming ? 0.7 : anySolo && !b.solo ? 0.45 : 1,
+        bg: on ? accent : hexA(accent, 0.25), fg: on ? th.nodeInk : th.accentText, ring: b.solo ? '2px solid ' + th.needle : 'none', sh: b.solo ? '0 0 10px ' + th.needle : on ? '0 0 8px ' + accent : 'none',
+        hasTag: b.solo || b.mute, tag: b.solo ? 'S' : 'M', tagBg: b.solo ? th.needle : th.hi, tagFg: th.nodeInk };
+    }).filter((b, bi) => bi !== mergeIdx) : [];
+
+    // ---------------- dials
+    const polar = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [32 + r * Math.cos(a), 32 + r * Math.sin(a)]; };
+    const tk = (deg, ra, rb) => { const [x0, y0] = polar(deg, ra), [x1, y1] = polar(deg, rb); return 'M' + r1(x0) + ' ' + r1(y0) + ' L' + r1(x1) + ' ' + r1(y1) + ' '; };
+    const geo = (frac, bip, n) => {
+      const cnt = n || 31, step = 270 / (cnt - 1), fr = clamp(frac, 0, 1), dv = -135 + 270 * fr;
+      let lit = '', dim = '';
+      for (let i = 0; i < cnt; i++) { const d = -135 + i * step; const s = tk(d, 25, 29); const on = bip ? (d >= Math.min(0, dv) - 0.01 && d <= Math.max(0, dv) + 0.01) : d <= dv + 0.01; if (on) lit += s; else dim += s; }
+      return { lit, dim, ctr: bip ? tk(0, 22.5, 30) : '', ptr: tk(dv, 21.5, 31) };
+    };
+    const amtFrac = (v) => { const a = Math.abs(v), m = a <= 6 ? 0.6 * a / 6 : 0.6 + 0.4 * (a - 6) / 12; return 0.5 + 0.5 * Math.sign(v) * m; };
+    const lgF = (v, a, b) => Math.log(v / a) / Math.log(b / a);
+    const knob = (label, n, u, frac, bip) => Object.assign({ label, n, u, aria: label + ' ' + n + ' ' + u }, geo(frac, bip));
+    const bandKnobs = (b) => [
+      knob('ATTACK', dbN(b.a), 'dB', amtFrac(b.a), true), knob('SUSTAIN', dbN(b.s), 'dB', amtFrac(b.s), true), knob('TIME', String(Math.round(b.T)), 'ms', lgF(b.T, 5, 200), false),
+      knob('TRANSITION', String(Math.round(b.tr)), '%', b.tr / 200, false), knob('MIX', String(b.mix), '%', b.mix / 100, false), knob('OUTPUT', dbN(b.out), 'dB', (b.out + 24) / 48, true)
+    ];
+    const miniKnobs = (b) => [Object.assign({ label: 'ATTACK', v: dbN(b.a) + ' dB', aria: 'Attack ' + dbN(b.a) + ' dB' }, geo(amtFrac(b.a), true, 15)), Object.assign({ label: 'SUSTAIN', v: dbN(b.s) + ' dB', aria: 'Sustain ' + dbN(b.s) + ' dB' }, geo(amtFrac(b.s), true, 15))];
+
+    // ---------------- transient scope: a synthetic hit through the band's detector, square-root time axis
+    const scopeOf = (b, W, H, big, handles) => {
+      const TM = 400, pad = 6, n = 160;
+      const sx = (tm) => pad + (W - 2 * pad) * Math.sqrt(clamp(tm, 0, TM) / TM);
+      const z = H * 0.56, k = (H * 0.40) / 12;
+      const yG = (g) => z - softG(g) * k * (11.5 / GCL);
+      const yL = (db) => 4 + (-clamp(db, -48, 0) / 48) * (H - 8);
+      const Wd = Math.max(1.5, b.T * b.tr / 100);
+      const ts = []; for (let i = 0; i <= n; i++) ts.push(TM * Math.pow(i / n, 2));
+      const wv = (tm) => { if (tm < -la) return 0; const d = tm + la; return 1 - smooth((d - (b.T - Wd / 2)) / Wd); };
+      const lvl = (tm) => tm < 0 ? -60 : 20 * Math.log10(0.5 * Math.exp(-tm / 120) + 0.008);
+      const g = (tm) => tm < -la ? 0 : b.a * wv(tm) + b.s * (1 - wv(tm));
+      const ts2 = la ? [0].concat(ts.map((x) => x)) : ts;
+      const areaS = (f) => 'M' + pad + ' ' + r1(z) + ' ' + ts2.map((tm) => 'L' + r1(sx(tm)) + ' ' + r1(yG(f(tm)))).join(' ') + ' L' + r1(W - pad) + ' ' + r1(z) + ' Z';
+      const up = (tm) => Math.max(0, g(tm)), dn = (tm) => Math.min(0, g(tm));
+      const anyUp = b.a > 0 || b.s > 0, anyDn = b.a < 0 || b.s < 0;
+      const xT = sx(b.T), x0 = sx(Math.max(0, b.T - Wd / 2)), x1 = sx(b.T + Wd / 2);
+      const grid = [1, 10, 50, 200].map((m) => 'M' + r1(sx(m)) + ' 0 V' + H).join(' ') + ' M0 ' + r1(yG(6)) + ' H' + W + ' M0 ' + r1(yG(-6)) + ' H' + W;
+      const out = { grid, zero: 'M0 ' + r1(z) + ' H' + W, trans: 'M' + r1(x0) + ' 0 H' + r1(x1) + ' V' + H + ' H' + r1(x0) + ' Z',
+        inFill: 'M' + pad + ' ' + H + ' ' + ts.map((tm) => 'L' + r1(sx(tm)) + ' ' + r1(yL(lvl(tm - la)))).join(' ') + ' L' + (W - pad) + ' ' + H + ' Z',
+        outLine: ts.map((tm, i) => (i ? 'L' : 'M') + r1(sx(tm)) + ' ' + r1(yL(lvl(tm - la) + g(tm)))).join(' '),
+        upLight: anyUp ? areaS(up) : '', dnLight: anyDn ? areaS(dn) : '',
+        upSolid: anyUp ? areaS((tm) => up(tm) * wv(tm)) : '', dnSolid: anyDn ? areaS((tm) => dn(tm) * wv(tm)) : '',
+        gain: ts.map((tm, i) => (i ? 'L' : 'M') + r1(sx(tm)) + ' ' + r1(yG(g(tm)))).join(' '),
+        hand: 'M' + r1(xT) + ' 0 V' + H, la: la ? 'M' + r1(sx(la)) + ' 0 V' + H : '', handles: [], labels: [] };
+      if (handles) {
+        const ta = Math.max(0.6, (b.T - Wd / 2) * 0.45), tsu = b.T + Wd / 2 + (TM - b.T) * 0.3;
+        out.handles = [
+          { x: r1(sx(ta) - 14), y: r1(yG(b.a) - 14), w: 12, h: 12, r: 6, aria: 'Attack ' + dbN(b.a) + ' dB, drag up or down' },
+          { x: r1(sx(tsu) - 14), y: r1(yG(b.s) - 14), w: 12, h: 12, r: 6, aria: 'Sustain ' + dbN(b.s) + ' dB, drag up or down' },
+          { x: r1(xT - 14), y: H - 26, w: 8, h: 18, r: 4, aria: 'Transient time ' + Math.round(b.T) + ' ms, drag sideways; Alt-drag the shaded band for transition ' + Math.round(b.tr) + ' %' }
+        ];
+      }
+      if (big) out.labels = [[1, '1'], [10, '10'], [50, '50'], [200, '200 ms']].map(([m, s]) => ({ x: r1(sx(m) + 3), y: H - 15, t: s }));
+      return out;
+    };
+    const emptySc = { grid: '', zero: '', trans: '', inFill: '', outLine: '', upLight: '', dnLight: '', upSolid: '', dnSolid: '', gain: '', hand: '', la: '', handles: [], labels: [] };
+
+    // ---------------- band cards
+    const tbtn = (on, color) => on ? { bg: hexA(color, 0.16), b: color, sh: '0 0 12px ' + hexA(color, 0.35), fg: color, glow: 'drop-shadow(0 0 3px ' + color + ')' } : { bg: th.pCtl, b: th.pCtlB, sh: th.raised, fg: th.mid, glow: 'none' };
+    let cards = [];
+    if (!multi) {
+      const b = bands[0];
+      cards = [{ x: 0, w: 1180, aria: 'Shape band', bg: th.surface, border: '1px solid ' + th.wellB, sh: 'none', op: 1, hatch: false, colW: 788, hasHead: false, n: 1, range: '', nb: '', nf: '', ring: 'none', nsh: 'none', btns: [],
+        sw: 788, sh2: Lt.ch - 22, vb: '0 0 788 ' + (Lt.ch - 22), gw: 2.4, sc: scopeOf(b, 788, Lt.ch - 22, true, true), isSmall: false, mini: [], isBig: true, knobs: bandKnobs(b),
+        scopeAria: 'Transient scope: a test hit through the detector. Attack ' + dbN(b.a) + ' dB for ' + Math.round(b.T) + ' ms, then sustain ' + dbN(b.s) + ' dB' }];
+    } else {
+      const n = bands.length, WS = 644, WO = (1180 - WS - 8 * (n - 1)) / (n - 1);
+      let x = 0;
+      cards = bands.map((b, bi) => {
+        const on = bi === sel, w = on ? WS : WO, cx = x; x += w + 8;
+        const dimSolo = anySolo && !b.solo;
+        const sb = tbtn(b.solo, th.needle), mb = tbtn(b.mute, th.hi);
+        const btns = [{ aria: 'Solo band ' + (bi + 1), on: b.solo ? 'true' : 'false', isText: true, isIcon: false, t: 'S', d: '', bg: sb.bg, b: sb.b, sh: sb.sh, fg: b.solo ? th.needle : th.mid, glow: 'none', tglow: b.solo ? '0 0 6px ' + th.needle : 'none' },
+                      { aria: 'Mute band ' + (bi + 1), on: b.mute ? 'true' : 'false', isText: false, isIcon: true, t: '', d: G.mute, bg: mb.bg, b: mb.b, sh: mb.sh, fg: b.mute ? th.hi : th.mid, glow: mb.glow, tglow: 'none' }];
+        if (on) btns.push({ aria: 'Remove band ' + (bi + 1), on: 'false', isText: false, isIcon: true, t: '', d: G.bin, bg: th.pCtl, b: th.pCtlB, sh: th.raised, fg: th.mid, glow: 'none', tglow: 'none' });
+        const colW = on ? 284 : r1(w - 20), sw = colW, sh2 = on ? 160 : (w > 220 ? 112 : 80);
+        const forming = b.forming || bi === mergeIdx;
+        return { x: r1(cx), w: r1(w), aria: 'Band ' + (bi + 1) + ', ' + fmtF(edges[bi]) + ' to ' + fmtF(edges[bi + 1]) + (b.solo ? ', soloed' : '') + (b.mute ? ', muted' : ''),
+          bg: th.surface, border: b.solo ? '2px solid ' + th.needle : forming ? '1.5px dashed ' + accent : on ? '1px solid ' + accent : '1px solid ' + th.wellB,
+          sh: b.solo ? '0 0 16px ' + hexA(th.needle, 0.35) : on ? '0 0 14px ' + hexA(accent, 0.3) : 'none', op: dimSolo ? 0.35 : b.mute ? 0.55 : bi === mergeIdx ? 0.6 : 1, hatch: b.mute,
+          colW, hasHead: true, n: bi + 1, range: on ? fmtF(edges[bi]) + ' – ' + fmtF(edges[bi + 1]) : '', nb: on ? accent : hexA(accent, 0.25), nf: on ? th.nodeInk : th.accentText,
+          ring: b.solo ? '2px solid ' + th.needle : 'none', nsh: on ? '0 0 8px ' + accent : 'none', btns,
+          sw, sh2, vb: '0 0 ' + sw + ' ' + sh2, gw: on ? 2.2 : 1.6, sc: scopeOf(b, sw, sh2, false, on), isSmall: !on, mini: on ? [] : miniKnobs(b), isBig: on, knobs: on ? bandKnobs(b) : [],
+          scopeAria: 'Band ' + (bi + 1) + ' transient scope: attack ' + dbN(b.a) + ' dB, sustain ' + dbN(b.s) + ' dB, time ' + Math.round(b.T) + ' ms' };
+      });
+    }
+    th.surface = NT.surface1;
+    cards.forEach((c) => { c.bg = th.surface; });
+    const funnels = multi ? bands.map((b, bi) => {
+      const rx0 = (bi === 0 ? 0 : fx(edges[bi])) + 2, rx1 = (bi === bands.length - 1 ? 1180 : fx(edges[bi + 1])) - 2, c = cards[bi], cx0 = c.x + 2, cx1 = c.x + c.w - 2, y0 = Lt.fy, y1 = Lt.cy, ym = (y0 + y1) / 2;
+      return { d: 'M' + r1(rx0) + ' ' + y0 + ' C' + r1(rx0) + ' ' + ym + ' ' + r1(cx0) + ' ' + ym + ' ' + r1(cx0) + ' ' + y1 + ' L' + r1(cx1) + ' ' + y1 + ' C' + r1(cx1) + ' ' + ym + ' ' + r1(rx1) + ' ' + ym + ' ' + r1(rx1) + ' ' + y0 + ' Z',
+        op: bi === sel ? 0.16 : 0.05, stroke: accent, sop: bi === sel ? 0.5 : 0 };
+    }) : [];
+
+    // ---------------- meters
+    const my = (d) => { const y = 24 + (-Math.max(-60, d) / 60) * 564; return 588 - Math.round((588 - y) / 4) * 4; };
+    const pk = (arr) => Math.max(...arr.slice(-5));
+    const iNow = pk(inDb), oNow = pk(outDb);
+    const mIn = 'M1203 588 V' + my(iNow) + ' M1213 588 V' + my(iNow - (CH2 ? 3 : 0.8));
+    const mOut = 'M1245 588 V' + my(oNow) + ' M1255 588 V' + my(oNow - (CH2 ? 2.6 : 0.9));
+    const meterWells = 'M1196 20 h26 v572 h-26 Z M1238 20 h26 v572 h-26 Z';
+
+    // ---------------- detector sheet
+    let sheet = { listenOn: 'false', lb: tbtn(false, th.sem.sc), grid: '', specFill: '', heard: '', heardC: th.sem.sc, curve: '', nodes: [], labels: [], knobs: [] };
+    if (V('detector')) {
+      const W2 = 380, H2 = 188, fx2 = (f) => 8 + (W2 - 16) * Math.log(f / 20) / Math.log(1000), gy2 = (g) => 70 - g * 3.2;
+      const hpF = 90, lpF = 6000;
+      const resp = (f) => { const h = Math.pow(f / hpF, 4), l = Math.pow(lpF / f, 4); return 10 * Math.log10(h / (1 + h)) + 10 * Math.log10(l / (1 + l)); };
+      let cur = '', sp2 = '', heardTop = '';
+      for (let i = 0; i <= 160; i++) {
+        const f = 20 * Math.pow(1000, i / 160), x = r1(fx2(f)), lv = specLv(f, i);
+        cur += (i ? 'L' : 'M') + x + ' ' + r1(gy2(Math.max(-24, resp(f))));
+        sp2 += (i ? 'L' : 'M') + x + ' ' + r1(80 + (-lv - 12) / 60 * 96);
+        heardTop += (i ? 'L' : 'M') + x + ' ' + r1(80 + (-(lv + Math.max(-40, resp(f))) - 12) / 60 * 96);
+      }
+      sheet = { listenOn: 'true', lb: tbtn(true, th.sem.sc), heardC: th.sem.sc,
+        grid: [100, 1000, 10000].map((f) => 'M' + r1(fx2(f)) + ' 0 V' + H2).join(' ') + ' M0 ' + gy2(0) + ' H' + W2,
+        specFill: sp2 + ' L' + r1(fx2(20000)) + ' 176 L8 176 Z', heard: heardTop + ' L' + r1(fx2(20000)) + ' 176 L8 176 Z', curve: cur,
+        nodes: [{ x: r1(fx2(hpF) - 14), y: r1(gy2(-3) - 14), aria: 'Detector high-pass 90 Hz, drag sideways' }, { x: r1(fx2(lpF) - 14), y: r1(gy2(-3) - 14), aria: 'Detector low-pass 6.0 kHz, drag sideways' }],
+        labels: [[100, '100'], [1000, '1k'], [10000, '10k']].map(([f, s]) => ({ x: r1(fx2(f) + 3), t: s })),
+        knobs: [knob('FLOOR', '−60', 'dBFS', (-60 + 80) / 60, false), knob('LOOKAHEAD', '0.0', 'ms', 0, false)] };
+    }
+    const pop = { k: geo(0.5, false), opts: [['lr', G.lr, 'Left / Right'], ['ms', G.ms, 'Mid / Side']].map(([k2, d, aria]) => { const b = tbtn(k2 === 'ms', accent); return { on: k2 === 'ms' ? 'true' : 'false', aria, d, bg: b.bg, b: b.b, sh: b.sh, fg: b.fg, glow: b.glow }; }) };
+
+    // ---------------- menus
+    const mItem = (t2, d, on, keyHint, role, danger) => ({ head: false, sep: false, item: true, hasIcon: !!d, t: t2, d: d || '', key: keyHint || '', role: role || 'menuitemradio', on: on ? 'true' : 'false', ti: on ? '0' : '-1', bg: on ? hexA(accent, 0.18) : 'transparent', b: on ? accent : 'transparent', fg: danger ? th.sem.danger : th.hi, ic: danger ? th.sem.danger : on ? accent : th.mid });
+    const SEP = { head: false, sep: true, item: false, t: '' };
+    let menu = null;
+    if (V('menu')) {
+      menu = { aria: 'Band 2', x: r1(fx(700) - 20), y: ry - 150, w: 236, items: [
+        mItem('Solo', G.solo, false, 'S', 'menuitem'), mItem('Mute', G.mute, false, 'M', 'menuitem'), SEP,
+        mItem('Copy settings', G.copy, false, '⌘C', 'menuitem'), mItem('Paste settings', G.paste, false, '⌘V', 'menuitem'), mItem('Reset band', G.reset, false, '', 'menuitem'), SEP,
+        mItem('Merge into band 1', G.merge, false, '', 'menuitem'), mItem('Merge into band 3', G.merge, false, '', 'menuitem'), mItem('Remove band', G.bin, false, 'Del', 'menuitem', true)] };
+      menu.items.forEach((m) => { if (m.item) m.ti = '-1'; }); menu.items[0].ti = '0';
+    }
+    if (V('presets')) {
+      const fac = ['Drum Punch', 'Kick Click', 'Snare Tighten', 'Room Killer', 'Pluck Soften', 'Bus Snap', 'Ambience Lift'];
+      menu = { aria: 'Presets', x: 196, y: 6, w: 300, items: [mItem('Save as…', G.save, false), { head: true, sep: false, item: false, t: 'FACTORY' }].concat(fac.map((n) => mItem(n, '', n === 'Drum Punch')), [{ head: true, sep: false, item: false, t: 'YOURS' }, mItem('Live Toms', '', false), mItem('Acoustic Guitar Pick', '', false)]) };
+    }
+
+    // ---------------- header + footer
+    const snaps = ['A', 'B', 'C', 'D'].map((k, i) => {
+      const cur = (st.snap || 0) === i, empty = i > 1;
+      return { k, on: cur ? 'true' : 'false', bg: cur ? hexA(accent, 0.16) : th.ctl, b: cur ? accent : th.ctlB, fg: cur ? th.accentText : empty ? th.dis : th.mid, sh: cur ? '0 0 12px ' + hexA(accent, 0.3) : th.raised, pick: () => this.setState({ snap: i }) };
+    });
+    const hb = (aria, d, on) => { const b = tbtn(on, accent); return { aria, d, on: on ? 'true' : 'false', bg: on ? b.bg : th.ctl, b: on ? b.b : th.ctlB, sh: on ? b.sh : th.raised, fg: on ? b.fg : th.mid, glow: b.glow }; };
+    const headBtns = [hb(V('stereo') ? 'Stereo: Mid/Side, link 50 %' : 'Stereo: Left/Right, linked', V('stereo') ? G.ms : G.link, V('stereo')), hb('Detector', G.sliders, V('detector'))];
+    const presetBtn = V('presets') ? { bg: th.ctl, b: accent, sh: '0 0 12px ' + hexA(accent, 0.3) } : { bg: th.ctl, b: th.ctlB, sh: th.raised };
+    const footDrops = multi ? [{ aria: 'Crossover type: LR4 minimum phase', d: G.lr4, t: 'LR4', w: 110 }] : [];
+    const tg = (aria, d, on) => { const b = tbtn(on, accent); return { aria, d, on: on ? 'true' : 'false', bg: on ? b.bg : th.ctl, b: on ? b.b : th.ctlB, sh: on ? b.sh : th.raised, fg: on ? b.fg : th.mid, glow: b.glow }; };
+    const toggles = [tg('Auto gain', G.auto, false), tg('Clip after shaping', G.clip, V('clip')), tg('Delta: hear only what Shape adds or removes', G.delta, V('delta')), tg('Bypass', G.power, false)];
+    const footDials = [
+      Object.assign({ label: 'MIX', v: '100 %', aria: 'Mix 100 percent' }, geo(1, false, 15)),
+      Object.assign({ label: 'PAN', v: '0 %', aria: 'Pan centre' }, geo(0.5, true, 15)),
+      Object.assign({ label: 'OUTPUT', v: '0.0 dB', aria: 'Output 0.0 dB' }, geo(0.5, true, 15))
+    ];
+
+    // ---------------- status icon (no words in the display)
+    let status = null;
+    if (V('delta')) status = { c: accent, d: G.delta, bg: th.accentSoft, aria: 'Delta on: you hear only what Shape adds or removes' };
+    if (V('detector')) status = { c: th.sem.sc, d: G.listen, bg: hexA(th.sem.sc, 0.18), aria: 'Listening to the detector' };
+    if (V('help')) status = { c: accent, d: G.help, bg: th.accentSoft, aria: 'Help mode: hover anything; ? or Esc exits' };
+
+    // ---------------- help strip
+    const slot = (t2, w, c) => ({ t: t2, w, c: c || th.hi });
+    const bs = bands[show];
+    const lastP = gArr[gArr.length - 1];
+    let helpSlots = [slot('IN ' + dbN(iNow), 70), slot('OUT ' + dbN(oNow), 78), slot('gain ' + dbN(lastP.g), 82, lastP.g >= 0 ? th.sem.up : th.sem.gr)], helpText = '— drag the scope’s first part for attack and its tail for sustain; pull a crossover in from either edge of the strip to split the sound into bands';
+    if (multi) { helpSlots = [slot('Band ' + (show + 1), 60), slot(fmtF(edges[show]) + ' – ' + fmtF(edges[show + 1]), 150, th.mid), slot('attack ' + dbN(bs.a), 92, bs.a >= 0 ? th.sem.up : th.sem.gr), slot('sustain ' + dbN(bs.s), 98, bs.s >= 0 ? th.sem.up : th.sem.gr)]; helpText = '— drag a crossover sideways; double-click the strip to split; click a band to edit it'; }
+    if (V('band-selected')) helpText = '— scope: drag the first part for attack, the tail for sustain, the dashed line for time; Alt-drag the shaded band for transition';
+    if (V('split')) { helpSlots = [slot('New crossover', 104), slot('2.0 kHz', 66)]; helpText = '— release to make band 2; both sides keep band 1’s settings. Esc cancels.'; }
+    if (V('merge')) { helpSlots = [slot('Merging', 64), slot('290 Hz', 60), slot('band 2 → band 3', 120, th.mid)]; helpText = '— release on the neighbour to remove band 2; band 3 grows and keeps its settings'; }
+    if (V('solo')) { helpSlots = [slot('Band 2 solo', 92, th.hi), slot('150 Hz – 3.5 kHz', 130, th.mid)]; helpText = '— you hear only band 2; S again or Esc to stop'; }
+    if (V('mute')) { helpSlots = [slot('Band 3 muted', 100), slot('3.5 – 20 kHz', 110, th.mid)]; helpText = '— band 3 is silent; M again to bring it back'; }
+    if (V('stereo')) { helpSlots = [slot('Mid/Side', 76), slot('link 50 %', 76, th.mid), slot('M ' + dbN(lastP.g), 66, lastP.g >= 0 ? th.sem.up : th.sem.gr), slot('S ' + dbN(CH2.pts[NPT - 1][0].g), 66)]; helpText = '— solid trace is mid, dashed is side; raise link to make them move together'; }
+    if (V('detector')) { helpSlots = [slot('Listening', 80, th.sem.sc), slot('90 Hz – 6.0 kHz', 130, th.mid)]; helpText = '— you hear what the detector hears; the hi-hats no longer trigger it. Click the headphones again to stop.'; }
+    if (V('lookahead')) { helpSlots = [slot('Lookahead', 84), slot('2.0 ms', 60)]; helpText = '— the gain starts 2 ms before each hit so a boosted attack keeps its leading edge; the host is told 2.0 ms latency'; }
+    if (V('delta')) { helpSlots = [slot('Delta', 50, th.accentText)]; helpText = '— you hear only what Shape adds or removes: with attack up and sustain down, the clicks and the missing tails'; }
+    if (V('clip')) { helpSlots = [slot('Clip', 40), slot('ceiling −6.0 dB', 120), slot('soft 40 %', 80, th.mid)]; helpText = '— the amber caps are what the clipper takes off the boosted attacks; drag the line, Alt-drag for softness'; }
+    if (V('empty')) { helpSlots = [slot('Init', 40)]; helpText = '— attack and sustain are 0 dB, so Shape passes audio unchanged and nulls. Ticks mark the hits it detects; drag the scope up to sharpen them.'; }
+    if (V('presets')) { helpSlots = [slot('Drum Punch', 96), slot('Factory', 70, th.mid)]; helpText = '— hover a preset to hear it; the dot after a name means the sound has moved on'; }
+    if (V('menu')) { helpSlots = [slot('Band 2', 60), slot('150 Hz – 3.5 kHz', 130, th.mid)]; helpText = '— right-click a band in the strip or its card'; }
+    if (V('help')) { helpSlots = [slot('Help mode', 86)]; helpText = '— hover any control for its explanation'; }
+
+    const helpSpots = [
+      { n: 1, t: 'History', d: 'Input dim, output lit. Below, the gain: boosts rise, cuts hang. Solid is the attack, light is the sustain.', x: 6, y: 6, w: 1170, h: Lt.h1 - 10, lx: 360, ly: 40 },
+      { n: 2, t: 'Hits', d: 'A tick for every hit the detector finds; its height is how sharp the hit is.', x: 6, y: Lt.sep - 8, w: 1170, h: 24, lx: 700, ly: Lt.sep + 26 },
+      { n: 3, t: 'Bands', d: 'Drag a crossover sideways. Pull one in from an edge, or double-click, to split.', x: 4, y: ry - 4, w: 1172, h: rh + 8, lx: 60, ly: ry - 74 },
+      { n: 4, t: 'Scope', d: 'A test hit through this band. Drag the attack, the tail, or the dashed line.', x: cards[sel].x, y: Lt.cy, w: 304, h: Lt.ch, lx: cards[sel].x + 320, ly: Lt.cy + 12 },
+      { n: 5, t: 'Meters', d: 'In and out. Values in the help strip.', x: 1190, y: 14, w: 82, h: 590, lx: 1000, ly: 120 },
+      { n: 6, t: 'Stereo · detector', d: 'Shape’s own header buttons.', x: 936, y: -50, w: 104, h: 44, lx: 700, ly: 10 }
+    ].map((h) => Object.assign(h, { y: h.y + 56, ly: h.ly + 56 }));
+
+    function slots(list, empty, pfx) { const o = {}; for (let i = 0; i < 5; i++) o[pfx + i] = list[i] || empty; return o; }
+    return {
+      th, G, presetName: V('empty') ? 'Init' : 'Drum Punch', presetDirty: V('split') || V('merge') || multi && !V('help') ? ' •' : '', isPresets: V('presets') ? 'true' : 'false', presetBtn,
+      snaps, headBtns,
+      listenFrame: V('detector') ? 'inset 0 0 0 2px ' + th.sem.sc + ', inset 0 0 36px ' + hexA(th.sem.sc, 0.35) : 'none',
+      displayAria: 'Shape display: 6 second history with signed shaping gain and hit marks, ' + (multi ? bands.length + ' bands split at ' + xovers.map(fmtF).join(', ') : 'one band') + ', transient scope' + (multi ? 's' : '') + ' and meters',
+      outColor: V('detector') ? th.sem.sc : th.curve, outFillA: V('delta') ? 0.3 : 0.12,
+      hGrid, laneSep: 'M0 ' + Lt.sep + '.5 H1180', zeroLine: 'M0 ' + Lt.gz + ' H1180',
+      inFill: inLine + ' L1180 ' + Lt.lv1 + ' L0 ' + Lt.lv1 + ' Z', inLine, outLine, outFillP: outLine + ' L1180 ' + Lt.lv1 + ' L0 ' + Lt.lv1 + ' Z', clipFill, ceilLine, ceilBand, hasCeil: V('clip'), ceil,
+      upLight, upSolid, dnLight, dnSolid, upEdge, dnEdge, gainEdge2, otherGain, hitTicks, upPattern: key === 'cb' ? 'url(#upDots)' : 'transparent',
+      dbLabels, fLabels, rail, rg: slots(regions, { x: 0, w: 0, fill: 'transparent', op: 0, stroke: 'none', hatch: 'transparent' }, 'r'), fn: slots(funnels, { d: '', op: 0, sop: 0 }, 'f'), xGrips, xLabels, badges, funnels, card: { y: Lt.cy, h: Lt.ch }, cards,
+      meterWells, mIn, mOut,
+      hasStatus: !!status, status: status || { c: accent, d: '', bg: 'transparent', aria: '' },
+      hasSheet: V('detector'), sheet, hasPop: V('stereo'), pop, hasMenu: !!menu, menu: menu || { aria: '', x: 0, y: 0, w: 0, items: [] },
+      isHelp: V('help'), helpSpots, helpSlots, helpText,
+      footDrops, latency: la ? '2.0 ms' : '0 ms', latC: la ? th.accentText : th.hi, toggles, footDials
+    };
+  }
+}
+</script>
+</body>
+</html>

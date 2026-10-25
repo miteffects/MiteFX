@@ -1,0 +1,22 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Kit Split",
+  "params": {
+    "x1_on": 1.0,
+    "x1_freq": 150.0,
+    "x2_on": 1.0,
+    "x2_freq": 3500.0,
+    "b1_attack": 5.0,
+    "b1_sustain": -3.0,
+    "b1_time": 30.0,
+    "b2_attack": 3.0,
+    "b2_sustain": -6.0,
+    "b2_time": 40.0,
+    "b2_trans": 80.0,
+    "b3_attack": -3.0,
+    "b3_sustain": -2.0,
+    "b3_time": 15.0,
+    "b3_trans": 120.0
+  }
+}

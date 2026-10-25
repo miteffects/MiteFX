@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Bus Snap",
+  "params": {
+    "b1_attack": 3.0,
+    "b1_sustain": -1.5,
+    "b1_time": 20.0,
+    "mix": 70.0
+  }
+}

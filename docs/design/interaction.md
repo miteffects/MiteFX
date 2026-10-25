@@ -1,6 +1,6 @@
 # MiteFX interaction spec
 
-Source: the "Interaction spec" board on the design canvas (third pass, 2026-10-14). Comp sections added in pass 4 (2026-10-22); they are drawn on the `CompMain` boards. Timings refer to `tokens.json` → `motion` (micro 80 ms, fast 140 ms, base 220 ms, slow 360 ms).
+Source: the "Interaction spec" board on the design canvas (third pass, 2026-10-14). Comp sections added in pass 4 (2026-10-22); they are drawn on the `CompMain` boards. Shape sections added in pass 5 (2026-10-25), as built; they are drawn on the `ShapeMain` boards. Timings refer to `tokens.json` → `motion` (micro 80 ms, fast 140 ms, base 220 ms, slow 360 ms).
 
 ## Main display gestures (EQ, Multiband crossovers)
 
@@ -338,3 +338,47 @@ Under 720 px wide (and in the 640 × 400 compact layout):
 - **Smart:** the threshold slide jumps to the current value at the UI frame rate, with no easing. The dashed set-point lines stay.
 - **Create/delete:** the springs become `ease.standard` at fast.
 - **Listen frame glow:** static, with no pulse.
+
+# Mite Shape
+
+As built (2026-10-25) from the `ShapeMain` boards and the canvas note `shapeAnswers`. One band is the same screen as several: a 36 px crossover rail with ghost grips at both ends, which grows to 80 px (base, 220 ms) once a crossover is made.
+
+## Crossover rail
+
+| Gesture | Empty rail (in a band) | Crossover grip | Ghost grip (an end) |
+|---|---|---|---|
+| Hover | Band highlighted; help strip names it, its range, attack and sustain | Grip lit; help strip shows its frequency | Ghost at full opacity; help strip says pull to split |
+| Click | Selects the band (its card goes wide) | — | — |
+| Double-click | Splits there (a sixth band is refused); both sides keep the band's settings | Merges: the selected band survives, otherwise the lower | — |
+| Drag | — | Sideways; kept ⅓ octave clear of its neighbours. Onto a neighbour (within 6 px) or 10 px off the end: release merges, the growing band survives | Pull in: a new crossover where it is released (past 6 px) |
+| Shift-drag | — | Fine ×0.1 | — |
+| Wheel | — | Frequency ×2^(1/6), Shift ×2^(1/48) | — |
+| Right-click | Band menu: solo, mute, copy, paste, reset, merge down or up, remove | — | — |
+
+## Band cards and scopes
+
+- One card per band, always visible, numbered by frequency; the selected one is 644 px wide with six dials (ATTACK, SUSTAIN, TIME, TRANSITION, MIX, OUTPUT) and the scope's handles; the others have the scope and two small dials (ATTACK, SUSTAIN). Curved funnels tie each rail region to its card.
+- Header buttons: S (solo: white ring, other bands at 35 %), mute (hatch, trace hidden), bin (wide card only: the band's region joins the one below; the lowest band's joins the one above, which takes its place).
+- Scope (a test hit through the band's real detector, square-root time 0–400 ms): drag before the handover line for attack, after it for sustain (vertical, Shift fine); drag the pill on the line sideways for transient time; Alt-drag sideways for transition; double-click a part resets it.
+- Attack and sustain dials: ±6 dB takes 60 % of the sweep. Time: 10–50 ms takes half.
+
+## Keys (Shape)
+
+| Key | Does |
+|---|---|
+| ← → | Previous / next band (by frequency) |
+| ↑ ↓ | Attack of the selected band ±0.5 dB (Shift ±0.1) |
+| S · M | Solo · mute the selected band |
+| Del | Remove the selected band (several bands) |
+| Esc | Closes, in order: menu, a crossover being pulled in, Listen, the open sheet, solo |
+
+## Header and footer
+
+- Header after the snapshots: stereo (L/R or M/S and link, lit when M/S or unlinked), detector (lit in the sidechain colour while Listening).
+- Detector sheet: Listen, the detector filter (one band only; drag its nodes, double-click opens a node again) over the input spectrum with what the detector hears in the sidechain colour, FLOOR and LOOKAHEAD dials.
+- Footer: LR4 (several bands), latency, auto gain, delta, bypass, MIX, PAN, OUTPUT. Clip comes later.
+
+## Shape reduce motion
+
+The history keeps scrolling and the meters and spectrum keep their ballistics (they are data). The rail's growth and the regions' breathing are motion: with reduce motion they should be instant and still (not yet wired: the setting is not read by any plugin yet).
+

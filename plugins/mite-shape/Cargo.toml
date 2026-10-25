@@ -1,0 +1,28 @@
+[package]
+name = "mite_shape"
+description = "Mite Shape: the transient designer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+mite-core.workspace = true
+mite-dsp.workspace = true
+mite-plugin.workspace = true
+mite-ui.workspace = true
+nih_plug.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# The allocation guard nih-plug wraps `process()` in (same source as nih-plug's, so it is the same
+# crate and the same global allocator): tests run engine blocks inside it.
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
+baseview.workspace = true
+png = "0.18"

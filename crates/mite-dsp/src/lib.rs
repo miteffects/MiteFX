@@ -16,6 +16,7 @@ pub mod oversample;
 pub mod output;
 pub mod meter;
 pub mod min_phase;
+pub mod shape;
 pub mod spectral;
 pub mod smooth;
 pub mod stft;

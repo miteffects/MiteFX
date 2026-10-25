@@ -2,9 +2,16 @@
 
 **Source canvas:** https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5 (Claude Design). The canvas is the living version. The files here are a snapshot and the implementation contract.
 
-**Next:** fifth pass (Mite Shape, single-band and multiband) briefed in `shape-brief.md` on 2026-10-25.
+**Status:** fifth pass (Mite Shape) received and built on 2026-10-25, answering `shape-brief.md`:
+- the Shape accent moved from blush to **leaf** (`#6BA208` dark, with its own text tint `accent.shape.text`), far from both `gainUp` and `gr`;
+- frequency bands (Shape, Multiband) are drawn in the plugin accent with their number, never in the ramp (`color.rules.frequencyBands`), and the attack/sustain rendering rule (`color.rules.shaping`);
+- layout numbers in `tokens.json` → `shape`; the boards `ShapeMain` (16 variants × 4 themes), `ShapeComponents`, `ShapeCompact`.
 
-**Status:** fourth pass (Mite Comp) received on 2026-10-22, answering `comp-brief.md`:
+**Design's answers (canvas note `shapeAnswers`):** the history is the hero; one scope per band, always visible, in cards under the crossover rail (the selected one wide); one band is the same screen with a 36 px rail and ghost grips at both ends; detector filter hidden in multiband; clip later, as a footer toggle and a ceiling on the level lane; merging by dragging keeps the growing band, by double-click the selected one, otherwise the lower.
+
+**Engineering deviations (Shape):** as Comp's stages, crossover and band slots never swap (crossover slot N owns band N + 1, bands numbered by frequency on screen). The clip stage, sustain length and the compact layout come later; the footer has no Clip toggle yet.
+
+Fourth pass (Mite Comp, 2026-10-22), still binding, answering `comp-brief.md`:
 - the Comp accent moved from azure to **ember** (`#E44A08` dark; your decision, ΔE 15.1 from `gr`, so OUT stays white and ember marks only what you touch);
 - a new semantic colour, **`gainUp`** (`#B5C0F8` dark), for upward gain, which rises from the bottom while `gr` hangs from the top;
 - the Comp boards (`CompMain` in 16 variants × 4 themes, components, compact) and the "Mite Comp" part of `interaction.md`.
@@ -33,7 +40,10 @@ The "Third pass" list below is kept as history; the design addressed all of it.
 | `mockups/comp-components.dc.html` | Comp component sheet: stage nodes and quadrant glyphs, Character and Smart glyphs, GR meter, envelope scope, threshold grip. |
 | `mockups/comp-compact.dc.html` | Comp compact layout, 640×400 (built later, with the EQ's). |
 | `comp-brief.md` | The brief this pass answers. |
-| `shape-brief.md` | The brief for pass 5 (Mite Shape), not yet answered. |
+| `shape-brief.md` | The brief pass 5 answers. |
+| `mockups/shape-main.dc.html` | **The Shape screen in every state.** Props: `theme` = `dark` · `light` · `cb` · `hc`, and `variant` = `default` · `multiband` · `band-selected` · `split` · `merge` · `solo` · `mute` · `stereo` · `detector` · `lookahead` · `delta` · `clip` · `empty` · `presets` · `help` · `menu`. Its script holds the scope and rail maths and the help-strip strings. |
+| `mockups/shape-components.dc.html` | Shape component sheet: crossover grips, band regions, the scope at its sizes, bipolar dials, the signed gain trace, hit markers. |
+| `mockups/shape-compact.dc.html` | Shape compact layout, 640×400 (built later, with the EQ's and Comp's). |
 | `mockups/shared.dc.html` | Shared components: modulation matrix, 4-node transfer curve, waveform/GR history, spectrogram, and their usage rules. |
 | `mockups/components.dc.html` | Component sheet. Still **first pass**: knobs, sliders, fields, meters, node states, buttons, crossover, piano strip. |
 | `mockups/tokens.dc.html` | Brand and token sheet. Still **first pass** and stale; `tokens.json` supersedes it. |

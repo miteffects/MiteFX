@@ -148,7 +148,8 @@ impl Theme {
             text_lo: neutral("textLo"),
             text_strong: neutral("textStrong"),
             accent,
-            accent_text: neutral("accentText"),
+            // A plugin's own text tint when its accent has one (Shape's leaf), else the shared one.
+            accent_text: colors["accent"][plugin]["text"].get(t).map_or_else(|| neutral("accentText"), |v| color(v, &format!("accent.{plugin}.text.{t}"))),
             meter_off: neutral("meterOff"),
             meter_well: neutral("meterWell"),
             warn: semantic("warn"),

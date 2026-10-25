@@ -306,6 +306,155 @@
       "w": 1280,
       "h": 760,
       "title": "Help mode"
+    },
+    "ShapeHighContrast.dc.html": {
+      "x": -4080,
+      "y": 12400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Shape — high-contrast theme · three bands"
+    },
+    "ShapeLight.dc.html": {
+      "x": -2720,
+      "y": 12400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Shape — light theme · three bands"
+    },
+    "ShapeColourBlind.dc.html": {
+      "x": -1360,
+      "y": 12400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Shape — colour-blind theme · three bands"
+    },
+    "ShapeMain.dc.html": {
+      "x": 0,
+      "y": 12400,
+      "w": 1280,
+      "h": 760,
+      "title": "Mite Shape — default · one band, attack +6, sustain −4",
+      "is_interactive": true
+    },
+    "ShapeComponents.dc.html": {
+      "x": 1360,
+      "y": 12400,
+      "w": 1440,
+      "h": 1620,
+      "title": "Shape component sheet (crossover bar shared with Multiband)"
+    },
+    "ShapeCompact.dc.html": {
+      "x": 2880,
+      "y": 12400,
+      "w": 640,
+      "h": 400,
+      "title": "Shape compact 640 × 400",
+      "is_interactive": true
+    },
+    "ShapeMultiband.dc.html": {
+      "x": 0,
+      "y": 14400,
+      "w": 1280,
+      "h": 760,
+      "title": "Three bands · kick, snare body, cymbals"
+    },
+    "ShapeBandSelected.dc.html": {
+      "x": 1360,
+      "y": 14400,
+      "w": 1280,
+      "h": 760,
+      "title": "Band 2 selected · scope gestures"
+    },
+    "ShapeSplit.dc.html": {
+      "x": 2720,
+      "y": 14400,
+      "w": 1280,
+      "h": 760,
+      "title": "Pulling in the first crossover"
+    },
+    "ShapeMerge.dc.html": {
+      "x": 4080,
+      "y": 14400,
+      "w": 1280,
+      "h": 760,
+      "title": "Crossover dragged onto its neighbour"
+    },
+    "ShapeSolo.dc.html": {
+      "x": 0,
+      "y": 15280,
+      "w": 1280,
+      "h": 760,
+      "title": "Band 2 soloed"
+    },
+    "ShapeMute.dc.html": {
+      "x": 1360,
+      "y": 15280,
+      "w": 1280,
+      "h": 760,
+      "title": "Band 3 muted"
+    },
+    "ShapeStereo.dc.html": {
+      "x": 2720,
+      "y": 15280,
+      "w": 1280,
+      "h": 760,
+      "title": "Mid/Side, link 50 % · two gain traces"
+    },
+    "ShapeDetector.dc.html": {
+      "x": 4080,
+      "y": 15280,
+      "w": 1280,
+      "h": 760,
+      "title": "Detector sheet · Listen on"
+    },
+    "ShapeLookahead.dc.html": {
+      "x": 0,
+      "y": 16160,
+      "w": 1280,
+      "h": 760,
+      "title": "Lookahead · 2 ms latency"
+    },
+    "ShapeDelta.dc.html": {
+      "x": 1360,
+      "y": 16160,
+      "w": 1280,
+      "h": 760,
+      "title": "Delta · what Shape adds or removes"
+    },
+    "ShapeClip.dc.html": {
+      "x": 2720,
+      "y": 16160,
+      "w": 1280,
+      "h": 760,
+      "title": "Clip stage (later) · ceiling on the history"
+    },
+    "ShapeEmpty.dc.html": {
+      "x": 4080,
+      "y": 16160,
+      "w": 1280,
+      "h": 760,
+      "title": "Init · nulls, hits still marked"
+    },
+    "ShapePresets.dc.html": {
+      "x": 0,
+      "y": 17040,
+      "w": 1280,
+      "h": 760,
+      "title": "Preset list"
+    },
+    "ShapeHelp.dc.html": {
+      "x": 1360,
+      "y": 17040,
+      "w": 1280,
+      "h": 760,
+      "title": "Help mode"
+    },
+    "ShapeMenu.dc.html": {
+      "x": 2720,
+      "y": 17040,
+      "w": 1280,
+      "h": 760,
+      "title": "Band menu"
     }
   },
   "order": [
@@ -349,7 +498,28 @@
     "CompLookahead.dc.html",
     "CompDelta.dc.html",
     "CompPresets.dc.html",
-    "CompHelp.dc.html"
+    "CompHelp.dc.html",
+    "ShapeHighContrast.dc.html",
+    "ShapeLight.dc.html",
+    "ShapeColourBlind.dc.html",
+    "ShapeMain.dc.html",
+    "ShapeComponents.dc.html",
+    "ShapeCompact.dc.html",
+    "ShapeMultiband.dc.html",
+    "ShapeBandSelected.dc.html",
+    "ShapeSplit.dc.html",
+    "ShapeMerge.dc.html",
+    "ShapeSolo.dc.html",
+    "ShapeMute.dc.html",
+    "ShapeStereo.dc.html",
+    "ShapeDetector.dc.html",
+    "ShapeLookahead.dc.html",
+    "ShapeDelta.dc.html",
+    "ShapeClip.dc.html",
+    "ShapeEmpty.dc.html",
+    "ShapePresets.dc.html",
+    "ShapeHelp.dc.html",
+    "ShapeMenu.dc.html"
   ],
   "notes": {
     "suiteTitle": {
@@ -406,6 +576,29 @@
       "fill": "yellow",
       "size": "m",
       "text": "COMP BRIEF §7 — DESIGN ANSWERS (pass 4, 2026-10-22)\n\n1 LAYOUT / HERO\nThe GR history is the hero: 6 s across the left 776 px. Input is grey, output white, GR hangs amber from the top (10 px/dB), and upward gain rises from the bottom. The transfer square (384 px) sits to the right with the stage strip under it, then the IN/GR/OUT meters. At 640×400 the history stays full width and the curve becomes a 132 px glass inset. The stage panel becomes a strip of THR · RATIO · ATK · REL plus More.\n\n2 CHARACTER AND SMART\nBoth are footer dropdowns with glyphs, next to the mode controls, because they change how the stages move, not the curve. Custom opens a docked six-dial panel. The header holds only Comp's own 32 px buttons: sidechain, stereo/link, detector & output.\n\n3 QUADRANTS\nPull below the line to compress or expand; pull above it to lift. You can tell them apart four ways: the side of the diagonal, the shading (amber GR vs ice-violet gainUp), the quadrant glyph on the node and its strip card, and the position of the threshold diamond.\n\n4 RANGE\nThe curve bends back parallel to the diagonal once the range is used. There is no extra mark.\n\n5 TWO-CHANNEL GR\nWhen unlinked: a solid trace for L/M and a dashed trace for R/S on the history. The GR meter splits in two, with L·R or M·S icons under it. The stereo popover holds the L/R vs M/S choice and a LINK dial.\n\nCOLOUR\nEmber accent #E44A08 is ΔE 15.1 from GR #F88A3D. Output therefore stays white, and ember is used only for what you touch. sem.gainUp #B5C0F8 is ΔE ≥ 15 from the ramp, the semantics and the curve in dark, light and hc. Colour-blind: rust #944B40 with a dotted edge."
+    },
+    "shapeTitle": {
+      "x": -4080,
+      "y": 12100,
+      "text": "Mite Shape — fifth pass · leaf accent",
+      "kind": "title1",
+      "maxW": 11440
+    },
+    "shapeScreensTitle": {
+      "x": 0,
+      "y": 14160,
+      "text": "Mite Shape — every state from the brief",
+      "kind": "title1",
+      "maxW": 5360
+    },
+    "shapeAnswers": {
+      "x": 2880,
+      "y": 12900,
+      "w": 1280,
+      "maxH": 1200,
+      "fill": "yellow",
+      "size": "m",
+      "text": "SHAPE BRIEF §7 — DESIGN ANSWERS (pass 5, 2026-10-25)\n\n1 HERO\nThe history is the hero: it is the only view that shows what happened to the real hits. It has two lanes: levels on top (IN dim, OUT lit), and the signed gain under its own 0 dB line (boost up in gainUp, cut down in gr, 5 px/dB). The scope is the editing surface; the strip shows where. At 640×400 the history is still the hero, with a 40 px crossover strip and a glass band strip (mini scope, ATTACK, SUSTAIN, TIME, More).\n\n2 SCOPES\nOne per band, always visible, in band cards under the strip. The selected band's card is wide (644 px) and carries the six dials. The others are compact: a scope plus ATTACK and SUSTAIN. Curved funnels tie each region of the strip to its card. With one band, the single card spans the width with a 788 px scope.\n\n3 BAND COLOUR\nEvery band uses the leaf accent and carries its number. The ramp is not used here, because in the EQ it means stereo placement. Lightness steps were rejected because they crowd ok and lime. The selected band is lit (22 % tint, wide card); the others get a 10 % tint that breathes with their gain. Soloed: white ring + S. Muted: hatch + M, trace removed.\n\n4 ATTACK VS SUSTAIN, HITS\nSame sign colours, different weight. The attack part (gain × w, the detector's own weight) is a 70 % fill with glow; the sustain part is a 28 % fill with an edge. Every detected hit gets a leaf tick on the lane divider, as tall as the hit is sharp. Ticks show even at Init.\n\n5 NO MODE SWITCH\nOne band = no crossovers: a 36 px rail with ghost grips at both ends. Pull one in, or double-click, and the rail grows to 80 px, the card splits, and the funnels appear. Remove the last crossover and it folds back.\n\nALSO\n• Detector filter: hidden in multiband (the crossovers do its job). Listen, floor and lookahead stay.\n• Clip (later): a footer toggle plus a draggable ceiling on the level lane; what it removes is filled in gr above the line.\n• Merge: dragging, the growing band survives; double-click, the selected band, otherwise the lower one.\n\nCOLOUR\nLeaf #6BA208 (light #495E21, hc #5DFF2B) is ΔE ≥ 16 from the ramp and semantics, and 53.6 / 45.7 from gainUp / gr. Blush sat between those two in hue. Light leaf is 9.1 from Gate's light accent; Gate moves when it is designed."
     }
   },
   "designSystems": []

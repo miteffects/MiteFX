@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Snare Tighten",
+  "params": {
+    "b1_attack": 3.0,
+    "b1_sustain": -8.0,
+    "b1_time": 30.0
+  }
+}

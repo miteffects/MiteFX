@@ -1,0 +1,61 @@
+stereo | choice | L/R, M/S | 0
+link | % | 0 | 100 | 100 | Linear
+lookahead | ms | 0 | 5 | 0 | Linear
+floor | dBFS | -80 | -20 | -60 | Linear
+det_hp | Hz | 20 | 2000 | 20 | Log
+det_lp | Hz | 200 | 20000 | 20000 | Log
+listen | bool | false
+auto_gain | bool | false
+mix | % | 0 | 100 | 100 | Linear
+out_pan | % | -100 | 100 | 0 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+delta | bool | false
+bypass | bool | false
+x1_on | bool | false
+x1_freq | Hz | 20 | 20000 | 120 | Log
+x2_on | bool | false
+x2_freq | Hz | 20 | 20000 | 500 | Log
+x3_on | bool | false
+x3_freq | Hz | 20 | 20000 | 2000 | Log
+x4_on | bool | false
+x4_freq | Hz | 20 | 20000 | 8000 | Log
+b1_attack | dB | -18 | 18 | 0 | Linear
+b1_sustain | dB | -18 | 18 | 0 | Linear
+b1_time | ms | 5 | 200 | 25 | Log
+b1_trans | % | 0 | 200 | 100 | Linear
+b1_mix | % | 0 | 100 | 100 | Linear
+b1_out | dB | -24 | 24 | 0 | Linear
+b1_mute | bool | false
+b1_solo | bool | false
+b2_attack | dB | -18 | 18 | 0 | Linear
+b2_sustain | dB | -18 | 18 | 0 | Linear
+b2_time | ms | 5 | 200 | 25 | Log
+b2_trans | % | 0 | 200 | 100 | Linear
+b2_mix | % | 0 | 100 | 100 | Linear
+b2_out | dB | -24 | 24 | 0 | Linear
+b2_mute | bool | false
+b2_solo | bool | false
+b3_attack | dB | -18 | 18 | 0 | Linear
+b3_sustain | dB | -18 | 18 | 0 | Linear
+b3_time | ms | 5 | 200 | 25 | Log
+b3_trans | % | 0 | 200 | 100 | Linear
+b3_mix | % | 0 | 100 | 100 | Linear
+b3_out | dB | -24 | 24 | 0 | Linear
+b3_mute | bool | false
+b3_solo | bool | false
+b4_attack | dB | -18 | 18 | 0 | Linear
+b4_sustain | dB | -18 | 18 | 0 | Linear
+b4_time | ms | 5 | 200 | 25 | Log
+b4_trans | % | 0 | 200 | 100 | Linear
+b4_mix | % | 0 | 100 | 100 | Linear
+b4_out | dB | -24 | 24 | 0 | Linear
+b4_mute | bool | false
+b4_solo | bool | false
+b5_attack | dB | -18 | 18 | 0 | Linear
+b5_sustain | dB | -18 | 18 | 0 | Linear
+b5_time | ms | 5 | 200 | 25 | Log
+b5_trans | % | 0 | 200 | 100 | Linear
+b5_mix | % | 0 | 100 | 100 | Linear
+b5_out | dB | -24 | 24 | 0 | Linear
+b5_mute | bool | false
+b5_solo | bool | false

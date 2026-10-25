@@ -171,8 +171,9 @@ impl ParamSpec {
 }
 
 /// How a dial feels, separate from the host's normalisation: breakpoints of (dial position
-/// 0…1, plain value), interpolated logarithmically between them. It gives common values more
-/// travel (release 100–300 ms) and rare ones less. Plain values must be > 0 and increasing.
+/// 0…1, plain value), interpolated logarithmically between them where both ends are positive
+/// (times) and linearly otherwise (signed amounts). It gives common values more travel (release
+/// 100–300 ms, shaping ±6 dB) and rare ones less. Plain values must be increasing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DialCurve(pub &'static [(f32, f32)]);
 
@@ -184,7 +185,7 @@ impl DialCurve {
             let ((p0, v0), (p1, v1)) = (w[0], w[1]);
             if pos <= p1 {
                 let t = if p1 > p0 { (pos - p0) / (p1 - p0) } else { 1.0 };
-                return v0 * (v1 / v0).powf(t);
+                return if v0 > 0.0 && v1 > 0.0 { v0 * (v1 / v0).powf(t) } else { v0 + (v1 - v0) * t };
             }
         }
         self.0.last().map_or(0.0, |&(_, v)| v)
@@ -195,8 +196,8 @@ impl DialCurve {
         for w in self.0.windows(2) {
             let ((p0, v0), (p1, v1)) = (w[0], w[1]);
             if plain <= v1 {
-                let t = ((plain.max(v0) / v0).ln() / (v1 / v0).ln()).clamp(0.0, 1.0);
-                return p0 + t * (p1 - p0);
+                let t = if v0 > 0.0 && v1 > 0.0 { (plain.max(v0) / v0).ln() / (v1 / v0).ln() } else { (plain.max(v0) - v0) / (v1 - v0) };
+                return p0 + t.clamp(0.0, 1.0) * (p1 - p0);
             }
         }
         1.0

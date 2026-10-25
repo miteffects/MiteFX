@@ -215,7 +215,10 @@ pub const GAIN_LIMIT_DB: f64 = 30.0;
 
 /// Transient detector: envelope (attack, release) times in ms, for the default transient time.
 /// Attacks are where a fast-attack envelope leads a slow-attack one (the fast one also releases
-/// sooner, so a decaying hit ends the attack). The slow times scale with the transient time.
+/// sooner, so a decaying hit ends the attack). The slow one follows the fast one, not the raw
+/// level: the fast envelope is already free of the rectified waveform's ripple, so steady noise
+/// and held tones sit within about 0.5 dB of no lead at all, far from the onset mark, and only a
+/// real rise triggers. The slow times scale with the transient time.
 const TRANSIENT_FAST: (f64, f64) = (0.5, 20.0);
 const TRANSIENT_SLOW: (f64, f64) = (25.0, 60.0);
 /// Where attack hands over to sustain by default, ms.
@@ -225,6 +228,9 @@ pub const DEFAULT_TRANSIENT_MS: f64 = 25.0;
 const SHAPE_FULL_DB: f64 = 12.0;
 /// A hit starts when the fast envelope leads the slow one by this much (as a linear ratio, 3 dB).
 const ONSET_RATIO: f64 = 1.412_537_5;
+/// Once a hit has started, the fast envelope must fall back under this lead (1.5 dB) before
+/// another can: noise hovering around the onset mark would otherwise retrigger every few ms.
+const REARM_RATIO: f64 = 1.188_502_2;
 /// Into the attack phase at a hit: a 0.25 ms ramp, quick enough that no sustain leaks into the
 /// hit's start (the jump coincides with the hit itself, which masks it).
 const PHASE_RISE_MS: f64 = 0.25;
@@ -308,11 +314,14 @@ impl ShapeDetector {
     /// Feeds one level (linear peak).
     #[inline]
     pub fn process(&mut self, level: f64) {
+        let mut input = level;
         for (e, &(a, r)) in self.env.iter_mut().zip(&self.coeffs) {
-            let k = if level > *e { a } else { r };
-            *e += k * (level - *e);
+            let k = if input > *e { a } else { r };
+            *e += k * (input - *e);
+            input = *e;
         }
-        let onset = self.env[0] > self.env[1] * ONSET_RATIO && self.env[0] > 10f64.powf(SHAPE_GATE_DB / 20.0);
+        let ratio = if self.onset { REARM_RATIO } else { ONSET_RATIO };
+        let onset = self.env[0] > self.env[1] * ratio && self.env[0] > 10f64.powf(SHAPE_GATE_DB / 20.0);
         if onset && !self.onset {
             self.elapsed = Some(0);
             self.sharpness = 0.0;
@@ -344,6 +353,22 @@ impl ShapeDetector {
     /// The fast envelope: the level as the detector hears it now (linear).
     pub fn level(&self) -> f64 {
         self.env[0]
+    }
+
+    /// The attack weight w (0…1) the last [`Self::gain_db`] worked with: how much of the attack
+    /// amount applies now.
+    pub fn weight(&self) -> f64 {
+        self.phase * self.sharpness
+    }
+
+    /// Samples since the current hit started, while its attack phase runs.
+    pub fn hit_age(&self) -> Option<u32> {
+        self.elapsed
+    }
+
+    /// The sharpest the current hit has been (0…1, as of the last [`Self::gain_db`]).
+    pub fn sharpness(&self) -> f64 {
+        self.sharpness
     }
 
     /// The gain for these amounts right now, dB: `transient_db` through the attack phase (scaled

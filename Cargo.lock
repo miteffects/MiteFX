@@ -1584,6 +1584,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mite_shape"
+version = "0.1.0"
+dependencies = [
+ "assert_no_alloc",
+ "baseview",
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
+ "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "naga"
 version = "30.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

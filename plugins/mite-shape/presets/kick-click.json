@@ -1,0 +1,12 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Kick Click",
+  "params": {
+    "x1_on": 1.0,
+    "x1_freq": 150.0,
+    "b1_sustain": -2.0,
+    "b2_attack": 8.0,
+    "b2_time": 15.0
+  }
+}

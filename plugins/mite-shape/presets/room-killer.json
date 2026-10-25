@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Room Killer",
+  "params": {
+    "b1_sustain": -12.0,
+    "b1_time": 40.0,
+    "b1_trans": 120.0
+  }
+}

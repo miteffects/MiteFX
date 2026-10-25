@@ -1,0 +1,9 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Drum Punch",
+  "params": {
+    "b1_attack": 6.0,
+    "b1_sustain": -4.0
+  }
+}

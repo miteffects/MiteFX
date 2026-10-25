@@ -298,6 +298,12 @@ impl Tdf2 {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+
+    /// `ka`·self + `kb`·other: the state a section would hold had it run on that mix of the two
+    /// inputs (the sections are linear), e.g. to carry filters across an L/R ↔ M/S switch.
+    pub fn combine(&self, other: &Self, ka: f64, kb: f64) -> Self {
+        Self { s1: ka * self.s1 + kb * other.s1, s2: ka * self.s2 + kb * other.s2 }
+    }
 }
 
 #[cfg(test)]

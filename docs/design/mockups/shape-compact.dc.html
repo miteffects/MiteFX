@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mite Shape — compact 640 × 400</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 640px; height: 400px; display: flex; flex-direction: column; background: {{c.win}}; color: {{c.hi}}; font-family: Manrope, system-ui, sans-serif; font-size: 12px; overflow: hidden">
+<header style="height: 44px; flex: 0 0 44px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid {{c.line}}">
+<button aria-label="Mite Shape menu" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 6px; background: transparent; border: none; border-radius: 6px">
+<svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true" style="overflow: visible"><path d="M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z" stroke="{{c.hi}}" stroke-width="1.8"></path><circle cx="16" cy="7.4" r="2.6" stroke="{{c.hi}}" stroke-width="1.8"></circle><path d="M11.5 23 L13.2 23 C14 23 14.2 15.5 15.4 15.5 C16.6 15.5 16.6 20.5 17.8 20.5 L20.5 20.5" stroke="{{c.accent}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 3px {{c.accent}})"></path></svg>
+<span style="font-size: 13px; font-weight: 800">Shape</span>
+</button>
+<button aria-label="Preset Drum Punch, open the preset list" style="flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: {{c.ctl}}; border: 1px solid {{c.ctlB}}; border-radius: 6px; box-shadow: {{c.raised}}; text-align: left"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="4.2" stroke="{{c.mid}}" stroke-width="1.5"></circle><path d="M9.2 9.2 L12.5 12.5" stroke="{{c.mid}}" stroke-width="1.5" stroke-linecap="round"></path></svg><span style="flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Drum Punch</span></button>
+<button aria-label="Snapshot A" aria-pressed="true" style="width: 32px; height: 32px; border-radius: 6px; font-weight: 700; background: {{c.accentSoft}}; border: 1px solid {{c.accent}}; color: {{c.accentText}}">A</button>
+<button aria-label="Snapshot B" aria-pressed="false" style="width: 32px; height: 32px; border-radius: 6px; font-weight: 700; background: {{c.ctl}}; border: 1px solid {{c.ctlB}}; box-shadow: {{c.raised}}; color: {{c.mid}}">B</button>
+<button aria-label="More: undo, redo, snapshots C and D, stereo, detector, help" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: {{c.ctl}}; border: 1px solid {{c.ctlB}}; border-radius: 6px; box-shadow: {{c.raised}}"><svg width="14" height="14" viewBox="0 0 14 14" fill="{{c.mid}}" aria-hidden="true"><circle cx="3" cy="7" r="1.4"></circle><circle cx="7" cy="7" r="1.4"></circle><circle cx="11" cy="7" r="1.4"></circle></svg></button>
+</header>
+<main style="position: relative; height: 308px; flex: 0 0 308px; background: {{c.disp}}; overflow: hidden">
+<svg width="640" height="308" viewBox="0 0 640 308" style="position: absolute; left: 0; top: 0" role="img" aria-label="History with signed shaping gain for band 2, crossover strip with three bands, meters">
+<defs>
+<filter id="cg" filterUnits="userSpaceOnUse" x="-10" y="-10" width="660" height="330"><feGaussianBlur stdDeviation="2.2" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+</defs>
+<path d="{{grid}}" stroke="{{c.gridMinor}}" stroke-width="1" fill="none"></path>
+<path d="M0 112.5 H560" stroke="{{c.line}}" stroke-width="1"></path>
+<path d="M0 156 H560" stroke="{{c.zero}}" stroke-width="1.2"></path>
+<path d="{{inFill}}" fill="{{c.pre}}" fill-opacity="0.16"></path>
+<path d="{{outLine}}" stroke="{{c.curve}}" stroke-width="1.5" fill="none" filter="url(#cg)"></path>
+<path d="{{upL}}" fill="{{c.up}}" fill-opacity="0.28"></path>
+<path d="{{upS}}" fill="{{c.up}}" fill-opacity="0.7" filter="url(#cg)"></path>
+<path d="{{dnL}}" fill="{{c.gr}}" fill-opacity="0.28"></path>
+<path d="{{dnS}}" fill="{{c.gr}}" fill-opacity="0.7" filter="url(#cg)"></path>
+<path d="{{upE}}" stroke="{{c.up}}" stroke-width="1.3" fill="none"></path>
+<path d="{{dnE}}" stroke="{{c.gr}}" stroke-width="1.3" fill="none"></path>
+<path d="{{ticks}}" stroke="{{c.accent}}" stroke-width="2" stroke-linecap="round" filter="url(#cg)"></path>
+<rect x="0" y="200" width="560" height="40" fill="{{c.well}}"></rect>
+<path d="M0 200.5 H560 M0 239.5 H560" stroke="{{c.wellB}}"></path>
+<rect x="{{rg.r0.x}}" y="200" width="{{rg.r0.w}}" height="40" fill="{{c.accent}}" fill-opacity="{{rg.r0.op}}"></rect>
+<rect x="{{rg.r1.x}}" y="200" width="{{rg.r1.w}}" height="40" fill="{{c.accent}}" fill-opacity="{{rg.r1.op}}"></rect>
+<rect x="{{rg.r2.x}}" y="200" width="{{rg.r2.w}}" height="40" fill="{{c.accent}}" fill-opacity="{{rg.r2.op}}"></rect>
+<path d="{{spec}}" stroke="{{c.pre}}" stroke-opacity="0.6" stroke-width="1" fill="none"></path>
+<path d="{{outSpec}}" stroke="{{c.curve}}" stroke-width="1.4" fill="none" filter="url(#cg)"></path>
+<path d="{{xl}}" stroke="{{c.accent}}" stroke-opacity="0.75" stroke-width="1.5"></path>
+<path d="M580 286 V14 M590 286 V14 M616 286 V14 M626 286 V14" stroke="{{c.meterOff}}" stroke-width="6" stroke-dasharray="2 2"></path>
+<path d="{{mIn}}" stroke="{{c.pre}}" stroke-width="6" stroke-dasharray="2 2"></path>
+<path d="{{mOut}}" stroke="{{c.curve}}" stroke-width="6" stroke-dasharray="2 2" filter="url(#cg)"></path>
+</svg>
+<sc-for list="{{grips}}" as="g" hint-placeholder-count="2">
+<button aria-label="{{g.aria}}" style="position: absolute; left: {{g.x}}px; top: 204px; width: 32px; height: 32px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center"><span style="width: 12px; height: 24px; box-sizing: border-box; border-radius: 6px; background: {{c.disp}}; border: 1.5px solid {{c.accent}}; box-shadow: 0 0 8px {{c.accentSoft}}"></span></button>
+</sc-for>
+<sc-for list="{{badges}}" as="b" hint-placeholder-count="3">
+<span aria-hidden="true" style="position: absolute; left: {{b.x}}px; top: 205px; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; background: {{b.bg}}; color: {{b.fg}}; box-shadow: {{b.sh}}">{{b.n}}</span>
+</sc-for>
+<span aria-hidden="true" style="position: absolute; left: 580px; top: 290px; font-size: 8px; font-weight: 700; letter-spacing: 0.06em; color: {{c.lo}}">IN&#160;&#160;&#160;&#160;OUT</span>
+<div style="position: absolute; left: 8px; right: 84px; bottom: 8px; height: 50px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; background: {{c.glass}}; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid {{c.glassB}}; border-radius: 12px; box-shadow: {{c.glassSh}}">
+<span style="width: 18px; height: 18px; flex: 0 0 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: {{c.accent}}; color: {{c.nodeInk}}; box-shadow: 0 0 8px {{c.accent}}">2</span>
+<div role="img" aria-label="Band 2 transient scope: attack +3.0 dB, sustain −6.0 dB, 40 ms" style="width: 92px; height: 38px; flex: 0 0 92px; border-radius: 6px; background: {{c.well}}; border: 1px solid {{c.wellB}}; overflow: hidden">
+<svg width="92" height="38" viewBox="0 0 92 38" aria-hidden="true"><path d="{{scTrans}}" fill="{{c.accent}}" fill-opacity="0.14"></path><path d="M0 20 H92" stroke="{{c.zero}}"></path><path d="{{scUp}}" fill="{{c.up}}" fill-opacity="0.6"></path><path d="{{scDn}}" fill="{{c.gr}}" fill-opacity="0.35"></path><path d="{{scG}}" stroke="{{c.curve}}" stroke-width="1.6" fill="none"></path></svg>
+</div>
+<sc-for list="{{fields}}" as="f" hint-placeholder-count="3">
+<button aria-label="{{f.aria}}" style="height: 34px; padding: 0 7px; display: flex; flex-direction: column; justify-content: center; gap: 1px; background: {{c.well}}; border: 1px solid {{c.wellB}}; border-radius: 6px; box-shadow: {{c.wellSh}}; text-align: left"><span style="font-size: 8px; font-weight: 700; letter-spacing: 0.06em; color: {{c.lo}}">{{f.k}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; color: {{f.c}}">{{f.v}}</span></button>
+</sc-for>
+<div style="flex: 1"></div>
+<button aria-label="Open the full band panel" style="height: 32px; padding: 0 10px; background: {{c.pCtl}}; border: 1px solid {{c.pCtlB}}; border-radius: 6px; box-shadow: {{c.raised}}; font-weight: 700">More</button>
+</div>
+</main>
+<footer style="height: 48px; flex: 0 0 48px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-top: 1px solid {{c.line}}">
+<sc-for list="{{icons}}" as="i" hint-placeholder-count="4">
+<button aria-label="{{i.aria}}" aria-pressed="{{i.on}}" style="width: 38px; height: 32px; display: flex; align-items: center; justify-content: center; background: {{i.bg}}; border: 1px solid {{i.b}}; border-radius: 6px; box-shadow: {{i.sh}}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="{{i.d}}" stroke="{{i.fg}}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+</sc-for>
+<div style="flex: 1"></div>
+<sc-for list="{{dials}}" as="d" hint-placeholder-count="2">
+<button aria-label="{{d.aria}}" style="height: 40px; display: flex; align-items: center; gap: 5px; padding: 0 2px; background: transparent; border: none">
+<svg width="30" height="30" viewBox="0 0 64 64" fill="none" aria-hidden="true" style="overflow: visible"><path d="{{d.dim}}" stroke="{{c.tickOff}}" stroke-width="4" stroke-linecap="round"></path><path d="{{d.lit}}" stroke="{{c.accent}}" stroke-width="4" stroke-linecap="round" style="filter: drop-shadow(0 0 2px {{c.accent}})"></path><circle cx="32" cy="32" r="17" fill="{{c.disc}}" stroke="{{c.discB}}" stroke-width="2"></circle><path d="{{d.ptr}}" stroke="{{c.needle}}" stroke-width="4.5" stroke-linecap="round" style="filter: drop-shadow(0 0 3px {{c.accent}})"></path></svg>
+<span style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px"><span style="font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: {{c.lo}}">{{d.label}}</span><span style="font-feature-settings: 'tnum' 1; font-weight: 600; font-size: 11px">{{d.v}}</span></span>
+</button>
+</sc-for>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const TOK = /*TOKENS*/{"$schema":"mitefx-tokens/3","meta":{"version":"0.5.0","date":"2026-10-25","note":"Fifth pass: Mite Shape. Shape accent moved from blush to leaf (user decision); band colouring for frequency bands; attack/sustain rendering rules."},"color":{"rules":{"deltaE":"CIEDE2000","minDeltaE":15,"applies":"band-band, band-semantic, band-curve, semantic-semantic, accent-band, accent-semantic in every theme (dark, light, high contrast)","colourBlind":"minimum CIEDE2000 12 (not 15: the CVD gamut is too small for 15 with 4 bands + 5 semantics); pairs checked as the minimum of normal, protanopia and deuteranopia simulation (Machado 2009); every semantic colour also has a non-colour cue","ramp":"one fixed ramp for the whole suite; band 7+ repeats and the node number disambiguates","accent":"accents never come from the ramp; modulation always draws in the accent (there is no sem.mod)","solo":"white ring + S badge, other bands at 35 % opacity","gainUp":"gainUp clears ramp, semantics, the curve and the Comp accent by >= 15 in dark/light/hc. It sits closer than 15 to a few pale accents of plugins that never draw upward gain (listed in semanticChecks).","frequencyBands":"Bands that are frequency regions (Mite Shape, Mite Multiband) are drawn in the plugin accent with their number, never in the ramp: the ramp means stereo placement (EQ). Selected band: accent at 100 % with glow. Other bands: accent edge at 55 %, region fill 10 %. Soloed: white ring + S badge, others at 35 %. Muted: region fill removed, 45° hatch in text.lo at 30 %, M badge in text.hi, its gain trace hidden.","shaping":"Shaping gain is signed: boost rises in gainUp, cut hangs in gr, from a 0 dB line. Attack and sustain share those colours and differ by weight: the attack part (gain while the detector weight w > 0.5) is a solid fill at 70 % with glow; the sustain part is a 28 % fill with a 1.5 px edge and no glow. Each detected hit gets a 2 px accent tick hanging from the divider between the level and gain lanes; its height is the hit sharpness."},"ramp":{"names":["blue","lime","pink","sea","sand","peri"],"dark":["#3D7EFC","#B2DD46","#F776C4","#229991","#E4B572","#8785BB"],"light":["#3778F5","#69870D","#B23586","#229991","#906520","#7574A8"],"hc":["#3D7EFC","#9AC321","#F776C4","#58A8A1","#CFAA77","#817FB5"],"cb":["#A3F5B4","#397BE9","#60CCFC","#568C81"],"cbDash":["none","6 3","2 3","8 3 2 3"]},"semantic":{"gr":{"dark":"#F88A3D","light":"#D56A10","hc":"#FF9044","cb":"#E69F00","cbCue":"bars always hang from the top / 0 dB line","use":"gain reduction only"},"warn":{"dark":"#FEDD4D","light":"#A28B23","hc":"#D6B603","cb":"#F0E442","cbCue":"triangle-! icon next to the value","use":"hot meter segments, true-peak over, notices, favourite star"},"danger":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"cross icon and the word","use":"destructive actions (Delete band), overs, clipping text"},"ok":{"dark":"#35C177","light":"#21834F","hc":"#24D17C","cb":"#1FBF8F","cbCue":"check icon","use":"in phase, on target"},"sidechain":{"dark":"#A35DE4","light":"#8244BA","hc":"#B671F9","cb":"#A7B0BE","cbCue":"dashed 6/4 line in text.mid","use":"sidechain spectrum and key routing"},"masking":{"dark":"#E6424C","light":"#DE3A46","hc":"#FB575D","cb":"#D55E00","cbCue":"45° hatch, 3 px stripes","use":"masking/collision overlay; always drawn as a 45° hatch at 22 % plus a 1.5 px edge"},"focus":{"dark":"#FFFFFF","light":"#12161C","hc":"#FFFFFF","cb":"#FFFFFF","use":"2 px ring, 2 px offset (3 px in high contrast)"},"gainUp":{"dark":"#B5C0F8","light":"#260384","hc":"#ADC3F9","cb":"#944B40","cbCue":"dotted top edge; always rises from the bottom or the 0 dB line","use":"upward gain (upward compression and upward expansion); mirrors gr, which always hangs from the top"}},"accent":{"eq":{"plugin":"Mite EQ","name":"cyan","dark":"#0ED4F6","light":"#056374","hc":"#23DAFC","cb":"#238EA9"},"comp":{"plugin":"Mite Comp","name":"ember","dark":"#E44A08","light":"#AC1D03","hc":"#DD410D","cb":"#238EA9"},"limit":{"plugin":"Mite Limit","name":"silver","dark":"#A4ACB4","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"multiband":{"plugin":"Mite Multiband","name":"mint","dark":"#59FCE1","light":"#0C665A","hc":"#3CE8CE","cb":"#238EA9"},"verb":{"plugin":"Mite Verb","name":"ice","dark":"#BADBFE","light":"#385573","hc":"#73B6FA","cb":"#238EA9"},"delay":{"plugin":"Mite Delay","name":"orchid tint","dark":"#FACCFC","light":"#69426B","hc":"#DFB3E1","cb":"#238EA9"},"sat":{"plugin":"Mite Sat","name":"salmon","dark":"#FD8A8C","light":"#902731","hc":"#FEAAA9","cb":"#238EA9"},"deess":{"plugin":"Mite DeEss","name":"deep sky","dark":"#16B3EB","light":"#135A76","hc":"#299FCD","cb":"#238EA9"},"gate":{"plugin":"Mite Gate","name":"pale green","dark":"#C2ECB9","light":"#294C22","hc":"#B6DEAD","cb":"#238EA9"},"shape":{"plugin":"Mite Shape","name":"leaf","dark":"#6BA208","light":"#495E21","hc":"#5DFF2B","cb":"#238EA9","text":{"dark":"#B2E37E","light":"#495E21","hc":"#FFFFFF","cb":"#9ED3E2"}},"soothe":{"plugin":"Mite Soothe","name":"aqua","dark":"#1EE6E7","light":"#086B6C","hc":"#AAFDFC","cb":"#238EA9"},"filter":{"plugin":"Mite Filter","name":"lagoon","dark":"#00DDEF","light":"#086A73","hc":"#00DDEF","cb":"#238EA9"},"mod":{"plugin":"Mite Mod","name":"lilac","dark":"#D9C6FE","light":"#4E3D6C","hc":"#CCB9F1","cb":"#238EA9"},"meter":{"plugin":"Mite Meter","name":"pewter","dark":"#B7BFC7","light":"#4C535B","hc":"#BDC5CE","cb":"#238EA9"},"utility":{"plugin":"Mite Utility","name":"slate","dark":"#95A0AB","light":"#4A545D","hc":"#C1CCD7","cb":"#238EA9"}},"neutral":{"dark":{"window":"#0A0C0F","display":"#0E1116","surface1":"#10141A","helpStrip":"#0C0E12","line":"#1C2129","divider":"#1F252E","chip":"rgba(18,22,28,0.85)","ctlBg":"#161A21","ctlBorder":"#262C36","ctlText":"#C9D1DC","segmentOn":"#262C36","panelCtlBg":"#1E232B","panelCtlBorder":"#2E3540","well":"#0C0F13","wellBorder":"#1E242D","dialDisc":"#161A21","dialDiscBorder":"#2E3540","tickOff":"#2A313C","needle":"#FFFFFF","thumb":"#E6EAF0","gridMinor":"#151920","gridMajor":"#1D232C","zeroLine":"#2A313C","curve":"#EEF2F6","postFill2":"#3D6FD9","preSpectrum":"#8A94A3","meterOff":"#1E242D","meterWell":"#0A0C10","glass":"rgba(24,28,35,0.72)","glassBorder":"rgba(255,255,255,0.09)","menu":"rgba(24,28,35,0.95)","scrim":"rgba(6,8,10,0.62)","textHi":"#E6EAF0","textMid":"#A7B0BE","textLo":"#7C8696","textStrong":"#F2F5F8","textDisabled":"#4A5260","accentSoft":"rgba(14,212,246,0.16)","accentText":"#A6EEFB"},"light":{"window":"#E6E9EE","display":"#FAFBFC","surface1":"#F1F3F6","helpStrip":"#EEF0F3","line":"#D5DAE1","divider":"#D0D6DE","chip":"rgba(255,255,255,0.9)","ctlBg":"#FFFFFF","ctlBorder":"#C9CFD8","ctlText":"#2A313C","segmentOn":"#FFFFFF","panelCtlBg":"#FFFFFF","panelCtlBorder":"#C9CFD8","well":"#E3E7EC","wellBorder":"#CDD3DB","dialDisc":"#FFFFFF","dialDiscBorder":"#C3C9D2","tickOff":"#CDD3DB","needle":"#12161C","thumb":"#FFFFFF","gridMinor":"#EEF0F3","gridMajor":"#E0E4EA","zeroLine":"#B8BFC9","curve":"#0F1B26","postFill2":"#8FB8E8","preSpectrum":"#8A94A3","meterOff":"#D5DAE1","meterWell":"#E3E7EC","glass":"rgba(255,255,255,0.80)","glassBorder":"rgba(20,30,45,0.12)","menu":"rgba(255,255,255,0.97)","scrim":"rgba(222,226,232,0.66)","textHi":"#12161C","textMid":"#3E4652","textLo":"#5A6370","textStrong":"#0A0C0F","textDisabled":"#A3ABB6","accentSoft":"rgba(5,99,116,0.12)","accentText":"#04505E"},"hc":{"window":"#000000","display":"#000000","surface1":"#0A0A0A","helpStrip":"#000000","line":"#8C8C8C","divider":"#8C8C8C","chip":"#000000","ctlBg":"#000000","ctlBorder":"#FFFFFF","ctlText":"#FFFFFF","segmentOn":"#FFFFFF","segmentOnText":"#000000","panelCtlBg":"#000000","panelCtlBorder":"#FFFFFF","well":"#000000","wellBorder":"#BFBFBF","dialDisc":"#000000","dialDiscBorder":"#FFFFFF","tickOff":"#5C5C5C","needle":"#FFFFFF","thumb":"#FFFFFF","gridMinor":"#262626","gridMajor":"#474747","zeroLine":"#8C8C8C","curve":"#FFFFFF","postFill2":"#FFFFFF","preSpectrum":"#9E9E9E","meterOff":"#333333","meterWell":"#000000","glass":"#0A0A0A","glassBorder":"#FFFFFF","menu":"#000000","scrim":"rgba(0,0,0,0.85)","textHi":"#FFFFFF","textMid":"#E6E6E6","textLo":"#C7C7C7","textStrong":"#FFFFFF","textDisabled":"#8C8C8C","accentSoft":"rgba(35,218,252,0.22)","accentText":"#FFFFFF","focus":"#FFFFFF","borderWidth":1.5,"shadows":"none","blur":0}},"accentMinDeltaE":{"eq":{"dark":21.8,"light":22.4,"hc":18.7,"cb":12.1},"comp":{"dark":15.1,"light":16.3,"hc":16.1,"cb":12.1},"limit":{"dark":18.2,"light":18.0,"hc":22.4,"cb":12.1},"multiband":{"dark":19.3,"light":15.2,"hc":15.4,"cb":12.1},"verb":{"dark":24.4,"light":17.4,"hc":16.4,"cb":12.1},"delay":{"dark":19.1,"light":15.0,"hc":15.2,"cb":12.1},"sat":{"dark":16.0,"light":17.0,"hc":17.8,"cb":12.1},"deess":{"dark":20.9,"light":20.0,"hc":16.8,"cb":12.1},"gate":{"dark":16.3,"light":18.8,"hc":15.0,"cb":12.1},"shape":{"dark":16.8,"light":16.3,"hc":16.0,"cb":12.1},"soothe":{"dark":20.9,"light":17.2,"hc":21.4,"cb":12.1},"filter":{"dark":20.7,"light":18.6,"hc":16.4,"cb":12.1},"mod":{"dark":20.1,"light":16.0,"hc":19.1,"cb":12.1},"meter":{"dark":21.6,"light":18.0,"hc":22.4,"cb":12.1},"utility":{"dark":15.4,"light":15.9,"hc":22.3,"cb":12.1}},"contrastChecked":{"dark.textLo/helpStrip":5.25,"dark.textLo/display":5.14,"light.textLo/window":5.0,"light.textLo/display":5.87,"hc.textLo/display":12.42,"hc.textDisabled/display":6.25,"dark.textDisabled/window":2.49,"note":"textDisabled is only used on disabled controls (WCAG exempt)"},"rampMinDeltaE":{"dark":15.8,"light":15.5,"hc":15.6},"semanticChecks":{"gainUp":{"dark":{"gainUp_vs_ramp_sem_curve":17.1,"gainUp_vs_comp":46.8,"gainUp_contrast":10.7,"comp_vs_ramp_sem":15.1,"comp_contrast":4.8,"gainUp_near_accents":[["mod",9.0],["verb",9.4],["meter",14.2]]},"light":{"gainUp_vs_ramp_sem_curve":15.5,"gainUp_vs_comp":45.8,"gainUp_contrast":14.2,"comp_vs_ramp_sem":16.3,"comp_contrast":6.9,"gainUp_near_accents":[]},"hc":{"gainUp_vs_ramp_sem_curve":20.2,"gainUp_vs_comp":48.5,"gainUp_contrast":12.0,"comp_vs_ramp_sem":16.1,"comp_contrast":4.8,"gainUp_near_accents":[["verb",10.7],["mod",11.5],["utility",12.4],["limit",13.2],["meter",13.2]]},"cb":{"gainUp_vs_cb":18.1,"gainUp_contrast":3.0}}},"accentChecks":{"shape":{"dark":{"nearest":"ramp lime 16.8, sem.ok 17.1","gainUp":53.6,"gr":45.7,"contrastOnDisplay":6.12},"light":{"nearest":"ramp lime 16.3, sem.ok 16.6","gainUp":67.4,"gr":41.3,"contrastOnDisplay":6.97,"note":"9.1 from the Gate light accent #294C22; Gate is not designed yet, so its light value moves when it is (accent-accent is not a checked pair)"},"hc":{"nearest":"ramp lime 16.0","gainUp":53.6,"gr":58.3,"contrastOnDisplay":15.8},"why":"Shape draws boosts in gainUp (violet) and cuts in gr (amber). Blush sat between the two in hue (23.5 and 31.0); leaf is far from both."}}},"typography":{"family":"Manrope","license":"OFL-1.1","readoutFeatures":["tnum"],"styles":{"display":{"size":28,"weight":800,"tracking":-0.02},"title":{"size":15,"weight":700},"body":{"size":12,"weight":500},"label":{"size":10,"weight":700,"tracking":0.08,"case":"upper"},"readout":{"size":11.5,"weight":600,"features":["tnum"]},"readoutDial":{"size":12,"weight":700,"features":["tnum"],"unitSize":9},"readoutLarge":{"size":20,"weight":600,"tracking":-0.01,"features":["tnum"]}}},"space":{"1":2,"2":4,"3":6,"4":8,"5":12,"6":16,"7":24,"8":32,"9":48},"radius":{"xs":2,"sm":4,"md":6,"lg":10,"xl":14,"pill":20},"hitTarget":{"desktopMin":32,"touchMin":44,"nodeHit":32,"nodeDot":{"idle":14,"selected":18},"segmentDesktop":32,"segmentTouch":44},"dial":{"sweepDegrees":270,"startDegrees":-135,"ticks":{"standard":31,"small":15,"innerRadius":25,"outerRadius":29,"width":2},"needle":{"innerRadius":21.5,"outerRadius":31,"width":2.5},"centreMark":"bipolar dials only: tick at 0 deg from r 22.5 to 30 in textMid","disc":{"radius":19.5},"sizes":{"standard":64,"small":34}},"meter":{"segment":2,"gap":2,"hotFromDb":-6,"peakHoldMs":1500,"releaseDbPerSec":20},"elevation":{"raised":{"dark":"inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.4)","light":"inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(20,30,45,0.18), 0 3px 8px rgba(20,30,45,0.10)","hc":"none; 1.5 px white border instead"},"inset":{"dark":"inset 0 1px 3px rgba(0,0,0,0.65)","light":"inset 0 1px 3px rgba(20,30,45,0.18)","hc":"none; 1 px #BFBFBF border"},"glass":{"dark":"0 18px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)","light":"0 18px 48px rgba(20,30,45,0.22), inset 0 1px 0 rgba(255,255,255,0.8)","hc":"none; solid #0A0A0A with 1.5 px white border, no blur"},"dialDisc":{"dy":2.5,"blur":2.5,"alphaDark":0.75,"alphaLight":0.22}},"glow":{"ticks":1.8,"meter":2.2,"needle":2.2,"curve":5,"latched":14,"rule":"every accent or semantic mark glows in its own colour"},"blur":{"glassPanel":18,"sheet":22,"menu":18,"saturate":1.2},"motion":{"duration":{"micro":80,"fast":140,"base":220,"slow":360},"easing":{"standard":[0.2,0,0,1],"enter":[0,0,0.2,1],"exit":[0.4,0,1,1]},"spring":{"node":{"stiffness":420,"damping":28}},"meter":{"attackMs":0,"releaseMs":300},"reduceMotion":"durations above micro become 0; springs become easing.standard at fast; meters keep ballistics"},"shape":{"history":{"single":{"levelLane":[12,194],"divider":204,"gainZero":268,"bottom":332},"multi":{"levelLane":[12,164],"divider":174,"gainZero":234,"bottom":292},"gainPxPerDb":5,"gainSoftClampDb":11.5,"attackFill":0.7,"sustainFill":0.28,"levelRangeDb":[-48,0]},"hitMarker":{"width":2,"maxHeight":14,"heightIs":"sharpness (3–12 dB lead → 30–100 %)"},"band":{"regionFillIdle":0.1,"regionFillSelected":0.22,"edgeIdle":0.55,"mutedHatch":0.3,"soloDim":0.35},"crossover":{"grip":[14,28],"hit":32,"minGapOct":0.333,"ghostFromEdgePx":24,"range":[20,20000],"defaults":[120,500,2000,8000]},"dial":{"attackSustainTravel":"S-curve: ±6 dB uses 60 % of the sweep, ±6–18 dB the outer 40 %"},"rail":{"single":{"y":340,"h":36},"multi":{"y":300,"h":80},"funnel":16},"cards":{"selectedWidth":644,"gap":8,"single":{"scope":[788,206]},"wide":{"scope":[284,160]},"compact":{"scopeH":[112,80],"switchAtWidth":220},"mutedOpacity":0.55,"mergingOpacity":0.6}}}/*END*/;
+    const N = TOK.color.neutral.dark, S = TOK.color.semantic, E = TOK.elevation;
+    const accent = TOK.color.accent.shape.dark;
+    const hexA = (h, a) => { const n = parseInt(h.slice(1), 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; };
+    const c = { win: N.window, disp: N.display, line: N.line, ctl: N.ctlBg, ctlB: N.ctlBorder, raised: E.raised.dark, well: N.well, wellB: N.wellBorder, wellSh: E.inset.dark,
+      pCtl: N.panelCtlBg, pCtlB: N.panelCtlBorder, glass: N.glass, glassB: N.glassBorder, glassSh: E.glass.dark, disc: N.dialDisc, discB: N.dialDiscBorder, tickOff: N.tickOff,
+      needle: N.needle, gridMinor: N.gridMinor, zero: N.zeroLine, curve: N.curve, pre: N.preSpectrum, hi: N.textHi, mid: N.textMid, lo: N.textLo, meterOff: N.meterOff,
+      nodeInk: '#0E1116', accent, accentSoft: hexA(accent, 0.2), accentText: TOK.color.accent.shape.text.dark, gr: S.gr.dark, up: S.gainUp.dark };
+    const r1 = (v) => Math.round(v * 10) / 10, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const smooth = (x) => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+    // band 2 (snare body) of a 3-band split at 150 Hz / 3.5 kHz, through the same detector model as ShapeMain
+    const a = 3, s = -6, T = 40, Wd = 32;
+    const NP = 280, W = 560, DT = 6000 / NP;
+    const hits = []; for (let k = -12; k < 48; k++) { const st = ((k % 16) + 16) % 16; if (st === 4 || st === 12) hits.push([k * 125, 1]); if (st === 14) hits.push([k * 125, 0.3]); if (st === 0 || st === 10) hits.push([k * 125, 0.35]); }
+    const amp = (tau) => { let v = 0.009; hits.forEach(([th, vel]) => { if (th <= tau) v += 0.8 * vel * Math.exp(-(tau - th) / 150); }); return v * 0.25; };
+    const pts = [];
+    for (let i = 0; i < NP; i++) {
+      const tau = i * DT; const A = amp(tau);
+      let o = null; for (let h = hits.length - 1; h >= 0; h--) if (hits[h][0] <= tau) { o = hits[h]; break; }
+      let w = 0; if (o) { const before = amp(o[0] - 0.01), lead = 20 * Math.log10((before + 0.8 * o[1] * 0.25) / before); if (lead >= 3) w = clamp(lead / 12, 0, 1) * (1 - smooth((tau - o[0] - (T - Wd / 2)) / Wd)); }
+      const g = a * w + s * (1 - w);
+      pts.push({ A, w, g, hit: o && tau - o[0] < DT ? 1 : 0 });
+    }
+    const X = (i) => r1(i * W / (NP - 1));
+    const ly = (d) => 8 + (-clamp(d, -48, 0) / 48) * 100, gy = (g) => 156 - clamp(g, -11, 11) * 3.5;
+    const inL = pts.map((p, i) => (i ? 'L' : 'M') + X(i) + ' ' + r1(ly(20 * Math.log10(p.A * 1.6)))).join(' ');
+    const outLine = pts.map((p, i) => (i ? 'L' : 'M') + X(i) + ' ' + r1(ly(20 * Math.log10(p.A * 1.6) + p.g))).join(' ');
+    const area = (f) => 'M0 156 ' + pts.map((p, i) => 'L' + X(i) + ' ' + r1(gy(f(p)))).join(' ') + ' L560 156 Z';
+    const edge = (f) => pts.map((p, i) => (i ? 'L' : 'M') + X(i) + ' ' + r1(gy(f(p)))).join(' ');
+    let ticks = ''; pts.forEach((p, i) => { if (p.hit) ticks += 'M' + X(i) + ' 112 V' + 122 + ' '; });
+    const fx = (f) => 8 + 544 * Math.log(f / 20) / Math.log(1000);
+    let spec = '', outSpec = '';
+    for (let i = 0; i <= 120; i++) {
+      const f = 20 * Math.pow(1000, i / 120), x = r1(fx(f));
+      const lv = -40 + 12 * Math.exp(-Math.pow(Math.log2(f / 60), 2) / 0.9) + 6 * Math.exp(-Math.pow(Math.log2(f / 230), 2)) + 4 * Math.exp(-Math.pow(Math.log2(f / 1800), 2) / 1.4) + 8 * Math.exp(-Math.pow(Math.log2(f / 9000), 2) / 0.9) - 18 * Math.max(0, Math.log2(f / 15000));
+      const y = (d) => r1(204 + (-clamp(d, -52, -20) - 20) / 32 * 32);
+      const b2 = f > 150 && f < 3500 ? 1 : 0;
+      spec += (i ? 'L' : 'M') + x + ' ' + y(lv); outSpec += (i ? 'L' : 'M') + x + ' ' + y(lv + b2 * pts[NP - 1].g + (f <= 150 ? -3 : f >= 3500 ? -2 : 0));
+    }
+    const xs = [fx(150), fx(3500)];
+    const last = pts[NP - 1];
+    const my = (d) => 286 - Math.round((clamp(60 + d, 0, 60) / 60 * 272) / 4) * 4;
+    const iDb = 20 * Math.log10(last.A * 1.6);
+    const polar = (deg, r) => { const an = (deg - 90) * Math.PI / 180; return [32 + r * Math.cos(an), 32 + r * Math.sin(an)]; };
+    const tk = (deg, ra, rb) => { const [x0, y0] = polar(deg, ra), [x1, y1] = polar(deg, rb); return 'M' + r1(x0) + ' ' + r1(y0) + ' L' + r1(x1) + ' ' + r1(y1) + ' '; };
+    const geo = (fr, bip) => { const dv = -135 + 270 * fr; let lit = '', dim = ''; for (let i = 0; i < 15; i++) { const d = -135 + i * 270 / 14; const sg = tk(d, 25, 29); const on = bip ? (d >= Math.min(0, dv) - 0.01 && d <= Math.max(0, dv) + 0.01) : d <= dv + 0.01; if (on) lit += sg; else dim += sg; } return { lit, dim, ptr: tk(dv, 21.5, 31) }; };
+    const ib = (aria, d, on) => ({ aria, d, on: on ? 'true' : 'false', bg: on ? hexA(accent, 0.16) : c.ctl, b: on ? accent : c.ctlB, sh: on ? '0 0 12px ' + hexA(accent, 0.3) : c.raised, fg: on ? accent : c.mid });
+    // mini scope
+    const sx = (tm) => 3 + 86 * Math.sqrt(tm / 400), sg = (g) => 20 - g * 1.4;
+    const wv = (tm) => 1 - smooth((tm - (T - Wd / 2)) / Wd), gt = (tm) => a * wv(tm) + s * (1 - wv(tm));
+    const ts = []; for (let i = 0; i <= 60; i++) ts.push(400 * Math.pow(i / 60, 2));
+    const scG = ts.map((tm, i) => (i ? 'L' : 'M') + r1(sx(tm)) + ' ' + r1(sg(gt(tm)))).join(' ');
+    return {
+      c, grid: [-12, -24, -36].map((d) => 'M0 ' + r1(ly(d)) + ' H560').join(' '),
+      inFill: inL + ' L560 108 L0 108 Z', outLine,
+      upL: area((p) => Math.max(0, p.g)), upS: area((p) => Math.max(0, p.g) * p.w), dnL: area((p) => Math.min(0, p.g)), dnS: area((p) => Math.min(0, p.g) * p.w),
+      upE: edge((p) => Math.max(0, p.g)), dnE: edge((p) => Math.min(0, p.g)), ticks,
+      rg: (() => { const o = {}; [[0, xs[0], 0.08], [xs[0], xs[1], 0.22], [xs[1], 560, 0.08]].forEach(([x0, x1, op], i) => { o['r' + i] = { x: r1(x0), w: r1(x1 - x0), op }; }); return o; })(),
+      spec, outSpec, xl: 'M' + r1(xs[0]) + ' 200 V240 M' + r1(xs[1]) + ' 200 V240',
+      grips: [{ x: r1(xs[0] - 16), aria: 'Crossover 1, 150 Hz' }, { x: r1(xs[1] - 16), aria: 'Crossover 2, 3.5 kHz' }],
+      badges: [[6, 1], [xs[0] + 14, 2], [xs[1] + 14, 3]].map(([x, n]) => ({ x: r1(x), n, bg: n === 2 ? accent : hexA(accent, 0.25), fg: n === 2 ? c.nodeInk : c.accentText, sh: n === 2 ? '0 0 8px ' + accent : 'none' })),
+      mIn: 'M580 286 V' + my(iDb) + ' M590 286 V' + my(iDb - 1), mOut: 'M616 286 V' + my(iDb + last.g) + ' M626 286 V' + my(iDb + last.g - 1),
+      scTrans: 'M' + r1(sx(T - Wd / 2)) + ' 0 H' + r1(sx(T + Wd / 2)) + ' V38 H' + r1(sx(T - Wd / 2)) + ' Z',
+      scUp: 'M3 20 ' + ts.map((tm) => 'L' + r1(sx(tm)) + ' ' + r1(sg(Math.max(0, gt(tm))))).join(' ') + ' L89 20 Z',
+      scDn: 'M3 20 ' + ts.map((tm) => 'L' + r1(sx(tm)) + ' ' + r1(sg(Math.min(0, gt(tm))))).join(' ') + ' L89 20 Z', scG,
+      fields: [['ATTACK', '+3.0', c.up], ['SUSTAIN', '−6.0', c.gr], ['TIME', '40 ms', c.hi]].map(([k, v, col]) => ({ k, v, c: col, aria: k + ' ' + v + ', drag or type' })),
+      icons: [ib('Auto gain', 'M3 16 H21 M6.5 16 C9 16 10 7.5 12 7.5 C14 7.5 15 16 17.5 16 M12 3.5 V6', false), ib('Clip after shaping', 'M3 18 H7 C10 18 10.5 6 14 6 H21 M3 6 H21', false), ib('Delta', 'M12 4 L20.5 19 H3.5 Z', false), ib('Bypass', 'M12 3.5 V11 M7.2 6.3 a7.5 7.5 0 1 0 9.6 0', false)],
+      dials: [Object.assign({ label: 'MIX', v: '100 %', aria: 'Mix 100 percent' }, geo(1, false)), Object.assign({ label: 'OUT', v: '0.0', aria: 'Output 0.0 dB' }, geo(0.5, true))]
+    };
+  }
+}
+</script>
+</body>
+</html>

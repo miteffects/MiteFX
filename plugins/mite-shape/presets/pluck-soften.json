@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Pluck Soften",
+  "params": {
+    "b1_attack": -6.0,
+    "b1_sustain": 2.0,
+    "b1_time": 15.0
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Shape",
+  "version": 1,
+  "name": "Ambience Lift",
+  "params": {
+    "b1_attack": -2.0,
+    "b1_sustain": 6.0,
+    "floor": -50.0
+  }
+}
