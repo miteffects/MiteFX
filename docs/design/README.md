@@ -2,6 +2,8 @@
 
 **Source canvas:** https://claude.ai/artifact/W6i7s8rA3Q81U43ruRusH5 (Claude Design). The canvas is the living version. The files here are a snapshot and the implementation contract.
 
+**Next:** fifth pass (Mite Shape, single-band and multiband) briefed in `shape-brief.md` on 2026-10-25.
+
 **Status:** fourth pass (Mite Comp) received on 2026-10-22, answering `comp-brief.md`:
 - the Comp accent moved from azure to **ember** (`#E44A08` dark; your decision, ΔE 15.1 from `gr`, so OUT stays white and ember marks only what you touch);
 - a new semantic colour, **`gainUp`** (`#B5C0F8` dark), for upward gain, which rises from the bottom while `gr` hangs from the top;
@@ -31,6 +33,7 @@ The "Third pass" list below is kept as history; the design addressed all of it.
 | `mockups/comp-components.dc.html` | Comp component sheet: stage nodes and quadrant glyphs, Character and Smart glyphs, GR meter, envelope scope, threshold grip. |
 | `mockups/comp-compact.dc.html` | Comp compact layout, 640×400 (built later, with the EQ's). |
 | `comp-brief.md` | The brief this pass answers. |
+| `shape-brief.md` | The brief for pass 5 (Mite Shape), not yet answered. |
 | `mockups/shared.dc.html` | Shared components: modulation matrix, 4-node transfer curve, waveform/GR history, spectrogram, and their usage rules. |
 | `mockups/components.dc.html` | Component sheet. Still **first pass**: knobs, sliders, fields, meters, node states, buttons, crossover, piano strip. |
 | `mockups/tokens.dc.html` | Brand and token sheet. Still **first pass** and stale; `tokens.json` supersedes it. |

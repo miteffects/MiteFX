@@ -293,6 +293,7 @@ Nova Shaper ported:
 - Multiband 1–5.
 - M/S and Delta.
 - **Beyond:** sustain-length control in ms, and a clip/soft-limit stage.
+- Design brief: `docs/design/shape-brief.md` (2026-10-25). Detection reuses the EQ's transient detector (`mite_dsp::eq::ShapeDetector`), so the EQ's transient bands and Shape behave and draw alike.
 
 ### 11. Mite Soothe. Rival: oeksound soothe2
 
@@ -410,6 +411,8 @@ FabFilter's strengths:
 - Multiband crossover bar.
 
 ### 7.4 Design status
+
+**Mite Shape brief written on 2026-10-25** (`docs/design/shape-brief.md`): single-band and multiband (up to 5 bands, 4 crossovers, made and removed by pulling on the spectrum, no band-count control), the main view (history with the signed shaping gain, spectrum with the crossover bar, the EQ's transient scope per band), band panel, solo and mute, detector and stereo, a later clip stage, compact, and a band-colour rule that doesn't break the EQ's colour = stereo placement. The crossover bar is designed once, for Shape and Mite Multiband. Shape moves ahead of its Phase 4 slot for design only; it reuses the EQ's `ShapeDetector`.
 
 **Mite Comp brief sent on 2026-10-22** (`docs/design/comp-brief.md`): the main view (history and transfer curve), creating stages by pulling the curve, the stage panel, Character, Smart, sidechain EQ, stereo link, compact, and a new upward-gain colour token.
 
