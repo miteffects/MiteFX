@@ -43,6 +43,12 @@ const SOLO_MS: f64 = 10.0;
 const STRUCTURE_MS: f64 = 10.0;
 /// Below the floor a lift fades out over this many dB.
 const FLOOR_FADE_DB: f64 = 6.0;
+/// Sustain lengths reach this long, ms; the top of the range is "endless" (`f32::INFINITY`).
+pub const LENGTH_MAX_MS: f32 = 2000.0;
+/// When a sustain length runs out, the gain returns to 0 dB along an S curve this long (a share
+/// of the length, within these bounds, ms).
+const LENGTH_FADE: f64 = 0.3;
+const LENGTH_FADE_MS: (f64, f64) = (5.0, 150.0);
 /// A hit is reported (for the history's tick) this long after it starts, when its sharpness has
 /// grown to its peak, ms.
 const HIT_REPORT_MS: f64 = 2.0;
@@ -60,13 +66,16 @@ pub struct BandShape {
     pub mix: f32,
     /// The band's fader in the sum, dB.
     pub out_db: f32,
+    /// How long sustain acts after the handover before the gain returns to 0 dB, ms
+    /// (`f32::INFINITY`: until the next hit).
+    pub length_ms: f32,
     pub mute: bool,
     pub solo: bool,
 }
 
 impl Default for BandShape {
     fn default() -> Self {
-        Self { attack_db: 0.0, sustain_db: 0.0, transient_ms: DEFAULT_TRANSIENT_MS as f32, transition: DEFAULT_TRANSITION as f32, mix: 1.0, out_db: 0.0, mute: false, solo: false }
+        Self { attack_db: 0.0, sustain_db: 0.0, transient_ms: DEFAULT_TRANSIENT_MS as f32, transition: DEFAULT_TRANSITION as f32, mix: 1.0, out_db: 0.0, length_ms: f32::INFINITY, mute: false, solo: false }
     }
 }
 
@@ -385,6 +394,7 @@ struct Eased {
     transition: f64,
     mix: f64,
     out: f64,
+    length_ms: f64,
     audible: f64,
     /// The times the detectors were last set to.
     times: (f64, f64),
@@ -400,6 +410,7 @@ impl Eased {
             transition: times.1,
             mix: f64::from(b.mix),
             out: crate::db_to_gain(b.out_db).into(),
+            length_ms: f64::from(b.length_ms),
             audible: if audible { 1.0 } else { 0.0 },
             times,
         }
@@ -572,6 +583,15 @@ impl Shaper {
             ease(&mut e.transition, f64::from(t.transition), self.glide);
             ease(&mut e.mix, f64::from(t.mix.clamp(0.0, 1.0)), self.glide);
             ease(&mut e.out, f64::from(crate::db_to_gain(t.out_db)), self.glide);
+            // Lengths glide in octaves; to or from endless they jump (the S curve is the glide).
+            let length = f64::from(t.length_ms);
+            if length.is_finite() && e.length_ms.is_finite() {
+                let mut ln = e.length_ms.ln();
+                ease(&mut ln, length.ln(), self.glide);
+                e.length_ms = ln.exp();
+            } else {
+                e.length_ms = length;
+            }
             let a = if heard[b] { 1.0 } else { 0.0 };
             e.audible = if a > e.audible { (e.audible + self.solo_step).min(a) } else { (e.audible - self.solo_step).max(a) };
         }
@@ -596,7 +616,8 @@ impl Shaper {
                     let level_db = 20.0 * det.level().max(1e-10).log10();
                     let lift = ((level_db - floor + FLOOR_FADE_DB) / FLOOR_FADE_DB).clamp(0.0, 1.0);
                     let sustain = if e.sustain > 0.0 { e.sustain * lift } else { e.sustain };
-                    let g = det.gain_db(e.attack, sustain);
+                    let since = det.since_hit().map(|n| f64::from(n) * 1000.0 / self.fs);
+                    let g = det.gain_db(e.attack, sustain * sustain_scale(e.transient_ms, e.length_ms, since));
                     let target = 10f64.powf(g / 20.0);
                     band.step[c] = (target - band.gain[c]) / CONTROL as f64;
                     if shown {
@@ -803,6 +824,20 @@ impl Shaper {
     }
 }
 
+/// How much of the sustain amount applies `since_ms` after a hit started: all of it through the
+/// attack phase and for `length_ms` after the handover, then back to none along an S curve
+/// (smoothstep, 30 % of the length, 5–150 ms). Endless lengths keep it; before any hit, a finite
+/// length has nothing to sustain.
+pub fn sustain_scale(transient_ms: f64, length_ms: f64, since_ms: Option<f64>) -> f64 {
+    if !length_ms.is_finite() {
+        return 1.0;
+    }
+    let Some(since) = since_ms else { return 0.0 };
+    let fade = (LENGTH_FADE * length_ms).clamp(LENGTH_FADE_MS.0, LENGTH_FADE_MS.1);
+    let u = ((since - transient_ms - length_ms) / fade).clamp(0.0, 1.0);
+    1.0 - u * u * (3.0 - 2.0 * u)
+}
+
 /// One point of a synthetic hit through a band's detector, as the editor's scopes draw it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HitPoint {
@@ -831,7 +866,9 @@ pub fn simulate_hit(band: &BandShape, lookahead_ms: f64, rate: f64, pre_ms: f64,
     for i in 0..steps + lead {
         let t = -pre_ms + i as f64 * dt;
         det.process(level(t));
-        let g = det.gain_db(f64::from(band.attack_db), f64::from(band.sustain_db));
+        let since = det.since_hit().map(|n| f64::from(n) * dt);
+        let scale = sustain_scale(f64::from(band.transient_ms), f64::from(band.length_ms), since);
+        let g = det.gain_db(f64::from(band.attack_db), f64::from(band.sustain_db) * scale);
         gains.push((g, det.weight()));
     }
     (0..steps)
@@ -841,6 +878,21 @@ pub fn simulate_hit(band: &BandShape, lookahead_ms: f64, rate: f64, pre_ms: f64,
             HitPoint { t_ms: t, level_db: 20.0 * level(t).max(1e-6).log10(), gain_db, weight }
         })
         .collect()
+}
+
+/// The clip stage's curve: unchanged up to `(1 − softness) · ceiling`, then easing into the
+/// ceiling (tanh), so the slope never jumps and the peak never passes it; `softness` 0 is a hard
+/// clip. Odd-symmetric. `ceiling` linear, `softness` 0…1.
+#[inline]
+pub fn soft_clip(x: f32, ceiling: f32, softness: f32) -> f32 {
+    let knee = ceiling * (1.0 - softness.clamp(0.0, 1.0));
+    let a = x.abs();
+    if a <= knee {
+        return x;
+    }
+    let room = ceiling - knee;
+    let y = if room <= 1e-9 { ceiling } else { knee + room * ((a - knee) / room).tanh() };
+    y.copysign(x)
 }
 
 #[cfg(test)]

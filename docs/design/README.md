@@ -9,7 +9,7 @@
 
 **Design's answers (canvas note `shapeAnswers`):** the history is the hero; one scope per band, always visible, in cards under the crossover rail (the selected one wide); one band is the same screen with a 36 px rail and ghost grips at both ends; detector filter hidden in multiband; clip later, as a footer toggle and a ceiling on the level lane; merging by dragging keeps the growing band, by double-click the selected one, otherwise the lower.
 
-**Engineering deviations (Shape):** as Comp's stages, crossover and band slots never swap (crossover slot N owns band N + 1, bands numbered by frequency on screen). The clip stage, sustain length and the compact layout come later; the footer has no Clip toggle yet.
+**Engineering deviations (Shape):** as Comp's stages, crossover and band slots never swap (crossover slot N owns band N + 1, bands numbered by frequency on screen). The clip stage (footer toggle, ceiling on the level lane) and sustain length (a LENGTH dial and a scope handle; the design left it unplaced) are built; the compact layout and help mode come later.
 
 Fourth pass (Mite Comp, 2026-10-22), still binding, answering `comp-brief.md`:
 - the Comp accent moved from azure to **ember** (`#E44A08` dark; your decision, ΔE 15.1 from `gr`, so OUT stays white and ember marks only what you touch);

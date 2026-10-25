@@ -27,6 +27,8 @@ pub enum ToggleGlyph {
     Delta,
     /// Bypass: power.
     Bypass,
+    /// Clip: a curve easing into a ceiling line.
+    Clip,
 }
 
 /// A toggle: its parameter (on at ≥ 0.5), glyph, and what the help strip says about it.
@@ -189,6 +191,18 @@ pub fn draw_toggle_glyph(scene: &mut Scene, glyph: ToggleGlyph, c: Point, color:
             delta.line_to((c.x - 7.0, c.y + 5.5));
             delta.close_path();
             scene.stroke(&round, Affine::IDENTITY, color, None, &delta);
+        }
+        ToggleGlyph::Clip => {
+            let mut curve = BezPath::new();
+            curve.move_to((c.x - 8.0, c.y + 6.0));
+            curve.line_to((c.x - 5.0, c.y + 6.0));
+            curve.curve_to((c.x - 2.0, c.y + 6.0), (c.x - 1.5, c.y - 4.0), (c.x + 2.0, c.y - 4.0));
+            curve.line_to((c.x + 8.0, c.y - 4.0));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &curve);
+            let mut ceiling = BezPath::new();
+            ceiling.move_to((c.x - 8.0, c.y - 7.0));
+            ceiling.line_to((c.x + 8.0, c.y - 7.0));
+            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.5), None, &ceiling);
         }
         ToggleGlyph::Bypass => {
             let mut stem = BezPath::new();

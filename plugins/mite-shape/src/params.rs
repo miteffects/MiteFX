@@ -9,7 +9,7 @@
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
 use mite_core::{BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::shape::{BandShape, ShapeSettings, AMOUNT_DB, BANDS, CROSSOVERS, DEFAULT_CROSSOVERS, FREQ_MAX, FREQ_MIN, MAX_LOOKAHEAD_MS};
+use mite_dsp::shape::{BandShape, ShapeSettings, AMOUNT_DB, BANDS, CROSSOVERS, DEFAULT_CROSSOVERS, FREQ_MAX, FREQ_MIN, LENGTH_MAX_MS, MAX_LOOKAHEAD_MS};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
@@ -38,6 +38,11 @@ pub const LISTEN: BoolSpec = BoolSpec { id: "listen", name: "Listen", default: f
 // ---- Output (as the EQ and Comp) ----------------------------------------------------------
 
 pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: false };
+/// The clip stage after shaping (4× oversampled while on), so boosted attacks never pass the
+/// ceiling.
+pub const CLIP: BoolSpec = BoolSpec { id: "clip", name: "Clip", default: false };
+pub const CLIP_CEILING: ParamSpec = spec("clip_ceil", "Clip Ceiling", "dB", -12.0, 0.0, -1.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const CLIP_SOFT: ParamSpec = spec("clip_soft", "Clip Softness", "%", 0.0, 100.0, 40.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const MIX: ParamSpec = spec("mix", "Mix", "%", 0.0, 100.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const OUT_PAN: ParamSpec = spec("out_pan", "Output Pan", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
@@ -63,6 +68,8 @@ pub const B_TIME: ParamSpec = spec("time", "Transient Time", "ms", 5.0, 200.0, 2
 pub const B_TRANSITION: ParamSpec = spec("trans", "Transition", "%", 0.0, 200.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_MIX: ParamSpec = spec("mix", "Band Mix", "%", 0.0, 100.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_OUT: ParamSpec = spec("out", "Band Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+/// How long sustain acts after the handover; the top of the range is endless (until the next hit).
+pub const B_LENGTH: ParamSpec = spec("length", "Sustain Length", "ms", 10.0, LENGTH_MAX_MS, LENGTH_MAX_MS, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::TimeOrForever);
 /// A muted band drops out of the sum (sound: kept in presets, as throwing a band away is).
 pub const B_MUTE: BoolSpec = BoolSpec { id: "mute", name: "Mute", default: false };
 /// Hear only this band (monitoring: never in presets).
@@ -72,6 +79,13 @@ pub const B_SOLO: BoolSpec = BoolSpec { id: "solo", name: "Solo", default: false
 pub const AMOUNT_DIAL: DialCurve = DialCurve(&[(0.0, -AMOUNT_DB), (0.2, -6.0), (0.5, 0.0), (0.8, 6.0), (1.0, AMOUNT_DB)]);
 /// Transient time: 10–50 ms takes half the travel.
 pub const TIME_DIAL: DialCurve = DialCurve(&[(0.0, 5.0), (0.2, 10.0), (0.7, 50.0), (1.0, 200.0)]);
+/// Sustain length: 50–500 ms takes most of the travel; the last stretch reaches endless.
+pub const LENGTH_DIAL: DialCurve = DialCurve(&[(0.0, 10.0), (0.15, 50.0), (0.8, 500.0), (1.0, LENGTH_MAX_MS)]);
+
+/// A sustain length's plain value as the engine takes it (the top of the range is endless).
+pub fn length_ms(plain: f32) -> f32 {
+    if plain >= LENGTH_MAX_MS * 0.995 { f32::INFINITY } else { plain }
+}
 
 /// A crossover parameter's host id, e.g. `x2_freq` (`slot` from 0).
 pub fn cross_id(slot: usize, param: &str) -> String {
@@ -89,6 +103,8 @@ pub fn manifest() -> String {
     lines.extend([LINK, LOOKAHEAD, FLOOR, DET_HP, DET_LP].iter().map(ParamSpec::manifest_line));
     lines.push(LISTEN.manifest_line());
     lines.push(AUTO_GAIN.manifest_line());
+    lines.push(CLIP.manifest_line());
+    lines.extend([CLIP_CEILING, CLIP_SOFT].iter().map(ParamSpec::manifest_line));
     lines.extend([MIX, OUT_PAN, OUT_GAIN].iter().map(ParamSpec::manifest_line));
     lines.push(DELTA.manifest_line());
     lines.push(BYPASS.manifest_line());
@@ -99,7 +115,7 @@ pub fn manifest() -> String {
     }
     for b in 0..BANDS {
         let prefix = |line: String| format!("b{}_{line}", b + 1);
-        for spec in [B_ATTACK, B_SUSTAIN, B_TIME, B_TRANSITION, B_MIX, B_OUT] {
+        for spec in [B_ATTACK, B_SUSTAIN, B_TIME, B_TRANSITION, B_MIX, B_OUT, B_LENGTH] {
             lines.push(prefix(spec.manifest_line()));
         }
         lines.push(prefix(B_MUTE.manifest_line()));
@@ -142,6 +158,7 @@ pub struct BandParams {
     pub transition: FloatParam,
     pub mix: FloatParam,
     pub out: FloatParam,
+    pub length: FloatParam,
     pub mute: BoolParam,
     pub solo: BoolParam,
 }
@@ -156,6 +173,7 @@ impl BandParams {
             transition: float_param_named(&B_TRANSITION, name("Transition")),
             mix: float_param_named(&B_MIX, name("Mix")),
             out: float_param_named(&B_OUT, name("Output")),
+            length: float_param_named(&B_LENGTH, name("Sustain Length")),
             mute: bool_param(&B_MUTE, name("Mute")),
             solo: bool_param(&B_SOLO, name("Solo")),
         }
@@ -169,6 +187,7 @@ impl BandParams {
             transition: self.transition.value() / 100.0,
             mix: self.mix.value() / 100.0,
             out_db: self.out.value(),
+            length_ms: length_ms(self.length.value()),
             mute: self.mute.value(),
             solo: self.solo.value(),
         }
@@ -184,6 +203,9 @@ pub struct ShapeParams {
     pub det_lp: FloatParam,
     pub listen: BoolParam,
     pub auto_gain: BoolParam,
+    pub clip: BoolParam,
+    pub clip_ceiling: FloatParam,
+    pub clip_soft: FloatParam,
     pub mix: FloatParam,
     pub out_pan: FloatParam,
     pub out_gain: FloatParam,
@@ -209,6 +231,9 @@ impl Default for ShapeParams {
             det_lp: float_param(&DET_LP),
             listen: flag(&LISTEN),
             auto_gain: flag(&AUTO_GAIN),
+            clip: flag(&CLIP),
+            clip_ceiling: float_param(&CLIP_CEILING),
+            clip_soft: float_param(&CLIP_SOFT),
             mix: float_param(&MIX),
             out_pan: float_param(&OUT_PAN),
             out_gain: float_param(&OUT_GAIN),
@@ -261,6 +286,9 @@ unsafe impl Params for ShapeParams {
             global(DET_LP.id, self.det_lp.as_ptr(), "Detector"),
             global(LISTEN.id, self.listen.as_ptr(), "Detector"),
             global(AUTO_GAIN.id, self.auto_gain.as_ptr(), ""),
+            global(CLIP.id, self.clip.as_ptr(), "Clip"),
+            global(CLIP_CEILING.id, self.clip_ceiling.as_ptr(), "Clip"),
+            global(CLIP_SOFT.id, self.clip_soft.as_ptr(), "Clip"),
             global(MIX.id, self.mix.as_ptr(), ""),
             global(OUT_PAN.id, self.out_pan.as_ptr(), ""),
             global(OUT_GAIN.id, self.out_gain.as_ptr(), ""),
@@ -280,6 +308,7 @@ unsafe impl Params for ShapeParams {
             map.push((band_id(i, B_TRANSITION.id), b.transition.as_ptr(), group.clone()));
             map.push((band_id(i, B_MIX.id), b.mix.as_ptr(), group.clone()));
             map.push((band_id(i, B_OUT.id), b.out.as_ptr(), group.clone()));
+            map.push((band_id(i, B_LENGTH.id), b.length.as_ptr(), group.clone()));
             map.push((band_id(i, B_MUTE.id), b.mute.as_ptr(), group.clone()));
             map.push((band_id(i, B_SOLO.id), b.solo.as_ptr(), group));
         }

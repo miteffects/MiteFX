@@ -4,7 +4,8 @@
 
 use mite_core::{HistoryTap, SpectrumTap};
 use mite_dsp::output::{balance, DryDelay};
-use mite_dsp::shape::{ShapeSettings, ShapeTelemetry, Shaper, BANDS, MAX_LOOKAHEAD_MS};
+use mite_dsp::oversample::Oversampler;
+use mite_dsp::shape::{soft_clip, ShapeSettings, ShapeTelemetry, Shaper, BANDS, MAX_LOOKAHEAD_MS};
 use mite_dsp::{db_to_gain, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`ShapeShared::history`).
@@ -23,6 +24,8 @@ pub mod record {
     pub const HIT: usize = WEIGHT + BANDS;
     /// Per band slot: its peak level as the detector hears it, dBFS.
     pub const LEVEL: usize = HIT + BANDS;
+    /// The peak going into the clip stage, L and R, dBFS (while it is on; else silence).
+    pub const CLIP: usize = LEVEL + BANDS;
     pub const WIDTH: usize = 32;
 }
 
@@ -42,6 +45,8 @@ const AUTO_LIMIT_DB: f32 = 12.0;
 const AUTO_GATE: f32 = 1e-7;
 /// Auto gain retargets every this many samples (on the clock, not per host block).
 const AUTO_EVERY: usize = 64;
+/// The clip stage runs this many times oversampled (it is the one nonlinear step).
+const CLIP_OVERSAMPLING: usize = 4;
 
 /// The output stage as the parameters set it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,11 +59,15 @@ pub struct Output {
     pub gain_db: f32,
     /// −1 … 1.
     pub pan: f32,
+    /// The clip stage: on, its ceiling (dBFS) and softness (0…1).
+    pub clip: bool,
+    pub ceiling_db: f32,
+    pub softness: f32,
 }
 
 impl Default for Output {
     fn default() -> Self {
-        Self { mix: 1.0, delta: false, bypass: false, auto_gain: false, gain_db: 0.0, pan: 0.0 }
+        Self { mix: 1.0, delta: false, bypass: false, auto_gain: false, gain_db: 0.0, pan: 0.0, clip: false, ceiling_db: -1.0, softness: 0.4 }
     }
 }
 
@@ -76,6 +85,17 @@ pub struct ShapeEngine {
     /// The latency switch: fades out, applies the new lookahead, fades back in.
     dip: LinearSmoother,
     lookahead_ms: f32,
+    /// The clip stage in force (a change waits for the dip, as it changes the latency), its
+    /// resamplers and high-rate buffer, and its glides.
+    clip_on: bool,
+    os: Oversampler,
+    hi: Vec<f32>,
+    ceiling: LinearSmoother,
+    softness: LinearSmoother,
+    /// Per sample of a chunk: the bypass blend, and the ceiling, softness and delta blend, for
+    /// after the clip stage.
+    bypass_now: Vec<f32>,
+    clip_now: Vec<(f32, f32, f32)>,
     /// Auto gain: mean squares in and out, the correction, and their per-sample coefficient.
     auto_in: f32,
     auto_out: f32,
@@ -102,6 +122,13 @@ impl ShapeEngine {
             pan: LinearSmoother::new(0.0),
             dip: LinearSmoother::new(1.0),
             lookahead_ms: s.lookahead_ms,
+            clip_on: false,
+            os: Oversampler::new(1),
+            hi: Vec::new(),
+            ceiling: LinearSmoother::new(1.0),
+            softness: LinearSmoother::new(0.4),
+            bypass_now: Vec::new(),
+            clip_now: Vec::new(),
             auto_in: 0.0,
             auto_out: 0.0,
             auto: LinearSmoother::new(1.0),
@@ -118,15 +145,18 @@ impl ShapeEngine {
     /// Sizes everything for `sample_rate`. Allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &ShapeSettings, out: &Output) {
         self.sample_rate = sample_rate;
-        let max_latency = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1;
+        let max_latency = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1 + Oversampler::latency_for(CLIP_OVERSAMPLING);
         self.dry = DryDelay::new(max_latency, CHUNK);
         self.wet = [vec![0.0; CHUNK], vec![0.0; CHUNK]];
         self.band_sum = [vec![0.0; CHUNK], vec![0.0; CHUNK]];
+        self.hi = vec![0.0; CHUNK * CLIP_OVERSAMPLING];
+        self.bypass_now = vec![0.0; CHUNK];
+        self.clip_now = vec![(1.0, 0.0, 0.0); CHUNK];
         self.slice_len = ((HISTORY_SLICE_MS * 0.001 * sample_rate).round() as usize).max(1);
         for sm in [&mut self.delta, &mut self.bypass, &mut self.dip] {
             sm.set_ramp(sample_rate, SWITCH_MS);
         }
-        for sm in [&mut self.mix, &mut self.gain, &mut self.pan, &mut self.auto] {
+        for sm in [&mut self.mix, &mut self.gain, &mut self.pan, &mut self.auto, &mut self.ceiling, &mut self.softness] {
             sm.set_ramp(sample_rate, GLIDE_MS);
         }
         self.auto_k = 1.0 - (-1.0 / (AUTO_SECONDS * sample_rate)).exp();
@@ -137,6 +167,11 @@ impl ShapeEngine {
     /// Clears the state and snaps every glide to `s` and `out`.
     pub fn reset(&mut self, s: &ShapeSettings, out: &Output) {
         self.lookahead_ms = s.lookahead_ms;
+        self.clip_on = out.clip;
+        self.os.set_factor(if out.clip { CLIP_OVERSAMPLING } else { 1 });
+        self.os.reset();
+        self.ceiling.reset(db_to_gain(out.ceiling_db));
+        self.softness.reset(out.softness);
         self.shaper.reset(s);
         self.dry.reset();
         self.dry.set_delay(self.latency());
@@ -154,10 +189,10 @@ impl ShapeEngine {
         self.acc = empty_record();
     }
 
-    /// The latency in force, samples: the lookahead (it follows a change once the dip has faded
-    /// out).
+    /// The latency in force, samples: the lookahead, plus the clip stage's oversampling while it
+    /// is on (it follows a change once the dip has faded out).
     pub fn latency(&self) -> usize {
-        self.active(&ShapeSettings::default()).latency(self.sample_rate)
+        self.active(&ShapeSettings::default()).latency(self.sample_rate) + self.os.latency()
     }
 
     /// The band layout playing now (for tests and tools).
@@ -191,14 +226,24 @@ impl ShapeEngine {
         self.gain.set_target(db_to_gain(out.gain_db));
         self.pan.set_target(if n_ch == 2 { out.pan } else { 0.0 });
         let auto_on = out.auto_gain && !s.listen;
+        self.ceiling.set_target(db_to_gain(out.ceiling_db));
+        self.softness.set_target(out.softness.clamp(0.0, 1.0));
+        // Listen hears the detector as it is: no clip then.
+        let clip = out.clip && !s.listen;
 
         let mut start = 0;
         while start < len {
-            // A lookahead change: fade out, switch once silent, fade back in.
-            if s.lookahead_ms != self.lookahead_ms {
+            // A lookahead or clip change (both move the latency): fade out, switch once silent,
+            // fade back in.
+            if s.lookahead_ms != self.lookahead_ms || clip != self.clip_on {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
                     self.lookahead_ms = s.lookahead_ms;
+                    if clip != self.clip_on {
+                        self.clip_on = clip;
+                        self.os.set_factor(if clip { CLIP_OVERSAMPLING } else { 1 });
+                        self.os.reset();
+                    }
                     self.dry.set_delay(self.latency());
                     self.dip.set_target(1.0);
                 }
@@ -246,6 +291,8 @@ impl ShapeEngine {
                 let (mix, delta, bypass) = (self.mix.next_value(), self.delta.next_value(), self.bypass.next_value());
                 let gain = self.gain.next_value() * self.dip.next_value();
                 let (pl, pr) = balance(self.pan.next_value());
+                self.bypass_now[i] = bypass;
+                self.clip_now[i] = (self.ceiling.next_value(), self.softness.next_value(), delta);
                 for c in 0..n_ch {
                     let wet = self.wet[c][i] * auto;
                     let bands = self.band_sum[c][i];
@@ -253,9 +300,32 @@ impl ShapeEngine {
                     // Each blend as a·(1 − t) + b·t, so its ends are exact (mix 0 and bypass null).
                     let mixed = bands * (1.0 - mix) + wet * mix;
                     let y = mixed * (1.0 - delta) + (wet - bands) * delta;
-                    let y = y * (1.0 - bypass) + dry * bypass;
                     let side = if n_ch == 2 { if c == 0 { pl } else { pr } } else { 1.0 };
-                    let v = y * gain * side;
+                    // The result before the clip stage, and the dry path as bypass hears it.
+                    self.wet[c][i] = y * gain * side;
+                    self.band_sum[c][i] = dry * gain * side;
+                }
+            }
+            // The clip stage, at the high rate.
+            let mut clip_peak = [0.0f32; 2];
+            if self.clip_on {
+                let m = n * CLIP_OVERSAMPLING;
+                for c in 0..n_ch {
+                    clip_peak[c] = self.wet[c][..n].iter().fold(0.0f32, |p, v| p.max(v.abs()));
+                    self.os.up(c, &self.wet[c][..n], &mut self.hi[..m]);
+                    for (k, v) in self.hi[..m].iter_mut().enumerate() {
+                        // Delta is heard unclipped: while it fades in, the clip fades out.
+                        let (ceiling, soft, delta) = self.clip_now[k / CLIP_OVERSAMPLING];
+                        let clipped = soft_clip(*v, ceiling, soft);
+                        *v += (clipped - *v) * (1.0 - delta);
+                    }
+                    self.os.down(c, &self.hi[..m], &mut self.wet[c][..n]);
+                }
+            }
+            for i in 0..n {
+                let bypass = self.bypass_now[i];
+                for c in 0..n_ch {
+                    let v = self.wet[c][i] * (1.0 - bypass) + self.band_sum[c][i] * bypass;
                     out_peak[c] = out_peak[c].max(v.abs());
                     channels[c][start + i] = v;
                 }
@@ -265,7 +335,16 @@ impl ShapeEngine {
                 in_peak[1] = in_peak[0];
                 out_peak[1] = out_peak[0];
             }
+            if n_ch == 1 {
+                clip_peak[1] = clip_peak[0];
+            }
             self.accumulate(&telemetry, in_peak, out_peak, n_ch);
+            if self.clip_on {
+                for c in 0..2 {
+                    let db = if clip_peak[c] > 0.0 { 20.0 * clip_peak[c].log10() } else { MINUS_INFINITY_DB };
+                    self.acc[record::CLIP + c] = self.acc[record::CLIP + c].max(db);
+                }
+            }
             self.slice_pos += n;
             if self.slice_pos >= self.slice_len {
                 history.push(&self.acc);
@@ -310,7 +389,7 @@ fn push_mono(tap: &SpectrumTap, channels: &[&mut [f32]]) {
 
 fn empty_record() -> [f32; record::WIDTH] {
     let mut r = [0.0; record::WIDTH];
-    for i in [record::IN, record::IN + 1, record::OUT, record::OUT + 1] {
+    for i in [record::IN, record::IN + 1, record::OUT, record::OUT + 1, record::CLIP, record::CLIP + 1] {
         r[i] = MINUS_INFINITY_DB;
     }
     for b in 0..BANDS {

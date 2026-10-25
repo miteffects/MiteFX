@@ -190,3 +190,28 @@ fn a_click_on_a_band_selects_it() {
     click(&mut view, &host, Point::new(rail_x(8000.0), RAIL_MULTI + 30.0));
     assert_eq!(view.selected(), 2);
 }
+
+#[test]
+fn the_clip_ceiling_drags_on_the_level_lane() {
+    let (mut view, host) = setup();
+    host.set_plain(mite_shape::params::CLIP.id, 1.0);
+    draw(&mut view, &host);
+    // Level lane (one band): −48…0 dB over y 68…250; the grip sits at the ceiling (−1 dB) at x 1127.
+    let y = |db: f64| 68.0 + -db / 48.0 * 182.0;
+    drag(&mut view, &host, Point::new(1127.0, y(-1.0)), Point::new(1127.0, y(-7.0)));
+    let c = plain(&host, mite_shape::params::CLIP_CEILING.id);
+    assert!((c + 7.0).abs() < 0.2, "{c}");
+}
+
+#[test]
+fn the_scope_sets_the_sustain_length_and_its_right_edge_is_endless() {
+    let (mut view, host) = setup();
+    let id = band_id(0, mite_shape::params::B_LENGTH.id);
+    // Endless: the handle sits at the scope's right edge (x 786, y 467); drag it to 200 ms.
+    let x200 = 16.0 + 776.0 * ((25.0f64 + 200.0) / 400.0).sqrt();
+    drag(&mut view, &host, Point::new(786.0, 467.0), Point::new(x200, 467.0));
+    let v = plain(&host, &id);
+    assert!((v - 200.0).abs() < 8.0, "{v}");
+    drag(&mut view, &host, Point::new(x200, 467.0), Point::new(796.0, 467.0));
+    assert_eq!(plain(&host, &id), mite_shape::params::B_LENGTH.max);
+}

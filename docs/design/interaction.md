@@ -360,7 +360,12 @@ As built (2026-10-25) from the `ShapeMain` boards and the canvas note `shapeAnsw
 - One card per band, always visible, numbered by frequency; the selected one is 644 px wide with six dials (ATTACK, SUSTAIN, TIME, TRANSITION, MIX, OUTPUT) and the scope's handles; the others have the scope and two small dials (ATTACK, SUSTAIN). Curved funnels tie each rail region to its card.
 - Header buttons: S (solo: white ring, other bands at 35 %), mute (hatch, trace hidden), bin (wide card only: the band's region joins the one below; the lowest band's joins the one above, which takes its place).
 - Scope (a test hit through the band's real detector, square-root time 0–400 ms): drag before the handover line for attack, after it for sustain (vertical, Shift fine); drag the pill on the line sideways for transient time; Alt-drag sideways for transition; double-click a part resets it.
-- Attack and sustain dials: ±6 dB takes 60 % of the sweep. Time: 10–50 ms takes half.
+- Attack and sustain dials: ±6 dB takes 60 % of the sweep. Time: 10–50 ms takes half. Length: 50–500 ms takes most of it; the top is endless (∞).
+- Sustain length: a pill at the scope's top where the length runs out (a dashed line marks the release); drag it sideways. Past the time axis, or endless, it sits at the right edge; dragging off the edge is endless.
+
+## Clip
+
+- Footer toggle (a curve easing into a ceiling). While on: the ceiling is a line across the level lane with a grip at its right end; drag it up or down (Shift fine), Alt-drag sideways for softness (0–100 % over 200 px), double-click resets both. What the clipper takes off is filled in `gr` between the level going in and the output.
 
 ## Keys (Shape)
 
@@ -376,7 +381,7 @@ As built (2026-10-25) from the `ShapeMain` boards and the canvas note `shapeAnsw
 
 - Header after the snapshots: stereo (L/R or M/S and link, lit when M/S or unlinked), detector (lit in the sidechain colour while Listening).
 - Detector sheet: Listen, the detector filter (one band only; drag its nodes, double-click opens a node again) over the input spectrum with what the detector hears in the sidechain colour, FLOOR and LOOKAHEAD dials.
-- Footer: LR4 (several bands), latency, auto gain, delta, bypass, MIX, PAN, OUTPUT. Clip comes later.
+- Footer: LR4 (several bands), latency, auto gain, clip, delta, bypass, MIX, PAN, OUTPUT.
 
 ## Shape reduce motion
 

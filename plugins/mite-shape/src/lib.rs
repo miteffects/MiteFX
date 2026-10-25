@@ -66,7 +66,17 @@ pub struct MiteShape {
 impl MiteShape {
     fn output(&self) -> Output {
         let p = &self.params;
-        Output { mix: p.mix.value() / 100.0, delta: p.delta.value(), bypass: p.bypass.value(), auto_gain: p.auto_gain.value(), gain_db: p.out_gain.value(), pan: p.out_pan.value() / 100.0 }
+        Output {
+            mix: p.mix.value() / 100.0,
+            delta: p.delta.value(),
+            bypass: p.bypass.value(),
+            auto_gain: p.auto_gain.value(),
+            gain_db: p.out_gain.value(),
+            pan: p.out_pan.value() / 100.0,
+            clip: p.clip.value(),
+            ceiling_db: p.clip_ceiling.value(),
+            softness: p.clip_soft.value() / 100.0,
+        }
     }
 }
 

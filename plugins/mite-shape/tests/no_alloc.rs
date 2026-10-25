@@ -35,7 +35,7 @@ fn engine_process_never_allocates() {
         s.detector_hp = if (i / 80) % 2 == 0 { 20.0 } else { 120.0 };
         s.detector_lp = if (i / 100) % 2 == 0 { 20_000.0 } else { 5000.0 };
         s.listen = (i / 170) % 5 == 4;
-        let out = Output { mix: if (i / 80) % 2 == 0 { 1.0 } else { 0.5 }, delta: (i / 100) % 2 == 1, bypass: (i / 210) % 4 == 3, auto_gain: (i / 140) % 2 == 0, gain_db: -3.0, pan: 0.2 };
+        let out = Output { mix: if (i / 80) % 2 == 0 { 1.0 } else { 0.5 }, delta: (i / 100) % 2 == 1, bypass: (i / 210) % 4 == 3, auto_gain: (i / 140) % 2 == 0, gain_db: -3.0, pan: 0.2, clip: (i / 160) % 2 == 1, ceiling_db: -6.0 + ((i / 20) % 6) as f32, softness: 0.4 };
         for (k, (a, b)) in l.iter_mut().zip(r.iter_mut()).enumerate() {
             let x = (((i * 256 + k) as f32) * 0.05).sin() * if (i / 7) % 2 == 0 { 0.5 } else { 0.01 };
             *a = x;

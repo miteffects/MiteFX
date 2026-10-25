@@ -22,6 +22,8 @@ pub enum ParamDisplay {
     Time,
     /// A ratio `n:1`: one decimal under 10, none from there, and `∞` at the top of the range.
     Ratio,
+    /// As [`ParamDisplay::Time`], with `∞` at the top of the range (a length that can be endless).
+    TimeOrForever,
 }
 
 /// The precision a [`ParamDisplay::Time`] value is shown and snapped to, ms.
@@ -82,9 +84,10 @@ impl ParamSpec {
             ParamDisplay::Frequency => (format!("{:.0}", plain), "Hz"),
             // The format follows the *rounded* value, so a time just under a boundary (9.97 ms)
             // reads like the boundary does ("10 ms") and survives a text round trip.
-            ParamDisplay::Time if (plain * 10.0).round() < 100.0 => (format!("{:.1}", plain), "ms"),
-            ParamDisplay::Time if plain.round() < 1000.0 => (format!("{:.0}", plain), "ms"),
-            ParamDisplay::Time => (format!("{:.2}", plain / 1000.0), "s"),
+            ParamDisplay::TimeOrForever if plain >= self.max * 0.995 => ("∞".to_owned(), ""),
+            ParamDisplay::Time | ParamDisplay::TimeOrForever if (plain * 10.0).round() < 100.0 => (format!("{:.1}", plain), "ms"),
+            ParamDisplay::Time | ParamDisplay::TimeOrForever if plain.round() < 1000.0 => (format!("{:.0}", plain), "ms"),
+            ParamDisplay::Time | ParamDisplay::TimeOrForever => (format!("{:.2}", plain / 1000.0), "s"),
             ParamDisplay::Ratio if plain >= self.max * 0.995 => ("∞".to_owned(), ":1"),
             ParamDisplay::Ratio if plain < 10.0 => (format!("{plain:.1}"), ":1"),
             ParamDisplay::Ratio => (format!("{plain:.0}"), ":1"),
@@ -96,7 +99,7 @@ impl ParamSpec {
     /// precision; every other display is returned unchanged.
     pub fn snap(&self, plain: f32) -> f32 {
         match self.display {
-            ParamDisplay::Time => {
+            ParamDisplay::Time | ParamDisplay::TimeOrForever => {
                 let step = time_step(plain);
                 ((plain / step).round() * step).clamp(self.min, self.max)
             }
@@ -126,10 +129,10 @@ impl ParamSpec {
     pub fn parse(&self, text: &str) -> Option<f32> {
         let t = text.trim().replace('−', "-");
         let lower = t.to_ascii_lowercase();
-        if self.display == ParamDisplay::Ratio && (lower.contains('∞') || lower.starts_with("inf")) {
+        if matches!(self.display, ParamDisplay::Ratio | ParamDisplay::TimeOrForever) && (lower.contains('∞') || lower.starts_with("inf")) {
             return Some(self.max);
         }
-        let seconds = self.display == ParamDisplay::Time && lower.ends_with('s') && !lower.ends_with("ms");
+        let seconds = matches!(self.display, ParamDisplay::Time | ParamDisplay::TimeOrForever) && lower.ends_with('s') && !lower.ends_with("ms");
         let (num, factor) = if let Some(n) = lower.strip_suffix("khz").or_else(|| lower.strip_suffix('k')) {
             (n.trim().to_owned(), 1000.0)
         } else if seconds {
@@ -154,7 +157,7 @@ impl ParamSpec {
         // Snapped values must still move: a notch too small to reach the next shown value takes
         // one display step.
         let (from, to) = (self.snap(plain), self.snap(v));
-        if to == from && notches != 0.0 && self.display == ParamDisplay::Time {
+        if to == from && notches != 0.0 && matches!(self.display, ParamDisplay::Time | ParamDisplay::TimeOrForever) {
             return self.snap(from + time_step(from) * notches.signum());
         }
         to

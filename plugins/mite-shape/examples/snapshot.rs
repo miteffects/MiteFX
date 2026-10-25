@@ -79,13 +79,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("delta") {
         host.set_plain(DELTA.id, 1.0);
     }
+    if v("clip") {
+        host.set_plain(CLIP.id, 1.0);
+        host.set_plain(CLIP_CEILING.id, -6.0);
+        host.set_plain(&band_id(0, B_ATTACK.id), 9.0);
+        host.set_plain(OUT_GAIN.id, 3.0);
+    }
+    if v("length") {
+        host.set_plain(&band_id(0, B_LENGTH.id), 80.0);
+        host.set_plain(&band_id(0, B_SUSTAIN.id), 6.0);
+    }
 
     // Run the real engine over the loop so the history holds genuine records.
     let shared = Arc::new(ShapeShared::new());
     let sample_rate = 48_000.0;
     shared.sample_rate.store(sample_rate);
     let settings = mite_shape::editor::settings(&host);
-    let out = Output { delta: v("delta"), ..Output::default() };
+    let out = Output { delta: v("delta"), clip: v("clip"), ceiling_db: -6.0, gain_db: if v("clip") { 3.0 } else { 0.0 }, ..Output::default() };
     let mut engine = ShapeEngine::new(sample_rate, &settings);
     let [mut l, mut r] = drums::drum_loop(7.0, sample_rate);
     for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {

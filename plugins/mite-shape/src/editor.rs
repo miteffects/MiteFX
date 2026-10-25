@@ -88,6 +88,9 @@ const SCOPE_PAD: f64 = 6.0;
 /// The layout grows from one band to several (base motion, 220 ms).
 const GROW_MS: f64 = 220.0;
 
+/// The clip ceiling's grip on the level lane (its x; it rides the ceiling's level).
+const CEILING_GRIP: Rect = Rect::new(1110.0, 0.0, 1144.0, 22.0);
+
 /// Docked panels.
 const DETECTOR_SHEET: Rect = Rect::new(12.0, DISPLAY_TOP + 392.0, 832.0, DISPLAY_TOP + 610.0);
 const STEREO_POP: Rect = Rect::new(852.0, DISPLAY_TOP + 8.0, 1088.0, DISPLAY_TOP + 120.0);
@@ -148,11 +151,11 @@ pub fn memory_host() -> mite_ui::MemoryParamHost {
             "choice" => index(id, f[2].split(", ").count(), f[3].parse().unwrap_or(0)),
             _ => {
                 let short = id.split_once('_').filter(|(p, _)| p.len() == 2 && (p.starts_with('x') || p.starts_with('b'))).map_or(id, |(_, rest)| rest);
-                let base = [LINK, LOOKAHEAD, FLOOR, DET_HP, DET_LP, MIX, OUT_PAN, OUT_GAIN]
+                let base = [LINK, LOOKAHEAD, FLOOR, DET_HP, DET_LP, CLIP_CEILING, CLIP_SOFT, MIX, OUT_PAN, OUT_GAIN]
                     .into_iter()
                     .find(|s| s.id == id)
                     .or_else(|| {
-                        let pool: &[ParamSpec] = if id.starts_with('x') { &[X_FREQ] } else { &[B_ATTACK, B_SUSTAIN, B_TIME, B_TRANSITION, B_MIX, B_OUT] };
+                        let pool: &[ParamSpec] = if id.starts_with('x') { &[X_FREQ] } else { &[B_ATTACK, B_SUSTAIN, B_TIME, B_TRANSITION, B_MIX, B_OUT, B_LENGTH] };
                         pool.iter().copied().find(|s| s.id == short)
                     })
                     .expect("every manifest line has a spec");
@@ -178,6 +181,7 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::shape::ShapeSettings {
             transition: p(&band_id(b, B_TRANSITION.id)) / 100.0,
             mix: p(&band_id(b, B_MIX.id)) / 100.0,
             out_db: p(&band_id(b, B_OUT.id)),
+            length_ms: length_ms(p(&band_id(b, B_LENGTH.id))),
             mute: on(&band_id(b, B_MUTE.id)),
             solo: on(&band_id(b, B_SOLO.id)),
         }),
@@ -253,6 +257,8 @@ enum Part {
     Sustain,
     Time,
     Transition,
+    /// Where the sustain length runs out.
+    Length,
 }
 
 /// What dragging a crossover onto something does on release.
@@ -275,6 +281,8 @@ enum Drag {
     Scope { band: usize, part: Part, start: Point, value: f32 },
     /// The detector filter's high-pass (true) or low-pass node.
     Filter { hp: bool },
+    /// The clip ceiling (Alt: its softness).
+    Ceiling { start: Point, ceiling: f32, softness: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -284,6 +292,7 @@ enum Hot {
     Region(usize),
     Card(usize),
     Scope(usize, Part),
+    Ceiling,
     History,
 }
 
@@ -328,8 +337,10 @@ struct PanelHits {
 }
 
 /// The band settings a copy carries (the sound ones), in this order.
-const BAND_SPECS: [ParamSpec; 6] = [B_ATTACK, B_SUSTAIN, B_TIME, B_TRANSITION, B_MIX, B_OUT];
-const BAND_LABELS: [&str; 6] = ["ATTACK", "SUSTAIN", "TIME", "TRANSITION", "MIX", "OUTPUT"];
+const BAND_SPECS: [ParamSpec; 7] = [B_ATTACK, B_SUSTAIN, B_TIME, B_LENGTH, B_TRANSITION, B_MIX, B_OUT];
+const BAND_LABELS: [&str; 7] = ["ATTACK", "SUSTAIN", "TIME", "LENGTH", "TRANSITION", "MIX", "OUTPUT"];
+/// The wide card's dials: four on the top row, three under them.
+const DIAL_COLUMNS: usize = 4;
 
 pub struct ShapeView {
     shared: Arc<ShapeShared>,
@@ -349,8 +360,8 @@ pub struct ShapeView {
     /// The cards' dials, for the bands and the selection they were made for.
     card_knobs: Vec<Knob>,
     card_key: Option<(Vec<usize>, usize)>,
-    /// Copied band settings (attack, sustain, time, transition, mix, output, mute).
-    clipboard: Option<[f32; 7]>,
+    /// Copied band settings (`BAND_SPECS`, then mute).
+    clipboard: Option<[f32; 8]>,
     /// History records (newest last), the tap's read position, and the meters as drawn (IN L/R,
     /// OUT L/R) with their ballistics.
     history: VecDeque<[f32; record::WIDTH]>,
@@ -382,6 +393,7 @@ impl ShapeView {
             (WIDTH, HEIGHT),
             vec![
                 FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — keeps the loudness where it was as the shaping changes it (measured over a second or two)" },
+                FooterToggle { id: CLIP.id, glyph: ToggleGlyph::Clip, words: "Clip — a soft clipper after the shaping, so boosted attacks never pass its ceiling (oversampled, so it adds under 2 ms of latency)" },
                 FooterToggle { id: DELTA.id, glyph: ToggleGlyph::Delta, words: "Delta — hear only what Shape adds or removes" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the whole plugin, latency kept" },
             ],
@@ -518,6 +530,7 @@ impl ShapeView {
             transition: Self::plain(host, &id(B_TRANSITION.id)) / 100.0,
             mix: Self::plain(host, &id(B_MIX.id)) / 100.0,
             out_db: Self::plain(host, &id(B_OUT.id)),
+            length_ms: length_ms(Self::plain(host, &id(B_LENGTH.id))),
             mute: Self::on(host, &id(B_MUTE.id)),
             solo: Self::on(host, &id(B_SOLO.id)),
         }
@@ -542,20 +555,20 @@ impl ShapeView {
         f64::from(Self::plain(host, LOOKAHEAD.id))
     }
 
-    fn band_values(host: &dyn ParamHost, b: usize) -> [f32; 7] {
-        let mut v = [0.0; 7];
+    fn band_values(host: &dyn ParamHost, b: usize) -> [f32; 8] {
+        let mut v = [0.0; 8];
         for (k, spec) in BAND_SPECS.iter().enumerate() {
             v[k] = Self::plain(host, &band_id(b, spec.id));
         }
-        v[6] = if Self::on(host, &band_id(b, B_MUTE.id)) { 1.0 } else { 0.0 };
+        v[7] = if Self::on(host, &band_id(b, B_MUTE.id)) { 1.0 } else { 0.0 };
         v
     }
 
-    fn write_band(host: &dyn ParamHost, b: usize, v: &[f32; 7]) {
+    fn write_band(host: &dyn ParamHost, b: usize, v: &[f32; 8]) {
         for (k, spec) in BAND_SPECS.iter().enumerate() {
             Self::set(host, &band_id(b, spec.id), v[k]);
         }
-        Self::set(host, &band_id(b, B_MUTE.id), v[6]);
+        Self::set(host, &band_id(b, B_MUTE.id), v[7]);
     }
 
     fn copy_band(host: &dyn ParamHost, from: usize, to: usize) {
@@ -563,7 +576,7 @@ impl ShapeView {
     }
 
     fn reset_band(host: &dyn ParamHost, b: usize) {
-        let mut v = [0.0; 7];
+        let mut v = [0.0; 8];
         for (k, spec) in BAND_SPECS.iter().enumerate() {
             v[k] = spec.default;
         }
@@ -645,6 +658,13 @@ impl ShapeView {
         Rect::new(x0, lanes.ry, x1, lanes.ry + lanes.rh)
     }
 
+    /// The clip ceiling's grip, at the ceiling's level on the level lane.
+    fn ceiling_rect(host: &dyn ParamHost, l: &Lanes) -> Rect {
+        let db = f64::from(Self::plain(host, CLIP_CEILING.id));
+        let y = l.lv0 + (-db.clamp(-LEVEL_RANGE_DB, 0.0) / LEVEL_RANGE_DB) * (l.lv1 - l.lv0);
+        Rect::new(CEILING_GRIP.x0, y - 11.0, CEILING_GRIP.x1, y + 11.0)
+    }
+
     fn grip_center(host: &dyn ParamHost, slot: usize, lanes: &Lanes) -> Point {
         let f = Self::plain(host, &cross_id(slot, X_FREQ.id));
         Point::new(rail_x(f64::from(f)), lanes.ry + lanes.rh / 2.0)
@@ -663,9 +683,8 @@ impl ShapeView {
             let rect = Rect::new(0.0, y, HIST_W, y + h);
             let scope = Rect::new(10.0, y + 10.0, 798.0, y + h - 12.0);
             let x0 = 810.0;
-            let col = (HIST_W - 10.0 - x0) / 3.0;
             let top = y + 10.0 + ((h - 20.0) - 192.0) / 2.0;
-            let dials = (0..6).map(|i| Point::new(x0 + col * ((i % 3) as f64 + 0.5), top + 39.5 + 98.0 * (i / 3) as f64)).collect();
+            let dials = Self::dial_grid(x0, HIST_W - 10.0, top);
             return vec![Card { band: bands[0], rect, scope, big: true, solo: None, mute: None, bin: None, dials }];
         }
         let narrow = (HIST_W - CARD_WIDE - CARD_GAP * (n - 1) as f64) / (n - 1) as f64;
@@ -685,10 +704,8 @@ impl ShapeView {
                 let sh = if big { 160.0 } else if w > 220.0 { 112.0 } else { 80.0 };
                 let scope = Rect::new(rect.x0 + 10.0, head_y + 38.0, rect.x0 + 10.0 + col, head_y + 38.0 + sh);
                 let dials = if big {
-                    let x0 = rect.x0 + 10.0 + 284.0 + 12.0;
-                    let cw = (rect.x1 - 10.0 - x0) / 3.0;
                     let top = y + 10.0 + ((h - 20.0) - 192.0) / 2.0;
-                    (0..6).map(|i| Point::new(x0 + cw * ((i % 3) as f64 + 0.5), top + 39.5 + 98.0 * (i / 3) as f64)).collect()
+                    Self::dial_grid(rect.x0 + 10.0 + 284.0 + 12.0, rect.x1 - 10.0, top)
                 } else {
                     // Two small dials, side by side when there is room.
                     let top = scope.y1 + 6.0 + 20.0;
@@ -697,6 +714,13 @@ impl ShapeView {
                 Card { band, rect, scope, big, solo: Some(solo), mute: Some(mute), bin, dials }
             })
             .collect()
+    }
+
+    /// The wide card's dial centres between `x0` and `x1` from row top `top`, in `BAND_SPECS`
+    /// order: ATTACK, SUSTAIN, TIME, LENGTH over TRANSITION, MIX, OUTPUT.
+    fn dial_grid(x0: f64, x1: f64, top: f64) -> Vec<Point> {
+        let col = (x1 - x0) / DIAL_COLUMNS as f64;
+        (0..BAND_SPECS.len()).map(|i| Point::new(x0 + col * ((i % DIAL_COLUMNS) as f64 + 0.5), top + 39.5 + 98.0 * (i / DIAL_COLUMNS) as f64)).collect()
     }
 
     /// The band whose card is wide: the selected one when it is in use, else the lowest.
@@ -723,15 +747,25 @@ impl ShapeView {
         r.y0 + r.height() * 0.56 - soft_gain(g) * Self::scope_k(r)
     }
 
-    fn handle_points(r: Rect, b: &BandShape) -> [(Part, Point); 3] {
+    /// Where the sustain length runs out on a scope: on the time axis while it fits, at the right
+    /// edge when it is longer (or endless).
+    fn length_x(r: Rect, b: &BandShape) -> f64 {
+        let end = f64::from(b.transient_ms) + f64::from(b.length_ms);
+        if end < SCOPE_MS * 0.97 { Self::scope_x(r, end) } else { r.x1 - SCOPE_PAD - 6.0 }
+    }
+
+    fn handle_points(r: Rect, b: &BandShape) -> [(Part, Point); 4] {
         let t = f64::from(b.transient_ms);
         let wd = (t * f64::from(b.transition)).max(1.5);
         let ta = ((t - wd / 2.0) * 0.45).max(0.6);
-        let ts = t + wd / 2.0 + (SCOPE_MS - t) * 0.3;
+        // The sustain dot sits inside the stretch sustain acts on (it ends with a finite length).
+        let end = (t + f64::from(b.length_ms)).min(SCOPE_MS);
+        let ts = t + wd / 2.0 + (end - t - wd / 2.0).max(0.0) * 0.3;
         [
             (Part::Attack, Point::new(Self::scope_x(r, ta), Self::scope_gain_y(r, f64::from(b.attack_db)))),
             (Part::Sustain, Point::new(Self::scope_x(r, ts), Self::scope_gain_y(r, f64::from(b.sustain_db)))),
             (Part::Time, Point::new(Self::scope_x(r, t), r.y1 - 17.0)),
+            (Part::Length, Point::new(Self::length_x(r, b), r.y0 + 17.0)),
         ]
     }
 
@@ -808,6 +842,11 @@ impl ShapeView {
         if la > 0.0 {
             cx.scene.stroke(&Stroke::new(1.0).with_dashes(0.0, [2.0, 2.0]), Affine::IDENTITY, theme.spectrum_pre, None, &Line::new((sx(la), r.y0), (sx(la), r.y1)));
         }
+        // Where the sustain length runs out, when it is on the axis.
+        if f64::from(b.transient_ms) + f64::from(b.length_ms) < SCOPE_MS * 0.97 {
+            let lx = Self::length_x(r, b);
+            cx.scene.stroke(&Stroke::new(1.0).with_dashes(0.0, [2.0, 3.0]), Affine::IDENTITY, theme.accent.multiply_alpha(0.7), None, &Line::new((lx, r.y0), (lx, r.y1)));
+        }
         let gain = polyline(&pts.iter().map(|p| Point::new(sx(p.t_ms), gy(p.gain_db))).collect::<Vec<_>>());
         glow_stroke(cx, &gain, if big { 2.2 } else { 1.6 }, theme.curve, theme.curve, 3.0);
         cx.scene.pop_layer();
@@ -820,7 +859,7 @@ impl ShapeView {
         if handles {
             for (part, c) in Self::handle_points(r, b) {
                 let hot = matches!(self.hot, Some(Hot::Scope(_, p)) if p == part) || matches!(self.drag, Some(Drag::Scope { part: p, .. }) if p == part);
-                let shape = if part == Part::Time { RoundedRect::from_rect(Rect::from_center_size(c, (8.0, 18.0)), 4.0) } else { RoundedRect::from_rect(Rect::from_center_size(c, (12.0, 12.0)), 6.0) };
+                let shape = if matches!(part, Part::Time | Part::Length) { RoundedRect::from_rect(Rect::from_center_size(c, (8.0, 18.0)), 4.0) } else { RoundedRect::from_rect(Rect::from_center_size(c, (12.0, 12.0)), 6.0) };
                 glow_fill(cx, &shape, theme.accent, if hot { 7.0 } else { 4.0 });
                 cx.scene.stroke(&Stroke::new(2.0), Affine::IDENTITY, theme.needle, None, &shape);
             }
@@ -943,7 +982,31 @@ impl ShapeView {
         let fill = Gradient::new_linear((0.0, l.lv0), (0.0, l.lv1)).with_stops([out_color.multiply_alpha(a), out_color.multiply_alpha(0.01)]);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(output.clone(), l.lv1));
         glow_stroke(cx, &output, 1.6, out_color, out_color, 2.4);
+        // The clip stage: what it takes off (between the level going in and coming out) in gr,
+        // and its ceiling.
+        if Self::on(cx.host, CLIP.id) {
+            let into = |r: &[f32; record::WIDTH]| lv_y(level(r, record::CLIP).max(level(r, record::OUT)));
+            let top = line(&into);
+            let mut taken = top.clone();
+            for (x, r) in cols.iter().rev() {
+                taken.line_to((*x, lv_y(level(r, record::OUT))));
+            }
+            taken.close_path();
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.gain_reduction.multiply_alpha(0.55), None, &taken);
+        }
         cx.scene.pop_layer();
+        if Self::on(cx.host, CLIP.id) {
+            let ceiling = f64::from(Self::plain(cx.host, CLIP_CEILING.id));
+            let y = lv_y(ceiling);
+            let band = Rect::new(0.0, y, CEILING_GRIP.x0 - 10.0, lv_y(ceiling - 2.0));
+            let fade = Gradient::new_linear((0.0, band.y0), (0.0, band.y1)).with_stops([theme.accent.multiply_alpha(0.16), theme.accent.multiply_alpha(0.0)]);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fade, None, &band);
+            glow_stroke(cx, &Line::new((0.0, y), (band.x1, y)), 1.5, theme.accent, theme.accent, 2.4);
+            let hot = matches!(self.hot, Some(Hot::Ceiling)) || matches!(self.drag, Some(Drag::Ceiling { .. }));
+            let pill = RoundedRect::from_rect(Self::ceiling_rect(cx.host, l), 11.0);
+            mite_ui::paint::glow_fill(cx, &pill, theme.accent, if hot { 8.0 } else { 4.0 });
+            draw_glyph(cx.scene, "M2 16 L8 16 C10.5 16 11 4 14 4 H22", pill.rect().center(), 16.0, theme.display, 2.2);
+        }
 
         // The gain lane: the shown band's gain, attack part solid, sustain part light.
         cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, l.sep, HIST_W, l.h1));
@@ -1592,6 +1655,14 @@ impl ShapeView {
                 return Help::default().text("Crossover ").slot(fmt_freq(f), "20.0 kHz").text(" — drag sideways; onto a neighbour or off the end merges; double-click merges");
             }
             Some(Hot::Ghost(_)) => return Help::default().text("Pull a crossover in from here to split the sound into bands"),
+            Some(Hot::Ceiling) => {
+                return Help::default()
+                    .text("Clip · ceiling ")
+                    .slot(CLIP_CEILING.format(Self::plain(host, CLIP_CEILING.id)), "−12.0 dB")
+                    .text(" · soft ")
+                    .slot(CLIP_SOFT.format(Self::plain(host, CLIP_SOFT.id)), "100 %")
+                    .text(" — the amber is what the clipper takes off; drag the line, Alt-drag for softness, double-click resets");
+            }
             Some(Hot::Scope(b, part)) => {
                 let s = Self::band(host, b);
                 return match part {
@@ -1599,6 +1670,7 @@ impl ShapeView {
                     Part::Sustain => Help::default().text("Sustain ").slot(format!("{} dB", fmt_db(f64::from(s.sustain_db))), "+18.0 dB").text(" — drag up or down; everything after the hit"),
                     Part::Time => Help::default().text("Transient time ").slot(B_TIME.format(s.transient_ms), "200 ms").text(" — drag sideways; where attack hands over to sustain. Alt-drag for the handover's width"),
                     Part::Transition => Help::default().text("Transition ").slot(format!("{:.0} %", s.transition * 100.0), "200 %").text(" — Alt-drag sideways; how gently attack hands over to sustain"),
+                    Part::Length => Help::default().text("Sustain length ").slot(B_LENGTH.format(Self::plain(host, &band_id(b, B_LENGTH.id))), "2.00 s").text(" — drag sideways; how long sustain acts before the gain returns to 0 dB. At the right edge: until the next hit"),
                 };
             }
             Some(Hot::Region(b)) | Some(Hot::Card(b)) if layout.n > 0 => {
@@ -1729,12 +1801,14 @@ impl ShapeView {
                 let b = card.band;
                 if card.big {
                     for (k, spec) in BAND_SPECS.iter().enumerate() {
-                        let kind = if matches!(k, 0 | 1 | 5) { KnobKind::Bipolar } else { KnobKind::Unipolar };
+                        let kind = if matches!(k, 0 | 1 | 6) { KnobKind::Bipolar } else { KnobKind::Unipolar };
                         let mut knob = Knob::new(*spec, BAND_LABELS[k], kind, card.dials[k], 62.0).with_id(band_id(b, spec.id));
                         if k < 2 {
                             knob = knob.with_curve(AMOUNT_DIAL);
                         } else if k == 2 {
                             knob = knob.with_curve(TIME_DIAL);
+                        } else if k == 3 {
+                            knob = knob.with_curve(LENGTH_DIAL);
                         }
                         self.card_knobs.push(knob);
                     }
@@ -1749,7 +1823,7 @@ impl ShapeView {
             self.card_key = Some(key);
         }
         // Follow the cards as the layout eases.
-        let mut centres = cards.iter().flat_map(|c| c.dials.iter().copied().take(if c.big { 6 } else { 2 }));
+        let mut centres = cards.iter().flat_map(|c| c.dials.iter().copied().take(if c.big { BAND_SPECS.len() } else { 2 }));
         for k in &mut self.card_knobs {
             if let Some(c) = centres.next() {
                 k.center = c;
@@ -1771,6 +1845,13 @@ impl ShapeView {
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
         let layout = Self::layout(host);
         let l = lanes(self.grow);
+        if Self::on(host, CLIP.id) {
+            let r = Self::ceiling_rect(host, &l);
+            let line = Rect::new(0.0, r.center().y - 5.0, r.x1, r.center().y + 5.0);
+            if r.contains(p) || line.contains(p) {
+                return Some(Hot::Ceiling);
+            }
+        }
         let rail = Rect::new(0.0, l.ry, HIST_W, l.ry + l.rh);
         if rail.inflate(0.0, 4.0).contains(p) {
             for k in 0..layout.n {
@@ -2037,9 +2118,16 @@ impl ShapeView {
                     Part::Sustain => (B_SUSTAIN.id, band.sustain_db),
                     Part::Time => (B_TIME.id, band.transient_ms),
                     Part::Transition => (B_TRANSITION.id, band.transition * 100.0),
+                    Part::Length => (B_LENGTH.id, Self::plain(host, &band_id(b, B_LENGTH.id))),
                 };
                 host.begin_gesture(&band_id(b, id));
                 self.drag = Some(Drag::Scope { band: b, part, start: pos, value });
+                true
+            }
+            Some(Hot::Ceiling) => {
+                host.begin_gesture(CLIP_CEILING.id);
+                host.begin_gesture(CLIP_SOFT.id);
+                self.drag = Some(Drag::Ceiling { start: pos, ceiling: Self::plain(host, CLIP_CEILING.id), softness: Self::plain(host, CLIP_SOFT.id) });
                 true
             }
             Some(Hot::History) | None => false,
@@ -2089,6 +2177,26 @@ impl ShapeView {
                         let v = value + ((pos.x - start.x) * 200.0 / 240.0 * fine) as f32;
                         Self::set_raw(host, &band_id(band, B_TRANSITION.id), v.clamp(0.0, 200.0));
                     }
+                    Part::Length => {
+                        // Along the time axis; off its right end is endless.
+                        let b = Self::band(host, band);
+                        let x0 = Self::length_x(r, &BandShape { length_ms: length_ms(value), ..b });
+                        let x = x0 + (pos.x - start.x) * fine;
+                        let v = if x >= r.x1 - SCOPE_PAD - 4.0 { B_LENGTH.max } else { B_LENGTH.snap(((Self::scope_t(r, x) - f64::from(b.transient_ms)) as f32).clamp(B_LENGTH.min, B_LENGTH.max)) };
+                        Self::set_raw(host, &band_id(band, B_LENGTH.id), v);
+                    }
+                }
+            }
+            Drag::Ceiling { start, ceiling, softness } => {
+                if mods.alt {
+                    // Softness: 0–100 % over 200 px, sideways.
+                    let v = softness + ((pos.x - start.x) / 2.0 * fine) as f32;
+                    Self::set_raw(host, CLIP_SOFT.id, v.clamp(0.0, 100.0));
+                } else {
+                    let l = lanes(self.grow);
+                    let db_per_px = LEVEL_RANGE_DB / (l.lv1 - l.lv0);
+                    let v = ceiling - ((pos.y - start.y) * db_per_px * fine) as f32;
+                    Self::set_raw(host, CLIP_CEILING.id, v.clamp(CLIP_CEILING.min, CLIP_CEILING.max));
                 }
             }
             Drag::Filter { hp } => {
@@ -2137,10 +2245,15 @@ impl ShapeView {
                     Part::Sustain => B_SUSTAIN.id,
                     Part::Time => B_TIME.id,
                     Part::Transition => B_TRANSITION.id,
+                    Part::Length => B_LENGTH.id,
                 };
                 host.end_gesture(&band_id(band, id));
             }
             Drag::Filter { hp } => host.end_gesture(if hp { DET_HP.id } else { DET_LP.id }),
+            Drag::Ceiling { .. } => {
+                host.end_gesture(CLIP_CEILING.id);
+                host.end_gesture(CLIP_SOFT.id);
+            }
         }
         true
     }
@@ -2175,6 +2288,12 @@ impl ShapeView {
                 self.split(host, rail_f(pos.x));
                 true
             }
+            Some(Hot::Ceiling) => {
+                self.drag = None;
+                Self::set(host, CLIP_CEILING.id, CLIP_CEILING.default);
+                Self::set(host, CLIP_SOFT.id, CLIP_SOFT.default);
+                true
+            }
             Some(Hot::Scope(b, part)) => {
                 self.drag = None;
                 let (id, spec) = match part {
@@ -2182,6 +2301,7 @@ impl ShapeView {
                     Part::Sustain => (B_SUSTAIN.id, B_SUSTAIN),
                     Part::Time => (B_TIME.id, B_TIME),
                     Part::Transition => (B_TRANSITION.id, B_TRANSITION),
+                    Part::Length => (B_LENGTH.id, B_LENGTH),
                 };
                 Self::set(host, &band_id(b, id), spec.default);
                 true

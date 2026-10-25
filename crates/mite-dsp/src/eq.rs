@@ -267,6 +267,8 @@ pub struct ShapeDetector {
     rise: f64,
     /// The sharpest the current hit has been (0…1), held through its attack phase.
     sharpness: f64,
+    /// Samples since the last hit started (any hit, attack phase over or not).
+    since: Option<u32>,
 }
 
 impl ShapeDetector {
@@ -283,6 +285,7 @@ impl ShapeDetector {
             phase: 0.0,
             rise: 1.0,
             sharpness: 0.0,
+            since: None,
         };
         d.set_times(rate, transient_ms, transition);
         d
@@ -309,6 +312,7 @@ impl ShapeDetector {
         self.onset = false;
         self.phase = 0.0;
         self.sharpness = 0.0;
+        self.since = None;
     }
 
     /// Feeds one level (linear peak).
@@ -325,6 +329,9 @@ impl ShapeDetector {
         if onset && !self.onset {
             self.elapsed = Some(0);
             self.sharpness = 0.0;
+            self.since = Some(0);
+        } else if let Some(n) = self.since {
+            self.since = Some(n.saturating_add(1));
         }
         self.onset = onset;
         // 1 through the attack phase, then an S-shaped crossfade to 0 centred on the transient
@@ -359,6 +366,11 @@ impl ShapeDetector {
     /// amount applies now.
     pub fn weight(&self) -> f64 {
         self.phase * self.sharpness
+    }
+
+    /// Samples since the last hit started, attack phase over or not (`None` before the first).
+    pub fn since_hit(&self) -> Option<u32> {
+        self.since
     }
 
     /// Samples since the current hit started, while its attack phase runs.
