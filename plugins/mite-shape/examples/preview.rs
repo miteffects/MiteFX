@@ -59,7 +59,7 @@ fn main() -> Result<(), String> {
             }
             pos = (pos + 512) % l0.len();
             let out = Output { delta, ..Output::default() };
-            engine.process(&mut [&mut l, &mut r], &s, &out, &audio.history, Some(&audio.spectrum));
+            engine.process(&mut [&mut l, &mut r], &s, &out, &audio.history, Some([&audio.spectrum, &audio.post]));
             audio.latency.store(engine.latency() as f32);
             blocks += 1;
             let due = start + Duration::from_secs_f64(blocks as f64 * 512.0 / 48_000.0);

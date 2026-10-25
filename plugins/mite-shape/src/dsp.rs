@@ -170,21 +170,17 @@ impl ShapeEngine {
         ShapeSettings { lookahead_ms: self.lookahead_ms, ..*s }
     }
 
-    /// Processes one host block in place, pushes the history records it completes and the input
-    /// to `spectrum` (mono).
+    /// Processes one host block in place, pushes the history records it completes, and the input
+    /// and the output to `spectra` (mono each).
     #[allow(clippy::needless_range_loop)] // channels and scratch buffers indexed together
-    pub fn process(&mut self, channels: &mut [&mut [f32]], s: &ShapeSettings, out: &Output, history: &HistoryTap<{ record::WIDTH }>, spectrum: Option<&SpectrumTap>) {
+    pub fn process(&mut self, channels: &mut [&mut [f32]], s: &ShapeSettings, out: &Output, history: &HistoryTap<{ record::WIDTH }>, spectra: Option<[&SpectrumTap; 2]>) {
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
             return;
         }
         let len = channels.iter().map(|c| c.len()).min().unwrap_or(0);
-        if let Some(tap) = spectrum {
-            match &*channels {
-                [l, r, ..] => tap.push(l.iter().zip(r.iter()).map(|(a, b)| 0.5 * (a + b))),
-                [m] => tap.push(m.iter().copied()),
-                [] => {}
-            }
+        if let Some([input, _]) = spectra {
+            push_mono(input, channels);
         }
         // Listen replaces the output with what the detector hears: no mix, delta, bypass or auto
         // gain then.
@@ -278,6 +274,9 @@ impl ShapeEngine {
             }
             start = end;
         }
+        if let Some([_, output]) = spectra {
+            push_mono(output, channels);
+        }
     }
 
     fn accumulate(&mut self, t: &ShapeTelemetry, in_peak: [f32; 2], out_peak: [f32; 2], n_ch: usize) {
@@ -298,6 +297,14 @@ impl ShapeEngine {
             a[record::HIT + b] = a[record::HIT + b].max(t.hit[b]);
             a[record::LEVEL + b] = a[record::LEVEL + b].max(t.level_db[b]);
         }
+    }
+}
+
+fn push_mono(tap: &SpectrumTap, channels: &[&mut [f32]]) {
+    match channels {
+        [l, r, ..] => tap.push(l.iter().zip(r.iter()).map(|(a, b)| 0.5 * (a + b))),
+        [m] => tap.push(m.iter().copied()),
+        [] => {}
     }
 }
 

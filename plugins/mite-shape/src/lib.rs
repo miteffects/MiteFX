@@ -20,8 +20,9 @@ use params::ShapeParams;
 pub struct ShapeShared {
     /// One record per 5 ms slice (`dsp::record`).
     pub history: HistoryTap<{ record::WIDTH }>,
-    /// The input (mono), for the spectrum under the crossovers.
+    /// The input and the output (mono), for the spectra under the crossovers.
     pub spectrum: SpectrumTap,
+    pub post: SpectrumTap,
     pub sample_rate: AtomicF32,
     /// The latency the engine runs with, samples.
     pub latency: AtomicF32,
@@ -39,6 +40,7 @@ impl ShapeShared {
         Self {
             history: HistoryTap::new(HISTORY_RECORDS),
             spectrum: SpectrumTap::new(editor::ANALYZER_SIZE),
+            post: SpectrumTap::new(editor::ANALYZER_SIZE),
             sample_rate: AtomicF32::new(48_000.0),
             latency: AtomicF32::new(0.0),
             snapshots,
@@ -126,7 +128,7 @@ impl Plugin for MiteShape {
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let settings = self.params.settings();
         let output = self.output();
-        self.engine.process(buffer.as_slice(), &settings, &output, &self.shared.history, Some(&self.shared.spectrum));
+        self.engine.process(buffer.as_slice(), &settings, &output, &self.shared.history, Some([&self.shared.spectrum, &self.shared.post]));
         // A lookahead change switched the latency behind its dip: tell the host.
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {

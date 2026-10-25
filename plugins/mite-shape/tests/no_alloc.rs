@@ -43,10 +43,10 @@ fn engine_process_never_allocates() {
         }
         let block = if i % 3 == 0 { 256 } else { 100 };
         process_wrapper(|| {
-            engine.process(&mut [&mut l[..block], &mut r[..block]], &s, &out, &history, Some(&spectrum));
+            engine.process(&mut [&mut l[..block], &mut r[..block]], &s, &out, &history, Some([&spectrum, &spectrum]));
         });
         if i % 50 == 0 {
-            process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, &out, &history, Some(&spectrum)));
+            process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, &out, &history, Some([&spectrum, &spectrum])));
         }
         assert!(l.iter().chain(&r).all(|x| x.is_finite()));
     }

@@ -366,6 +366,12 @@ pub struct ShapeView {
     power: Vec<f32>,
     spectrum_target: Vec<f32>,
     spectrum: Vec<f32>,
+    /// The output's spectrum (several bands only), eased the same way.
+    post_target: Vec<f32>,
+    post: Vec<f32>,
+    /// Each band's glow on the rail: the size of its gain, eased like the spectrum, so regions
+    /// breathe with the music instead of flashing at every hit.
+    glow: [f32; BANDS],
     last_analysis: Instant,
 }
 
@@ -419,6 +425,9 @@ impl ShapeView {
             samples: vec![0.0; ANALYZER_SIZE],
             power: vec![0.0; bins],
             spectrum_target: vec![-150.0; SPECTRUM_POINTS],
+            post_target: vec![-150.0; SPECTRUM_POINTS],
+            post: vec![-150.0; SPECTRUM_POINTS],
+            glow: [0.0; BANDS],
             spectrum: vec![-150.0; SPECTRUM_POINTS],
             last_analysis: Instant::now(),
             shared,
@@ -1000,7 +1009,6 @@ impl ShapeView {
         let x = Self::crossovers(cx.host);
         let soloed = Self::soloed(cx.host, layout);
         let merging = self.merging_band(cx.host, layout);
-        let now_gain = |b: usize| self.history.iter().rev().take(4).map(|r| r[record::GAIN_A + b]).fold(0.0f32, |m, g| if g.abs() > m.abs() { g } else { m });
         // Band regions: the selected one lit, the others breathing with their gain.
         if multi {
             for (p, &b) in layout.bands().iter().enumerate() {
@@ -1008,7 +1016,7 @@ impl ShapeView {
                 let muted = Self::on(cx.host, &band_id(b, B_MUTE.id));
                 let audible = Self::audible(cx.host, layout, b);
                 let on = b == self.shown_selected(layout);
-                let breath = (f64::from(now_gain(b).abs()) / 6.0 * 0.12).min(0.12);
+                let breath = (f64::from(self.glow[b]) / 6.0 * 0.12).min(0.12);
                 let mut op = (if on { 0.22 } else { 0.10 }) + if audible { breath } else { 0.0 };
                 if soloed.is_some_and(|s| s != b) {
                     op *= 0.35;
@@ -1036,7 +1044,7 @@ impl ShapeView {
                 }
             }
         }
-        // The input spectrum, and (several bands) what the bands make of it now.
+        // The input spectrum, and (several bands) the output's.
         let spec_y = |db: f32| ry + 4.0 + f64::from((SPEC_TOP_DB - db.clamp(SPEC_BOTTOM_DB, SPEC_TOP_DB)) / (SPEC_TOP_DB - SPEC_BOTTOM_DB)) * (rh - 8.0);
         if self.spectrum.iter().any(|&v| v > SPEC_BOTTOM_DB) {
             let pts: Vec<Point> = (0..SPECTRUM_POINTS).map(|i| Point::new(rail_x(spectrum_point_freq(i)), spec_y(self.spectrum[i]))).collect();
@@ -1048,15 +1056,8 @@ impl ShapeView {
             cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &rail);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(if multi { 0.2 } else { 0.12 }), None, &fill);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.6), None, &curve);
-            if multi {
-                let gains: Vec<(usize, f64)> = layout.bands().iter().map(|&b| (b, if Self::audible(cx.host, layout, b) { 10f64.powf(f64::from(now_gain(b)) / 20.0) } else { 0.0 })).collect();
-                let out: Vec<Point> = (0..SPECTRUM_POINTS)
-                    .map(|i| {
-                        let w = layout.weights(&x, spectrum_point_freq(i));
-                        let a: f64 = gains.iter().map(|&(b, g)| w[b] * g).sum();
-                        Point::new(pts[i].x, spec_y(self.spectrum[i] + 20.0 * a.max(1e-3).log10() as f32))
-                    })
-                    .collect();
+            if multi && self.post.iter().any(|&v| v > SPEC_BOTTOM_DB) {
+                let out: Vec<Point> = (0..SPECTRUM_POINTS).map(|i| Point::new(pts[i].x, spec_y(self.post[i]))).collect();
                 glow_stroke(cx, &smooth_path(&out), 1.6, theme.curve, theme.curve, 2.4);
             }
             cx.scene.pop_layer();
@@ -2189,29 +2190,45 @@ impl ShapeView {
         }
     }
 
-    /// Reads the input spectrum (at most once per display refresh) and eases the curve towards it.
-    fn update_spectrum(&mut self, dt: f64) -> bool {
+    /// Reads the input spectrum, and the output's with several bands (at most once per display
+    /// refresh), and eases the curves towards them; eases the bands' glow too.
+    fn update_spectrum(&mut self, dt: f64, multi: bool) -> bool {
         let fs = f64::from(self.shared.sample_rate.load()).max(1.0);
         if fs != self.log_spectrum.sample_rate() {
             self.log_spectrum = LogSpectrum::new(ANALYZER_SIZE, fs);
         }
         if self.last_analysis.elapsed().as_secs_f64() >= 0.0155 {
             self.last_analysis = Instant::now();
-            self.shared.spectrum.read_latest(&mut self.samples);
-            if self.samples.iter().all(|s| s.abs() < 1e-7) {
-                self.spectrum_target.iter_mut().for_each(|t| *t = -150.0);
-            } else {
-                self.analyzer.analyze_power(&self.samples, &mut self.power);
-                self.log_spectrum.read(&self.power, &mut self.spectrum_target);
+            for (tap, target, on) in [(&self.shared.spectrum, &mut self.spectrum_target, true), (&self.shared.post, &mut self.post_target, multi)] {
+                if !on {
+                    target.iter_mut().for_each(|t| *t = -150.0);
+                    continue;
+                }
+                tap.read_latest(&mut self.samples);
+                if self.samples.iter().all(|s| s.abs() < 1e-7) {
+                    target.iter_mut().for_each(|t| *t = -150.0);
+                } else {
+                    self.analyzer.analyze_power(&self.samples, &mut self.power);
+                    self.log_spectrum.read(&self.power, target);
+                }
             }
         }
         let rise = (1.0 - (-dt / SPECTRUM_RISE_S).exp()) as f32;
         let fall = (1.0 - (-dt / SPECTRUM_FALL_S).exp()) as f32;
-        let mut changed = false;
-        for (v, &t) in self.spectrum.iter_mut().zip(&self.spectrum_target) {
+        let ease = |v: &mut f32, t: f32| {
             let next = *v + (t - *v) * if t > *v { rise } else { fall };
-            changed |= (next - *v).abs() > 0.02;
+            let moved = (next - *v).abs() > 0.02;
             *v = next;
+            moved
+        };
+        let mut changed = false;
+        for (v, &t) in self.spectrum.iter_mut().zip(&self.spectrum_target).chain(self.post.iter_mut().zip(&self.post_target)) {
+            changed |= ease(v, t);
+        }
+        // The glow follows the largest gain of the last 20 ms, eased.
+        for b in 0..BANDS {
+            let now = self.history.iter().rev().take(4).map(|r| r[record::GAIN_A + b].abs()).fold(0.0f32, f32::max);
+            changed |= ease(&mut self.glow[b], now);
         }
         changed
     }
@@ -2304,7 +2321,7 @@ impl View for ShapeView {
         let target = if Self::layout(host).n > 0 { 1.0 } else { 0.0 };
         let step = dt * 1000.0 / GROW_MS;
         let before = self.grow;
-        self.grow = if target > self.grow { (self.grow + step).min(1.0) } else { (self.grow - step).max(0.0) };
+        self.grow = if target > self.grow { (self.grow + step).min(target) } else { (self.grow - step).max(target) };
         let grew = self.grow != before;
         if Self::layout(host).position(self.selected).is_none() {
             self.selected = 0;
@@ -2317,7 +2334,7 @@ impl View for ShapeView {
                 *m = if t > *m { t } else { (*m - fall).max(t) };
             }
         }
-        let spectrum = self.update_spectrum(dt);
+        let spectrum = self.update_spectrum(dt, Self::layout(host).n > 0);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
         fresh || flowing || grew || spectrum || self.drag.is_some() || self.meters.iter().any(|&m| m > -149.0)
     }
@@ -2333,6 +2350,29 @@ mod tests {
             assert!((rail_f(rail_x(f)) - f).abs() / f < 1e-9);
         }
         assert!((rail_x(20.0) - RAIL_X0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_layout_settles_and_stays_put() {
+        // It once overshot its target every other frame, so with several bands everything
+        // jumped up and down.
+        let host = memory_host();
+        host.set_plain(&cross_id(0, X_ON.id), 1.0);
+        let mut view = ShapeView::new(Arc::new(ShapeShared::new()));
+        let mut seen = Vec::new();
+        for _ in 0..80 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            view.tick(&host);
+            seen.push(view.grow);
+        }
+        assert!(seen.windows(2).all(|w| w[1] >= w[0]), "it only grows: {seen:?}");
+        assert_eq!(*seen.last().unwrap(), 1.0);
+        host.set_plain(&cross_id(0, X_ON.id), 0.0);
+        for _ in 0..80 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            view.tick(&host);
+        }
+        assert_eq!(view.grow, 0.0);
     }
 
     #[test]

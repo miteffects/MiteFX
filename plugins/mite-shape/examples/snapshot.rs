@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = ShapeEngine::new(sample_rate, &settings);
     let [mut l, mut r] = drums::drum_loop(7.0, sample_rate);
     for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-        engine.process(&mut [a, b], &settings, &out, &shared.history, Some(&shared.spectrum));
+        engine.process(&mut [a, b], &settings, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
     }
     shared.latency.store(engine.latency() as f32);
 
