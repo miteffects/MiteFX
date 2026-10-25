@@ -10,6 +10,7 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -189,13 +190,25 @@ pub fn render(cases: &[Case], work: &Path) -> Result<std::collections::BTreeMap<
         let _ = std::fs::remove_file(out.join(format!("{}.wav", c.id)));
     }
     std::fs::write(&lua, script(cases, &out, &log, &done)).map_err(|e| e.to_string())?;
-    let mut child = Command::new("reaper")
+    // Off screen when gamescope is there (its headless backend is a display of its own), so
+    // Reaper never takes the window in front; MITEFX_COMPARE_VISIBLE=1 shows it. Its own process
+    // group, so stopping it stops Reaper and the plugin bridges with it.
+    let headless = std::env::var_os("MITEFX_COMPARE_VISIBLE").is_none() && Command::new("gamescope").arg("--help").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok();
+    let mut command = if headless {
+        let mut c = Command::new("gamescope");
+        c.args(["--backend", "headless", "-w", "1280", "-h", "720", "--", "reaper"]);
+        c
+    } else {
+        Command::new("reaper")
+    };
+    let mut child = command
         .args(["-newinst", "-nosplash", "-cfgfile"])
         .arg(res.join("reaper.ini"))
         .arg("-new")
         .arg(&lua)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .process_group(0)
         .spawn()
         .map_err(|e| format!("reaper: {e}"))?;
     let start = Instant::now();
@@ -203,6 +216,7 @@ pub fn render(cases: &[Case], work: &Path) -> Result<std::collections::BTreeMap<
     while !done.exists() && start.elapsed() < limit && child.try_wait().ok().flatten().is_none() {
         std::thread::sleep(Duration::from_millis(250));
     }
+    let _ = Command::new("kill").args(["-9", "--", &format!("-{}", child.id())]).status();
     let _ = child.kill();
     let _ = child.wait();
     if !done.exists() {

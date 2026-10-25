@@ -4,6 +4,11 @@
 //! Each band is a 2×2 matrix per frequency in the L/R basis (a stereo band scales both channels,
 //! a mid or side band scales M or S), so stereo placements combine exactly; the result comes back
 //! as one shared kernel, a kernel per channel, or a full matrix, whichever the bands need.
+//!
+//! A narrow low band rings for longer than the kernel lasts, so the kernel cannot hold all of it,
+//! and a window that tapers early smears it further. The window is flat over most of the kernel
+//! with short cosine ends, and the target is pre-compensated: each pass adds back what the
+//! windowed kernel still misses, measured on a grid finer than the kernel.
 
 use realfft::num_complex::Complex;
 use realfft::RealFftPlanner;
@@ -15,6 +20,13 @@ use crate::eq::{linear_phase_response_db, BandSettings, Placement};
 type Matrix = [f64; 4];
 
 const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0];
+
+/// The share of each half of the kernel the window spends tapering (a Tukey window).
+const TAPER: f64 = 0.3;
+/// Pre-compensation passes.
+const PASSES: usize = 4;
+/// The grid the target is defined and checked on, as a multiple of the kernel length.
+const OVERSAMPLE: usize = 2;
 
 fn multiply(a: Matrix, b: Matrix) -> Matrix {
     [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3]]
@@ -36,12 +48,14 @@ fn band_matrix(placement: Placement, g: f64) -> Matrix {
 /// The EQ's linear-phase kernels, `len` samples long (a power of two), at `sample_rate`.
 pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDesign {
     assert!(len.is_power_of_two() && len >= 4, "kernel length must be a power of two");
-    let bins = len / 2 + 1;
+    let half = len / 2;
+    let fine = OVERSAMPLE * len;
+    let bins = fine / 2 + 1;
     // The whole EQ's matrix at every bin, bands applied in order.
     let mut response = vec![IDENTITY; bins];
     for s in bands.iter().filter(|s| s.enabled) {
         for (k, m) in response.iter_mut().enumerate() {
-            let f = k as f64 * sample_rate / len as f64;
+            let f = k as f64 * sample_rate / fine as f64;
             let db = linear_phase_response_db(s, f);
             let g = if db.is_finite() { 10f64.powf(db / 20.0) } else { 0.0 };
             *m = multiply(band_matrix(s.placement, g), *m);
@@ -57,27 +71,55 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDes
         (KernelLayout::Shared, &[0])
     };
 
-    let ifft = RealFftPlanner::<f64>::new().plan_fft_inverse(len);
+    // Tukey: 1 over the middle, a cosine down to 0 at sample 0, symmetric about `half`.
+    let window: Vec<f64> = (0..len)
+        .map(|n| {
+            let d = (n as f64 - half as f64).abs() / half as f64;
+            if d <= 1.0 - TAPER {
+                1.0
+            } else {
+                0.5 + 0.5 * (std::f64::consts::PI * (d - (1.0 - TAPER)) / TAPER).cos()
+            }
+        })
+        .collect();
+    let mut planner = RealFftPlanner::<f64>::new();
+    let ifft = planner.plan_fft_inverse(fine);
+    let fft = planner.plan_fft_forward(fine);
     let mut spectrum = ifft.make_input_vec();
     let mut scratch = ifft.make_scratch_vec();
-    let mut zero_phase = vec![0.0; len];
-    let half = len / 2;
+    let mut time = vec![0.0; fine];
+    let mut achieved = fft.make_output_vec();
+    let mut fft_scratch = fft.make_scratch_vec();
     let kernels = entries
         .iter()
         .map(|&e| {
-            for (c, m) in spectrum.iter_mut().zip(&response) {
-                *c = Complex::new(m[e], 0.0);
+            let desired: Vec<f64> = response.iter().map(|m| m[e]).collect();
+            let mut target = desired.clone();
+            let mut kernel = vec![0.0; len];
+            for pass in 0..=PASSES {
+                for (c, &t) in spectrum.iter_mut().zip(&target) {
+                    *c = Complex::new(t, 0.0);
+                }
+                ifft.process_with_scratch(&mut spectrum, &mut time, &mut scratch).expect("buffers sized by the planner");
+                // Centre the zero-phase response at `half` and window it: the kernel is exactly
+                // symmetric about `half`.
+                for (n, k) in kernel.iter_mut().enumerate() {
+                    *k = time[(n + fine - half) % fine] / fine as f64 * window[n];
+                }
+                if pass == PASSES {
+                    break;
+                }
+                // The windowed kernel's (real, zero-phase) response, and what it still misses.
+                time.fill(0.0);
+                for (n, &k) in kernel.iter().enumerate() {
+                    time[(n + fine - half) % fine] = k;
+                }
+                fft.process_with_scratch(&mut time, &mut achieved, &mut fft_scratch).expect("buffers sized by the planner");
+                for ((t, d), a) in target.iter_mut().zip(&desired).zip(&achieved) {
+                    *t += d - a.re;
+                }
             }
-            ifft.process_with_scratch(&mut spectrum, &mut zero_phase, &mut scratch).expect("buffers sized by the planner");
-            // Centre the zero-phase response at `half` and taper it with a Blackman window, which
-            // is 1 at the centre and 0 at sample 0: the kernel is exactly symmetric about `half`.
-            (0..len)
-                .map(|n| {
-                    let h = zero_phase[(n + len - half) % len] / len as f64;
-                    let x = 2.0 * std::f64::consts::PI * n as f64 / len as f64;
-                    h * (0.42 - 0.5 * x.cos() + 0.08 * (2.0 * x).cos())
-                })
-                .collect()
+            kernel
         })
         .collect();
     KernelDesign { layout, kernels, delay: half }

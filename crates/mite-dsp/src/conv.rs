@@ -44,6 +44,7 @@ pub struct KernelDesign {
 
 /// Kernels cut into block-sized partitions and transformed, ready for a [`Convolver`] with the
 /// same block size. Build it off the audio thread.
+#[derive(Clone)]
 pub struct KernelSet {
     block: usize,
     partitions: usize,

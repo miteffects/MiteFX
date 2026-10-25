@@ -64,7 +64,7 @@ impl PhaseMode {
 
 /// Linear-phase resolutions (the `lp_res` choices): kernel lengths at 48 kHz.
 pub const LP_RESOLUTIONS: [&str; 4] = ["Low", "Medium", "High", "Max"];
-const LP_LENGTHS_48K: [usize; 4] = [1024, 2048, 4096, 8192];
+const LP_LENGTHS_48K: [usize; 4] = [1024, 2048, 8192, 16384];
 /// Convolution partition sizes at 48 kHz, samples (part of the latency). Natural Phase's kernel
 /// is short, so it uses smaller partitions for less latency.
 const LP_BLOCK_48K: usize = 128;
@@ -168,7 +168,7 @@ struct DesignRequest {
 
 fn design_kernel(req: &DesignRequest) -> KernelSet {
     let k = if req.mode == PhaseMode::NaturalPhase {
-        natural_phase::design(&req.bands, req.sample_rate, req.len)
+        natural_phase::design(&req.bands, req.sample_rate, req.len, natural_phase::TAPS_48K * rate_ratio(req.sample_rate))
     } else {
         linear_phase::design(&req.bands, req.sample_rate, req.len)
     };
@@ -184,12 +184,16 @@ struct CorrectionRequest {
 }
 
 /// Design grid for the correction at 48 kHz, points (scaled with the sample rate).
-const CORRECTION_FFT_48K: usize = 8192;
+const CORRECTION_FFT_48K: usize = 4096;
+/// The correction's direct-form part and FFT partitions at 48 kHz, samples (scaled likewise).
+const CORRECTION_BLOCK_48K: usize = 64;
 
 fn design_correction(req: &CorrectionRequest) -> Correction {
     let ratio = rate_ratio(req.sample_rate);
     let lengths = TAPS_48K.map(|t| t * ratio);
-    zero_latency_correction(&req.bands, req.sample_rate, &lengths, CORRECTION_FFT_48K * ratio, req.mono).unwrap_or_else(Correction::identity)
+    zero_latency_correction(&req.bands, req.sample_rate, &lengths, CORRECTION_FFT_48K * ratio, req.mono)
+        .unwrap_or_else(Correction::identity)
+        .partitioned(CORRECTION_BLOCK_48K * ratio)
 }
 
 /// The kernel-design thread: designs whatever was requested last (convolution kernels and the
@@ -286,6 +290,10 @@ pub struct EqEngine {
     /// the bands after its kernel), and the delayed chunk.
     sc_delay: DryDelay,
     sc_scratch: [Vec<f32>; 2],
+    /// What `prepare` designed last, kept so a host re-activating with the same settings (as
+    /// hosts do around renders) does not design it again.
+    prepared_correction: Option<(CorrectionRequest, Correction)>,
+    prepared_kernel: Option<(DesignRequest, KernelSet)>,
 }
 
 impl EqEngine {
@@ -340,7 +348,7 @@ impl EqEngine {
             solo_placement: Placement::Stereo,
             solo: LinearSmoother::new(0.0),
             solo_scratch: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
-            correction: CorrectionFilter::new(1, 1),
+            correction: CorrectionFilter::new(1, 1, 1),
             corrections,
             correction_requests,
             last_correction: None,
@@ -348,6 +356,8 @@ impl EqEngine {
             mono: false,
             sc_delay: DryDelay::new(0, CHUNK),
             sc_scratch: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
+            prepared_correction: None,
+            prepared_kernel: None,
         };
         engine.prepare(sample_rate, settings, out_db);
         engine
@@ -380,16 +390,26 @@ impl EqEngine {
         let ratio = rate_ratio(sr);
         let fade = (KERNEL_FADE_MS * sr / 1000.0) as usize;
         self.conv = Convolver::new(LP_BLOCK_48K * ratio, kernel_len(LP_LENGTHS_48K.len() - 1, sr), fade);
-        self.np_conv = Convolver::new(NP_BLOCK_48K * ratio, 2 * natural_phase::DELAY_48K * ratio, fade);
+        self.np_conv = Convolver::new(NP_BLOCK_48K * ratio, natural_phase::TAPS_48K * ratio, fade);
         self.stft = Stft::new(spectral_latency(sr));
         self.spectral = SpectralBands::new(BANDS, self.stft.size(), sr);
         let max_latency = linear_phase_latency(LP_LENGTHS_48K.len() - 1, sr).max(natural_phase_latency(sr)) + spectral_latency(sr);
         self.dry = DryDelay::new(max_latency, CHUNK);
         self.sc_delay = DryDelay::new(linear_phase_latency(LP_LENGTHS_48K.len() - 1, sr), CHUNK);
-        // The correction is designed off the audio thread here, so Zero Latency starts corrected.
-        self.correction = CorrectionFilter::new(max_taps(ratio), fade);
-        self.last_correction = Some(CorrectionRequest { bands: *settings, sample_rate: sr, mono: self.mono });
-        let _ = self.correction.offer(Box::new(design_correction(&CorrectionRequest { bands: *settings, sample_rate: sr, mono: self.mono })));
+        // In Zero Latency the correction is designed off the audio thread here, so it starts
+        // corrected (the other modes ask the designer for it when they switch to Zero Latency).
+        self.correction = CorrectionFilter::new(max_taps(ratio), CORRECTION_BLOCK_48K * ratio, fade);
+        self.last_correction = None;
+        if self.wanted.mode == PhaseMode::ZeroLatency {
+            let req = CorrectionRequest { bands: *settings, sample_rate: sr, mono: self.mono };
+            let correction = match &self.prepared_correction {
+                Some((r, c)) if *r == req => c.clone(),
+                _ => design_correction(&req),
+            };
+            self.prepared_correction = Some((req, correction.clone()));
+            self.last_correction = Some(req);
+            let _ = self.correction.offer(Box::new(correction));
+        }
         let [pan_l, pan_r] = &mut self.pan;
         for s in [&mut self.mix, pan_l, pan_r] {
             s.set_ramp(sample_rate, crate::params::MIX.smoothing_ms);
@@ -405,8 +425,12 @@ impl EqEngine {
         self.last_request = None;
         if self.active.mode.convolves() {
             let req = self.request(settings);
-            let kernel = Box::new(design_kernel(&req));
-            self.convolver(self.active.mode).replace(kernel);
+            let kernel = match &self.prepared_kernel {
+                Some((r, k)) if *r == req => k.clone(),
+                _ => design_kernel(&req),
+            };
+            self.prepared_kernel = Some((req, kernel.clone()));
+            self.convolver(self.active.mode).replace(Box::new(kernel));
         }
         self.reset(settings, out_db);
     }

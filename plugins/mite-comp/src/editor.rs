@@ -14,6 +14,7 @@ use std::time::Instant;
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::dynamics::{curve_db, level_before, level_thresholds, order, partial_curve_db, simulate_stage, Detector, Quadrant, Smart, Stage, CHARACTERS, CUSTOM, INF_RATIO, KEY_BANDS, RATIO_MAX, STAGES, STYLES};
 use mite_dsp::eq::{analog_response_db, BandSettings, BandType};
+use mite_dsp::oversample::Oversampler;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel};
 use mite_ui::peniko::{Color, Fill, Gradient};
@@ -1233,6 +1234,19 @@ impl CompView {
                     draw_glyph(cx.scene, d, r.center(), 22.0, ink, 1.7);
                     hits.icons.push((r, TOPOLOGY.id, v));
                 }
+                // Oversampling in the fourth column: 1×, 2×, 4× stacked, the one in force lit.
+                let x0 = WIDE_PANEL.x0 + 16.0 + 170.0 + 16.0;
+                let col = (WIDE_PANEL.x1 - 16.0 - 36.0 - 16.0 - x0) / 4.0;
+                let (cx_os, cy) = (x0 + col * 3.5, WIDE_PANEL.center().y + 4.0);
+                let factor = Self::index(cx.host, OVERSAMPLING.id);
+                for (i, label) in OVERSAMPLING.choices.iter().enumerate() {
+                    let y = cy - 45.0 + i as f64 * 32.0;
+                    let r = Rect::new(cx_os - 30.0, y, cx_os + 30.0, y + 26.0);
+                    let on = factor == i;
+                    let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), on, theme.accent);
+                    cx.text.draw(cx.scene, label, r.center().x, r.y0 + 6.0, TextStyle::LABEL.sized(10.0).weighted(800.0), ink, Align::Center);
+                    hits.icons.push((r, OVERSAMPLING.id, i as f32));
+                }
                 // Auto makeup beside the MAKEUP dial.
                 if let Some(k) = self.panel_knobs.get(2) {
                     let r = Rect::new(k.center.x + 36.0, k.center.y - 18.0, k.center.x + 72.0, k.center.y + 18.0);
@@ -1499,7 +1513,7 @@ impl CompView {
                 Smart::Master => "Smart · Master — the curve follows the mix gently to hold the target",
             });
         }
-        for (i, words) in ["Sidechain — what the detector hears, through its own EQ", "Stereo — L/R or M/S, and how tightly the channels are linked", "Detector & output — topology, lookahead, hold, makeup"].into_iter().enumerate() {
+        for (i, words) in ["Sidechain — what the detector hears, through its own EQ", "Stereo — L/R or M/S, and how tightly the channels are linked", "Detector & output — topology, lookahead, hold, makeup, oversampling"].into_iter().enumerate() {
             if self.head_hits[i].contains(p) {
                 return Help::default().text(words);
             }
@@ -1512,6 +1526,16 @@ impl CompView {
                 if let Some(k) = self.panel_knobs.iter().find(|k| k.bounds().contains(p)) {
                     let v = Self::plain(host, &k.id);
                     return Help::default().text(format!("{} · ", k.label)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(" — drag; double-click resets");
+                }
+                if let Some(&(_, _, v)) = self.hits.icons.iter().find(|(r, id, _)| *id == OVERSAMPLING.id && r.contains(p)) {
+                    let factor = 1usize << (v as usize);
+                    let latency_ms = Oversampler::latency_for(factor) as f32 / self.shared.sample_rate.load().max(1.0) * 1000.0;
+                    return Help::default()
+                        .text("Oversampling · ")
+                        .slot(OVERSAMPLING.choices[v as usize], "4×")
+                        .text(if factor == 1 { " — the compressor runs at the host's rate" } else { " — fast gain changes alias less; adds " })
+                        .slot(if factor == 1 { String::new() } else { format!("{latency_ms:.1} ms") }, "0.0 ms")
+                        .text(if factor == 1 { "" } else { " of latency" });
                 }
                 if self.hits.handles.iter().any(|(_, c)| c.distance(p) < 12.0) {
                     return Help::default().text("Drag sideways: attack (first handle) or release (second)");

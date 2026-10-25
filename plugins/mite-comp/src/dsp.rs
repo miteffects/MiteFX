@@ -5,6 +5,7 @@
 use mite_core::HistoryTap;
 use mite_dsp::dynamics::{CompSettings, CompTelemetry, Compressor, MAX_LOOKAHEAD_MS, STAGES};
 use mite_dsp::output::{balance, DryDelay};
+use mite_dsp::oversample::{Oversampler, MAX_FACTOR};
 use mite_dsp::{db_to_gain, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`CompShared::history`).
@@ -57,14 +58,20 @@ pub struct CompEngine {
     comp: Compressor,
     dry: DryDelay,
     scratch: [Vec<f32>; 2],
+    /// Oversampling: the audio's and the key's resamplers, and their high-rate buffers.
+    os: Oversampler,
+    os_key: Oversampler,
+    hi: [Vec<f32>; 2],
+    hi_key: [Vec<f32>; 2],
     mix: LinearSmoother,
     delta: LinearSmoother,
     bypass: LinearSmoother,
     gain: LinearSmoother,
     pan: LinearSmoother,
-    /// The latency switch: fades out, applies the new lookahead, fades back in.
+    /// The latency switch: fades out, applies the new lookahead or oversampling, fades back in.
     dip: LinearSmoother,
     lookahead_ms: f32,
+    oversampling: usize,
     slice_len: usize,
     slice_pos: usize,
     acc: [f32; record::WIDTH],
@@ -77,6 +84,10 @@ impl CompEngine {
             comp: Compressor::new(sample_rate),
             dry: DryDelay::new(1, 1),
             scratch: [Vec::new(), Vec::new()],
+            os: Oversampler::new(1),
+            os_key: Oversampler::new(1),
+            hi: [Vec::new(), Vec::new()],
+            hi_key: [Vec::new(), Vec::new()],
             mix: LinearSmoother::new(1.0),
             delta: LinearSmoother::new(0.0),
             bypass: LinearSmoother::new(0.0),
@@ -84,6 +95,7 @@ impl CompEngine {
             pan: LinearSmoother::new(0.0),
             dip: LinearSmoother::new(1.0),
             lookahead_ms: s.lookahead_ms,
+            oversampling: s.oversampling,
             slice_len: 1,
             slice_pos: 0,
             acc: empty_record(),
@@ -95,9 +107,11 @@ impl CompEngine {
     /// Sizes everything for `sample_rate`. Allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &CompSettings, out: &Output) {
         self.sample_rate = sample_rate;
-        let max_latency = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1;
+        let max_latency = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1 + Oversampler::latency_for(MAX_FACTOR);
         self.dry = DryDelay::new(max_latency, CHUNK);
         self.scratch = [vec![0.0; CHUNK], vec![0.0; CHUNK]];
+        self.hi = [vec![0.0; CHUNK * MAX_FACTOR], vec![0.0; CHUNK * MAX_FACTOR]];
+        self.hi_key = [vec![0.0; CHUNK * MAX_FACTOR], vec![0.0; CHUNK * MAX_FACTOR]];
         self.slice_len = ((HISTORY_SLICE_MS * 0.001 * sample_rate).round() as usize).max(1);
         for sm in [&mut self.delta, &mut self.bypass, &mut self.dip] {
             sm.set_ramp(sample_rate, SWITCH_MS);
@@ -106,6 +120,7 @@ impl CompEngine {
             sm.set_ramp(sample_rate, GLIDE_MS);
         }
         self.lookahead_ms = s.lookahead_ms;
+        self.oversampling = s.oversampling;
         self.comp.prepare(sample_rate, s);
         self.reset(s, out);
     }
@@ -113,9 +128,10 @@ impl CompEngine {
     /// Clears the state and snaps every glide to `s` and `out`.
     pub fn reset(&mut self, s: &CompSettings, out: &Output) {
         self.lookahead_ms = s.lookahead_ms;
-        self.comp.reset(&self.active(s));
+        self.oversampling = s.oversampling;
+        self.apply_oversampling(s);
         self.dry.reset();
-        self.dry.set_delay(self.comp.latency());
+        self.dry.set_delay(self.latency());
         self.mix.reset(out.mix);
         self.delta.reset(if out.delta { 1.0 } else { 0.0 });
         self.bypass.reset(if out.bypass { 1.0 } else { 0.0 });
@@ -126,14 +142,23 @@ impl CompEngine {
         self.acc = empty_record();
     }
 
-    /// The latency in force, samples (it follows a lookahead change once the dip has faded out).
+    /// The latency in force, samples (it follows a lookahead or oversampling change once the
+    /// dip has faded out): the lookahead plus the oversampler's round trip.
     pub fn latency(&self) -> usize {
-        self.comp.latency()
+        self.comp.latency() / self.comp.multiple() + self.os.latency()
     }
 
-    /// `s` with the lookahead in force (a change waits for the dip).
+    /// `s` with the lookahead and oversampling in force (a change waits for the dip).
     fn active(&self, s: &CompSettings) -> CompSettings {
-        CompSettings { lookahead_ms: self.lookahead_ms, ..*s }
+        CompSettings { lookahead_ms: self.lookahead_ms, oversampling: self.oversampling, ..*s }
+    }
+
+    /// Runs the compressor and the resamplers at the oversampling in force, from rest.
+    fn apply_oversampling(&mut self, s: &CompSettings) {
+        let active = self.active(s);
+        self.os.set_factor(self.oversampling);
+        self.os_key.set_factor(self.oversampling);
+        self.comp.retune(self.os.factor(), &active);
     }
 
     /// Processes one host block in place and pushes the history records it completes.
@@ -154,12 +179,16 @@ impl CompEngine {
 
         let mut start = 0;
         while start < len {
-            // A lookahead change: fade out, switch once silent, fade back in.
-            if s.lookahead_ms != self.lookahead_ms {
+            // A lookahead or oversampling change: fade out, switch once silent, fade back in.
+            if s.lookahead_ms != self.lookahead_ms || s.oversampling != self.oversampling {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
                     self.lookahead_ms = s.lookahead_ms;
-                    self.dry.set_delay(s.latency(self.sample_rate));
+                    if s.oversampling != self.oversampling {
+                        self.oversampling = s.oversampling;
+                        self.apply_oversampling(s);
+                    }
+                    self.dry.set_delay(self.latency());
                     self.dip.set_target(1.0);
                 }
             }
@@ -171,10 +200,33 @@ impl CompEngine {
             self.dry.write(&channels[0][start..end], (n_ch == 2).then(|| &channels[1][start..end]));
             let active = self.active(s);
             let key_chunk: Option<[&[f32]; 2]> = key.filter(|k| !k.is_empty() && k.iter().all(|c| c.len() >= end)).map(|k| [&k[0][start..end], &k[k.len().min(2) - 1][start..end]]);
-            let telemetry = {
+            let factor = self.os.factor();
+            let telemetry = if factor == 1 {
                 let [a, b] = &mut self.scratch;
                 let mut parts: [&mut [f32]; 2] = [&mut a[..n], &mut b[..n]];
                 self.comp.process(&mut parts[..n_ch], key_chunk.as_ref().map(|k| &k[..]), &active)
+            } else {
+                // Up, compress at the high rate, down.
+                let m = n * factor;
+                for c in 0..n_ch {
+                    self.os.up(c, &self.scratch[c][..n], &mut self.hi[c][..m]);
+                }
+                if let Some(k) = key_chunk {
+                    for (c, ch) in k.iter().enumerate() {
+                        self.os_key.up(c, ch, &mut self.hi_key[c][..m]);
+                    }
+                }
+                let telemetry = {
+                    let [a, b] = &mut self.hi;
+                    let mut parts: [&mut [f32]; 2] = [&mut a[..m], &mut b[..m]];
+                    let [ka, kb] = &self.hi_key;
+                    let key_hi: [&[f32]; 2] = [&ka[..m], &kb[..m]];
+                    self.comp.process(&mut parts[..n_ch], key_chunk.is_some().then_some(&key_hi[..]), &active)
+                };
+                for c in 0..n_ch {
+                    self.os.down(c, &self.hi[c][..m], &mut self.scratch[c][..n]);
+                }
+                telemetry
             };
             for i in 0..n {
                 let (mix, delta, bypass) = (self.mix.next_value(), self.delta.next_value(), self.bypass.next_value());
@@ -229,6 +281,7 @@ fn empty_record() -> [f32; record::WIDTH] {
 mod tests {
     use super::*;
     use mite_dsp::dynamics::{Detector, Quadrant, Stage};
+    use mite_dsp::oversample::Oversampler;
 
     const FS: f32 = 48_000.0;
 
@@ -330,5 +383,89 @@ mod tests {
         s.lookahead_ms = 5.0;
         run(&mut e, &input, &s, &Output::default(), 480);
         assert_eq!(e.latency(), 240);
+    }
+
+    /// A sum of tones well inside the band (oversampling passes it as a pure delay).
+    fn tones(n: usize, fs: f32) -> Vec<f32> {
+        (0..n).map(|i| [110.0f32, 1_234.0, 7_000.0, 15_500.0].iter().map(|f| (std::f32::consts::TAU * f * i as f32 / fs).sin() * 0.2).sum()).collect()
+    }
+
+    #[test]
+    fn oversampling_with_nothing_to_do_is_a_pure_delay_of_its_latency() {
+        for (choice, factor) in [(2, 2), (4, 4)] {
+            let s = CompSettings { oversampling: choice, ..CompSettings::default() };
+            let mut e = CompEngine::new(FS, &s);
+            assert_eq!(e.latency(), Oversampler::latency_for(factor));
+            let input = tones(9600, FS);
+            let y = run(&mut e, &input, &s, &Output::default(), 333);
+            let lat = e.latency();
+            let worst = (2000..input.len()).map(|i| (y[i] - input[i - lat]).abs()).fold(0.0f32, f32::max);
+            assert!(worst < 2e-4, "{factor}×: {worst}");
+        }
+    }
+
+    /// The level (dB re the 5 kHz fundamental) of what folds back from above Nyquist when a fast
+    /// compressor rides a 5 kHz tone at 44.1 kHz: its gain moves at the tone's harmonics, and the
+    /// products above Nyquist land at |5 kHz · k − 44.1 kHz · m|.
+    fn aliasing(factor: usize) -> f64 {
+        let fs = 44_100.0f32;
+        let mut s = CompSettings { oversampling: factor, ..CompSettings::default() };
+        s.stages[0] = Stage { on: true, threshold_db: -30.0, ratio: 4.0, knee_db: 0.0, attack_ms: 0.05, release_ms: 10.0, detector: Detector::Peak, ..Stage::default() };
+        let mut e = CompEngine::new(fs, &s);
+        let n = 44_100;
+        let input: Vec<f32> = (0..n).map(|i| ((std::f64::consts::TAU * 5_000.0 * i as f64 / f64::from(fs)).sin() * 0.5) as f32).collect();
+        let tap = HistoryTap::new(1024);
+        let mut y = input.clone();
+        for chunk in y.chunks_mut(512) {
+            e.process(&mut [chunk], None, &s, &Output::default(), &tap);
+        }
+        if let Ok(dir) = std::env::var("MITE_ALIAS_DUMP") {
+            let bytes: Vec<u8> = y.iter().flat_map(|v| v.to_le_bytes()).collect();
+            std::fs::write(format!("{dir}/alias{factor}.f32"), bytes).expect("dump");
+        }
+        let tail = &y[n / 2..];
+        let m = tail.len() as f64;
+        let level = |f: f64| {
+            let w = std::f64::consts::TAU * f / f64::from(fs);
+            let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| {
+                let t = std::f64::consts::TAU * i as f64 / m;
+                let win = 0.35875 - 0.48829 * t.cos() + 0.14128 * (2.0 * t).cos() - 0.01168 * (3.0 * t).cos();
+                (re + win * f64::from(v) * (w * i as f64).cos(), im + win * f64::from(v) * (w * i as f64).sin())
+            });
+            re * re + im * im
+        };
+        let fundamental = level(5_000.0);
+        let folded: f64 = (5..=16)
+            .map(|k| {
+                let f = 5_000.0 * k as f64 % 44_100.0;
+                if f > 22_050.0 { 44_100.0 - f } else { f }
+            })
+            .filter(|f| *f > 100.0 && (f / 5_000.0 - (f / 5_000.0).round()).abs() > 0.01)
+            .map(level)
+            .sum();
+        10.0 * (folded / fundamental).log10()
+    }
+
+    #[test]
+    fn oversampling_folds_back_less() {
+        let (off, x2, x4) = (aliasing(1), aliasing(2), aliasing(4));
+        assert!(x2 < off - 6.0, "2×: {x2:.1} dB against {off:.1} dB");
+        assert!(x4 < x2 - 3.0, "4×: {x4:.1} dB against 2×'s {x2:.1} dB");
+    }
+
+    #[test]
+    fn an_oversampling_change_moves_the_latency_after_a_dip_and_does_not_click() {
+        let mut s = compressing();
+        let mut e = CompEngine::new(FS, &s);
+        let input = tones(9600, FS);
+        run(&mut e, &input, &s, &Output::default(), 480);
+        assert_eq!(e.latency(), 0);
+        s.oversampling = 4;
+        let y = run(&mut e, &input, &s, &Output::default(), 480);
+        assert_eq!(e.latency(), Oversampler::latency_for(4));
+        // The dip: the output never jumps more than the tones themselves move per sample.
+        let step = y.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        let natural = input.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(step <= natural * 1.05, "{step} against {natural}");
     }
 }

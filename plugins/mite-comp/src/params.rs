@@ -358,6 +358,8 @@ impl CompParams {
             key_bands: std::array::from_fn(|i| self.keys[i].band()),
             listen: self.listen.value(),
             solo: self.stages.iter().position(|s| s.solo.value() && s.on.value()),
+            // 1×, 2×, 4×.
+            oversampling: 1 << self.oversampling.value().clamp(0, 2),
         }
     }
 }

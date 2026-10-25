@@ -48,6 +48,8 @@ const BANDS: &[Band] = &[
     Band { name: "All pass 1 kHz", shape: "All Pass", freq: 1000.0, gain: 0.0, q: 1.0, slope: None },
 ];
 
+/// Renders of each timed case (the fastest counts).
+const TIMED_RUNS: usize = 3;
 /// Linear-phase resolutions, per vendor.
 const FAB_RES: &[&str] = &["Low", "Medium", "High", "Very High", "Maximum"];
 const MITE_RES: &[&str] = &["Low", "Medium", "High", "Max"];
@@ -203,6 +205,12 @@ pub fn cases(work: &Path, m: &Manifest) -> Result<Vec<Case>, String> {
             for mode in ["Zero Latency", "Natural Phase"] {
                 for (k, b) in BANDS.iter().enumerate() {
                     cases.push(Case { id: id(v, k, mode, rate, None), fx: fx(v).to_owned(), signal: sig.clone(), rate, params: band_params(v, b, mode, None, m) });
+                    // The timed ones again (a render's time swings with the host): the fastest counts.
+                    if rate == LOW_RATE {
+                        for run in 1..TIMED_RUNS {
+                            cases.push(Case { id: format!("{}-t{run}", id(v, k, mode, rate, None)), fx: fx(v).to_owned(), signal: sig.clone(), rate, params: band_params(v, b, mode, None, m) });
+                        }
+                    }
                 }
             }
         }
@@ -242,8 +250,17 @@ fn worst_db(a: &Response, reference: &Response) -> f64 {
     a.mag_db.iter().zip(&reference.mag_db).filter(|(_, r)| **r > top - 30.0).map(|(x, r)| (x - r).abs()).fold(0.0, f64::max)
 }
 
+/// Where the curve is within 30 dB of its peak, as for the magnitude: deeper in a stopband the
+/// phase of a signal 100 dB down is noise.
 fn worst_phase_deg(a: &Response, reference: &Response) -> f64 {
-    a.phase.iter().zip(&reference.phase).map(|(x, r)| analyze::phase_diff(*x, *r).abs().to_degrees()).fold(0.0, f64::max)
+    let top = reference.mag_db.iter().copied().fold(f64::MIN, f64::max);
+    a.phase
+        .iter()
+        .zip(&reference.phase)
+        .zip(&reference.mag_db)
+        .filter(|(_, m)| **m > top - 30.0)
+        .map(|((x, r), _)| analyze::phase_diff(*x, *r).abs().to_degrees())
+        .fold(0.0, f64::max)
 }
 
 pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendered>) -> Result<Vec<Table>, String> {
@@ -257,7 +274,7 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
         );
         let mut phase = Table::new(
             &format!("{mode}: phase error against the analog phase (degrees, worst 20 Hz–20 kHz at 44.1 kHz)"),
-            "As above, for the phase. Zero Latency is minimum phase by design, so only Natural Phase is meant to follow the analog phase.",
+            "As above (where the curve is within 30 dB of its peak), for the phase. Zero Latency is minimum phase by design, so only Natural Phase is meant to follow the analog phase.",
             &["Band", "Pro-Q 4", "Mite EQ", "Verdict"],
         );
         let mut pre = Table::new(
@@ -413,11 +430,15 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
     // modes, all bands), as a rough CPU figure.
     let mut cpu = Table::new(
         "Render time (rough CPU)",
-        "Total offline render time of every Zero Latency and Natural Phase case at 44.1 kHz (one band each, 4 s of audio). Pro-Q 4 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
+        "Total offline render time of every Zero Latency and Natural Phase case at 44.1 kHz (one band each, 4 s of audio), each the fastest of three renders. Pro-Q 4 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
         &["Mode", "Pro-Q 4", "Mite EQ", "Verdict"],
     );
     for mode in ["Zero Latency", "Natural Phase"] {
-        let total = |v: Vendor| (0..BANDS.len()).filter_map(|k| rendered.get(&id(v, k, mode, LOW_RATE, None))).map(|r| r.seconds).sum::<f64>();
+        let fastest = |v: Vendor, k: usize| {
+            let base = id(v, k, mode, LOW_RATE, None);
+            (0..TIMED_RUNS).filter_map(|run| rendered.get(&if run == 0 { base.clone() } else { format!("{base}-t{run}") })).map(|r| r.seconds).fold(f64::NAN, f64::min)
+        };
+        let total = |v: Vendor| (0..BANDS.len()).map(|k| fastest(v, k)).filter(|t| t.is_finite()).sum::<f64>();
         cpu.push(Row::lower(mode, total(Vendor::Fab), total(Vendor::Mite), 0.0, 2));
     }
     tables.push(cpu);

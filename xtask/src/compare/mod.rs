@@ -3,7 +3,8 @@
 //! `docs/compare/pro-q-4.md` or `docs/compare/pro-c-3.md`.
 //!
 //! Needs Reaper on PATH, the FabFilter plugins (on Linux through yabridge) and our installed
-//! plugins (`cargo xtask install`). Work files go to `target/compare/`.
+//! plugins (`cargo xtask install`). Work files go to `target/compare/`. Reaper runs off screen
+//! when gamescope is installed (its headless backend); `MITEFX_COMPARE_VISIBLE=1` shows it.
 
 mod analyze;
 mod comp;

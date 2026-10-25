@@ -33,6 +33,8 @@ struct Setting {
     auto_makeup: bool,
 }
 
+/// Renders of the timing case (the fastest counts).
+const CPU_RUNS: usize = 3;
 const BASE: Setting = Setting { style: 0, threshold: -20.0, ratio: 4.0, knee: 0.0, attack: 1.0, release: 50.0, lookahead: 0.0, link: 100.0, oversampling: None, range: 60.0, auto_makeup: false };
 
 fn params(v: Vendor, s: &Setting, m: &Manifest) -> Vec<(String, Value)> {
@@ -100,6 +102,7 @@ fn params(v: Vendor, s: &Setting, m: &Manifest) -> Vec<(String, Value)> {
             m.flag("s2_on", false),
             m.flag("s3_on", false),
             m.flag("s4_on", false),
+            m.choice("oversampling", match s.oversampling { Some(x) if x >= 4.0 => "4×", Some(x) if x >= 2.0 => "2×", _ => "1×" }),
         ],
     }
 }
@@ -147,7 +150,10 @@ fn plan(work: &Path) -> Result<Vec<(String, Setting, std::path::PathBuf)>, Strin
     p.push(("alias-os4".to_owned(), Setting { oversampling: Some(4.0), ..fast }, high));
     p.push(("link100".to_owned(), Setting { threshold: -30.0, ..BASE }, split.clone()));
     p.push(("link0".to_owned(), Setting { threshold: -30.0, link: 0.0, ..BASE }, split));
-    p.push(("cpu".to_owned(), Setting { threshold: -30.0, attack: 10.0, release: 100.0, ..BASE }, noise));
+    // Timed three times (a render's time swings with the host): the fastest counts.
+    for k in 0..CPU_RUNS {
+        p.push((format!("cpu{k}"), Setting { threshold: -30.0, attack: 10.0, release: 100.0, ..BASE }, noise.clone()));
+    }
     Ok(p)
 }
 
@@ -159,7 +165,6 @@ pub fn cases(work: &Path, m: &Manifest) -> Result<Vec<Case>, String> {
     let mut cases = Vec::new();
     for (name, s, signal) in plan(work)? {
         for v in [Vendor::Fab, Vendor::Mite] {
-            // Our oversampling is not built yet: its case runs ours at 1×.
             cases.push(Case { id: id(v, &name), fx: fx(v).to_owned(), signal: signal.clone(), rate: RATE, params: params(v, &s, m) });
         }
     }
@@ -318,10 +323,10 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
     // Distortion.
     let mut thd = Table::new(
         "Distortion: 50 Hz at −6 dBFS, threshold −30 dB, ratio 4:1, attack 0.05 ms, release 10 ms",
-        "THD+N of the output (20 Hz–20 kHz, dB re the fundamental; lower is cleaner). Settings this fast make the gain follow the waveform: these harmonics are the compressor working, not a fault, and oversampling does not remove them. Pro-C 3 without and with 4× oversampling; Mite Comp has no oversampling yet, so it runs at 1× in both rows.",
+        "THD+N of the output (20 Hz–20 kHz, dB re the fundamental; lower is cleaner). Settings this fast make the gain follow the waveform: these harmonics are the compressor working, not a fault, and oversampling does not remove them. Both without and with 4× oversampling.",
         &["Oversampling", "Pro-C 3", "Mite Comp", "Verdict"],
     );
-    for (name, label) in [("thd", "off"), ("thd-os4", "4× (Pro-C 3 only)")] {
+    for (name, label) in [("thd", "off"), ("thd-os4", "4×")] {
         let m = |v: Vendor| -> Result<f64, String> {
             let (_, o) = io(work, v, name, "sine50")?;
             Ok(analyze::thd_n(&o[0], RATE, 50.0))
@@ -334,7 +339,7 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
         "Energy away from the fundamental and its harmonics (what folded back from above Nyquist), dB re the fundamental, 20 Hz–20 kHz; lower is better. This is what oversampling is for.",
         &["Oversampling", "Pro-C 3", "Mite Comp", "Verdict"],
     );
-    for (name, label) in [("alias", "off"), ("alias-os4", "4× (Pro-C 3 only)")] {
+    for (name, label) in [("alias", "off"), ("alias-os4", "4×")] {
         let m = |v: Vendor| -> Result<f64, String> {
             let (_, o) = io(work, v, name, "sine5k")?;
             Ok(analyze::aliasing(&o[0], RATE, 5000.0))
@@ -365,10 +370,10 @@ pub fn tables(work: &Path, rendered: &std::collections::BTreeMap<String, Rendere
     // Render speed.
     let mut cpu = Table::new(
         "Render time (rough CPU): 20 s of pink noise, one stage",
-        "Offline render time. Pro-C 3 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
+        "Offline render time, the fastest of three renders. Pro-C 3 runs through wine and yabridge, so its figure includes the bridge: indicative only.",
         &["", "Pro-C 3", "Mite Comp", "Verdict"],
     );
-    let s = |v: Vendor| rendered.get(&id(v, "cpu")).map_or(f64::NAN, |r| r.seconds);
+    let s = |v: Vendor| (0..CPU_RUNS).filter_map(|k| rendered.get(&id(v, &format!("cpu{k}")))).map(|r| r.seconds).fold(f64::NAN, f64::min);
     cpu.push(Row::lower("seconds", s(Vendor::Fab), s(Vendor::Mite), 0.0, 3));
     tables.push(cpu);
     Ok(tables)

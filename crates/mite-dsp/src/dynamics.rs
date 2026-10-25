@@ -398,6 +398,8 @@ pub struct CompSettings {
     pub listen: bool,
     /// Hear only this stage's gain change (by slot).
     pub solo: Option<usize>,
+    /// The oversampling factor the engine runs the compressor at (1, 2 or 4).
+    pub oversampling: usize,
 }
 
 impl Default for CompSettings {
@@ -420,6 +422,7 @@ impl Default for CompSettings {
             key_bands: [BandSettings::default(); KEY_BANDS],
             listen: false,
             solo: None,
+            oversampling: 1,
         }
     }
 }
@@ -513,6 +516,8 @@ struct Chan {
     hold: [u32; STAGES],
     tail: f32,
     peak: f32,
+    /// The detector's last two samples (for the peak between samples).
+    prev: [f32; 2],
     rms: f32,
     loud: f32,
     k_weight: [Tdf2; 2],
@@ -531,6 +536,7 @@ impl Chan {
             hold: [0; STAGES],
             tail: 0.0,
             peak: 0.0,
+            prev: [0.0; 2],
             rms: 0.0,
             loud: 0.0,
             k_weight: [Tdf2::default(); 2],
@@ -633,7 +639,11 @@ impl StageGlide {
 
 /// Mite Comp's processor: stereo or mono, in place.
 pub struct Compressor {
+    /// The rate it runs at: the host's, times the oversampling factor.
     sample_rate: f32,
+    /// The host's rate, and the oversampling factor it runs at (1, 2 or 4).
+    base_rate: f32,
+    multiple: usize,
     chans: [Chan; 2],
     glides: [StageGlide; STAGES],
     makeup: LinearSmoother,
@@ -669,6 +679,8 @@ impl Compressor {
         let s = CompSettings::default();
         let mut c = Self {
             sample_rate,
+            base_rate: sample_rate,
+            multiple: 1,
             chans: [Chan::new(), Chan::new()],
             glides: std::array::from_fn(|i| StageGlide::new(&s.stages[i])),
             makeup: LinearSmoother::new(0.0),
@@ -699,14 +711,24 @@ impl Compressor {
         c
     }
 
-    /// Sizes the delay lines and designs the filters for `sample_rate`; starts from `s` with no
-    /// glides. The only place that allocates.
+    /// Sizes the delay lines for `sample_rate` (the host's) at any oversampling factor, and
+    /// designs the filters to run at it (factor 1); starts from `s` with no glides. The only place
+    /// that allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &CompSettings) {
-        self.sample_rate = sample_rate;
-        let max = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1;
+        self.base_rate = sample_rate;
+        let max = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize * crate::oversample::MAX_FACTOR + 1;
         for ch in &mut self.chans {
             ch.delay = vec![0.0; max];
         }
+        self.retune(1, s);
+    }
+
+    /// Runs at `multiple` (1, 2 or 4) × the host's rate from now on: the filters and time
+    /// constants redesigned for it, the state cleared, `s` snapped. Allocation-free.
+    pub fn retune(&mut self, multiple: usize, s: &CompSettings) {
+        self.multiple = multiple.clamp(1, crate::oversample::MAX_FACTOR);
+        let sample_rate = self.base_rate * self.multiple as f32;
+        self.sample_rate = sample_rate;
         // K weighting (BS.1770): +4 dB above about 1.7 kHz, then a high pass near 38 Hz.
         self.k_coeffs = [
             biquad(Biquad::HighShelf, sample_rate, 1681.0, std::f32::consts::FRAC_1_SQRT_2, 4.0),
@@ -736,7 +758,7 @@ impl Compressor {
             g.snap(st);
         }
         self.write = 0;
-        self.latency = s.latency(self.sample_rate);
+        self.latency = self.lookahead(s);
         self.fast_env = 0.0;
         self.slow_sq = 0.0;
         self.program_env = 0.0;
@@ -750,9 +772,20 @@ impl Compressor {
         self.makeup.reset(s.makeup_total_db(0.0));
     }
 
-    /// The latency in force, samples (the lookahead).
+    /// The latency in force, samples at the rate it runs at (the lookahead; a whole number of
+    /// host samples).
     pub fn latency(&self) -> usize {
         self.latency
+    }
+
+    /// The oversampling factor it runs at.
+    pub fn multiple(&self) -> usize {
+        self.multiple
+    }
+
+    /// `s`'s lookahead in samples at the running rate: whole host samples, times the factor.
+    fn lookahead(&self, s: &CompSettings) -> usize {
+        s.latency(self.base_rate) * self.multiple
     }
 
     fn design_key(&mut self, s: &CompSettings, force: bool) {
@@ -778,7 +811,7 @@ impl Compressor {
         let ms = s.mid_side && stereo;
         let link = if stereo { s.link.clamp(0.0, 1.0) } else { 0.0 };
         self.design_key(s, false);
-        self.latency = s.latency(fs);
+        self.latency = self.lookahead(s);
         let delay_len = self.chans[0].delay.len();
         let look = self.latency.min(delay_len - 1);
 
@@ -825,10 +858,12 @@ impl Compressor {
         self.makeup.set_target(s.makeup_total_db(self.offset_db));
 
         let uses = |d: Detector| s.stages.iter().any(|st| st.on && st.detector == d);
-        let (use_rms, use_loud) = (uses(Detector::Rms), uses(Detector::Loudness));
+        let (use_peak, use_rms, use_loud) = (uses(Detector::Peak), uses(Detector::Rms), uses(Detector::Loudness));
         let key_len = key.map_or(0, |k| k.iter().map(|c| c.len()).min().unwrap_or(0));
         let external = s.external_key;
 
+        let mut makeup_last = (f32::NAN, 1.0);
+        let mut settled: Option<[(Stage, f32, f32); STAGES]> = None;
         for i in 0..len {
             let (l, r) = (channels[0][i], if stereo { channels[1][i] } else { 0.0 });
             t.in_peak_db[0] = t.in_peak_db[0].max(l.abs());
@@ -858,16 +893,33 @@ impl Compressor {
                     }
                 }
                 let x = x as f32;
-                hf[c] = ch.sib_hp.process(&self.sib_hp, f64::from(x)) as f32;
-                let lp = ch.sib_lp.process(&self.sib_lp, f64::from(x)) as f32;
-                det[c] = x + self.sib_guard * (lp - x);
+                // The guard's filters run only while it listens or still acts.
+                if sib_depth > 0.0 || self.sib_guard > 0.0 {
+                    hf[c] = ch.sib_hp.process(&self.sib_hp, f64::from(x)) as f32;
+                    let lp = ch.sib_lp.process(&self.sib_lp, f64::from(x)) as f32;
+                    det[c] = x + self.sib_guard * (lp - x);
+                } else {
+                    det[c] = x;
+                }
             }
             // Levels: peak, RMS, loudness, per channel, then linked.
             let mut level = [[0.0f32; 3]; 2];
             for c in 0..n_ch {
                 let ch = &mut self.chans[c];
                 let x = det[c];
-                ch.peak = x.abs().max(self.peak_a * ch.peak);
+                // The peak between samples: where the last sample was a local maximum, the
+                // parabola through it and its neighbours, so the reading does not wobble with
+                // where the samples happen to fall on each cycle.
+                let [a, b] = ch.prev;
+                let (ya, yb, yc) = (a.abs(), b.abs(), x.abs());
+                let between = if use_peak && yb > ya && yb >= yc && (a >= 0.0) == (b >= 0.0) && (b >= 0.0) == (x >= 0.0) {
+                    let d = ya - 2.0 * yb + yc;
+                    if d < 0.0 { yb - 0.125 * (ya - yc) * (ya - yc) / d } else { yb }
+                } else {
+                    0.0
+                };
+                ch.prev = [b, x];
+                ch.peak = yc.max(between).max(self.peak_a * ch.peak);
                 level[c][0] = ch.peak;
                 if use_rms {
                     ch.rms = self.rms_a * ch.rms + (1.0 - self.rms_a) * x * x;
@@ -889,12 +941,28 @@ impl Compressor {
                 }
             }
             let mono = level[0][0].max(if stereo { level[1][0] } else { 0.0 });
+            // In dB, once per detector the stages use (peak always: it is always tracked).
+            let mut level_db = [[MINUS_INFINITY_DB; 3]; 2];
+            for c in 0..n_ch {
+                // Linked channels usually read the same: convert once.
+                if c == 1 && level[1] == level[0] {
+                    level_db[1] = level_db[0];
+                    continue;
+                }
+                for (d, used) in [true, use_rms, use_loud].into_iter().enumerate() {
+                    if used {
+                        level_db[c][d] = gain_to_db(level[c][d]);
+                    }
+                }
+            }
 
-            // Smart trackers, on the linked peak.
-            self.fast_env = if mono > self.fast_env { crest_att * self.fast_env + (1.0 - crest_att) * mono } else { crest_rel * self.fast_env + (1.0 - crest_rel) * mono };
-            self.slow_sq += (mono * mono - self.slow_sq) * slow_a;
-            if mono > program_gate {
-                self.program_env = if mono > self.program_env { program_att * self.program_env + (1.0 - program_att) * mono } else { program_rel * self.program_env + (1.0 - program_rel) * mono };
+            // Smart trackers, on the linked peak (nothing reads them while Smart is off).
+            if s.smart != Smart::Off {
+                self.fast_env = if mono > self.fast_env { crest_att * self.fast_env + (1.0 - crest_att) * mono } else { crest_rel * self.fast_env + (1.0 - crest_rel) * mono };
+                self.slow_sq += (mono * mono - self.slow_sq) * slow_a;
+                if mono > program_gate {
+                    self.program_env = if mono > self.program_env { program_att * self.program_env + (1.0 - program_att) * mono } else { program_rel * self.program_env + (1.0 - program_rel) * mono };
+                }
             }
             if sib_depth > 0.0 {
                 let hf_mag = hf[0].abs().max(hf[1].abs());
@@ -907,6 +975,14 @@ impl Compressor {
                 self.sib_guard += (want - self.sib_guard) * if want > self.sib_guard { sib_att } else { sib_rel };
             } else if self.sib_guard > 0.0 {
                 self.sib_guard -= self.sib_guard * sib_rel;
+                // Gone: stop the filters, from rest.
+                if self.sib_guard < 1e-6 {
+                    self.sib_guard = 0.0;
+                    for ch in &mut self.chans {
+                        ch.sib_hp.reset();
+                        ch.sib_lp.reset();
+                    }
+                }
             }
             let want_offset = if tracking {
                 let program_db = gain_to_db(self.program_env);
@@ -916,85 +992,128 @@ impl Compressor {
             };
             self.offset_db += (want_offset - self.offset_db) * glide_a;
 
-            // The stages, per channel, in series in threshold order.
-            let mut stages_now = [(Stage::default(), 0.0f32, 1.0f32); STAGES];
-            for (k, g) in self.glides.iter_mut().enumerate() {
-                stages_now[k] = g.next(&s.stages[k]);
-            }
-            // Thresholds and knees are on the input: each stage's, in the level it works on, is
-            // what the stages below it (as they play now) make of them. Worked out again only
-            // while something glides.
-            let moving = self.glides.iter().any(StageGlide::is_smoothing);
-            if !moving && self.levels_valid {
-                for (k, (stage, _, _)) in stages_now.iter_mut().enumerate() {
-                    (stage.threshold_db, stage.knee_db) = self.levels[k];
+            // The stages as they play this sample. Once nothing glides they stay put for the rest
+            // of this call (the settings are fixed within it), so they are worked out once.
+            let stages_now = if let Some(settled) = settled {
+                settled
+            } else {
+                // The stages, per channel, in series in threshold order.
+                let mut stages_now = [(Stage::default(), 0.0f32, 1.0f32); STAGES];
+                for (k, g) in self.glides.iter_mut().enumerate() {
+                    stages_now[k] = g.next(&s.stages[k]);
                 }
+                // Thresholds and knees are on the input: each stage's, in the level it works on, is
+                // what the stages below it (as they play now) make of them. Worked out again only
+                // while something glides.
+                let moving = self.glides.iter().any(StageGlide::is_smoothing);
+                if !moving && self.levels_valid {
+                    for (k, (stage, _, _)) in stages_now.iter_mut().enumerate() {
+                        (stage.threshold_db, stage.knee_db) = self.levels[k];
+                    }
+                }
+                for (n, &k) in order.iter().enumerate().filter(|_| moving || !self.levels_valid) {
+                    let glides = &self.glides;
+                    let (threshold, slope) = into_level(stages_now[k].0.threshold_db, |level| {
+                        order[..n].iter().fold(level, |l, &j| {
+                            let (stage, weight, fade) = stages_now[j];
+                            let mut g = stage_gain_db(&stage, l, 0.0);
+                            if fade < 1.0 {
+                                g = fade * g + (1.0 - fade) * stage_gain_db(&Stage { quadrant: glides[j].from_quadrant, ..stage }, l, 0.0);
+                            }
+                            l + weight * g
+                        })
+                    });
+                    stages_now[k].0.threshold_db = threshold;
+                    stages_now[k].0.knee_db *= slope;
+                    self.levels[k] = (threshold, stages_now[k].0.knee_db);
+                }
+                self.levels_valid = !moving;
+                if !moving {
+                    settled = Some(stages_now);
+                }
+                stages_now
+            };
+            let makeup_db = self.makeup.next_value();
+            if makeup_db != makeup_last.0 {
+                makeup_last = (makeup_db, db_to_gain(makeup_db));
             }
-            for (n, &k) in order.iter().enumerate().filter(|_| moving || !self.levels_valid) {
-                let glides = &self.glides;
-                let (threshold, slope) = into_level(stages_now[k].0.threshold_db, |level| {
-                    order[..n].iter().fold(level, |l, &j| {
-                        let (stage, weight, fade) = stages_now[j];
-                        let mut g = stage_gain_db(&stage, l, 0.0);
-                        if fade < 1.0 {
-                            g = fade * g + (1.0 - fade) * stage_gain_db(&Stage { quadrant: glides[j].from_quadrant, ..stage }, l, 0.0);
-                        }
-                        l + weight * g
-                    })
-                });
-                stages_now[k].0.threshold_db = threshold;
-                stages_now[k].0.knee_db *= slope;
-                self.levels[k] = (threshold, stages_now[k].0.knee_db);
-            }
-            self.levels_valid = !moving;
-            let makeup = db_to_gain(self.makeup.next_value());
+            let makeup = makeup_last.1;
             let mut out = [0.0f32; 2];
+            // Linked channels that hear the same level from the same state end in the same
+            // state (the usual stereo case): the second copies the first's work.
+            let shared = n_ch == 2 && level_db[0] == level_db[1] && {
+                let [a, b] = &self.chans;
+                a.env == b.env && a.hold == b.hold && a.tail == b.tail
+            };
+            let mut first_gain_db = 0.0f32;
+            let mut gain_lin = 1.0f32;
             for c in 0..n_ch {
+                if c == 1 && shared {
+                    let [a, b] = &mut self.chans;
+                    (b.env, b.hold, b.tail) = (a.env, a.hold, a.tail);
+                }
                 let ch = &mut self.chans[c];
-                let mut sum = 0.0f32;
-                for &k in &order {
-                    let (stage, weight, fade) = stages_now[k];
-                    let detected = gain_to_db(level[c][stage.detector as usize]) + style.drive_db - self.offset_db + sum;
-                    let mu = if style.ratio_bend > 0.0 {
-                        let over = if stage.quadrant.acts_above() { detected - stage.threshold_db } else { stage.threshold_db - detected };
-                        style.ratio_bend * (over / 12.0).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    let mut target = stage_gain_db(&stage, detected, mu);
-                    if fade < 1.0 {
-                        let old = Stage { quadrant: self.glides[k].from_quadrant, ..stage };
-                        target = fade * target + (1.0 - fade) * stage_gain_db(&old, detected, mu);
-                    }
-                    target *= weight;
-                    let e = &mut ch.env[k];
-                    if target.abs() > e.abs() {
-                        *e = attack_a[k] * *e + (1.0 - attack_a[k]) * target;
-                        ch.hold[k] = hold;
-                    } else if ch.hold[k] > 0 {
-                        ch.hold[k] -= 1;
-                    } else {
-                        let mut rc = release_a[k];
-                        if style.program > 0.0 && e.abs() > target.abs() + PROGRAM_MARGIN_DB {
-                            rc += (fast_a - rc) * style.program;
+                let gain_db = if c == 1 && shared {
+                    first_gain_db
+                } else {
+                    let mut sum = 0.0f32;
+                    for &k in &order {
+                        let (stage, weight, fade) = stages_now[k];
+                        // A stage that is off and has let go adds nothing.
+                        if weight == 0.0 && ch.env[k] == 0.0 {
+                            continue;
                         }
-                        *e = rc * *e + (1.0 - rc) * target;
+                        let detected = level_db[c][stage.detector as usize] + style.drive_db - self.offset_db + sum;
+                        let mu = if style.ratio_bend > 0.0 {
+                            let over = if stage.quadrant.acts_above() { detected - stage.threshold_db } else { stage.threshold_db - detected };
+                            style.ratio_bend * (over / 12.0).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let mut target = stage_gain_db(&stage, detected, mu);
+                        if fade < 1.0 {
+                            let old = Stage { quadrant: self.glides[k].from_quadrant, ..stage };
+                            target = fade * target + (1.0 - fade) * stage_gain_db(&old, detected, mu);
+                        }
+                        target *= weight;
+                        let e = &mut ch.env[k];
+                        if target.abs() > e.abs() {
+                            *e = attack_a[k] * *e + (1.0 - attack_a[k]) * target;
+                            ch.hold[k] = hold;
+                        } else if ch.hold[k] > 0 {
+                            ch.hold[k] -= 1;
+                        } else {
+                            let mut rc = release_a[k];
+                            if style.program > 0.0 && e.abs() > target.abs() + PROGRAM_MARGIN_DB {
+                                rc += (fast_a - rc) * style.program;
+                            }
+                            *e = rc * *e + (1.0 - rc) * target;
+                            if weight == 0.0 && e.abs() < 1e-6 {
+                                *e = 0.0;
+                            }
+                        }
+                        sum += *e;
                     }
-                    sum += *e;
-                }
-                // The slow tail: a second, slow release stage blended in (Opto, Bus, Vari-Mu).
-                ch.tail = if sum.abs() > ch.tail.abs() { attack_a[order[0]] * ch.tail + (1.0 - attack_a[order[0]]) * sum } else { tail_a * ch.tail + (1.0 - tail_a) * sum };
-                let mut gain_db = if style.slow_tail > 0.0 { sum + (ch.tail - sum) * style.slow_tail } else { sum };
-                if let Some(k) = s.solo.filter(|&k| k < STAGES) {
-                    gain_db = ch.env[k];
-                }
+                    // The slow tail: a second, slow release stage blended in (Opto, Bus, Vari-Mu).
+                    ch.tail = if sum.abs() > ch.tail.abs() { attack_a[order[0]] * ch.tail + (1.0 - attack_a[order[0]]) * sum } else { tail_a * ch.tail + (1.0 - tail_a) * sum };
+                    let mut gain_db = if style.slow_tail > 0.0 { sum + (ch.tail - sum) * style.slow_tail } else { sum };
+                    if let Some(k) = s.solo.filter(|&k| k < STAGES) {
+                        gain_db = ch.env[k];
+                    }
+                    gain_db
+                };
+                first_gain_db = gain_db;
                 t.cut_db[c] = t.cut_db[c].min(gain_db);
                 t.lift_db[c] = t.lift_db[c].max(gain_db);
                 // The audio, delayed by the lookahead.
                 ch.delay[self.write] = audio[c];
                 let read = (self.write + delay_len - look) % delay_len;
                 let delayed = ch.delay[read];
-                let wet = delayed * db_to_gain(gain_db);
+                // The second of two shared channels takes the first's gain as it is.
+                if !(c == 1 && shared) {
+                    gain_lin = db_to_gain(gain_db);
+                }
+                let wet = delayed * gain_lin;
                 ch.feedback = wet;
                 out[c] = if s.listen { det[c] } else { wet * makeup };
             }

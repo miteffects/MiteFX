@@ -12,6 +12,7 @@ pub mod gain;
 pub mod linear_phase;
 pub mod matching;
 pub mod natural_phase;
+pub mod oversample;
 pub mod output;
 pub mod meter;
 pub mod min_phase;
