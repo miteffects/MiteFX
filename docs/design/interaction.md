@@ -387,3 +387,41 @@ As built (2026-10-25) from the `ShapeMain` boards and the canvas note `shapeAnsw
 
 The history keeps scrolling and the meters and spectrum keep their ballistics (they are data). The rail's growth and the regions' breathing are motion: with reduce motion they should be instant and still (not yet wired: the setting is not read by any plugin yet).
 
+
+## Mite Sat (in-house design, 2026-10-26; docs/design/sat-brief.md)
+
+### Transfer square
+
+| Gesture | Does |
+|---|---|
+| Hover | Help strip: drive and bias in fixed slots |
+| Drag up / down | Drive, 0.12 dB/px (Shift ×0.2) |
+| Drag sideways | Bias, 0.7 %/px (Shift ×0.2) |
+| Alt-drag up / down | Tone, 0.06 dB/px |
+| Wheel | Drive, 0.5 dB a notch (Shift 0.1) |
+| Double-click | Drive and bias back to 0 |
+
+A drag is one undo step. The curve is `mite_dsp::sat::transfer` at the live operating point
+(Tube's drift) times auto gain; it is lit from −peak to +peak of the band's input (60 ms up,
+300 ms down), with a dot at each end.
+
+### Card
+
+- Model icons: one 44×36 icon button per built model, each drawing its own curve. The current one
+  is lit in the accent. Hovering one draws its curve as a ghost in the square (never writes the
+  parameter); clicking picks it (a 20 ms crossfade between the curves).
+- Power button (top right): the band passes clean but is still heard (`b{N}_bypass`).
+- Dials: DRIVE (104 px; 0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT.
+
+### Footer
+
+Oversampling dropdown (1×/2×/4×/8×, each with as many waves as it oversamples; the help strip says
+the latency each adds), latency, auto gain, Δ, bypass, MIX, PAN, OUTPUT.
+
+### Keys (Sat)
+
+| Key | Does |
+|---|---|
+| ↑ ↓ | Drive ±0.5 dB (Shift ±0.1) |
+| ← → | Previous / next model |
+| Esc | Closes the oversampling list |

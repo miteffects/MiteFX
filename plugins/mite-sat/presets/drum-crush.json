@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Sat",
+  "version": 1,
+  "name": "Drum Crush",
+  "params": {
+    "b1_model": 5.0,
+    "b1_drive": 20.0,
+    "b1_mix": 45.0,
+    "b1_tone": 2.0
+  }
+}

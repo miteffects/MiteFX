@@ -10,3 +10,6 @@ name = "Mite Comp"
 
 [mite_shape]
 name = "Mite Shape"
+
+[mite_sat]
+name = "Mite Sat"

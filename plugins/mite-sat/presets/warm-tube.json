@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Sat",
+  "version": 1,
+  "name": "Warm Tube",
+  "params": {
+    "b1_model": 1.0,
+    "b1_drive": 9.0,
+    "b1_bias": 10.0,
+    "b1_tone": -1.5
+  }
+}

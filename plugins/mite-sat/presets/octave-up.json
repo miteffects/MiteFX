@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Sat",
+  "version": 1,
+  "name": "Octave Up",
+  "params": {
+    "b1_model": 7.0,
+    "b1_drive": 14.0,
+    "b1_mix": 50.0
+  }
+}

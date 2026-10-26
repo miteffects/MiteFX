@@ -73,6 +73,11 @@ impl History {
         self.data.fill(0.0);
         self.pos = 0;
     }
+
+    fn copy_from(&mut self, other: &Self) {
+        self.data.copy_from_slice(&other.data);
+        self.pos = other.pos;
+    }
 }
 
 /// `Σ a_j (x[K−1−j] + x[K+j])` over a newest-first window `x` of `2K` samples: the symmetric
@@ -133,6 +138,12 @@ impl Stage {
         self.even.clear();
         self.odd.clear();
     }
+
+    fn copy_from(&mut self, other: &Self) {
+        self.up.copy_from(&other.up);
+        self.even.copy_from(&other.even);
+        self.odd.copy_from(&other.odd);
+    }
 }
 
 /// Up to two channels oversampled by `factor` (1, 2, 4 or 8), round trip a pure delay of
@@ -176,6 +187,17 @@ impl Oversampler {
         }
         for p in &mut self.pad {
             p.clear();
+        }
+    }
+
+    /// Becomes a copy of `other`'s factor and state, without allocating.
+    pub fn copy_from(&mut self, other: &Self) {
+        self.factor = other.factor;
+        for (a, b) in self.stages.iter_mut().flatten().zip(other.stages.iter().flatten()) {
+            a.copy_from(b);
+        }
+        for (a, b) in self.pad.iter_mut().zip(&other.pad) {
+            a.copy_from(b);
         }
     }
 

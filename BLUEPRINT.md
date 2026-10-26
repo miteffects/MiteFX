@@ -4,7 +4,7 @@
 > follows this file or changes this file first. Audience: Claude Design (visual
 > system), implementation sessions, and future contributors.
 
-**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-10-22
+**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-10-26
 
 ---
 
@@ -271,6 +271,9 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
 - **Beyond:**
   - A harmonics display showing actual measured harmonic levels per band.
   - Mid/side per band.
+- Design and build spec: `docs/design/sat-brief.md` (designed in-house, no Claude Design pass; user decision 2026-10-26). Accent **crimson** (`#F0284A`; user: "Sat is red"): 17 ΔE from Comp's ember but on top of `danger`, so Sat draws no danger role (`tokens.json` `rules.satRed`).
+
+**Status (2026-10-26): slice 1 built (one band).** All 139 parameters of the full design exist (golden manifest; modulation targets in `tests/golden/mite_sat.modtargets.txt`, append only), so the state stays at version 1 as slices arrive. DSP in `mite_dsp::sat`: per band `u = g·x + b`, `F = f(u) − f(b)` at 1/2/4/8× (`mite_dsp::oversample`, now with an 8× stage, latency 78), back down, the tone tilt (first order, ±T/2 about the band's centre), then `y = x_d + a·HP₅(wet − x_d)` with `a = smoothstep(drive/6 dB)·mix·engaged`: drive 0, band bypass and mix 0 null bit for bit at every factor, and the DC a bias makes is taken out without touching the band's lows. Models: Tube (asymmetric, the bias drifts down with level: even harmonics that grow when pushed), Diode (asinh), Soft (cubic), Hard (clip with a rounded knee), Fold (sine fold), Rectify (smooth full wave); every curve smooth (C¹). **ADAA dropped** (sat-brief §1.2): on the nonlinear part alone it leaks `g·Δu/2` at high drive, on the whole curve its half-sample delay combs against the dry path; oversampling does the anti-aliasing. Model changes crossfade two curve lanes (20 ms), a band waking up pre-rolls its last 80 samples through the oversampler (no transient), a new band starts silent (its delay and oversampler empty; the band below keeps playing what it held), and a split change crossfades only once the new core has run one round trip. Auto gain per band: a table of each curve's sine gain (built once) read at the band's level (instant as drive moves), times a trim measured on the music (1.5 s, ±6 dB). The engine already splits into six bands (`mite_dsp::crossover`); the editor shows one. Processed in stretches that end on 16-sample control steps, so the output is identical for every block size. Tests: 12 in `mite_dsp::sat` (closed-form Soft harmonics; every static model's harmonics within 0.05 dB of the curve the editor draws; no even harmonics from the symmetric models; bit-exact nulls; latency = impulse; block-size invariance; changes never step past what either setting makes; six bands sum flat; auto gain within 1 dB; tilt), plus the plugin's (engine, golden params and state through CLAP, no allocation, editor gestures). Editor: spectrum (input dim, output lit, the harmonics the saturation adds filled in crimson), the band's card: model icons drawn from their own curves (hover: a ghost curve), the transfer square (drag up for drive, across for bias, Alt for tone), DRIVE/BIAS/TONE/MIX/OUTPUT, the band's power button; footer with the oversampling list. CPU (`examples/bench`, music, one band at 12 dB): Tube 0.39 % at 1×, 1.01 % at 2×, 1.42 % at 4×, 2.45 % at 8×; six bands of Tube at 4× 8.8 %. UI at 2× DPI (2560×1520, headless gamescope at 120 Hz): 120 fps, worst frame interval 8.8 ms, scene 0.27 ms, render plus GPU 1.57 ms median. clap-validator 34 passed, 0 failed. **Next:** multiband editing (the rail shared with Shape), Tape and Transformer (hysteresis), the harmonics probe, per-band M/S, per-band dynamics, the modulation matrix.
 
 ### 8. Mite DeEss. Rival: FabFilter Pro-DS
 
@@ -416,6 +419,8 @@ FabFilter's strengths:
 - Multiband crossover bar.
 
 ### 7.4 Design status
+
+**Mite Sat designed in-house on 2026-10-26** (`docs/design/sat-brief.md`, interaction.md "Mite Sat"): user decision, no Claude Design pass. Shape's frame with the spectrum on top and a card per band; the transfer square is the hero of the card; the accent is crimson.
 
 **Pass 5 (Mite Shape) received and built on 2026-10-25.** Design's answers (canvas note `shapeAnswers`): the history is the hero (levels on top, the signed gain under its own 0 dB line, attack solid and sustain light, a tick per hit); one card per band, always visible, the selected one wide with six dials; every band in the plugin accent with its number (the ramp keeps meaning stereo placement); one band is the same screen with a 36 px rail and ghost grips, which grows to 80 px when a crossover is made; the Shape accent moved from blush to leaf (`#6BA208`), far from both gainUp and gr.
 
@@ -658,6 +663,8 @@ Mite Comp, Mite Limit and Mite Multiband. These build the dynamics cell and the 
 ### Phase 3: Space and colour
 
 Mite Verb, Mite Delay and Mite Sat, plus the modulation matrix.
+
+**Status (2026-10-26):** Mite Sat's first slice is built (§6.7), designed in-house.
 
 ### Phase 4: The rest
 

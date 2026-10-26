@@ -1,0 +1,9 @@
+{
+  "plugin": "Mite Sat",
+  "version": 1,
+  "name": "Gentle Glue",
+  "params": {
+    "b1_model": 1.0,
+    "b1_drive": 4.5
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Sat",
+  "version": 1,
+  "name": "Fold Fuzz",
+  "params": {
+    "b1_model": 6.0,
+    "b1_drive": 16.0,
+    "b1_mix": 70.0,
+    "b1_tone": -4.0
+  }
+}

@@ -15,6 +15,7 @@ pub mod matching;
 pub mod natural_phase;
 pub mod oversample;
 pub mod output;
+pub mod sat;
 pub mod meter;
 pub mod min_phase;
 pub mod shape;
