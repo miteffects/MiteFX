@@ -19,6 +19,8 @@ pub const FACTORY: &[&str] = &[
     include_str!("../presets/gentle-glue.json"),
     include_str!("../presets/fold-fuzz.json"),
     include_str!("../presets/octave-up.json"),
+    include_str!("../presets/tape-warmth.json"),
+    include_str!("../presets/iron-bass.json"),
 ];
 
 pub fn factory() -> Vec<Preset> {

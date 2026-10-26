@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::sat::{bias_point, Layout, Model, BANDS, DRIVE_MAX_DB, ENGAGE_DB, TONE_MAX_DB};
+use mite_dsp::sat::{bias_point, tone_pivot, Layout, Model, BANDS, DRIVE_MAX_DB, ENGAGE_DB, TONE_MAX_DB};
 use mite_ui::kurbo::{Affine, BezPath, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, icon_button, panel};
 use mite_ui::peniko::Fill;
@@ -103,7 +103,7 @@ fn rail_params() -> RailParams {
 
 /// The models offered (those built so far), in icon order.
 fn offered() -> Vec<Model> {
-    Model::ALL.into_iter().filter(|m| m.is_built()).collect()
+    Model::ALL.to_vec()
 }
 
 /// The wide card's dials: drive large, then bias, tone, mix and output.
@@ -291,6 +291,8 @@ pub struct SatView {
     /// 0 = one band's layout, 1 = several (eased between).
     grow: f64,
     spectrum: spectrum::Spectrum,
+    /// Tape's and Transformer's loops, as traced lately.
+    loops: curve::Loops,
     /// Each band's peak going in (linear), operating point and auto gain, eased.
     peak: [f32; BANDS],
     point: [f32; BANDS],
@@ -336,6 +338,7 @@ impl SatView {
             last_tick: Instant::now(),
             grow: 0.0,
             spectrum: spectrum::Spectrum::new(),
+            loops: curve::Loops::default(),
             peak: [0.0; BANDS],
             point: [0.0; BANDS],
             auto: [1.0; BANDS],
@@ -504,7 +507,9 @@ impl SatView {
         // Tube's point drifts with the music: the engine reports where it sits.
         let point = if model.is_stateful() && self.history.back().is_some() { self.point[b] } else { bias_point(bias) };
         let auto = if Self::on(host, AUTO_GAIN.id) { self.auto[b] } else { 1.0 };
-        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, auto, peak: self.peak[b] }
+        let x = settings(host).crossovers;
+        let freq = tone_pivot(&Layout::new(&x), &x, b);
+        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, auto, peak: self.peak[b], freq }
     }
 
     fn os_list(host: &dyn ParamHost) -> Dropdown {
@@ -560,7 +565,7 @@ impl SatView {
                         kind: CardKind::Wide,
                         rect,
                         square,
-                        models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 40.0, 32.0, 44.0),
+                        models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 36.0, 32.0, 40.0),
                         power: Some(button(1.0)),
                         solo: Some(button(3.0)),
                         mute: Some(button(2.0)),
@@ -662,10 +667,9 @@ impl SatView {
                 glyphs::draw_model(cx.scene, m, r.center(), r.height() * 0.72, ink, 1.6);
             }
             if card.kind == CardKind::Wide {
-                // The band's range, between the icons and the buttons.
+                // The band's range, over the dials.
                 let text = self.rail.range_text(cx.host, layout, b);
-                let x0 = card.models.last().map_or(card.rect.x0 + 40.0, |(_, r)| r.x1) + 12.0;
-                cx.text.draw(cx.scene, &text, x0, card.rect.y0 + 18.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0).weighted(600.0) }, theme.text_mid, Align::Left);
+                cx.text.draw(cx.scene, &text, card.rect.x1 - 14.0, card.square.y0 + 2.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0).weighted(600.0) }, theme.text_mid, Align::Right);
             }
             if let Some(r) = card.power {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), !bypassed, theme.accent);
@@ -690,7 +694,7 @@ impl SatView {
                 _ => None,
             };
             let lit = if bypassed { 0.45 } else { 1.0 } * alpha;
-            curve::draw(cx, card.square, &self.curve(cx.host, b), ghost, card.kind != CardKind::Narrow, lit);
+            curve::draw(cx, card.square, &self.curve(cx.host, b), ghost, card.kind != CardKind::Narrow, lit, &self.loops);
         }
         for k in &self.knobs {
             k.draw(cx);
@@ -1152,7 +1156,8 @@ fn model_words(m: Model) -> &'static str {
         Model::Hard => "clipping, its corner rounded so it folds nothing harsh back",
         Model::Fold => "a wavefolder: past the top it folds back down",
         Model::Rectify => "full-wave: the fundamental gives way to the octave above",
-        Model::Tape | Model::Transformer => "",
+        Model::Tape => "magnetic hysteresis behind tape's emphasis: the highs saturate first, soft and loose, and the curve opens into a loop",
+        Model::Transformer => "an iron core: the lows saturate first (its flux is the integral of the voltage), a narrow loop",
     }
 }
 

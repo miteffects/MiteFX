@@ -3,7 +3,8 @@
 //!
 //!     cargo run -p mite_sat --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT picks the state: default, clean, fold, hard, rectify, bypass, delta,
+//! SNAPSHOT_VARIANT picks the state: default, clean, fold, hard, rectify, tape, transformer,
+//! bypass, delta,
 //! oversampling, presets, ghost; several bands: bands (three), six, solo, mute, menu, pull (a
 //! crossover being pulled in), merge (one dragged onto its neighbour). SNAPSHOT_HOVER=x,y moves
 //! the pointer there.
@@ -41,6 +42,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "fold" => (Model::Fold, 16.0, 0.0, -2.0),
         "hard" => (Model::Hard, 22.0, 0.0, 0.0),
         "rectify" => (Model::Rectify, 14.0, 0.0, 0.0),
+        "tape" => (Model::Tape, 16.0, 0.0, 0.0),
+        "transformer" => (Model::Transformer, 20.0, 0.0, 0.0),
         _ => (Model::Tube, 12.0, 15.0, 0.0),
     };
     host.set_plain(&band_id(0, B_MODEL.id), model.index() as f32);

@@ -41,14 +41,34 @@ The editor's transfer curve is `x + a·(F(x) − x)` times the auto gain, from t
 
 | # | Model | Curve `f(u)` (`f(0) = 0`, `f'(0) = 1` but Rectify's 0, smooth: no corners) | Character |
 |---|---|---|---|
-| 0 | Tape | Jiles–Atherton hysteresis (slice 3) | Soft, loose, HF saturates first |
+| 0 | Tape | +18 dB shelf above ~2 kHz → Jiles–Atherton core (wide loop) → its exact inverse | Soft, loose, HF saturates first (and comes out compressed, little added distortion) |
 | 1 | **Tube** (default) | `u > 0`: `0.8·tanh(u/0.8)`; `u < 0`: `−1.25·(1 − e^{u/1.25})`; bias drifts down with level (blocking) | Asymmetric: even harmonics, more as it is pushed |
-| 2 | Transformer | Integrator → JA core → differentiator (slice 3) | Low end saturates first |
+| 2 | Transformer | +18 dB shelf below ~120 Hz (the flux integrates) → JA core (narrow loop) → its exact inverse | Low end saturates first |
 | 3 | Diode | `0.3·asinh(u/0.3)` | Hard knee, log growth, never a ceiling |
 | 4 | Soft | `u − 4u³/27` to ±1.5, then ±1 | Classic cubic: odd harmonics, gentle |
 | 5 | Hard | `u` to 0.95, a quadratic knee to 1 at 1.05, then ±1 | Clipping, rounded so it never folds a corner into the spectrum |
 | 6 | Fold | `sin(u)` | Wavefolder: past ±π/2 it folds back |
 | 7 | Rectify | `tanh(√(u² + 0.05²) − 0.05)` | Full-wave: the fundamental gives way to the octave |
+
+### 1.3 Hysteresis (Tape, Transformer)
+
+A Jiles–Atherton core in normalised units (`mite_dsp::hysteresis`): `m_an = L(h + A·m)` with the
+Langevin function, an irreversible part that relaxes `m` towards `m_an` over a field distance of
+about `K` (the loop's width), a reversible share `c`. Tape: `A` 0.1, `K` 0.3, `c` 0.82; Transformer:
+`K` 0.12, `c` 0.9. A high reversible share keeps quiet signals clean (an unbiased core's gain grows
+with level at the bottom of its loop, what AC bias hides on tape): within 1.5 dB below the knee,
+H3 of a quiet sine under −40 dB. Output scaled to slope 1 for a quiet sine, so the blend with the
+dry band has no level step; the rest magnetisation at the operating point is taken off, so silence
+stays silence.
+
+The relaxation is stiff (an explicit solver diverges once a sample moves the field further than
+`K`), so each substep is solved exactly with its coefficients held and the target moving linearly
+(an exponential integrator), as predictor and corrector; substeps are spaced evenly in
+`asinh(h)`. The settled loop is within 0.005 of a finely solved one for swings to ±400 at 12
+samples a cycle. The core is rate independent; only the emphasis sees the frequency.
+
+Auto gain reads the band's level after the model's emphasis (what drives the core); the measured
+trim reaches ±12 dB for these two (their prediction depends on the band's spectrum).
 
 **No ADAA.** First-order antiderivative anti-aliasing was planned and dropped (2026-10-26).
 On the curve's nonlinear part alone, it leaks `g·Δu/2` of high-frequency energy at high drive.
@@ -109,7 +129,11 @@ x 1180–1280, as in Shape.
   identity as a faint diagonal, the band's curve as a glowing accent line (`x + a(F − x)` with
   auto gain), and lit where the music is: the stretch from −p to +p, `p` the band's input peak
   (eased 60 ms up, 300 ms down), with a live dot riding the curve at +p. Tube's drifting bias
-  moves the curve live. Tape and Transformer (slice 3) draw their loop.
+  moves the curve live. Tape and Transformer: the faint curve is their core's anhysteretic
+  curve, the lit part is the loop a sine at the band's peak traces through the real core and
+  emphasis at the band's centre frequency (`magnet_loop`). The full-scale loop is not drawn: that
+  deep in saturation the emphasis turns the harmonics against the fundamental and it twists into
+  a figure of eight.
   - Drag up/down: drive. Drag sideways: bias. Shift: fine. Alt-drag up/down: tone. Wheel: drive.
     Double-click: drive and bias back to their defaults.
 - **Harmonics** (slice 4): H2–H9 bars, measured by a probe tone through the band's real
@@ -156,7 +180,7 @@ the editor does not show it.
    spectrum and one card. The engine already splits into bands (tested); the editor shows one.
 2. Multiband (done 2026-10-26): the rail, cards and band editing shared with Shape
    (`mite_ui::widgets::rail`).
-3. Tape and Transformer (hysteresis).
+3. Tape and Transformer (done 2026-10-26): `mite_dsp::hysteresis` (see §1.3).
 4. Harmonics probe and bars.
 5. Per-band stereo modes.
 6. Per-band dynamics.

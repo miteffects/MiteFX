@@ -93,7 +93,10 @@ fn the_wheel_drives_and_a_double_click_resets() {
 #[test]
 fn model_icons_pick_the_model_and_keys_step_through_them() {
     let (mut view, host) = setup();
-    assert!(view.model_icon(&host, Model::Tape).is_none(), "not offered until it is built");
+    // All eight are offered; Tape is the first.
+    let tape = view.model_icon(&host, Model::Tape).expect("offered").center();
+    click(&mut view, &host, tape);
+    assert_eq!(plain(&host, &band_id(0, B_MODEL.id)) as usize, Model::Tape.index());
     let fold = view.model_icon(&host, Model::Fold).expect("offered").center();
     click(&mut view, &host, fold);
     assert_eq!(plain(&host, &band_id(0, B_MODEL.id)) as usize, Model::Fold.index());

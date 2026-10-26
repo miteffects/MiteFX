@@ -1,5 +1,5 @@
 //! CPU of the engine on 20 s of stereo music at 48 kHz: one band per model and oversampling
-//! factor, and six bands of Tube at 4×.
+//! factor, and six bands of Tube or Tape at 4×.
 //!
 //!     cargo run --release -p mite_sat --example bench
 
@@ -26,13 +26,18 @@ fn main() {
     six.crossovers = [Some(120.0), Some(500.0), Some(2000.0), Some(6000.0), Some(12_000.0)];
     six.bands = [six.bands[0]; 6];
     let mut cases: Vec<(String, SatSettings, usize)> = Vec::new();
-    for m in [Model::Tube, Model::Soft, Model::Fold] {
+    for m in [Model::Tape, Model::Tube, Model::Transformer, Model::Soft, Model::Fold] {
         for f in [1, 2, 4, 8] {
             cases.push((format!("{} {f}×", m.name()), one(m), f));
         }
     }
     cases.push(("six bands Tube 4×".into(), six, 4));
-    for (name, s, factor) in cases {
+    let mut tape = six;
+    tape.bands = [one(Model::Tape).bands[0]; 6];
+    cases.push(("six bands Tape 4×".into(), tape, 4));
+    // ONLY=<text> runs the cases whose name holds it (profiling).
+    let only = std::env::var("ONLY").ok();
+    for (name, s, factor) in cases.into_iter().filter(|c| only.as_ref().is_none_or(|o| c.0.contains(o.as_str()))) {
         let out = Output::default();
         let mut engine = SatEngine::new(fs, factor, &s);
         let history = HistoryTap::new(6000);

@@ -4,7 +4,8 @@
 //!
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_sat --example preview
 //!
-//! PREVIEW_BANDS=3 or 6 starts with that many bands, each on its own model.
+//! PREVIEW_BANDS=3 or 6 starts with that many bands, each on its own model; PREVIEW_MAGNETS
+//! puts every band on Tape or Transformer (the loops traced each frame).
 
 #[path = "common/music.rs"]
 mod music;
@@ -24,7 +25,11 @@ fn main() -> Result<(), String> {
     host.set_plain(&band_id(0, B_MODEL.id), Model::Tube.index() as f32);
     host.set_plain(&band_id(0, B_DRIVE.id), 12.0);
     let bands: usize = std::env::var("PREVIEW_BANDS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
-    let models = [Model::Soft, Model::Hard, Model::Fold, Model::Diode, Model::Rectify];
+    let magnets = std::env::var_os("PREVIEW_MAGNETS").is_some();
+    let models = if magnets { [Model::Transformer, Model::Tape, Model::Transformer, Model::Tape, Model::Transformer] } else { [Model::Soft, Model::Hard, Model::Fold, Model::Diode, Model::Rectify] };
+    if magnets {
+        host.set_plain(&band_id(0, B_MODEL.id), Model::Tape.index() as f32);
+    }
     for (k, f) in [150.0, 600.0, 2000.0, 5000.0, 11_000.0].into_iter().enumerate().take(bands.clamp(1, 6) - 1) {
         host.set_plain(&cross_id(k, X_ON.id), 1.0);
         host.set_plain(&cross_id(k, X_FREQ.id), f);

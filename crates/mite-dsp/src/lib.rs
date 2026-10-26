@@ -9,6 +9,7 @@ pub mod crossover;
 pub mod dynamics;
 pub mod eq;
 pub mod filter;
+pub mod hysteresis;
 pub mod gain;
 pub mod linear_phase;
 pub mod matching;

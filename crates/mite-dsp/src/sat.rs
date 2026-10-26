@@ -8,6 +8,11 @@
 //! and band mix 0 are the band bit for bit; the 5 Hz high-pass on the difference takes out the
 //! DC a bias makes without touching the band's lows. A band at `a = 0` skips the oversampler.
 //!
+//! Tape and Transformer run a Jiles–Atherton hysteresis core (`crate::hysteresis`) between an
+//! emphasis filter and its exact inverse: Tape lifts the highs into the core (they saturate
+//! first, as on a tape machine), Transformer the lows (the core's flux is the integral of the
+//! voltage). Quiet signals come out as they went in.
+//!
 //! Every curve is smooth (C¹): the oversampler does the anti-aliasing. First-order ADAA was
 //! dropped (sat-brief §1.2): on the nonlinear part alone it leaks `g·Δu/2` at high drive; on the
 //! whole curve its half-sample delay combs against the dry path.
@@ -15,6 +20,7 @@
 use std::sync::OnceLock;
 
 use crate::crossover::{Cross, Split};
+use crate::hysteresis::{self, anhysteretic, Ja, JaParams};
 use crate::oversample::Oversampler;
 
 pub use crate::crossover::{FREQ_MAX, FREQ_MIN, MIN_GAP_OCT};
@@ -51,6 +57,9 @@ const LEVEL_MS: f64 = 300.0;
 /// Auto gain's measured trim: mean squares over this long (s), corrected this far (dB).
 const TRIM_SECONDS: f64 = 1.5;
 const TRIM_LIMIT_DB: f64 = 6.0;
+/// Tape and Transformer: their emphasis makes the prediction coarser (it depends on the band's
+/// spectrum), so the trim reaches further.
+const TRIM_LIMIT_MAGNET_DB: f64 = 12.0;
 /// Auto gain never moves a band by more than this, dB.
 const AUTO_LIMIT_DB: f64 = 24.0;
 /// Below this mean square (−80 dBFS) the trim is not measured.
@@ -68,6 +77,8 @@ const CHUNK: usize = CONTROL;
 /// A band waking up runs this many of its past samples through the oversampler first (more than
 /// the longest half-band's history).
 const PREROLL: usize = 80;
+/// Each channel's stretch at the high rate in the scratch: a chunk at 8×.
+const HI_CH: usize = CHUNK * 8;
 
 /// The saturation models, in their frozen parameter order (append only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,10 +110,13 @@ impl Model {
         Self::NAMES[self.index()]
     }
 
-    /// Whether the model is built yet (Tape and Transformer come with the hysteresis slice; until
-    /// then they play Soft and the editor does not offer them).
-    pub fn is_built(self) -> bool {
-        !matches!(self, Model::Tape | Model::Transformer)
+    /// Which hysteresis core a model runs (Tape 0, Transformer 1), if any.
+    pub fn magnet(self) -> Option<usize> {
+        match self {
+            Model::Tape => Some(0),
+            Model::Transformer => Some(1),
+            _ => None,
+        }
     }
 
     /// Whether the curve itself has state (drift or hysteresis), so the drawn curve moves.
@@ -111,10 +125,22 @@ impl Model {
     }
 }
 
+/// The hysteresis cores, by [`Model::magnet`].
+const MAGNETS: [JaParams; 2] = [hysteresis::TAPE, hysteresis::TRANSFORMER];
+/// Tape's emphasis: up to +18 dB above about 2 kHz into the core; Transformer's: up to +18 dB
+/// below about 120 Hz (tilt and pivot, as [`Tilt::new`] takes them, then half the tilt as gain,
+/// so the other end stays at 0 dB).
+const EMPHASIS: [(f32, f32); 2] = [(18.0, 2000.0), (-18.0, 120.0)];
+
 /// The model's static curve `f(u)`: `f(0) = 0`, smooth, slope 1 at 0 (Rectify: 0, it trades the
-/// fundamental for the octave).
+/// fundamental for the octave). Tape and Transformer: their core's anhysteretic curve (what the
+/// loop closes onto); they play their loop ([`Magnet`]).
 #[inline]
 pub fn curve(model: Model, u: f32) -> f32 {
+    if let Some(w) = model.magnet() {
+        let p = &MAGNETS[w];
+        return anhysteretic(p, p.h_in * u) * (3.0 - p.coupling) / p.h_in;
+    }
     match model {
         Model::Tube => {
             if u > 0.0 {
@@ -189,15 +215,26 @@ fn gain_tables() -> &'static [GainTable; 8] {
     TABLES.get_or_init(|| {
         Box::new(Model::ALL.map(|m| {
             let mut t = GainTable { p: [0.0; TABLE_U * TABLE_B], c: [0.0; TABLE_U * TABLE_B] };
+            let flat = (Tilt::IDENTITY, Tilt::IDENTITY);
             for j in 0..TABLE_B {
                 let b = -BIAS_RANGE + j as f32 * (2.0 * BIAS_RANGE / (TABLE_B - 1) as f32);
                 for i in 0..TABLE_U {
                     let u = 10f64.powf((TABLE_U_DB.0 + i as f64) / 20.0);
                     let (mut p, mut c) = (0.0f64, 0.0f64);
                     const N: usize = 128;
-                    for k in 0..N {
+                    // A hysteresis core is run through a settling cycle first, then measured
+                    // on its loop (without the emphasis: the trim measures the rest).
+                    let mut magnet = Magnet::default();
+                    let settle = if m.magnet().is_some() { N } else { 0 };
+                    for k in 0..settle + N {
                         let s = (std::f64::consts::TAU * (k as f64 + 0.5) / N as f64).sin();
-                        let f = f64::from(curve(m, (u * s) as f32 + b)) - f64::from(curve(m, b));
+                        let f = match m.magnet() {
+                            Some(w) => f64::from(magnet.process(w, &flat, (u * s) as f32, b)),
+                            None => f64::from(curve(m, (u * s) as f32 + b)) - f64::from(curve(m, b)),
+                        };
+                        if k < settle {
+                            continue;
+                        }
                         p += f * f;
                         c += s * f;
                     }
@@ -311,6 +348,16 @@ impl Tilt {
         Self { b0: ((hi * k + lo * wp) / d) as f32, b1: ((lo * wp - hi * k) / d) as f32, a1: ((wp - k) / d) as f32 }
     }
 
+    /// The same section times `gain`.
+    pub fn scaled(self, gain: f32) -> Self {
+        Self { b0: self.b0 * gain, b1: self.b1 * gain, ..self }
+    }
+
+    /// The exact inverse (the section is minimum phase: its zero is inside the unit circle).
+    pub fn inverse(self) -> Self {
+        Self { b0: 1.0 / self.b0, b1: self.a1 / self.b0, a1: self.b1 / self.b0 }
+    }
+
     /// The magnitude at `f` Hz (for the editor and tests).
     pub fn magnitude(&self, f: f64, fs: f64) -> f64 {
         let w = std::f64::consts::TAU * f / fs;
@@ -328,6 +375,80 @@ impl Tilt {
     }
 }
 
+// ---- Hysteresis lanes -----------------------------------------------------------------------
+
+/// The emphasis around hysteresis core `w` at rate `fs`: into the core, and its exact inverse out.
+pub fn emphasis(w: usize, fs: f32) -> (Tilt, Tilt) {
+    let (tilt, pivot) = EMPHASIS[w];
+    let pre = Tilt::new(tilt, pivot, fs).scaled(crate::db_to_gain(tilt.abs() / 2.0));
+    (pre, pre.inverse())
+}
+
+/// One channel of a Tape or Transformer lane: the core and its emphasis filters' states. A
+/// fresh one starts at rest at the operating point, so silence stays silence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Magnet {
+    core: Ja,
+    pre: f32,
+    post: f32,
+    /// The core's rest magnetisation at the operating point it was worked out for.
+    rest: f32,
+    rest_at: f32,
+    /// The core's output scale ([`hysteresis::unity`]).
+    unity: f32,
+    fresh: bool,
+}
+
+impl Default for Magnet {
+    fn default() -> Self {
+        Self { core: Ja::default(), pre: 0.0, post: 0.0, rest: 0.0, rest_at: 0.0, unity: 1.0, fresh: true }
+    }
+}
+
+impl Magnet {
+    /// `F` for the driven sample `u0` (`g·x`) at operating point `point`, through core `w` with
+    /// its emphasis `em`: slope 1 for quiet signals, 0 at rest.
+    #[inline]
+    pub fn process(&mut self, w: usize, em: &(Tilt, Tilt), u0: f32, point: f32) -> f32 {
+        let p = &MAGNETS[w];
+        let at = p.h_in * point;
+        if self.fresh {
+            self.core = Ja::rest(p, at);
+            (self.pre, self.post, self.rest, self.rest_at, self.fresh) = (0.0, 0.0, self.core.m, point, false);
+            self.unity = hysteresis::unity(p);
+        } else if point != self.rest_at {
+            self.rest = anhysteretic(p, at);
+            self.rest_at = point;
+        }
+        let v = em.0.process(&mut self.pre, u0);
+        let m = self.core.step(p, p.h_in * v + at);
+        em.1.process(&mut self.post, self.unity * (m - self.rest))
+    }
+}
+
+/// What a Tape or Transformer band makes of `x` at rate `fs` (the rate the curve runs at),
+/// from rest: `F` through the emphasis and the core, the code the engine runs per lane (without
+/// the oversampler, the tone and the dry blend). For the editor and tests; allocates.
+pub fn magnet_response(model: Model, x: &[f32], drive_db: f32, point: f32, fs: f32) -> Vec<f32> {
+    let Some(w) = model.magnet() else { return x.iter().map(|&v| curve(model, v)).collect() };
+    let em = emphasis(w, fs);
+    let g = crate::db_to_gain(drive_db);
+    let mut magnet = Magnet::default();
+    x.iter().map(|&v| magnet.process(w, &em, g * v, point)).collect()
+}
+
+/// The loop a Tape or Transformer band traces for a sine of amplitude `amp` at `freq` Hz once
+/// settled (after one cycle from rest): `(x, F(x))` over the next, `n` points from phase 0 (the
+/// editor draws it).
+pub fn magnet_loop(model: Model, amp: f32, drive_db: f32, point: f32, freq: f32, n: usize) -> Vec<(f32, f32)> {
+    // The core is rate independent and the emphasis only sees `freq / fs`: any rate with `n`
+    // samples a cycle gives the same loop.
+    let fs = freq * n as f32;
+    let x: Vec<f32> = (0..2 * n).map(|i| amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32).collect();
+    let y = magnet_response(model, &x, drive_db, point, fs);
+    x[n..].iter().copied().zip(y[n..].iter().copied()).collect()
+}
+
 // ---- Engine --------------------------------------------------------------------------------
 
 /// One band slot's state in one core, per channel.
@@ -335,11 +456,17 @@ struct BandCore {
     os: Oversampler,
     /// Tube's drift follower per lane and channel.
     drift: [[f32; 2]; 2],
+    /// Tape's or Transformer's core per lane and channel.
+    magnet: [[Magnet; 2]; 2],
     tone: [f32; 2],
     /// The difference high-pass: last input and output per channel.
     hp: [(f32, f32); 2],
     /// The band's level (mean square, both channels), for auto gain.
     level: f64,
+    /// The same through Tape's and Transformer's emphasis (what their cores are driven with), and
+    /// those filters' states per channel.
+    level_emph: [f64; 2],
+    emph_state: [[f32; 2]; 2],
     /// Auto gain's trim meters: mean squares in and out (after the prediction).
     trim_in: f64,
     trim_out: f64,
@@ -349,12 +476,13 @@ struct BandCore {
 
 impl BandCore {
     fn new(factor: usize) -> Self {
-        Self { os: Oversampler::new(factor), drift: [[0.0; 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, trim_in: 0.0, trim_out: 0.0, idle: true }
+        Self { os: Oversampler::new(factor), drift: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, idle: true }
     }
 
     fn clear(&mut self) {
         self.os.reset();
         self.drift = [[0.0; 2]; 2];
+        self.magnet = [[Magnet::default(); 2]; 2];
         self.tone = [0.0; 2];
         self.hp = [(0.0, 0.0); 2];
         self.idle = true;
@@ -363,9 +491,12 @@ impl BandCore {
     fn copy_from(&mut self, other: &BandCore) {
         self.os.copy_from(&other.os);
         self.drift = other.drift;
+        self.magnet = other.magnet;
         self.tone = other.tone;
         self.hp = other.hp;
         self.level = other.level;
+        self.level_emph = other.level_emph;
+        self.emph_state = other.emph_state;
         self.trim_in = other.trim_in;
         self.trim_out = other.trim_out;
         self.idle = other.idle;
@@ -400,6 +531,8 @@ impl Core {
         for b in &mut self.bands {
             b.clear();
             b.level = 0.0;
+            b.level_emph = [0.0; 2];
+            b.emph_state = [[0.0; 2]; 2];
             b.trim_in = 0.0;
             b.trim_out = 0.0;
         }
@@ -427,10 +560,10 @@ impl Core {
         let parents = self.split.restructure(&self.layout, &layout, crossovers);
         for (slot, parent) in parents.iter().enumerate() {
             let Some(parent) = *parent else { continue };
-            let (level, trim_in, trim_out) = (self.bands[parent].level, self.bands[parent].trim_in, self.bands[parent].trim_out);
+            let (level, level_emph, trim_in, trim_out) = (self.bands[parent].level, self.bands[parent].level_emph, self.bands[parent].trim_in, self.bands[parent].trim_out);
             let band = &mut self.bands[slot];
             band.clear();
-            (band.level, band.trim_in, band.trim_out) = (level, trim_in, trim_out);
+            (band.level, band.level_emph, band.trim_in, band.trim_out) = (level, level_emph, trim_in, trim_out);
             for c in 0..2 {
                 let r = self.ring(slot, c);
                 self.rings[r].fill(0.0);
@@ -541,6 +674,10 @@ pub struct Saturator {
     level_k: f64,
     trim_k: f64,
     drift_k: (f32, f32),
+    /// Tape's and Transformer's emphasis at the high rate, and (pre only) at the base rate for
+    /// the levels auto gain reads.
+    emph: [(Tilt, Tilt); 2],
+    emph_base: [Tilt; 2],
     hp_k: f32,
     /// The values each control step ramps from and to, by band slot: gain, point, share, post.
     from: [[f32; 4]; BANDS],
@@ -579,6 +716,8 @@ impl Saturator {
             level_k: 0.0,
             trim_k: 0.0,
             drift_k: (0.0, 0.0),
+            emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
+            emph_base: [Tilt::IDENTITY; 2],
             hp_k: 0.0,
             from: [[0.0; 4]; BANDS],
             to: [[0.0; 4]; BANDS],
@@ -594,7 +733,7 @@ impl Saturator {
                 tilt: [[Tilt::IDENTITY; CHUNK]; BANDS],
             }),
             split: vec![0.0; 2 * BANDS * 2 * CHUNK],
-            hi: vec![0.0; PREROLL.max(CHUNK) * 8],
+            hi: vec![0.0; (PREROLL * 8).max(2 * HI_CH)],
             wet: vec![0.0; CHUNK],
         };
         sat.prepare(sample_rate, factor, s);
@@ -628,6 +767,8 @@ impl Saturator {
         let hi_rate = self.fs * self.factor as f64;
         let per = |ms: f64| (1.0 - (-1000.0 / (ms * hi_rate)).exp()) as f32;
         self.drift_k = (per(DRIFT_ATTACK_MS), per(DRIFT_RELEASE_MS));
+        self.emph = [emphasis(0, hi_rate as f32), emphasis(1, hi_rate as f32)];
+        self.emph_base = [emphasis(0, self.fs as f32).0, emphasis(1, self.fs as f32).0];
         self.reset(s);
     }
 
@@ -734,7 +875,7 @@ impl Saturator {
         let toward = |v: &mut f64, target: f64, step: f64| {
             *v = if target > *v { (*v + step).min(target) } else { (*v - step).max(target) };
         };
-        let level = self.cores[self.active].bands.each_ref().map(|b| b.level);
+        let level = self.cores[self.active].bands.each_ref().map(|b| (b.level, b.level_emph));
         let trim_ms = self.cores[self.active].bands.each_ref().map(|b| (b.trim_in, b.trim_out));
         for b in 0..BANDS {
             if !self.live[b] {
@@ -756,13 +897,17 @@ impl Saturator {
                 e.lane_fade = Some(0.0);
                 for core in &mut self.cores {
                     core.bands[b].drift[other] = [0.0; 2];
+                    core.bands[b].magnet[other] = [Magnet::default(); 2];
                 }
             }
             // Auto gain: the curve's predicted gain for a sine at the band's level, then a trim
             // measured on the music.
             let share = e.share();
             let model = e.lanes[e.lane];
-            let amplitude = (2.0 * level[b]).sqrt() as f32;
+            // Tape and Transformer: the level their emphasis drives the core with (the inverse
+            // after it takes back about as much as it lifted).
+            let ms = model.magnet().map_or(level[b].0, |w| level[b].1[w]);
+            let amplitude = (2.0 * ms).sqrt() as f32;
             let predicted = f64::from(predicted_gain(model, amplitude, e.drive_db as f32, bias_point(e.bias as f32), share as f32)).max(1e-6);
             let limit = 10f64.powf(AUTO_LIMIT_DB / 20.0);
             // Its inputs (level, eased settings) are smooth already: no lag of its own, so the
@@ -770,7 +915,7 @@ impl Saturator {
             e.comp = (1.0 / predicted).clamp(1.0 / limit, limit);
             let (tin, tout) = trim_ms[b];
             if s.auto_gain && tin > TRIM_GATE && tout > TRIM_GATE {
-                let lim = 10f64.powf(TRIM_LIMIT_DB / 20.0);
+                let lim = 10f64.powf(if model.magnet().is_some() { TRIM_LIMIT_MAGNET_DB } else { TRIM_LIMIT_DB } / 20.0);
                 ease(&mut e.trim, (tin / tout).sqrt().clamp(1.0 / lim, lim), self.trim_k * CONTROL as f64);
             }
             if !s.auto_gain {
@@ -904,13 +1049,18 @@ impl Saturator {
                 let mut peak_out = 0.0f32;
                 // Mean square across the channels, going in and coming out (before the gains).
                 let mut power = [0.0f64; CHUNK];
+                let mut power_emph = [[0.0f64; CHUNK]; 2];
                 let mut power_out = [0.0f64; CHUNK];
                 let per_ch = 1.0 / n_ch as f64;
+                // A: each channel's delayed band (x_d) and meters, the wake-up pre-roll, and the
+                // stretch up to the high rate (channel c at `hi[c·HI_CH..]`).
+                let mut xds = [[0.0f32; CHUNK]; 2];
+                let f = self.factor;
+                let m = n * f;
                 for c in 0..n_ch {
                     let src = at(ci, p, c);
-                    // The band delayed by the round trip (x_d), through its ring.
                     let r = (b * 2 + c) * core.ring_len;
-                    let mut xd = [0.0f32; CHUNK];
+                    let xd = &mut xds[c];
                     let mut w = self.write;
                     for i in 0..n {
                         let v = self.split[src + i];
@@ -922,6 +1072,10 @@ impl Saturator {
                         }
                         w = (w + 1) % core.ring_len;
                         power[i] += f64::from(v) * f64::from(v) * per_ch;
+                        for (w, pe) in power_emph.iter_mut().enumerate() {
+                            let ve = f64::from(self.emph_base[w].process(&mut band.emph_state[w][c], v));
+                            pe[i] += ve * ve * per_ch;
+                        }
                         peak_in = peak_in.max(v.abs());
                     }
                     if engaged && band.idle && latency > 0 {
@@ -932,46 +1086,66 @@ impl Saturator {
                         for (j, v) in tmp[..past].iter_mut().enumerate() {
                             *v = core.rings[r + (self.write + core.ring_len - past + j) % core.ring_len];
                         }
-                        let f = self.factor;
                         band.os.up(c, &tmp[..past], &mut self.hi[..past * f]);
                         let (g, point, model) = (self.lanes.gain[b][0], self.lanes.point[b][0], e.lanes[e.lane]);
                         for v in &mut self.hi[..past * f] {
-                            *v = curve(model, g * *v + point) - curve(model, point);
+                            *v = match model.magnet() {
+                                // The core warms up on the past too.
+                                Some(w) => band.magnet[e.lane][c].process(w, &self.emph[w], g * *v, point),
+                                None => curve(model, g * *v + point) - curve(model, point),
+                            };
                         }
                         let mut sink = [0.0f32; PREROLL];
                         band.os.down(c, &self.hi[..past * f], &mut sink[..past]);
                     }
-                    if engaged {
-                        let f = self.factor;
-                        let m = n * f;
-                        band.os.up(c, &self.split[src..src + n], &mut self.hi[..m]);
-                        let models = e.lanes;
-                        let heard = e.lane;
-                        let (ka, kr) = self.drift_k;
-                        for k in 0..m {
-                            let i = k / f;
-                            let u0 = self.lanes.gain[b][i] * self.hi[k];
-                            let point = self.lanes.point[b][i];
-                            let mut lane = |l: usize| {
-                                let model = models[l];
-                                let pt = if model == Model::Tube {
-                                    let d = &mut band.drift[l][c];
-                                    let target = u0.clamp(0.0, DRIFT_MAX);
-                                    *d += (target - *d) * if target > *d { ka } else { kr };
-                                    point - DRIFT * *d
-                                } else {
-                                    point
-                                };
-                                curve(model, u0 + pt) - curve(model, pt)
-                            };
-                            self.hi[k] = if lane_fading {
-                                let (a, z) = (lane(heard), lane(1 - heard));
+                }
+                if engaged {
+                    for c in 0..n_ch {
+                        let src = at(ci, p, c);
+                        band.os.up(c, &self.split[src..src + n], &mut self.hi[c * HI_CH..c * HI_CH + m]);
+                    }
+                    // B: the curves, both channels in the same pass (their state chains are
+                    // independent, so the CPU overlaps them: a hysteresis core is latency bound).
+                    let models = e.lanes;
+                    let heard = e.lane;
+                    let (ka, kr) = self.drift_k;
+                    let emph = &self.emph;
+                    let mut lane = |l: usize, c: usize, u0: f32, point: f32| {
+                        let model = models[l];
+                        if let Some(w) = model.magnet() {
+                            return band.magnet[l][c].process(w, &emph[w], u0, point);
+                        }
+                        let pt = if model == Model::Tube {
+                            let d = &mut band.drift[l][c];
+                            let target = u0.clamp(0.0, DRIFT_MAX);
+                            *d += (target - *d) * if target > *d { ka } else { kr };
+                            point - DRIFT * *d
+                        } else {
+                            point
+                        };
+                        curve(model, u0 + pt) - curve(model, pt)
+                    };
+                    for k in 0..m {
+                        let i = k / f;
+                        let (g, point) = (self.lanes.gain[b][i], self.lanes.point[b][i]);
+                        for c in 0..n_ch {
+                            let at = c * HI_CH + k;
+                            let u0 = g * self.hi[at];
+                            self.hi[at] = if lane_fading {
+                                let (a, z) = (lane(heard, c, u0, point), lane(1 - heard, c, u0, point));
                                 a + (z - a) * self.lanes.blend[b][i]
                             } else {
-                                lane(heard)
+                                lane(heard, c, u0, point)
                             };
                         }
-                        band.os.down(c, &self.hi[..m], &mut self.wet[..n]);
+                    }
+                    band.idle = false;
+                }
+                // C: back down, the tone and the dry blend, the sum.
+                for c in 0..n_ch {
+                    let xd = &xds[c];
+                    if engaged {
+                        band.os.down(c, &self.hi[c * HI_CH..c * HI_CH + m], &mut self.wet[..n]);
                         let (mut x1, mut y1) = band.hp[c];
                         let mut tone = band.tone[c];
                         for i in 0..n {
@@ -987,9 +1161,6 @@ impl Saturator {
                     } else {
                         self.wet[..n].copy_from_slice(&xd[..n]);
                     }
-                    if engaged && c + 1 == n_ch {
-                        band.idle = false;
-                    }
                     for i in 0..n {
                         let pre = self.wet[i];
                         power_out[i] += f64::from(pre) * f64::from(pre) * per_ch;
@@ -1002,6 +1173,9 @@ impl Saturator {
                 let comp2 = e.comp * e.comp;
                 for i in 0..n {
                     band.level += self.level_k * (power[i] - band.level);
+                    for w in 0..2 {
+                        band.level_emph[w] += self.level_k * (power_emph[w][i] - band.level_emph[w]);
+                    }
                     band.trim_in += self.trim_k * (power[i] - band.trim_in);
                     band.trim_out += self.trim_k * (power_out[i] * comp2 - band.trim_out);
                 }
@@ -1166,6 +1340,77 @@ mod tests {
         }
     }
 
+    /// Harmonic `h` of a tone at bin `K` of `N`, over the last `over·N` samples of a signal at
+    /// `over` times the base rate.
+    fn harmonic_at(y: &[f32], h: usize, over: usize) -> f64 {
+        let n = N * over;
+        let tail = &y[y.len() - n..];
+        let w = std::f64::consts::TAU * (h * K) as f64 / n as f64;
+        let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+        2.0 * re.hypot(im) / n as f64
+    }
+
+    #[test]
+    fn tape_and_transformer_play_the_drawn_loop() {
+        // The engine at 8× against `magnet_response` (what the editor's loop is drawn from) on
+        // the same tone at the high rate: the same harmonics within 0.1 dB down to −60 dB.
+        for m in [Model::Tape, Model::Transformer] {
+            for (amp, drive, bias) in [(0.25f32, 12.0f32, 0.0f32), (0.1, 24.0, 0.4)] {
+                let mut s = band(m, drive);
+                s.bands[0].bias = bias;
+                let mut sat = Saturator::new(FS, 8, &s);
+                let (y, _) = run(&mut sat, &tone(6 * N, amp, K), &s, 333);
+                let x_hi: Vec<f32> = (0..6 * N * 8).map(|i| amp * (std::f64::consts::TAU * (K * i) as f64 / (8 * N) as f64).sin() as f32).collect();
+                let want_y = magnet_response(m, &x_hi, drive, bias_point(bias), 8.0 * FS);
+                let reference = (1..=5).map(|h| harmonic_at(&want_y, h, 8)).fold(0.0, f64::max);
+                for h in 1..=5 {
+                    let want = harmonic_at(&want_y, h, 8);
+                    if want < reference * 1e-3 {
+                        continue;
+                    }
+                    let db = 20.0 * (harmonic(&y, h) / want).log10();
+                    assert!(db.abs() < 0.1, "{m:?} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tape_saturates_the_highs_first_and_transformer_the_lows() {
+        // The third harmonic's share for a low (≈ 70 Hz) and a high (≈ 4.4 kHz) tone at the same
+        // level: Tape distorts the high one more, Transformer the low one.
+        let h3 = |m: Model, k: usize| {
+            let s = band(m, 12.0);
+            let mut sat = Saturator::new(FS, 4, &s);
+            let x: Vec<f32> = (0..8 * N).map(|i| 0.05 * (std::f64::consts::TAU * (k * i) as f64 / N as f64).sin() as f32).collect();
+            let (y, _) = run(&mut sat, &x, &s, 256);
+            let at = |h: usize| {
+                let tail = &y[y.len() - N..];
+                let w = std::f64::consts::TAU * (h * k) as f64 / N as f64;
+                let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+                re.hypot(im)
+            };
+            20.0 * (at(3) / at(1)).log10()
+        };
+        let (tape_lo, tape_hi) = (h3(Model::Tape, 6), h3(Model::Tape, 377));
+        let (iron_lo, iron_hi) = (h3(Model::Transformer, 6), h3(Model::Transformer, 377));
+        assert!(tape_hi > tape_lo + 6.0, "tape: low {tape_lo:.1} dB, high {tape_hi:.1} dB");
+        assert!(iron_lo > iron_hi + 6.0, "transformer: low {iron_lo:.1} dB, high {iron_hi:.1} dB");
+    }
+
+    #[test]
+    fn tape_and_transformer_pass_quiet_signals_at_unity() {
+        for m in [Model::Tape, Model::Transformer] {
+            let s = band(m, 12.0);
+            let mut sat = Saturator::new(FS, 2, &s);
+            let (y, _) = run(&mut sat, &tone(4 * N, 0.002, K), &s, 256);
+            // Drive is gain into the curve (auto gain off): 12 dB louder, as the static curves.
+            let db = 20.0 * (harmonic(&y, 1) / 0.002).log10() - 12.0;
+            assert!(db.abs() < 1.0, "{m:?}: {db:.2} dB");
+            assert!(harmonic(&y, 3) < harmonic(&y, 1) * 0.01, "{m:?}: H3");
+        }
+    }
+
     #[test]
     fn symmetric_models_make_no_even_harmonics_and_tube_does() {
         for m in [Model::Diode, Model::Soft, Model::Hard, Model::Fold] {
@@ -1175,6 +1420,16 @@ mod tests {
             let h1 = harmonic(&y, 1).max(harmonic(&y, 3));
             for h in [2, 4, 6] {
                 assert!(harmonic(&y, h) < h1 * 1e-6, "{m:?}: H{h}");
+            }
+        }
+        // A loop is odd-symmetric too, once the core has left its virgin curve (to f32 rounding).
+        for m in [Model::Tape, Model::Transformer] {
+            let s = band(m, 18.0);
+            let mut sat = Saturator::new(FS, 4, &s);
+            let (y, _) = run(&mut sat, &tone(6 * N, 0.3, K), &s, 256);
+            let h1 = harmonic(&y, 1);
+            for h in [2, 4, 6] {
+                assert!(harmonic(&y, h) < h1 * 1e-4, "{m:?}: H{h} {}", harmonic(&y, h) / h1);
             }
         }
         // Tube: even harmonics, more as it is pushed.
@@ -1288,6 +1543,9 @@ mod tests {
             (base, with(&|b| b.tone_db = -12.0)),
             (with(&|b| b.model = Model::Fold), base),
             (with(&|b| b.model = Model::Tube), with(&|b| b.model = Model::Rectify)),
+            // Auto gain off: a trim measured on Tape settles onto Transformer over seconds.
+            (SatSettings { auto_gain: false, ..with(&|b| b.model = Model::Tape) }, SatSettings { auto_gain: false, ..with(&|b| b.model = Model::Transformer) }),
+            (base, with(&|b| b.model = Model::Tape)),
             (base, with(&|b| b.bypass = true)),
             (with(&|b| b.bypass = true), base),
             (base, with(&|b| b.mix = 0.0)),
@@ -1324,7 +1582,7 @@ mod tests {
     #[test]
     fn auto_gain_keeps_the_level() {
         let rms = |v: &[f32]| (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
-        for m in [Model::Tube, Model::Diode, Model::Soft, Model::Hard, Model::Fold] {
+        for m in [Model::Tape, Model::Tube, Model::Transformer, Model::Diode, Model::Soft, Model::Hard, Model::Fold] {
             for drive in [6.0f32, 18.0, 36.0] {
                 // The trim settles over seconds (1.5 s time constant): judge the last two.
                 for input in [tone(288_000, 0.25, K), noise(288_000, 9, 0.3)] {

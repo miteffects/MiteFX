@@ -403,7 +403,9 @@ The history keeps scrolling and the meters and spectrum keep their ballistics (t
 
 A drag is one undo step. The curve is `mite_dsp::sat::transfer` at the live operating point
 (Tube's drift) times auto gain; it is lit from −peak to +peak of the band's input (60 ms up,
-300 ms down), with a dot at each end.
+300 ms down), with a dot at each end. Tape and Transformer: lit is the loop a sine at the band's
+peak traces through the real core (`magnet_loop`, at the band's centre frequency), with a dot
+where it peaks either way.
 
 ### Card
 

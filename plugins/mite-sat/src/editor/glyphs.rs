@@ -1,6 +1,8 @@
 //! Glyphs (24×24, stroked) and the model icons, each a tiny drawing of its own curve.
 
-use mite_dsp::sat::{transfer, Model};
+use std::sync::OnceLock;
+
+use mite_dsp::sat::{magnet_loop, transfer, Model};
 use mite_ui::kurbo::{Affine, BezPath, Cap, Join, Point, Stroke};
 use mite_ui::peniko::Color;
 use mite_ui::vello::Scene;
@@ -27,15 +29,40 @@ fn icon_drive(model: Model) -> f32 {
     }
 }
 
+/// Tape's and Transformer's icons: their loop (from the DSP) where their emphasis is flat
+/// (Tape at 200 Hz, Transformer at 1 kHz), so it shows the core's curve and loop; traced once.
+fn icon_loop(model: Model) -> &'static [(f32, f32)] {
+    static LOOPS: OnceLock<[Vec<(f32, f32)>; 2]> = OnceLock::new();
+    let loops = LOOPS.get_or_init(|| [magnet_loop(Model::Tape, 1.0, 12.0, 0.0, 200.0, 64), magnet_loop(Model::Transformer, 1.0, 9.0, 0.0, 1000.0, 64)]);
+    &loops[model.magnet().unwrap_or(0)]
+}
+
 /// A model's icon: its own transfer curve (from the DSP) over −1…1, `size` across, centred on
-/// `c`.
+/// `c` (Tape and Transformer: their loop).
 pub fn draw_model(scene: &mut Scene, model: Model, c: Point, size: f64, color: Color, width: f64) {
+    let stroke = Stroke::new(width).with_caps(Cap::Round).with_join(Join::Round);
+    let half = size / 2.0;
+    if model.magnet().is_some() {
+        let pts = icon_loop(model);
+        let peak = pts.iter().fold(0.0f32, |m, p| m.max(p.1.abs())).max(1e-6);
+        let mut path = BezPath::new();
+        for (i, &(x, y)) in pts.iter().enumerate() {
+            let p = Point::new(c.x + f64::from(x) * half, c.y - f64::from(y / peak) * half * 0.8);
+            if i == 0 {
+                path.move_to(p);
+            } else {
+                path.line_to(p);
+            }
+        }
+        path.close_path();
+        scene.stroke(&stroke, Affine::IDENTITY, color, None, &path);
+        return;
+    }
     let drive = icon_drive(model);
     // Fit the curve's height to the box, so models that never reach ±1 still read.
     let n = 48;
     let ys: Vec<f64> = (0..=n).map(|i| f64::from(transfer(model, -1.0 + 2.0 * i as f32 / n as f32, drive, 0.0))).collect();
     let peak = ys.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1e-6);
-    let half = size / 2.0;
     let mut path = BezPath::new();
     for (i, y) in ys.iter().enumerate() {
         let p = Point::new(c.x - half + size * i as f64 / n as f64, c.y - y / peak * half * 0.8);
@@ -45,6 +72,5 @@ pub fn draw_model(scene: &mut Scene, model: Model, c: Point, size: f64, color: C
             path.line_to(p);
         }
     }
-    let stroke = Stroke::new(width).with_caps(Cap::Round).with_join(Join::Round);
     scene.stroke(&stroke, Affine::IDENTITY, color, None, &path);
 }

@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite Sat",
+  "version": 1,
+  "name": "Iron Bass",
+  "params": {
+    "x1_on": 1.0,
+    "x1_freq": 250.0,
+    "b1_model": 2.0,
+    "b1_drive": 14.0,
+    "b2_model": 1.0,
+    "b2_drive": 0.0
+  }
+}
