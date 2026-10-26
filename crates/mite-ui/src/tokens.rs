@@ -227,6 +227,106 @@ mod tests {
         }
     }
 
+    /// CIE L*a*b* (D65) of `#RRGGBB`.
+    fn lab(hex: &str) -> [f64; 3] {
+        let byte = |i: usize| f64::from(u8::from_str_radix(&hex[1 + i..3 + i], 16).unwrap()) / 255.0;
+        let lin = |c: f64| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+        let (r, g, b) = (lin(byte(0)), lin(byte(2)), lin(byte(4)));
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+        let f = |t: f64| if t > 216.0 / 24389.0 { t.cbrt() } else { (24389.0 / 27.0 * t + 16.0) / 116.0 };
+        let (fx, fy, fz) = (f(x), f(y), f(z));
+        [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+    }
+
+    /// CIEDE2000 between two `#RRGGBB` colours (the metric `rules.deltaE` names).
+    fn delta_e(c1: &str, c2: &str) -> f64 {
+        delta_e_lab(lab(c1), lab(c2))
+    }
+
+    fn delta_e_lab([l1, a1, b1]: [f64; 3], [l2, a2, b2]: [f64; 3]) -> f64 {
+        let p7 = |c: f64| c.powi(7);
+        let cb = (a1.hypot(b1) + a2.hypot(b2)) / 2.0;
+        let g = 0.5 * (1.0 - (p7(cb) / (p7(cb) + p7(25.0))).sqrt());
+        let (a1p, a2p) = ((1.0 + g) * a1, (1.0 + g) * a2);
+        let (c1p, c2p) = (a1p.hypot(b1), a2p.hypot(b2));
+        let hue = |b: f64, a: f64| b.atan2(a).to_degrees().rem_euclid(360.0);
+        let (h1, h2) = (hue(b1, a1p), hue(b2, a2p));
+        let mut dh = h2 - h1;
+        if c1p * c2p == 0.0 {
+            dh = 0.0;
+        } else if dh > 180.0 {
+            dh -= 360.0;
+        } else if dh < -180.0 {
+            dh += 360.0;
+        }
+        let d_hh = 2.0 * (c1p * c2p).sqrt() * (dh / 2.0).to_radians().sin();
+        let lb = (l1 + l2) / 2.0;
+        let cbp = (c1p + c2p) / 2.0;
+        let hb = if c1p * c2p == 0.0 {
+            h1 + h2
+        } else if (h1 - h2).abs() <= 180.0 {
+            (h1 + h2) / 2.0
+        } else if h1 + h2 < 360.0 {
+            (h1 + h2 + 360.0) / 2.0
+        } else {
+            (h1 + h2 - 360.0) / 2.0
+        };
+        let cos = |d: f64| d.to_radians().cos();
+        let t = 1.0 - 0.17 * cos(hb - 30.0) + 0.24 * cos(2.0 * hb) + 0.32 * cos(3.0 * hb + 6.0) - 0.2 * cos(4.0 * hb - 63.0);
+        let dth = 30.0 * (-((hb - 275.0) / 25.0).powi(2)).exp();
+        let rc = 2.0 * (p7(cbp) / (p7(cbp) + p7(25.0))).sqrt();
+        let sl = 1.0 + 0.015 * (lb - 50.0).powi(2) / (20.0 + (lb - 50.0).powi(2)).sqrt();
+        let sc = 1.0 + 0.045 * cbp;
+        let sh = 1.0 + 0.015 * cbp * t;
+        let rt = -(2.0 * dth).to_radians().sin() * rc;
+        let (dl, dc, dhh) = ((l2 - l1) / sl, (c2p - c1p) / sc, d_hh / sh);
+        (dl * dl + dc * dc + dhh * dhh + rt * dc * dhh).sqrt()
+    }
+
+    #[test]
+    fn delta_e_matches_the_reference_pairs() {
+        // Sharma, Wu and Dalal (2005), pairs 1, 7 and 17.
+        for (a, b, want) in [
+            ([50.0, 2.6772, -79.7751], [50.0, 0.0, -82.7485], 2.0425),
+            ([50.0, 0.0, 0.0], [50.0, -1.0, 2.0], 2.3669),
+            ([50.0, 2.5, 0.0], [73.0, 25.0, -18.0], 27.1492),
+        ] {
+            assert!((delta_e_lab(a, b) - want).abs() < 1e-4, "{a:?} {b:?}");
+        }
+        assert!((delta_e("#000000", "#FFFFFF") - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn accents_clear_the_ramp_and_semantics() {
+        let json: Value = serde_json::from_str(TOKENS_JSON).unwrap();
+        let color = &json["color"];
+        let min = color["rules"]["minDeltaE"].as_f64().unwrap();
+        let exceptions: Vec<(String, String)> = color["rules"]["accentExceptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p[0].as_str().unwrap().to_owned(), p[1].as_str().unwrap().to_owned()))
+            .collect();
+        for theme in ["dark", "light", "hc"] {
+            for (plugin, accent) in color["accent"].as_object().unwrap() {
+                let a = accent[theme].as_str().unwrap();
+                for (i, band) in color["ramp"][theme].as_array().unwrap().iter().enumerate() {
+                    let d = delta_e(a, band.as_str().unwrap());
+                    assert!(d >= min, "{plugin} accent vs ramp {i} in {theme}: {d:.1}");
+                }
+                for (name, sem) in color["semantic"].as_object().unwrap() {
+                    if name == "focus" || exceptions.contains(&(plugin.clone(), name.clone())) {
+                        continue;
+                    }
+                    let d = delta_e(a, sem[theme].as_str().unwrap());
+                    assert!(d >= min, "{plugin} accent vs {name} in {theme}: {d:.1}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn parses_token_colour_forms() {
         assert_eq!(parse_color("#63CBFE"), Some(Color::from_rgba8(0x63, 0xCB, 0xFE, 255)));

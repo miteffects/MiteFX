@@ -109,9 +109,12 @@ MiteFX/
 | Footer: toggles, dials with name and value, latency, dropdown buttons | `mite_ui::widgets::Footer`, `widgets::footer::draw_dropdown_button` |
 | Per-slice history telemetry (levels, GR) | `mite_core::HistoryTap` (Comp records one per 5 ms) |
 | Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
+| Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
+| Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
 | State version, migrations, snapshot/preset fields | `mite_plugin::state` (`migrate` from `Plugin::filter_state`; `session_fields`/`load_session_fields` from `Params::serialize_fields`/`deserialize_fields`) |
 | Golden state test through the real CLAP entry point | `mite_plugin::testing::check_golden_states` (`tests/golden/<plugin>.state.v<N>.json`) |
 | Parameter golden manifest | `mite_core::manifest` (`tests/golden/<plugin>.params.txt`) |
+| Accent colours, checked: every accent clears the ramp and the semantics by CIEDE2000 15 except the pairs in `rules.accentExceptions` | `docs/design/tokens.json`, test `accents_clear_the_ramp_and_semantics` in `mite_ui::tokens` |
 | CI bundling and validation | add the package to `PACKAGES` and its bundle name to `BUNDLES` in `.github/workflows/ci.yml` |
 
 `mite-test` does not exist yet; measurement helpers live in the crates' tests and examples.

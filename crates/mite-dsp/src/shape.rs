@@ -12,10 +12,11 @@
 //! region above it up to the next crossover; band slot 0 is always the lowest region. The editor
 //! numbers bands by frequency.
 
-use std::f64::consts::{FRAC_1_SQRT_2, PI};
-
+use crate::crossover::{Cross, Split};
 use crate::eq::{ShapeDetector, DEFAULT_TRANSIENT_MS, DEFAULT_TRANSITION};
 use crate::filter::{Coeffs, Tdf2};
+
+pub use crate::crossover::{FREQ_MAX, FREQ_MIN, MIN_GAP_OCT};
 
 pub const BANDS: usize = 5;
 pub const CROSSOVERS: usize = BANDS - 1;
@@ -24,10 +25,6 @@ pub const AMOUNT_DB: f32 = 18.0;
 pub const MAX_LOOKAHEAD_MS: f32 = 5.0;
 /// Where each crossover slot sits when it is first made (the design's defaults), Hz.
 pub const DEFAULT_CROSSOVERS: [f32; CROSSOVERS] = [120.0, 500.0, 2000.0, 8000.0];
-pub const FREQ_MIN: f32 = 20.0;
-pub const FREQ_MAX: f32 = 20_000.0;
-/// Neighbouring crossovers stay at least this far apart, octaves (they are pushed, never cross).
-pub const MIN_GAP_OCT: f32 = 1.0 / 3.0;
 /// The detector filter is open (not run) at or past these, Hz.
 pub const DETECTOR_HP_OPEN: f32 = 20.5;
 pub const DETECTOR_LP_OPEN: f32 = 19_900.0;
@@ -123,97 +120,14 @@ fn lookahead_samples(ms: f32, sample_rate: f32) -> usize {
     (ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * sample_rate).round() as usize
 }
 
-/// The split the crossovers make: the active crossover slots in frequency order, and the band
-/// slot of each region from the bottom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Layout {
-    pub crossovers: [usize; CROSSOVERS],
-    pub n: usize,
-    pub owners: [usize; BANDS],
-}
-
-impl Layout {
-    pub fn new(crossovers: &[Option<f32>; CROSSOVERS]) -> Self {
-        let mut order = [0usize; CROSSOVERS];
-        let mut n = 0;
-        for (k, f) in crossovers.iter().enumerate() {
-            if f.is_some() {
-                order[n] = k;
-                n += 1;
-            }
-        }
-        let freq = |k: usize| crossovers[k].unwrap_or(0.0);
-        order[..n].sort_by(|&a, &b| freq(a).total_cmp(&freq(b)).then(a.cmp(&b)));
-        let mut owners = [0usize; BANDS];
-        for p in 0..n {
-            owners[p + 1] = order[p] + 1;
-        }
-        Self { crossovers: order, n, owners }
-    }
-
-    /// The bands in use, from the bottom.
-    pub fn bands(&self) -> &[usize] {
-        &self.owners[..=self.n]
-    }
-
-    /// Where band slot `band` sits from the bottom, if it is in use.
-    pub fn position(&self, band: usize) -> Option<usize> {
-        self.bands().iter().position(|&b| b == band)
-    }
-
-    /// Band slot `band`'s region, Hz, if it is in use.
-    pub fn region(&self, band: usize, crossovers: &[Option<f32>; CROSSOVERS]) -> Option<(f32, f32)> {
-        let p = self.position(band)?;
-        let edge = |q: usize| crossovers[self.crossovers[q]].unwrap_or(FREQ_MIN);
-        let lo = if p == 0 { FREQ_MIN } else { edge(p - 1) };
-        let hi = if p == self.n { FREQ_MAX } else { edge(p) };
-        Some((lo, hi))
-    }
-
-    /// Each band slot's share of the signal at `f` Hz (LR4 magnitudes, in phase, so they add to 1).
-    pub fn weights(&self, crossovers: &[Option<f32>; CROSSOVERS], f: f64) -> [f64; BANDS] {
-        let mut w = [0.0; BANDS];
-        let mut rest = 1.0;
-        for p in 0..self.n {
-            let fc = f64::from(crossovers[self.crossovers[p]].unwrap_or(FREQ_MIN));
-            let r4 = (f / fc).powi(4);
-            let (lo, hi) = (1.0 / (1.0 + r4), r4 / (1.0 + r4));
-            w[self.owners[p]] = rest * lo;
-            rest *= hi;
-        }
-        w[self.owners[self.n]] = rest;
-        w
-    }
-}
+/// The split the crossovers make (`crate::crossover::Layout` for five bands).
+pub type Layout = crate::crossover::Layout<BANDS>;
 
 /// The structure a core runs: the split and the stereo mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Key {
     layout: Layout,
     mid_side: bool,
-}
-
-/// One crossover's sections: Butterworth low- and high-pass (each run twice, LR4), and the
-/// allpass their sum makes (for the bands below it).
-#[derive(Debug, Clone, Copy)]
-struct Cross {
-    lp: Coeffs,
-    hp: Coeffs,
-    ap: Coeffs,
-}
-
-impl Cross {
-    fn new(f: f64, fs: f64) -> Self {
-        let k = (PI * f.min(0.45 * fs) / fs).tan();
-        let q = FRAC_1_SQRT_2;
-        let norm = 1.0 / (1.0 + k / q + k * k);
-        let a1 = 2.0 * (k * k - 1.0) * norm;
-        let a2 = (1.0 - k / q + k * k) * norm;
-        let lp = Coeffs { b0: k * k * norm, b1: 2.0 * k * k * norm, b2: k * k * norm, a1, a2 };
-        let hp = Coeffs { b0: norm, b1: -2.0 * norm, b2: norm, a1, a2 };
-        let ap = Coeffs { b0: a2, b1: a1, b2: 1.0, a1, a2 };
-        Self { lp, hp, ap }
-    }
 }
 
 /// One band slot's detector side, per channel.
@@ -239,10 +153,7 @@ impl BandState {
 /// when the structure changes. Allocation-free once sized.
 struct Core {
     key: Key,
-    /// Crossover sections by channel and crossover slot: low-pass ×2, high-pass ×2.
-    cross: [[[Tdf2; 4]; CROSSOVERS]; 2],
-    /// Allpass compensation by channel, band slot and the crossover slot above it.
-    ap: [[[Tdf2; CROSSOVERS]; BANDS]; 2],
+    split: Split<BANDS>,
     /// The detector filter by channel: high-pass ×2, low-pass ×2.
     det_filter: [[Tdf2; 4]; 2],
     bands: [BandState; BANDS],
@@ -255,8 +166,7 @@ impl Core {
     fn new(fs: f64, ring_len: usize) -> Self {
         Self {
             key: Key { layout: Layout::new(&[None; CROSSOVERS]), mid_side: false },
-            cross: [[[Tdf2::default(); 4]; CROSSOVERS]; 2],
-            ap: [[[Tdf2::default(); CROSSOVERS]; BANDS]; 2],
+            split: Split::default(),
             det_filter: [[Tdf2::default(); 4]; 2],
             bands: [BandState::new(fs); BANDS],
             rings: vec![0.0; (BANDS + 1) * 2 * ring_len],
@@ -265,8 +175,7 @@ impl Core {
     }
 
     fn reset(&mut self) {
-        self.cross = [[[Tdf2::default(); 4]; CROSSOVERS]; 2];
-        self.ap = [[[Tdf2::default(); CROSSOVERS]; BANDS]; 2];
+        self.split.reset();
         self.det_filter = [[Tdf2::default(); 4]; 2];
         for b in &mut self.bands {
             for d in &mut b.det {
@@ -282,8 +191,7 @@ impl Core {
     /// Becomes a copy of `other` (no allocation: both are sized alike).
     fn copy_from(&mut self, other: &Core) {
         self.key = other.key;
-        self.cross = other.cross;
-        self.ap = other.ap;
+        self.split = other.split;
         self.det_filter = other.det_filter;
         self.bands = other.bands;
         self.rings.copy_from_slice(&other.rings);
@@ -304,18 +212,7 @@ impl Core {
                 *a = x.combine(&y, ka, kb);
                 *b = x.combine(&y, ka, -kb);
             };
-            for k in 0..CROSSOVERS {
-                for s in 0..4 {
-                    let (l, r) = self.cross.split_at_mut(1);
-                    mix(&mut l[0][k][s], &mut r[0][k][s]);
-                }
-            }
-            for b in 0..BANDS {
-                for k in 0..CROSSOVERS {
-                    let (l, r) = self.ap.split_at_mut(1);
-                    mix(&mut l[0][b][k], &mut r[0][b][k]);
-                }
-            }
+            self.split.switch_mid_side(key.mid_side);
             for s in 0..4 {
                 let (l, r) = self.det_filter.split_at_mut(1);
                 mix(&mut l[0][s], &mut r[0][s]);
@@ -329,30 +226,12 @@ impl Core {
                 }
             }
         }
-        let was_on = |k: usize| old.layout.crossovers[..old.layout.n].contains(&k);
-        for p in 0..key.layout.n {
-            let k = key.layout.crossovers[p];
-            if was_on(k) {
-                continue;
-            }
-            let f = crossovers[k].unwrap_or(FREQ_MIN);
-            // The band it splits, in the old layout.
-            let parent = (0..=old.layout.n)
-                .find(|&q| {
-                    let (lo, hi) = old.layout.region(old.layout.owners[q], crossovers).unwrap_or((FREQ_MIN, FREQ_MAX));
-                    f >= lo && f < hi
-                })
-                .map_or(0, |q| old.layout.owners[q]);
+        let parents = self.split.restructure(&old.layout, &key.layout, crossovers);
+        for (slot, parent) in parents.iter().enumerate() {
+            let Some(parent) = *parent else { continue };
+            self.bands[slot] = self.bands[parent];
             for c in 0..2 {
-                self.cross[c][k] = [Tdf2::default(); 4];
-                for b in 0..BANDS {
-                    self.ap[c][b][k] = Tdf2::default();
-                }
-                self.ap[c][k + 1] = [Tdf2::default(); CROSSOVERS];
-            }
-            self.bands[k + 1] = self.bands[parent];
-            for c in 0..2 {
-                let (from, to) = (self.ring(parent, c), self.ring(k + 1, c));
+                let (from, to) = (self.ring(parent, c), self.ring(slot, c));
                 self.rings.copy_within(from, to.start);
             }
         }
@@ -695,24 +574,7 @@ impl Shaper {
                 let mut sig = [[0.0f64; BANDS]; 2];
                 let mut listen = [0.0f64; 2];
                 for c in 0..n_ch {
-                    let mut rest = input[c];
-                    for p in 0..layout.n {
-                        let k = layout.crossovers[p];
-                        let st = &mut core.cross[c][k];
-                        let xc = &self.cross[k];
-                        let lo = st[0].process(&xc.lp, rest);
-                        sig[c][p] = st[1].process(&xc.lp, lo);
-                        let hi = st[2].process(&xc.hp, rest);
-                        rest = st[3].process(&xc.hp, hi);
-                    }
-                    sig[c][layout.n] = rest;
-                    for p in 0..layout.n {
-                        let owner = layout.owners[p];
-                        for q in p + 1..layout.n {
-                            let k = layout.crossovers[q];
-                            sig[c][p] = core.ap[c][owner][k].process(&self.cross[k].ap, sig[c][p]);
-                        }
-                    }
+                    core.split.process(c, input[c], &layout, &self.cross, &mut sig[c]);
                     if layout.n == 0 {
                         // One band: the detector hears the input through its own filter.
                         let f = &mut core.det_filter[c];
@@ -897,6 +759,8 @@ pub fn soft_clip(x: f32, ceiling: f32, softness: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
 
     const FS: f32 = 48_000.0;
@@ -928,6 +792,47 @@ mod tests {
 
     fn split3() -> ShapeSettings {
         ShapeSettings { crossovers: [Some(150.0), Some(3500.0), None, None], ..ShapeSettings::default() }
+    }
+
+    /// A fixed render through splits, a band made, an M/S switch and lookahead, hashed bit for bit:
+    /// the crossover's extraction into `crate::crossover` must leave Shape's output unchanged.
+    #[test]
+    fn render_checksum_is_unchanged() {
+        let n = 20_000;
+        let l = hits(n);
+        let r: Vec<f32> = noise(n, 11).iter().zip(&l).map(|(a, b)| 0.3 * a + 0.8 * b).collect();
+        let mut s = split3();
+        s.lookahead_ms = 2.0;
+        s.bands[0].attack_db = 6.0;
+        s.bands[1].sustain_db = -8.0;
+        s.bands[2].attack_db = -4.0;
+        s.bands[2].sustain_db = 5.0;
+        let mut sh = Shaper::new(FS, &s);
+        let (mut yl, mut yr) = (l.clone(), r.clone());
+        let (mut dl, mut dr) = (vec![0.0; n], vec![0.0; n]);
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut at = 0;
+        for (k, block) in [64usize, 333, 1, 1024, 7].iter().cycle().enumerate() {
+            if at >= n {
+                break;
+            }
+            if k == 6 {
+                s.crossovers[3] = Some(900.0);
+            }
+            if k == 12 {
+                s.mid_side = true;
+            }
+            if k == 20 {
+                s.crossovers[0] = None;
+            }
+            let end = (at + block).min(n);
+            sh.process(&mut [&mut yl[at..end], &mut yr[at..end]], &mut [&mut dl[at..end], &mut dr[at..end]], &s);
+            at = end;
+        }
+        for v in yl.iter().chain(&yr).chain(&dl).chain(&dr) {
+            hash = (hash ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
+        }
+        assert_eq!(hash, 0x66e1_cd21_5240_2e25, "checksum {hash:#x}");
     }
 
     #[test]
