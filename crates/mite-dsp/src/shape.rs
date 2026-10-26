@@ -226,13 +226,30 @@ impl Core {
                 }
             }
         }
+        // A band merged away: what its lookahead holds joins the band below it, which takes its
+        // region, so nothing drops out for the lookahead's length.
+        for p in 1..=old.layout.n {
+            let gone = old.layout.owners[p];
+            if key.layout.position(gone).is_some() {
+                continue;
+            }
+            let into = (0..p).rev().map(|q| old.layout.owners[q]).find(|&b| key.layout.position(b).is_some()).unwrap_or(0);
+            for c in 0..2 {
+                let (from, to) = (self.ring(gone, c), self.ring(into, c));
+                for i in 0..self.ring_len {
+                    self.rings[to.start + i] += self.rings[from.start + i];
+                }
+            }
+        }
+        // A new band takes its parent's detector and gain, but starts with an empty lookahead:
+        // the parent still holds the whole region it delayed and plays it out.
         let parents = self.split.restructure(&old.layout, &key.layout, crossovers);
         for (slot, parent) in parents.iter().enumerate() {
             let Some(parent) = *parent else { continue };
             self.bands[slot] = self.bands[parent];
             for c in 0..2 {
-                let (from, to) = (self.ring(parent, c), self.ring(slot, c));
-                self.rings.copy_within(from, to.start);
+                let r = self.ring(slot, c);
+                self.rings[r].fill(0.0);
             }
         }
         self.key = key;
@@ -796,6 +813,8 @@ mod tests {
 
     /// A fixed render through splits, a band made, an M/S switch and lookahead, hashed bit for bit:
     /// the crossover's extraction into `crate::crossover` must leave Shape's output unchanged.
+    /// (Re-blessed 2026-10-26: with lookahead, a new band now starts with an empty delay and a
+    /// merged band's delay joins the band below.)
     #[test]
     fn render_checksum_is_unchanged() {
         let n = 20_000;
@@ -832,7 +851,7 @@ mod tests {
         for v in yl.iter().chain(&yr).chain(&dl).chain(&dr) {
             hash = (hash ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
-        assert_eq!(hash, 0x66e1_cd21_5240_2e25, "checksum {hash:#x}");
+        assert_eq!(hash, 0xbc57_371c_0dd1_a946, "checksum {hash:#x}");
     }
 
     #[test]
@@ -961,6 +980,28 @@ mod tests {
 
     fn tone(n: usize, f: f32) -> Vec<f32> {
         (0..n).map(|i| (std::f32::consts::TAU * f * i as f32 / FS).sin() * 0.5).collect()
+    }
+
+    /// With lookahead, a band made or merged away keeps the level: the new band starts with an
+    /// empty delay (the band it split from still holds what it delayed), and a merged band's
+    /// delayed signal joins the band that takes its region. Copying the parent's delay used to
+    /// play its region twice for the lookahead's length, and dropping a merged band's lost it.
+    #[test]
+    fn with_lookahead_a_split_or_merge_keeps_the_level() {
+        let mut s = ShapeSettings { lookahead_ms: 5.0, ..ShapeSettings::default() };
+        let input = tone(48_000, 5000.0);
+        let mut sh = Shaper::new(FS, &s);
+        let mut y = input.clone();
+        let mut d = vec![0.0; input.len()];
+        for (k, (a, b)) in y.chunks_mut(480).zip(d.chunks_mut(480)).enumerate() {
+            s.crossovers[1] = (20..60).contains(&k).then_some(200.0);
+            sh.process(&mut [a], &mut [b], &s);
+        }
+        // Each 1 ms window's peak (five cycles) from well after the start.
+        for (w, chunk) in y[4800..].chunks(48).enumerate() {
+            let peak = chunk.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!((0.47..0.53).contains(&peak), "window {w}: {peak}");
+        }
     }
 
     #[test]

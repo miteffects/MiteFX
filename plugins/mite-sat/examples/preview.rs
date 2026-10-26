@@ -3,6 +3,8 @@
 //! editor's parameters, so what you drag is heard in the pictures.
 //!
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_sat --example preview
+//!
+//! PREVIEW_BANDS=3 or 6 starts with that many bands, each on its own model.
 
 #[path = "common/music.rs"]
 mod music;
@@ -21,6 +23,14 @@ fn main() -> Result<(), String> {
     let host = memory_host();
     host.set_plain(&band_id(0, B_MODEL.id), Model::Tube.index() as f32);
     host.set_plain(&band_id(0, B_DRIVE.id), 12.0);
+    let bands: usize = std::env::var("PREVIEW_BANDS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    let models = [Model::Soft, Model::Hard, Model::Fold, Model::Diode, Model::Rectify];
+    for (k, f) in [150.0, 600.0, 2000.0, 5000.0, 11_000.0].into_iter().enumerate().take(bands.clamp(1, 6) - 1) {
+        host.set_plain(&cross_id(k, X_ON.id), 1.0);
+        host.set_plain(&cross_id(k, X_FREQ.id), f);
+        host.set_plain(&band_id(k + 1, B_MODEL.id), models[k].index() as f32);
+        host.set_plain(&band_id(k + 1, B_DRIVE.id), 12.0);
+    }
 
     // "Audio thread": 512-sample blocks at 48 kHz, in real time, looping the music.
     let shared = Arc::new(SatShared::new());

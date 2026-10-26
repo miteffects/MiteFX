@@ -84,9 +84,14 @@ impl Spectrum {
         moved
     }
 
-    pub fn draw(&self, cx: &mut DrawCx<'_>, area: Rect) {
+    /// Draws the plot in `area`; `tints` are regions (the bands') filled in the accent at their
+    /// opacity under the curves.
+    pub fn draw(&self, cx: &mut DrawCx<'_>, area: Rect, tints: &[(Rect, f32)]) {
         let theme = cx.theme;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &area);
+        for &(r, op) in tints {
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(op), None, &r.intersect(area));
+        }
         let y = |db: f32| area.y0 + 4.0 + f64::from((TOP_DB - db.clamp(BOTTOM_DB, TOP_DB)) / (TOP_DB - BOTTOM_DB)) * (area.height() - 8.0);
         for db in [-30.0, -60.0] {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((area.x0, y(db)), (area.x1, y(db))));

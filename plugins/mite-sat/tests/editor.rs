@@ -1,12 +1,14 @@
 //! The Sat editor driven through events, against a stand-in host: shaping the curve by dragging
 //! it (one undo step), picking a model, the band's bypass, the wheel, resetting, the
-//! oversampling list, and keys.
+//! oversampling list and keys; then several bands: pulling a crossover in, merging, editing a
+//! narrow card, solo, the band menu and removing.
 
 use std::sync::Arc;
 
 use mite_dsp::sat::Model;
 use mite_sat::editor::{memory_host, SatView};
-use mite_sat::params::{band_id, B_BIAS, B_BYPASS, B_DRIVE, B_MODEL, B_TONE, OVERSAMPLING};
+use mite_dsp::sat::Layout;
+use mite_sat::params::{band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
 use mite_sat::SatShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -26,8 +28,9 @@ fn setup() -> (SatView, MemoryParamHost) {
     (view, host)
 }
 
-/// Lays the view out (hit areas are set while drawing).
+/// Lays the view out (hit areas are set while drawing), with the layout settled.
 fn draw(view: &mut SatView, host: &MemoryParamHost) {
+    view.settle(host);
     let theme = Theme::load(ThemeKind::Dark, mite_sat::editor::ACCENT);
     let mut text = mite_ui::Typesetter::new();
     view.draw(&mut DrawCx { scene: &mut mite_ui::vello::Scene::new(), theme: &theme, text: &mut text, host, size: view.logical_size(), fx: &mut Default::default() });
@@ -54,7 +57,7 @@ fn click(view: &mut SatView, host: &MemoryParamHost, at: Point) {
 #[test]
 fn dragging_the_curve_sets_drive_and_bias_as_one_undo_step() {
     let (mut view, host) = setup();
-    let c = view.square().center();
+    let c = view.square(&host).center();
     drag(&mut view, &host, c, c + (50.0, -100.0), MODS);
     let (drive, bias) = (plain(&host, &band_id(0, B_DRIVE.id)), plain(&host, &band_id(0, B_BIAS.id)));
     assert!((drive - 12.0).abs() < 0.5, "drive {drive}");
@@ -67,7 +70,7 @@ fn dragging_the_curve_sets_drive_and_bias_as_one_undo_step() {
 #[test]
 fn alt_drag_sets_tone_and_shift_is_fine() {
     let (mut view, host) = setup();
-    let c = view.square().center();
+    let c = view.square(&host).center();
     drag(&mut view, &host, c, c + (0.0, -100.0), Modifiers { alt: true, ..MODS });
     assert!((plain(&host, &band_id(0, B_TONE.id)) - 6.0).abs() < 0.3);
     assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), 0.0, "Alt leaves drive alone");
@@ -78,7 +81,7 @@ fn alt_drag_sets_tone_and_shift_is_fine() {
 #[test]
 fn the_wheel_drives_and_a_double_click_resets() {
     let (mut view, host) = setup();
-    let c = view.square().center();
+    let c = view.square(&host).center();
     view.event(&UiEvent::Wheel { pos: c, lines: 4.0, mods: MODS }, &host);
     assert!((plain(&host, &band_id(0, B_DRIVE.id)) - 2.0).abs() < 1e-4);
     host.set_plain(&band_id(0, B_BIAS.id), 40.0);
@@ -90,8 +93,8 @@ fn the_wheel_drives_and_a_double_click_resets() {
 #[test]
 fn model_icons_pick_the_model_and_keys_step_through_them() {
     let (mut view, host) = setup();
-    assert!(view.model_icon(Model::Tape).is_none(), "not offered until it is built");
-    let fold = view.model_icon(Model::Fold).expect("offered").center();
+    assert!(view.model_icon(&host, Model::Tape).is_none(), "not offered until it is built");
+    let fold = view.model_icon(&host, Model::Fold).expect("offered").center();
     click(&mut view, &host, fold);
     assert_eq!(plain(&host, &band_id(0, B_MODEL.id)) as usize, Model::Fold.index());
     view.event(&UiEvent::KeyDown { key: Key::Right, mods: MODS }, &host);
@@ -103,7 +106,8 @@ fn model_icons_pick_the_model_and_keys_step_through_them() {
 #[test]
 fn the_power_button_bypasses_the_band() {
     let (mut view, host) = setup();
-    click(&mut view, &host, Point::new(1166.0 - 36.0, 56.0 + 252.0 + 30.0));
+    let power = view.band_power(&host, 0).expect("the card has one").center();
+    click(&mut view, &host, power);
     assert_eq!(plain(&host, &band_id(0, B_BYPASS.id)), 1.0);
 }
 
@@ -116,4 +120,135 @@ fn the_oversampling_list_sets_the_factor() {
     click(&mut view, &host, rows[3].center());
     assert_eq!(plain(&host, OVERSAMPLING.id), 3.0, "8×");
     assert!(view.oversampling_rows().is_empty(), "and closed");
+}
+
+fn layout(host: &MemoryParamHost) -> Layout {
+    Layout::new(&mite_sat::editor::settings(host).crossovers)
+}
+
+fn split(host: &MemoryParamHost, at: &[(usize, f32)]) {
+    for &(k, f) in at {
+        host.set_plain(&cross_id(k, X_ON.id), 1.0);
+        host.set_plain(&cross_id(k, X_FREQ.id), f);
+    }
+}
+
+#[test]
+fn pulling_a_crossover_in_makes_a_band_with_the_same_sound() {
+    let (mut view, host) = setup();
+    host.set_plain(&band_id(0, B_DRIVE.id), 14.0);
+    host.set_plain(&band_id(0, B_MODEL.id), Model::Fold.index() as f32);
+    draw(&mut view, &host);
+    let y = view.rail_y();
+    let (from, to) = (Point::new(view.rail_x(20_000.0) - 6.0, y), Point::new(view.rail_x(2000.0), y));
+    drag(&mut view, &host, from, to, MODS);
+    let l = layout(&host);
+    assert_eq!(l.n, 1);
+    let slot = l.crossovers[0];
+    let f = plain(&host, &cross_id(slot, X_FREQ.id));
+    assert!((f / 2000.0 - 1.0).abs() < 0.02, "{f}");
+    assert_eq!(plain(&host, &band_id(slot + 1, B_DRIVE.id)), 14.0);
+    assert_eq!(plain(&host, &band_id(slot + 1, B_MODEL.id)) as usize, Model::Fold.index());
+    assert_eq!(view.selected(), slot + 1);
+    // One undo takes the split away.
+    view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
+    assert_eq!(layout(&host).n, 0);
+}
+
+#[test]
+fn double_clicking_the_rail_splits_until_six_bands() {
+    let (mut view, host) = setup();
+    for (k, f) in [80.0, 300.0, 1000.0, 3000.0, 9000.0, 16_000.0].into_iter().enumerate() {
+        let at = Point::new(view.rail_x(f), view.rail_y());
+        view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+        view.event(&UiEvent::DoubleClick { pos: at, mods: MODS }, &host);
+        draw(&mut view, &host);
+        assert_eq!(layout(&host).n, (k + 1).min(5), "after {f} Hz");
+    }
+}
+
+#[test]
+fn dragging_a_crossover_onto_its_neighbour_merges_and_the_growing_band_survives() {
+    let (mut view, host) = setup();
+    split(&host, &[(0, 150.0), (1, 300.0), (2, 3000.0)]);
+    host.set_plain(&band_id(2, B_DRIVE.id), 20.0);
+    draw(&mut view, &host);
+    let y = view.rail_y();
+    let (from, to) = (Point::new(view.rail_x(300.0), y), Point::new(view.rail_x(150.0) + 2.0, y));
+    drag(&mut view, &host, from, to, MODS);
+    let l = layout(&host);
+    assert_eq!(l.bands(), &[0, 2, 3]);
+    assert_eq!(plain(&host, &band_id(2, B_DRIVE.id)), 20.0);
+}
+
+#[test]
+fn a_narrow_card_s_curve_drives_its_own_band_and_selects_it() {
+    let (mut view, host) = setup();
+    split(&host, &[(0, 200.0), (1, 2000.0)]);
+    draw(&mut view, &host);
+    assert_eq!(view.selected(), 0);
+    let sq = view.band_square(&host, 2).expect("band 3 has a card");
+    assert!(sq.width() < view.square(&host).width(), "a narrow card's square: {sq:?}");
+    drag(&mut view, &host, sq.center(), sq.center() + (0.0, -50.0), MODS);
+    assert!((plain(&host, &band_id(2, B_DRIVE.id)) - 6.0).abs() < 0.3);
+    assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), 0.0, "the others stay clean");
+    assert_eq!(view.selected(), 2);
+    // Now wide, its model icons are on offer.
+    let fold = view.model_icon(&host, Model::Fold).expect("offered").center();
+    click(&mut view, &host, fold);
+    assert_eq!(plain(&host, &band_id(2, B_MODEL.id)) as usize, Model::Fold.index());
+    assert_eq!(plain(&host, &band_id(0, B_MODEL.id)) as usize, Model::Tube.index());
+}
+
+#[test]
+fn keys_solo_mute_and_remove_the_selected_band() {
+    let (mut view, host) = setup();
+    split(&host, &[(0, 150.0), (1, 3500.0)]);
+    view.select(1);
+    draw(&mut view, &host);
+    view.event(&UiEvent::KeyDown { key: Key::Character('s'), mods: MODS }, &host);
+    assert_eq!(plain(&host, &band_id(1, B_SOLO.id)), 1.0);
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
+    assert_eq!(plain(&host, &band_id(1, B_SOLO.id)), 0.0, "Esc lets go of solo");
+    view.event(&UiEvent::KeyDown { key: Key::Character('m'), mods: MODS }, &host);
+    assert_eq!(plain(&host, &band_id(1, B_MUTE.id)), 1.0);
+    view.event(&UiEvent::KeyDown { key: Key::Delete, mods: MODS }, &host);
+    draw(&mut view, &host);
+    assert_eq!(layout(&host).bands(), &[0, 2]);
+    assert_eq!(view.selected(), 0);
+}
+
+#[test]
+fn the_band_menu_copies_and_pastes_a_band() {
+    let (mut view, host) = setup();
+    split(&host, &[(0, 400.0)]);
+    host.set_plain(&band_id(0, B_DRIVE.id), 9.0);
+    host.set_plain(&band_id(0, B_MIX.id), 40.0);
+    draw(&mut view, &host);
+    view.open_menu(0, &host);
+    let rows = view.menu_rows();
+    click(&mut view, &host, rows[2].center());
+    view.open_menu(1, &host);
+    let rows = view.menu_rows();
+    assert_eq!(rows.len(), 7, "solo, mute, copy, paste, reset, merge down, remove");
+    click(&mut view, &host, rows[3].center());
+    assert_eq!(plain(&host, &band_id(1, B_DRIVE.id)), 9.0);
+    assert_eq!(plain(&host, &band_id(1, B_MIX.id)), 40.0);
+    assert!(view.menu_rows().is_empty(), "closed");
+}
+
+#[test]
+fn the_layout_settles_and_stays_put() {
+    let shared = Arc::new(SatShared::new());
+    let mut view = SatView::new(shared);
+    let host = memory_host();
+    split(&host, &[(0, 500.0)]);
+    let mut seen = Vec::new();
+    for _ in 0..80 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        view.tick(&host);
+        seen.push(view.rail_y());
+    }
+    assert!(seen.windows(2).all(|w| w[1] <= w[0]), "the rail only rises: {seen:?}");
+    assert!(seen.windows(2).rev().take(5).all(|w| w[0] == w[1]), "and rests");
 }

@@ -1,9 +1,12 @@
 //! The Mite Sat editor (docs/design/sat-brief.md §3), in 1280×760 design units.
 //!
 //! The display, top to bottom: the spectrum (input dim, output lit, the harmonics the saturation
-//! adds filled in the accent) and the band's card: its model icons (each a drawing of its own
-//! curve), the transfer square (the curve the DSP plays, lit where the music reaches) and its
-//! dials. Everything drawn comes from `mite_dsp::sat` and the engine's history records.
+//! adds filled in the accent, the bands' regions tinted), the crossover rail shared with Shape
+//! (`mite_ui::widgets::rail`), and a card per band: the selected one wide, with its model icons
+//! (each a drawing of its own curve), the transfer square (the curve the DSP plays, lit where the
+//! music reaches) and its dials; the others narrow, with a small square, DRIVE and MIX. One band
+//! is the same screen with a thin rail and one card across. Everything drawn comes from
+//! `mite_dsp::sat` and the engine's history records.
 
 mod curve;
 mod glyphs;
@@ -14,13 +17,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::sat::{bias_point, Layout, Model, CROSSOVERS, DRIVE_MAX_DB, TONE_MAX_DB};
+use mite_dsp::sat::{bias_point, Layout, Model, BANDS, DRIVE_MAX_DB, ENGAGE_DB, TONE_MAX_DB};
 use mite_ui::kurbo::{Affine, BezPath, Line, Point, Rect, RoundedRect, Stroke};
-use mite_ui::paint::{icon_button, panel};
+use mite_ui::paint::{glow_stroke, icon_button, panel};
 use mite_ui::peniko::Fill;
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::footer::draw_dropdown_button;
+use mite_ui::widgets::rail::{draw_badge, draw_glyph, glyph as rail_glyph, hatch, BandMenu, MenuAsk, Rail, RailHot, RailParams};
 use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
@@ -44,36 +48,57 @@ const FOOTER_TOP: f64 = HELP_TOP + 28.0;
 
 /// The display left of the meters.
 const MAIN_W: f64 = 1180.0;
-/// The spectrum: 20 Hz at x 14, 20 kHz at x 1166.
+/// The spectrum and the rail: 20 Hz at x 14, 20 kHz at x 1166.
 pub(crate) const PLOT_X0: f64 = 14.0;
 pub(crate) const PLOT_W: f64 = 1152.0;
-const SPECTRUM: Rect = Rect::new(PLOT_X0, DISPLAY_TOP + 12.0, PLOT_X0 + PLOT_W, DISPLAY_TOP + 236.0);
-/// The band's card.
-const CARD: Rect = Rect::new(PLOT_X0, DISPLAY_TOP + 252.0, PLOT_X0 + PLOT_W, DISPLAY_TOP + 608.0);
+const PLOT_X1: f64 = PLOT_X0 + PLOT_W;
 /// Meter release (tokens.json `meter.releaseDbPerSec`).
 const METER_RELEASE_DB_S: f32 = 20.0;
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
-/// The band's peak on the curve: 60 ms up, 300 ms down (as the spectrum).
+/// The bands' peaks on their curves: 60 ms up, 300 ms down (as the spectrum).
 const PEAK_RISE_S: f64 = 0.06;
 const PEAK_FALL_S: f64 = 0.3;
-/// Drag on the curve: drive per px up, bias per px across (Shift: a fifth), tone per px (Alt).
+/// Drag on a curve: drive per px up, bias per px across (Shift: a fifth), tone per px (Alt).
 const DRIVE_PER_PX: f32 = 0.12;
 const BIAS_PER_PX: f32 = 0.7;
 const TONE_PER_PX: f32 = 0.06;
+/// The layout grows from one band to several (base motion, 220 ms).
+const GROW_MS: f64 = 220.0;
+/// Cards: the selected one is this wide (multiband), the gap between cards.
+const CARD_WIDE: f64 = 600.0;
+const CARD_GAP: f64 = 8.0;
 
-/// The card's parts.
-fn square() -> Rect {
-    Rect::new(CARD.x0 + 18.0, CARD.y0 + 60.0, CARD.x0 + 18.0 + 280.0, CARD.y0 + 340.0)
+/// The display's vertical layout (absolute y), blended between one band and several.
+#[derive(Debug, Clone, Copy)]
+struct Lanes {
+    spectrum: Rect,
+    rail: Rect,
+    /// The cards' top and bottom (the funnels run from the rail down to the top).
+    cy: f64,
+    cb: f64,
 }
 
-fn model_rect(i: usize) -> Rect {
-    let x = CARD.x0 + 18.0 + i as f64 * 50.0;
-    Rect::new(x, CARD.y0 + 12.0, x + 44.0, CARD.y0 + 48.0)
+/// Spectrum top and bottom, rail top and height, cards' top and bottom (from the display top).
+const SINGLE: [f64; 6] = [12.0, 222.0, 230.0, 36.0, 274.0, 608.0];
+const MULTI: [f64; 6] = [12.0, 172.0, 180.0, 64.0, 270.0, 608.0];
+
+fn lanes(grow: f64) -> Lanes {
+    let v: [f64; 6] = std::array::from_fn(|i| SINGLE[i] + (MULTI[i] - SINGLE[i]) * grow);
+    let y = |i: usize| DISPLAY_TOP + v[i];
+    Lanes { spectrum: Rect::new(PLOT_X0, y(0), PLOT_X1, y(1)), rail: Rect::new(PLOT_X0, y(2), PLOT_X1, y(2) + v[3]), cy: y(4), cb: y(5) }
 }
 
-fn bypass_rect() -> Rect {
-    Rect::new(CARD.x1 - 54.0, CARD.y0 + 12.0, CARD.x1 - 18.0, CARD.y0 + 48.0)
+/// How the shared rail reads and writes Sat's crossovers and bands.
+fn rail_params() -> RailParams {
+    RailParams {
+        cross_on: |k| cross_id(k, X_ON.id),
+        cross_freq: |k| cross_id(k, X_FREQ.id),
+        freq: X_FREQ,
+        solo: |b| band_id(b, B_SOLO.id),
+        mute: |b| band_id(b, B_MUTE.id),
+        copy: SatView::copy_band,
+    }
 }
 
 /// The models offered (those built so far), in icon order.
@@ -81,7 +106,7 @@ fn offered() -> Vec<Model> {
     Model::ALL.into_iter().filter(|m| m.is_built()).collect()
 }
 
-/// The card's dials: drive large, then bias, tone, mix and output.
+/// The wide card's dials: drive large, then bias, tone, mix and output.
 const DIALS: [(ParamSpec, &str, KnobKind); 5] = [
     (B_DRIVE, "DRIVE", KnobKind::Unipolar),
     (B_BIAS, "BIAS", KnobKind::Bipolar),
@@ -90,12 +115,37 @@ const DIALS: [(ParamSpec, &str, KnobKind); 5] = [
     (B_OUT, "OUTPUT", KnobKind::Bipolar),
 ];
 
-/// The dials spread evenly over the card right of the square.
-fn dial_center(k: usize) -> (Point, f64) {
-    let y = square().center().y - 4.0;
-    let (x0, x1) = (square().x1 + 30.0, CARD.x1 - 20.0);
-    let step = (x1 - x0) / DIALS.len() as f64;
-    (Point::new(x0 + step * (k as f64 + 0.5), y), if k == 0 { 104.0 } else { 76.0 })
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CardKind {
+    /// One band: the card across the display.
+    Single,
+    /// The selected band of several.
+    Wide,
+    Narrow,
+}
+
+/// One band's card: where it is and what is in it.
+#[derive(Debug, Clone)]
+struct Card {
+    band: usize,
+    kind: CardKind,
+    rect: Rect,
+    square: Rect,
+    /// The model icons (single and wide cards).
+    models: Vec<(Model, Rect)>,
+    power: Option<Rect>,
+    solo: Option<Rect>,
+    mute: Option<Rect>,
+    remove: Option<Rect>,
+    /// Dial centres and diameters: the five of `DIALS`, or DRIVE and MIX on a narrow card.
+    dials: Vec<(Point, f64)>,
+}
+
+impl Card {
+    fn buttons(&self) -> [(Option<Rect>, Hot); 4] {
+        let b = self.band;
+        [(self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b))]
+    }
 }
 
 /// A Catmull-Rom curve through `pts` (no corners between samples).
@@ -197,15 +247,20 @@ pub fn oversampling(host: &dyn ParamHost) -> usize {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
-    /// On the transfer square: drive up and down, bias across (Alt: tone).
-    Curve { start: Point, drive: f32, bias: f32, tone: f32, alt: bool },
+    /// On a band's transfer square: drive up and down, bias across (Alt: tone).
+    Curve { band: usize, start: Point, drive: f32, bias: f32, tone: f32, alt: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
-    Square,
-    Model(Model),
-    Bypass,
+    Square(usize),
+    Model(usize, Model),
+    Power(usize),
+    Solo(usize),
+    Mute(usize),
+    Remove(usize),
+    Card(usize),
+    Rail(RailHot),
     Oversampling,
 }
 
@@ -213,13 +268,19 @@ pub struct SatView {
     shared: Arc<SatShared>,
     session: Session,
     footer: Footer,
+    /// The crossovers, band regions and the selection.
+    rail: Rail<BANDS>,
     pointer: Option<Point>,
     hot: Option<Hot>,
     drag: Option<Drag>,
     os_menu: Option<Dropdown>,
     os_hit: Rect,
+    menu: Option<BandMenu>,
+    /// Copied band settings (`copy_band`'s order).
+    clipboard: Option<[f32; 13]>,
+    /// The cards' dials, for the bands and the selection they were made for.
     knobs: Vec<Knob>,
-    knob_band: Option<usize>,
+    knob_key: Option<(Vec<usize>, usize)>,
     /// The newest history records, the tap's read position, and the meters as drawn (IN L/R,
     /// OUT L/R) with their ballistics.
     history: VecDeque<[f32; record::WIDTH]>,
@@ -227,11 +288,13 @@ pub struct SatView {
     meters: [f32; 4],
     last_fresh: Instant,
     last_tick: Instant,
+    /// 0 = one band's layout, 1 = several (eased between).
+    grow: f64,
     spectrum: spectrum::Spectrum,
-    /// The selected band's peak going in (linear), operating point and auto gain, eased.
-    peak: f32,
-    point: f32,
-    auto: f32,
+    /// Each band's peak going in (linear), operating point and auto gain, eased.
+    peak: [f32; BANDS],
+    point: [f32; BANDS],
+    auto: [f32; BANDS],
 }
 
 impl SatView {
@@ -250,25 +313,32 @@ impl SatView {
                 FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" },
             ],
         );
+        let mut rail = Rail::new(rail_params(), lanes(0.0).rail, PLOT_X0, PLOT_W);
+        rail.tint = (0.18, 0.10);
+        rail.labels = false;
         Self {
             session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, shared.snapshots.clone(), shared.preset.clone()),
             footer,
+            rail,
             pointer: None,
             hot: None,
             drag: None,
             os_menu: None,
             os_hit: Rect::ZERO,
+            menu: None,
+            clipboard: None,
             knobs: Vec::new(),
-            knob_band: None,
+            knob_key: None,
             history: VecDeque::with_capacity(64),
             seen: 0,
             meters: [-150.0; 4],
             last_fresh: Instant::now(),
             last_tick: Instant::now(),
+            grow: 0.0,
             spectrum: spectrum::Spectrum::new(),
-            peak: 0.0,
-            point: 0.0,
-            auto: 1.0,
+            peak: [0.0; BANDS],
+            point: [0.0; BANDS],
+            auto: [1.0; BANDS],
             shared,
         }
     }
@@ -283,14 +353,52 @@ impl SatView {
         &self.session
     }
 
-    /// The transfer square's rectangle (tests and tools).
-    pub fn square(&self) -> Rect {
-        square()
+    /// Lets the layout settle at once (tools render a single frame).
+    pub fn settle(&mut self, host: &dyn ParamHost) {
+        self.grow = if Self::layout(host).n > 0 { 1.0 } else { 0.0 };
+        self.rail.area = lanes(self.grow).rail;
     }
 
-    /// Where model `m`'s icon sits, if it is offered (tests and tools).
-    pub fn model_icon(&self, m: Model) -> Option<Rect> {
-        offered().iter().position(|&o| o == m).map(model_rect)
+    /// Selects a band slot (tests and tools).
+    pub fn select(&mut self, band: usize) {
+        self.rail.selected = band.min(BANDS - 1);
+    }
+
+    /// The band being edited.
+    pub fn selected(&self) -> usize {
+        self.rail.selected
+    }
+
+    /// The edited band's transfer square (tests and tools).
+    pub fn square(&self, host: &dyn ParamHost) -> Rect {
+        let layout = Self::layout(host);
+        self.card(host, self.rail.current(&layout)).map_or(Rect::ZERO, |c| c.square)
+    }
+
+    /// Band `b`'s transfer square, if it is in use (tests and tools).
+    pub fn band_square(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).map(|c| c.square)
+    }
+
+    /// Band `b`'s power button, if its card has one (tests and tools).
+    pub fn band_power(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).and_then(|c| c.power)
+    }
+
+    /// Where model `m`'s icon sits on the edited band's card, if it is offered (tests and tools).
+    pub fn model_icon(&self, host: &dyn ParamHost, m: Model) -> Option<Rect> {
+        let layout = Self::layout(host);
+        self.card(host, self.rail.current(&layout))?.models.iter().find(|(o, _)| *o == m).map(|(_, r)| *r)
+    }
+
+    /// The rail's centre line (tests and tools).
+    pub fn rail_y(&self) -> f64 {
+        self.rail.area.center().y
+    }
+
+    /// Where `f` Hz sits on the rail (tests and tools).
+    pub fn rail_x(&self, f: f64) -> f64 {
+        self.rail.x(f)
     }
 
     /// Opens the oversampling list (tools).
@@ -301,6 +409,19 @@ impl SatView {
     /// The open oversampling list's rows, 1× first (tests and tools).
     pub fn oversampling_rows(&self) -> Vec<Rect> {
         self.os_menu.as_ref().map(Dropdown::item_rects).unwrap_or_default()
+    }
+
+    /// Opens band `band`'s menu under its region (tools).
+    pub fn open_menu(&mut self, band: usize, host: &dyn ParamHost) {
+        let layout = Self::layout(host);
+        let Some(p) = layout.position(band) else { return };
+        let r = self.rail.region_rect(host, &layout, p);
+        self.menu = BandMenu::open(&mut self.rail, host, band, Point::new(r.center().x - 20.0, r.y1 + 4.0), self.clipboard.is_some(), (DISPLAY_TOP, FOOTER_TOP));
+    }
+
+    /// The open band menu's rows (tests and tools).
+    pub fn menu_rows(&self) -> Vec<Rect> {
+        self.menu.as_ref().map(BandMenu::item_rects).unwrap_or_default()
     }
 
     // ---- parameters -------------------------------------------------------------------------
@@ -324,31 +445,143 @@ impl SatView {
     }
 
     fn layout(host: &dyn ParamHost) -> Layout {
-        Layout::new(&std::array::from_fn::<_, CROSSOVERS, _>(|k| Self::on(host, &cross_id(k, X_ON.id)).then(|| Self::plain(host, &cross_id(k, X_FREQ.id)))))
-    }
-
-    /// The band the card shows (one band for now: the lowest region).
-    fn band(host: &dyn ParamHost) -> usize {
-        Self::layout(host).owners[0]
+        Layout::new(&std::array::from_fn::<_, { BANDS - 1 }, _>(|k| Self::on(host, &cross_id(k, X_ON.id)).then(|| Self::plain(host, &cross_id(k, X_FREQ.id)))))
     }
 
     fn model(host: &dyn ParamHost, b: usize) -> Model {
         Model::from_index(Self::plain(host, &band_id(b, B_MODEL.id)).round().max(0.0) as usize)
     }
 
+    /// A band's sound settings: model, the continuous ones (`BAND_SPECS`), stereo, bypass, mute.
+    fn band_values(host: &dyn ParamHost, b: usize) -> [f32; 13] {
+        let mut v = [0.0; 13];
+        v[0] = Self::plain(host, &band_id(b, B_MODEL.id));
+        for (k, spec) in BAND_SPECS.iter().enumerate() {
+            v[1 + k] = Self::plain(host, &band_id(b, spec.id));
+        }
+        v[10] = Self::plain(host, &band_id(b, B_STEREO.id));
+        v[11] = Self::plain(host, &band_id(b, B_BYPASS.id));
+        v[12] = Self::plain(host, &band_id(b, B_MUTE.id));
+        v
+    }
+
+    fn write_band(host: &dyn ParamHost, b: usize, v: &[f32; 13]) {
+        Self::set(host, &band_id(b, B_MODEL.id), v[0]);
+        for (k, spec) in BAND_SPECS.iter().enumerate() {
+            Self::set(host, &band_id(b, spec.id), v[1 + k]);
+        }
+        Self::set(host, &band_id(b, B_STEREO.id), v[10]);
+        Self::set(host, &band_id(b, B_BYPASS.id), v[11]);
+        Self::set(host, &band_id(b, B_MUTE.id), v[12]);
+    }
+
+    fn copy_band(host: &dyn ParamHost, from: usize, to: usize) {
+        Self::write_band(host, to, &Self::band_values(host, from));
+    }
+
+    fn reset_band(host: &dyn ParamHost, b: usize) {
+        let mut v = [0.0; 13];
+        v[0] = B_MODEL.default as f32;
+        for (k, spec) in BAND_SPECS.iter().enumerate() {
+            v[1 + k] = spec.default;
+        }
+        v[10] = B_STEREO.default as f32;
+        Self::write_band(host, b, &v);
+    }
+
+    /// How far band `b`'s saturation is engaged, 0…1 (`a` in sat-brief §1.1 before the mix).
+    fn engagement(host: &dyn ParamHost, b: usize) -> f32 {
+        if Self::on(host, &band_id(b, B_BYPASS.id)) {
+            return 0.0;
+        }
+        let t = (Self::plain(host, &band_id(b, B_DRIVE.id)) / ENGAGE_DB).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t) * Self::plain(host, &band_id(b, B_MIX.id)) / 100.0
+    }
+
     fn curve(&self, host: &dyn ParamHost, b: usize) -> curve::Curve {
         let model = Self::model(host, b);
         let bias = Self::plain(host, &band_id(b, B_BIAS.id)) / 100.0;
         // Tube's point drifts with the music: the engine reports where it sits.
-        let point = if model.is_stateful() && self.history.back().is_some() { self.point } else { bias_point(bias) };
-        let auto = if Self::on(host, AUTO_GAIN.id) { self.auto } else { 1.0 };
-        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, auto, peak: self.peak }
+        let point = if model.is_stateful() && self.history.back().is_some() { self.point[b] } else { bias_point(bias) };
+        let auto = if Self::on(host, AUTO_GAIN.id) { self.auto[b] } else { 1.0 };
+        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, auto, peak: self.peak[b] }
     }
 
     fn os_list(host: &dyn ParamHost) -> Dropdown {
         let current = Self::plain(host, OVERSAMPLING.id).round().max(0.0) as usize;
         let anchor = Rect::new(16.0, FOOTER_TOP + 9.0, 126.0, FOOTER_TOP + 47.0);
         Dropdown::new(anchor, OVERSAMPLING.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(150.0)
+    }
+
+    // ---- geometry ---------------------------------------------------------------------------
+
+    /// The cards, in band order from the bottom.
+    fn cards(&self, layout: &Layout) -> Vec<Card> {
+        let l = lanes(self.grow);
+        let (y0, y1) = (l.cy, l.cb);
+        let bands = layout.bands();
+        let n = bands.len();
+        let icon = |x: f64, y: f64, w: f64, h: f64, step: f64| -> Vec<(Model, Rect)> { offered().into_iter().enumerate().map(|(i, m)| (m, Rect::new(x + i as f64 * step, y, x + i as f64 * step + w, y + h))).collect() };
+        if n == 1 {
+            let rect = Rect::new(PLOT_X0, y0, PLOT_X1, y1);
+            let side = rect.height() - 70.0;
+            let square = Rect::new(rect.x0 + 18.0, rect.y0 + 58.0, rect.x0 + 18.0 + side, rect.y0 + 58.0 + side);
+            let (x0, x1) = (square.x1 + 30.0, rect.x1 - 20.0);
+            let step = (x1 - x0) / DIALS.len() as f64;
+            let dials = (0..DIALS.len()).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), square.center().y - 4.0), if k == 0 { 104.0 } else { 76.0 })).collect();
+            let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
+            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), solo: None, mute: None, remove: None, dials }];
+        }
+        let current = self.rail.current(layout);
+        let narrow = (PLOT_W - CARD_WIDE - CARD_GAP * (n - 1) as f64) / (n - 1) as f64;
+        let mut x = PLOT_X0;
+        bands
+            .iter()
+            .map(|&band| {
+                let wide = band == current;
+                let w = if wide { CARD_WIDE } else { narrow };
+                let rect = Rect::new(x, y0, x + w, y1);
+                x += w + CARD_GAP;
+                if wide {
+                    // Header: badge, model icons, the range, then S M power and remove on the right.
+                    let button = |k: f64| Rect::new(rect.x1 - 10.0 - 32.0 * (k + 1.0) - 6.0 * k, rect.y0 + 10.0, rect.x1 - 10.0 - 32.0 * k - 6.0 * k, rect.y0 + 42.0);
+                    let side = rect.height() - 62.0;
+                    let square = Rect::new(rect.x0 + 10.0, rect.y0 + 52.0, rect.x0 + 10.0 + side, rect.y0 + 52.0 + side);
+                    // DRIVE large on the left of the dial area, the other four in a 2×2 grid.
+                    let (ax0, ax1) = (square.x1 + 12.0, rect.x1 - 8.0);
+                    let col = (ax1 - ax0) / 3.0;
+                    let cy = square.center().y - 10.0;
+                    let mut dials = vec![(Point::new(ax0 + col * 0.5, cy), 92.0)];
+                    for k in 0..4 {
+                        dials.push((Point::new(ax0 + col * (1.5 + (k % 2) as f64), cy - 52.0 + 104.0 * (k / 2) as f64), 60.0));
+                    }
+                    Card {
+                        band,
+                        kind: CardKind::Wide,
+                        rect,
+                        square,
+                        models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 40.0, 32.0, 44.0),
+                        power: Some(button(1.0)),
+                        solo: Some(button(3.0)),
+                        mute: Some(button(2.0)),
+                        remove: Some(button(0.0)),
+                        dials,
+                    }
+                } else {
+                    let button = |k: f64| Rect::new(rect.x1 - 8.0 - 24.0 * (k + 1.0) - 3.0 * k, rect.y0 + 10.0, rect.x1 - 8.0 - 24.0 * k - 3.0 * k, rect.y0 + 34.0);
+                    let side = (w - 16.0).min(rect.height() - 128.0);
+                    let square = Rect::new(rect.x0 + 8.0, rect.y0 + 44.0, rect.x0 + 8.0 + side, rect.y0 + 44.0 + side);
+                    // Two small dials, side by side when there is room.
+                    let top = square.y1 + 30.0;
+                    let dials = if w >= 216.0 { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0 + 104.0, top), 34.0)] } else { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0, top + 44.0), 34.0)] };
+                    Card { band, kind: CardKind::Narrow, rect, square, models: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
+                }
+            })
+            .collect()
+    }
+
+    fn card(&self, host: &dyn ParamHost, b: usize) -> Option<Card> {
+        self.cards(&Self::layout(host)).into_iter().find(|c| c.band == b)
     }
 
     // ---- drawing ----------------------------------------------------------------------------
@@ -362,31 +595,112 @@ impl SatView {
         self.session.draw(cx);
     }
 
-    fn draw_card(&self, cx: &mut DrawCx<'_>, b: usize) {
-        let theme = cx.theme;
-        let frame = RoundedRect::from_rect(CARD, 12.0);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &frame);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.control.multiply_alpha(0.55), None, &frame);
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.well_border, None, &frame);
-        let bypassed = Self::on(cx.host, &band_id(b, B_BYPASS.id));
-        let current = Self::model(cx.host, b);
-        let hot = |r: Rect| self.pointer.is_some_and(|p| r.contains(p));
-        for (i, m) in offered().into_iter().enumerate() {
-            let r = model_rect(i);
-            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), m == current, theme.accent);
-            glyphs::draw_model(cx.scene, m, r.center(), 26.0, ink, 1.6);
+    /// The spectrum, with each band's region tinted (several bands) and the crossovers through it.
+    fn draw_spectrum(&self, cx: &mut DrawCx<'_>, layout: &Layout, area: Rect) {
+        let mut tints = Vec::new();
+        if layout.n > 0 {
+            let current = self.rail.current(layout);
+            let soloed = self.rail.soloed(cx.host, layout);
+            for (p, &b) in layout.bands().iter().enumerate() {
+                if self.rail.is_muted(cx.host, b) {
+                    continue;
+                }
+                let r = self.rail.region_rect(cx.host, layout, p);
+                let breath = Self::engagement(cx.host, b) * self.peak[b].min(1.0);
+                let mut op = if b == current { 0.10 } else { 0.05 } + 0.06 * breath;
+                if soloed.is_some_and(|s| s != b) {
+                    op *= 0.35;
+                }
+                tints.push((Rect::new(r.x0, area.y0, r.x1, area.y1), op));
+            }
         }
-        let r = bypass_rect();
-        let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), !bypassed, theme.accent);
-        glyphs::draw(cx.scene, glyphs::POWER, r.center(), 18.0, ink, 1.8);
-        let ghost = match self.hot {
-            Some(Hot::Model(m)) if m != current => Some(m),
-            _ => None,
-        };
-        let alpha = if bypassed { 0.45 } else { 1.0 };
-        curve::draw(cx, square(), &self.curve(cx.host, b), ghost, true, alpha);
+        self.spectrum.draw(cx, area, &tints);
+        if layout.n > 0 {
+            let theme = cx.theme;
+            let x = self.rail.crossovers(cx.host);
+            for p in 0..layout.n {
+                let px = self.rail.x(f64::from(x[layout.crossovers[p]].unwrap_or(20.0)));
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.35), None, &Line::new((px, area.y0), (px, area.y1)));
+            }
+        }
+    }
+
+    fn draw_cards(&self, cx: &mut DrawCx<'_>, layout: &Layout, cards: &[Card]) {
+        let theme = cx.theme;
+        let soloed = self.rail.soloed(cx.host, layout);
+        let merging = self.rail.merging_band(layout);
+        let hot = |r: Rect| self.pointer.is_some_and(|p| r.contains(p));
+        for (p, card) in cards.iter().enumerate() {
+            let b = card.band;
+            let solo = self.rail.is_solo(cx.host, b);
+            let muted = self.rail.is_muted(cx.host, b);
+            let bypassed = Self::on(cx.host, &band_id(b, B_BYPASS.id));
+            let alpha: f32 = if soloed.is_some_and(|s| s != b) { 0.35 } else if muted { 0.55 } else if merging == Some(b) { 0.6 } else { 1.0 };
+            let frame = RoundedRect::from_rect(card.rect, 12.0);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window.multiply_alpha(alpha), None, &frame);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.control.multiply_alpha(0.55 * alpha), None, &frame);
+            if merging == Some(b) {
+                cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.accent, None, &frame);
+            } else if solo {
+                glow_stroke(cx, &frame, 2.0, theme.needle.multiply_alpha(alpha), theme.needle, 6.0);
+            } else if card.kind == CardKind::Wide {
+                glow_stroke(cx, &frame, 1.0, theme.accent.multiply_alpha(alpha), theme.accent.multiply_alpha(0.45 * alpha), 5.0);
+            } else {
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.well_border, None, &frame);
+            }
+            if muted {
+                hatch(cx, card.rect, Some(12.0), 0.22);
+            }
+            if card.kind != CardKind::Single {
+                let r = if card.kind == CardKind::Wide { 11.0 } else { 9.0 };
+                let y = if card.kind == CardKind::Wide { card.rect.y0 + 26.0 } else { card.rect.y0 + 22.0 };
+                draw_badge(cx, Point::new(card.rect.x0 + 9.0 + r + 2.0, y), r, p + 1, card.kind == CardKind::Wide, solo, alpha);
+            }
+            let current = Self::model(cx.host, b);
+            for &(m, r) in &card.models {
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), m == current, theme.accent);
+                glyphs::draw_model(cx.scene, m, r.center(), r.height() * 0.72, ink, 1.6);
+            }
+            if card.kind == CardKind::Wide {
+                // The band's range, between the icons and the buttons.
+                let text = self.rail.range_text(cx.host, layout, b);
+                let x0 = card.models.last().map_or(card.rect.x0 + 40.0, |(_, r)| r.x1) + 12.0;
+                cx.text.draw(cx.scene, &text, x0, card.rect.y0 + 18.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0).weighted(600.0) }, theme.text_mid, Align::Left);
+            }
+            if let Some(r) = card.power {
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), !bypassed, theme.accent);
+                glyphs::draw(cx.scene, glyphs::POWER, r.center(), r.height() * 0.5, ink, 1.8);
+            }
+            if let Some(r) = card.solo {
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), solo, theme.needle);
+                let size = if r.height() > 28.0 { 13.0 } else { 11.0 };
+                cx.text.draw(cx.scene, "S", r.center().x, r.center().y - size * 0.62, TextStyle::BODY.sized(size as f32).weighted(800.0), ink, Align::Center);
+            }
+            if let Some(r) = card.mute {
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), muted, theme.text_hi);
+                draw_glyph(cx.scene, rail_glyph::MUTE, r.center(), r.height() * 0.56, ink, 1.7);
+            }
+            if let Some(r) = card.remove {
+                // Sat draws no danger role: the remove button is a cross in the text colour.
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), false, theme.text_hi);
+                draw_glyph(cx.scene, rail_glyph::CROSS, r.center(), r.height() * 0.56, ink, 1.8);
+            }
+            let ghost = match self.hot {
+                Some(Hot::Model(hb, m)) if hb == b && m != current => Some(m),
+                _ => None,
+            };
+            let lit = if bypassed { 0.45 } else { 1.0 } * alpha;
+            curve::draw(cx, card.square, &self.curve(cx.host, b), ghost, card.kind != CardKind::Narrow, lit);
+        }
         for k in &self.knobs {
             k.draw(cx);
+            if !k.value_inside {
+                // Small dials: the name and value beside them.
+                let v = Self::plain(cx.host, &k.id);
+                let x = k.center.x + k.diameter / 2.0 + 7.0;
+                cx.text.draw(cx.scene, k.label, x, k.center.y - 14.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Left);
+                cx.text.draw(cx.scene, &k.spec.format(v), x, k.center.y - 1.0, TextStyle { tabular: true, ..TextStyle::BODY.weighted(600.0) }, theme.text_hi, Align::Left);
+            }
         }
     }
 
@@ -447,12 +761,12 @@ impl SatView {
         }
     }
 
-    fn draw_states(&self, cx: &mut DrawCx<'_>) {
+    fn draw_states(&self, cx: &mut DrawCx<'_>, spectrum: Rect) {
         let theme = cx.theme;
         if Self::on(cx.host, DELTA.id) {
-            let r = RoundedRect::from_rect(Rect::new(SPECTRUM.x0 + 10.0, SPECTRUM.y0 + 10.0, SPECTRUM.x0 + 46.0, SPECTRUM.y0 + 46.0), 10.0);
+            let r = RoundedRect::from_rect(Rect::new(spectrum.x0 + 10.0, spectrum.y0 + 10.0, spectrum.x0 + 46.0, spectrum.y0 + 46.0), 10.0);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.18), None, &r);
-            mite_ui::paint::glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
+            glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
             mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Delta, r.center(), theme.accent);
         }
     }
@@ -460,15 +774,18 @@ impl SatView {
     // ---- help -------------------------------------------------------------------------------
 
     fn help_text(&self, host: &dyn ParamHost) -> Help {
-        let b = Self::band(host);
-        let drive = f64::from(Self::plain(host, &band_id(b, B_DRIVE.id)));
-        let bias = f64::from(Self::plain(host, &band_id(b, B_BIAS.id)));
-        let tone = f64::from(Self::plain(host, &band_id(b, B_TONE.id)));
-        if let Some(Drag::Curve { alt, .. }) = self.drag {
+        let layout = Self::layout(host);
+        let number = |b: usize| layout.position(b).map_or(1, |p| p + 1);
+        let values = |b: usize| (f64::from(Self::plain(host, &band_id(b, B_DRIVE.id))), f64::from(Self::plain(host, &band_id(b, B_BIAS.id))), f64::from(Self::plain(host, &band_id(b, B_TONE.id))));
+        if let Some(Drag::Curve { band, alt, .. }) = self.drag {
+            let (drive, bias, tone) = values(band);
             if alt {
                 return Help::default().text("Tone ").slot(fmt_signed(tone, " dB"), "+12.0 dB").text(" — tilts what the saturation gives, around the band's centre.");
             }
             return Help::default().text("Drive ").slot(format!("{drive:.1} dB"), "36.0 dB").text("  bias ").slot(format!("{bias:+.0} %"), "+100 %").text(" — up drives harder, across moves the operating point. Shift is fine.");
+        }
+        if let Some(h) = self.rail.help(host) {
+            return h;
         }
         if let Some(list) = &self.os_menu {
             let fs = f64::from(self.shared.sample_rate.load()).max(1.0);
@@ -480,62 +797,116 @@ impl SatView {
             }
         }
         match self.hot {
-            Some(Hot::Square) => Help::default().text("Drive ").slot(format!("{drive:.1} dB"), "36.0 dB").text("  bias ").slot(format!("{bias:+.0} %"), "+100 %").text(" — drag up for more drive, across for bias; Alt-drag: tone; wheel: drive; double-click resets."),
-            Some(Hot::Model(m)) => Help::default().text(format!("{} — {}", m.name(), model_words(m))),
-            Some(Hot::Bypass) => Help::default().text(if Self::on(host, &band_id(b, B_BYPASS.id)) { "The band passes clean — click to saturate it again." } else { "Band on — click to let it pass clean (still heard)." }),
-            Some(Hot::Oversampling) => Help::default().text("Oversampling — how many times faster the curves run, so their harmonics do not fold back into the audible band."),
-            None => {
-                if let Some(h) = self.footer.help(host) {
-                    return h;
-                }
-                if let Some(k) = self.knobs.iter().find(|k| self.pointer.is_some_and(|p| k.bounds().contains(p))) {
-                    let v = Self::plain(host, &k.id);
-                    return Help::default().text(format!("{} ", k.spec.name)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(knob_words(k.spec.id));
-                }
-                if let Some(h) = self.session.help() {
-                    return h;
-                }
-                if drive == 0.0 {
-                    Help::default().text("Clean: drag the curve up, or turn DRIVE, to saturate.")
-                } else {
-                    Help::default().text("Lit: where the music reaches on the curve. Crimson in the spectrum: the harmonics it adds.")
-                }
+            Some(Hot::Square(b)) => {
+                let (drive, bias, _) = values(b);
+                return Help::default().text("Drive ").slot(format!("{drive:.1} dB"), "36.0 dB").text("  bias ").slot(format!("{bias:+.0} %"), "+100 %").text(" — drag up for more drive, across for bias; Alt-drag: tone; wheel: drive; double-click resets.");
             }
+            Some(Hot::Model(_, m)) => return Help::default().text(format!("{} — {}", m.name(), model_words(m))),
+            Some(Hot::Power(b)) => return Help::default().text(if Self::on(host, &band_id(b, B_BYPASS.id)) { "The band passes clean — click to saturate it again." } else { "Band on — click to let it pass clean (still heard)." }),
+            Some(Hot::Solo(_)) => return Help::default().text("Solo — hear only this band (S)"),
+            Some(Hot::Mute(_)) => return Help::default().text("Mute — take this band out of the sum (M)"),
+            Some(Hot::Remove(b)) => return Help::default().text(format!("Remove band {} — its region joins the band below (Delete)", number(b))),
+            Some(Hot::Oversampling) => return Help::default().text("Oversampling — how many times faster the curves run, so their harmonics do not fold back into the audible band."),
+            Some(Hot::Rail(RailHot::Region(b))) | Some(Hot::Card(b)) if layout.n > 0 => {
+                let (drive, _, _) = values(b);
+                return Help::default()
+                    .slot(format!("Band {}", number(b)), "Band 6")
+                    .text(" · ")
+                    .slot(self.rail.range_text(host, &layout, b), "20.0 kHz – 20.0 kHz")
+                    .text(format!(" · {} · drive ", Self::model(host, b).name()))
+                    .slot(format!("{drive:.1} dB"), "36.0 dB")
+                    .text(" — click to edit it; double-click the strip to split; right-click for more");
+            }
+            _ => {}
+        }
+        if let Some(h) = self.footer.help(host) {
+            return h;
+        }
+        if let Some(k) = self.knobs.iter().find(|k| self.pointer.is_some_and(|p| k.bounds().contains(p))) {
+            let v = Self::plain(host, &k.id);
+            return Help::default().text(format!("{} ", k.spec.name)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(knob_words(k.spec.id));
+        }
+        if let Some(h) = self.session.help() {
+            return h;
+        }
+        let b = self.rail.current(&layout);
+        if layout.n > 0 {
+            return Help::default()
+                .slot(format!("Band {}", number(b)), "Band 6")
+                .text(" · ")
+                .slot(self.rail.range_text(host, &layout, b), "20.0 kHz – 20.0 kHz")
+                .text(" — drag a crossover sideways; double-click the strip to split; click a band to edit it");
+        }
+        if values(b).0 == 0.0 {
+            Help::default().text("Clean: drag the curve up, or turn DRIVE, to saturate. Pull a crossover in from either end of the strip to saturate bands apart.")
+        } else {
+            Help::default().text("Lit: where the music reaches on the curve. Crimson in the spectrum: the harmonics it adds.")
         }
     }
 
     // ---- events -----------------------------------------------------------------------------
 
+    /// Makes the cards' dials for the bands in use and the selection, and moves them where the
+    /// cards are now.
     fn sync_knobs(&mut self, host: &dyn ParamHost) {
-        let b = Self::band(host);
-        if self.knob_band == Some(b) || self.knobs.iter().any(Knob::is_dragging) {
-            return;
+        let layout = Self::layout(host);
+        let cards = self.cards(&layout);
+        let key = (layout.bands().to_vec(), self.rail.current(&layout));
+        if self.knob_key.as_ref() != Some(&key) && !self.knobs.iter().any(Knob::is_dragging) {
+            self.knobs.clear();
+            for card in &cards {
+                let b = card.band;
+                if card.kind == CardKind::Narrow {
+                    for (k, spec) in [B_DRIVE, B_MIX].into_iter().enumerate() {
+                        let (c, d) = card.dials[k];
+                        let mut knob = Knob::new(spec, DIALS[k * 3].1, KnobKind::Unipolar, c, d).with_id(band_id(b, spec.id));
+                        if k == 0 {
+                            knob = knob.with_curve(DRIVE_DIAL);
+                        }
+                        knob.value_inside = false;
+                        self.knobs.push(knob);
+                    }
+                } else {
+                    for (k, (spec, label, kind)) in DIALS.iter().enumerate() {
+                        let (c, d) = card.dials[k];
+                        let knob = Knob::new(*spec, label, *kind, c, d).with_id(band_id(b, spec.id));
+                        self.knobs.push(if k == 0 { knob.with_curve(DRIVE_DIAL) } else { knob });
+                    }
+                }
+            }
+            self.knob_key = Some(key);
         }
-        self.knobs = DIALS
-            .iter()
-            .enumerate()
-            .map(|(k, (spec, label, kind))| {
-                let (c, d) = dial_center(k);
-                let knob = Knob::new(*spec, label, *kind, c, d).with_id(band_id(b, spec.id));
-                if k == 0 { knob.with_curve(DRIVE_DIAL) } else { knob }
-            })
-            .collect();
-        self.knob_band = Some(b);
+        // Follow the cards as the layout eases.
+        let mut centres = cards.iter().flat_map(|c| c.dials.iter().copied());
+        for k in &mut self.knobs {
+            if let Some((c, _)) = centres.next() {
+                k.center = c;
+            }
+        }
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
     }
 
-    fn hot_at(&self, p: Point) -> Option<Hot> {
-        if square().contains(p) {
-            return Some(Hot::Square);
+    fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
+        if let Some(h) = self.rail.hit(host, p) {
+            return Some(Hot::Rail(h));
         }
-        if let Some(i) = (0..offered().len()).find(|&i| model_rect(i).contains(p)) {
-            return Some(Hot::Model(offered()[i]));
-        }
-        if bypass_rect().contains(p) {
-            return Some(Hot::Bypass);
+        for card in self.cards(&Self::layout(host)) {
+            if !card.rect.contains(p) {
+                continue;
+            }
+            if card.square.contains(p) {
+                return Some(Hot::Square(card.band));
+            }
+            if let Some(&(m, _)) = card.models.iter().find(|(_, r)| r.contains(p)) {
+                return Some(Hot::Model(card.band, m));
+            }
+            if let Some((_, h)) = card.buttons().into_iter().find(|(r, _)| r.is_some_and(|r| r.contains(p))) {
+                return Some(h);
+            }
+            return Some(Hot::Card(card.band));
         }
         if self.os_hit.contains(p) {
             return Some(Hot::Oversampling);
@@ -547,10 +918,17 @@ impl SatView {
         if let Some(used) = self.session.key(key, mods, host) {
             return used;
         }
-        let b = Self::band(host);
+        let layout = Self::layout(host);
+        let b = self.rail.current(&layout);
         match key {
-            Key::Escape if self.os_menu.is_some() => {
-                self.os_menu = None;
+            Key::Escape => {
+                if self.os_menu.take().is_some() || self.menu.take().is_some() || self.rail.cancel() {
+                    return true;
+                }
+                self.rail.clear_solo(host)
+            }
+            Key::Delete | Key::Backspace if layout.n > 0 => {
+                self.rail.remove_band(host, b);
                 true
             }
             Key::Up | Key::Down => {
@@ -567,7 +945,88 @@ impl SatView {
                 Self::set(host, &band_id(b, B_MODEL.id), models[next].index() as f32);
                 true
             }
+            Key::Character(c) if !(mods.ctrl || mods.meta) => match c.to_ascii_lowercase() {
+                's' => {
+                    self.rail.toggle_solo(host, b);
+                    true
+                }
+                'm' => {
+                    self.rail.toggle_mute(host, b);
+                    true
+                }
+                _ => false,
+            },
             _ => false,
+        }
+    }
+
+    fn menu_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        let Some(menu) = &mut self.menu else { return false };
+        if let UiEvent::PointerMove { pos, .. } = *event {
+            self.pointer = Some(pos);
+        }
+        let Ok(ask) = menu.event(event, &mut self.rail, host) else { return true };
+        self.menu = None;
+        match ask {
+            Some(MenuAsk::Copy(b)) => self.clipboard = Some(Self::band_values(host, b)),
+            Some(MenuAsk::Paste(b)) => {
+                if let Some(v) = self.clipboard {
+                    Self::write_band(host, b, &v);
+                }
+            }
+            Some(MenuAsk::Reset(b)) => Self::reset_band(host, b),
+            None => {}
+        }
+        true
+    }
+
+    fn curve_ids(band: usize, alt: bool) -> Vec<String> {
+        if alt { vec![band_id(band, B_TONE.id)] } else { vec![band_id(band, B_DRIVE.id), band_id(band, B_BIAS.id)] }
+    }
+
+    fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers) -> bool {
+        match self.hot_at(host, pos) {
+            Some(Hot::Rail(_)) => self.rail.press(host, pos),
+            Some(Hot::Square(b)) => {
+                self.rail.selected = b;
+                let alt = mods.alt;
+                for id in Self::curve_ids(b, alt) {
+                    host.begin_gesture(&id);
+                }
+                let p = |s: &ParamSpec| Self::plain(host, &band_id(b, s.id));
+                self.drag = Some(Drag::Curve { band: b, start: pos, drive: p(&B_DRIVE), bias: p(&B_BIAS), tone: p(&B_TONE), alt });
+                true
+            }
+            Some(Hot::Model(b, m)) => {
+                Self::set(host, &band_id(b, B_MODEL.id), m.index() as f32);
+                true
+            }
+            Some(Hot::Power(b)) => {
+                let on = Self::on(host, &band_id(b, B_BYPASS.id));
+                Self::set(host, &band_id(b, B_BYPASS.id), if on { 0.0 } else { 1.0 });
+                true
+            }
+            Some(Hot::Solo(b)) => {
+                self.rail.toggle_solo(host, b);
+                true
+            }
+            Some(Hot::Mute(b)) => {
+                self.rail.toggle_mute(host, b);
+                true
+            }
+            Some(Hot::Remove(b)) => {
+                self.rail.remove_band(host, b);
+                true
+            }
+            Some(Hot::Card(b)) => {
+                self.rail.selected = b;
+                true
+            }
+            Some(Hot::Oversampling) => {
+                self.os_menu = Some(Self::os_list(host));
+                true
+            }
+            None => false,
         }
     }
 
@@ -589,6 +1048,9 @@ impl SatView {
             }
             return true;
         }
+        if self.menu.is_some() && !self.session.menu_open() {
+            return self.menu_event(event, host);
+        }
         if let Some(answer) = self.session.event(event, host) {
             return answer;
         }
@@ -600,83 +1062,84 @@ impl SatView {
                 return true;
             }
         }
-        let b = Self::band(host);
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
-                if let Some(Drag::Curve { start, drive, bias, tone, alt }) = self.drag {
+                if self.rail.drag_to(host, pos, mods) {
+                    return true;
+                }
+                if let Some(Drag::Curve { band, start, drive, bias, tone, alt }) = self.drag {
                     let k = if mods.fine() { 0.2 } else { 1.0 };
                     let (dx, dy) = ((pos.x - start.x) as f32, (start.y - pos.y) as f32);
                     if alt {
-                        Self::set_raw(host, &band_id(b, B_TONE.id), (tone + dy * TONE_PER_PX * k).clamp(-TONE_MAX_DB, TONE_MAX_DB));
+                        Self::set_raw(host, &band_id(band, B_TONE.id), (tone + dy * TONE_PER_PX * k).clamp(-TONE_MAX_DB, TONE_MAX_DB));
                     } else {
-                        Self::set_raw(host, &band_id(b, B_DRIVE.id), (drive + dy * DRIVE_PER_PX * k).clamp(0.0, DRIVE_MAX_DB));
-                        Self::set_raw(host, &band_id(b, B_BIAS.id), (bias + dx * BIAS_PER_PX * k).clamp(-100.0, 100.0));
+                        Self::set_raw(host, &band_id(band, B_DRIVE.id), (drive + dy * DRIVE_PER_PX * k).clamp(0.0, DRIVE_MAX_DB));
+                        Self::set_raw(host, &band_id(band, B_BIAS.id), (bias + dx * BIAS_PER_PX * k).clamp(-100.0, 100.0));
                     }
                     return true;
                 }
-                self.hot = self.hot_at(pos);
+                self.hot = self.hot_at(host, pos);
+                self.rail.hover(host, Some(pos));
                 true
             }
             UiEvent::PointerLeft => {
                 self.pointer = None;
                 self.hot = None;
+                self.rail.hover(host, None);
                 true
             }
-            UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => match self.hot_at(pos) {
-                Some(Hot::Square) => {
-                    let alt = mods.alt;
-                    let ids: Vec<String> = if alt { vec![band_id(b, B_TONE.id)] } else { vec![band_id(b, B_DRIVE.id), band_id(b, B_BIAS.id)] };
-                    for id in &ids {
-                        host.begin_gesture(id);
-                    }
-                    let p = |s: &ParamSpec| Self::plain(host, &band_id(b, s.id));
-                    self.drag = Some(Drag::Curve { start: pos, drive: p(&B_DRIVE), bias: p(&B_BIAS), tone: p(&B_TONE), alt });
+            UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => self.press(host, pos, mods),
+            UiEvent::PointerDown { pos, button: MouseButton::Right, .. } => match self.hot_at(host, pos) {
+                Some(Hot::Rail(RailHot::Region(b)) | Hot::Card(b) | Hot::Square(b)) => {
+                    self.menu = BandMenu::open(&mut self.rail, host, b, pos, self.clipboard.is_some(), (DISPLAY_TOP, FOOTER_TOP));
                     true
                 }
-                Some(Hot::Model(m)) => {
-                    Self::set(host, &band_id(b, B_MODEL.id), m.index() as f32);
-                    true
-                }
-                Some(Hot::Bypass) => {
-                    let on = Self::on(host, &band_id(b, B_BYPASS.id));
-                    Self::set(host, &band_id(b, B_BYPASS.id), if on { 0.0 } else { 1.0 });
-                    true
-                }
-                Some(Hot::Oversampling) => {
-                    self.os_menu = Some(Self::os_list(host));
-                    true
-                }
-                None => false,
+                _ => false,
             },
-            UiEvent::PointerUp { button: MouseButton::Left, .. } => match self.drag.take() {
-                Some(Drag::Curve { alt, .. }) => {
-                    let ids: Vec<String> = if alt { vec![band_id(b, B_TONE.id)] } else { vec![band_id(b, B_DRIVE.id), band_id(b, B_BIAS.id)] };
-                    for id in &ids {
-                        host.end_gesture(id);
+            UiEvent::PointerUp { button: MouseButton::Left, .. } => {
+                if self.rail.release(host) {
+                    return true;
+                }
+                match self.drag.take() {
+                    Some(Drag::Curve { band, alt, .. }) => {
+                        for id in Self::curve_ids(band, alt) {
+                            host.end_gesture(&id);
+                        }
+                        true
                     }
+                    None => false,
+                }
+            }
+            UiEvent::DoubleClick { pos, .. } => match self.hot_at(host, pos) {
+                Some(Hot::Rail(_)) => self.rail.double_click(host, pos),
+                Some(Hot::Square(b)) => {
+                    self.drag = None;
+                    Self::set(host, &band_id(b, B_DRIVE.id), B_DRIVE.default);
+                    Self::set(host, &band_id(b, B_BIAS.id), B_BIAS.default);
                     true
                 }
-                None => false,
+                _ => false,
             },
-            UiEvent::DoubleClick { pos, .. } if square().contains(pos) => {
-                self.drag = None;
-                Self::set(host, &band_id(b, B_DRIVE.id), B_DRIVE.default);
-                Self::set(host, &band_id(b, B_BIAS.id), B_BIAS.default);
-                true
-            }
-            UiEvent::Wheel { pos, lines, mods } if square().contains(pos) => {
-                let id = band_id(b, B_DRIVE.id);
-                Self::set(host, &id, B_DRIVE.wheel(Self::plain(host, &id), lines, mods.fine()));
-                true
-            }
+            UiEvent::Wheel { pos, lines, mods } => match self.hot_at(host, pos) {
+                Some(Hot::Rail(_)) => self.rail.wheel(host, pos, lines, mods),
+                Some(Hot::Square(b)) => {
+                    let id = band_id(b, B_DRIVE.id);
+                    Self::set(host, &id, B_DRIVE.wheel(Self::plain(host, &id), lines, mods.fine()));
+                    true
+                }
+                _ => false,
+            },
             _ => false,
         }
     }
 
-    fn after_session(&mut self) {
+    fn after_session(&mut self, host: &dyn ParamHost) {
         if self.session.take_replaced() {
-            self.knob_band = None;
+            if Self::layout(host).position(self.rail.selected).is_none() {
+                self.rail.selected = 0;
+            }
+            self.knob_key = None;
         }
     }
 }
@@ -712,15 +1175,24 @@ impl View for SatView {
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
         self.sync_knobs(cx.host);
         let theme = cx.theme;
-        let b = Self::band(cx.host);
+        let layout = Self::layout(cx.host);
+        let l = lanes(self.grow);
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
-        self.spectrum.draw(cx, SPECTRUM);
-        self.draw_card(cx, b);
+        self.draw_spectrum(cx, &layout, l.spectrum);
+        let breath: [f32; BANDS] = std::array::from_fn(|b| Self::engagement(cx.host, b) * self.peak[b].min(1.0));
+        self.rail.draw_under(cx, &layout, &breath);
+        self.rail.draw_over(cx, &layout);
+        let cards = self.cards(&layout);
+        self.rail.draw_funnels(cx, &layout, &cards.iter().map(|c| c.rect).collect::<Vec<_>>(), l.rail.y1, l.cy);
+        self.draw_cards(cx, &layout, &cards);
         self.draw_meters(cx);
-        self.draw_states(cx);
+        self.draw_states(cx, l.spectrum);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
         self.draw_footer(cx);
+        if let Some(menu) = &self.menu {
+            menu.draw(cx, (theme.text_hi, rail_glyph::CROSS));
+        }
         self.session.draw_menu(cx);
     }
 
@@ -731,7 +1203,7 @@ impl View for SatView {
         let changed = self.handle_event(event, &recording);
         let busy = self.busy();
         self.session.end(host, recording.wrote(), busy);
-        self.after_session();
+        self.after_session(host);
         changed
     }
 
@@ -752,6 +1224,17 @@ impl View for SatView {
         if fresh {
             self.last_fresh = Instant::now();
         }
+        // The layout eases between one band and several.
+        let layout = Self::layout(host);
+        let target = if layout.n > 0 { 1.0 } else { 0.0 };
+        let step = dt * 1000.0 / GROW_MS;
+        let before = self.grow;
+        self.grow = if target > self.grow { (self.grow + step).min(target) } else { (self.grow - step).max(target) };
+        let grew = self.grow != before;
+        self.rail.area = lanes(self.grow).rail;
+        if layout.position(self.rail.selected).is_none() {
+            self.rail.selected = 0;
+        }
         if let Some(r) = self.history.back().copied() {
             let targets = [r[record::IN], r[record::IN + 1], r[record::OUT], r[record::OUT + 1]];
             for (m, t) in self.meters.iter_mut().zip(targets) {
@@ -759,21 +1242,22 @@ impl View for SatView {
                 *m = if t > *m { t } else { (*m - fall).max(t) };
             }
         }
-        // The band's peak, point and auto gain, eased like the spectrum (the last 20 ms).
-        let b = Self::band(host);
-        let recent = self.history.iter().rev().take(4);
-        let peak_db = recent.clone().map(|r| r[record::BAND_IN + b]).fold(-150.0f32, f32::max);
-        let target = if peak_db > -120.0 { 10f32.powf(peak_db / 20.0) } else { 0.0 };
+        // Each band's peak, point and auto gain, eased like the spectrum (the last 20 ms).
         let k = |s: f64| (1.0 - (-dt / s).exp()) as f32;
-        let before = (self.peak, self.point, self.auto);
-        self.peak += (target - self.peak) * if target > self.peak { k(PEAK_RISE_S) } else { k(PEAK_FALL_S) };
-        if let Some(r) = self.history.back() {
-            self.point += (r[record::POINT + b] - self.point) * k(0.03);
-            self.auto += (r[record::AUTO + b] - self.auto) * k(0.03);
+        let mut moved = false;
+        for b in 0..BANDS {
+            let peak_db = self.history.iter().rev().take(4).map(|r| r[record::BAND_IN + b]).fold(-150.0f32, f32::max);
+            let target = if peak_db > -120.0 { 10f32.powf(peak_db / 20.0) } else { 0.0 };
+            let before = (self.peak[b], self.point[b], self.auto[b]);
+            self.peak[b] += (target - self.peak[b]) * if target > self.peak[b] { k(PEAK_RISE_S) } else { k(PEAK_FALL_S) };
+            if let Some(r) = self.history.back() {
+                self.point[b] += (r[record::POINT + b] - self.point[b]) * k(0.03);
+                self.auto[b] += (r[record::AUTO + b] - self.auto[b]) * k(0.03);
+            }
+            moved |= (self.peak[b] - before.0).abs() > 1e-4 || (self.point[b] - before.1).abs() > 1e-4 || (self.auto[b] - before.2).abs() > 1e-4;
         }
-        let moved = (self.peak - before.0).abs() > 1e-4 || (self.point - before.1).abs() > 1e-4 || (self.auto - before.2).abs() > 1e-4;
         let spectrum = self.spectrum.update(&self.shared, dt);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || moved || spectrum || self.drag.is_some() || self.meters.iter().any(|&m| m > -149.0)
+        fresh || flowing || moved || grew || spectrum || self.busy() || self.meters.iter().any(|&m| m > -149.0)
     }
 }

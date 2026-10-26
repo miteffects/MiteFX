@@ -81,7 +81,7 @@ x 1180–1280, as in Shape.
 ┌ header: mark · Mite Sat · ‹ preset › · undo redo · A B C D ─────────────────┐
 │ spectrum (x 14–1166, y +12…+236): input dim, output lit,   │ IN  OUT        │
 │ added harmonics in crimson; band regions tint the plot      │ meters         │
-│ rail (36 px; 80 px with bands): grips, ghosts, badges       │                │
+│ rail (36 px; 64 px with bands): grips, ghosts, badges       │                │
 │ funnels                                                     │                │
 │ ┌ card (wide when selected) ───────────────────────────┐    │                │
 │ │ model glyphs  ○ ○ ● ○ ○ ○ ○ ○        S  M  ⏻  ×     │    │                │
@@ -116,7 +116,12 @@ x 1180–1280, as in Shape.
   processor at its live operating point. A harmonic above the base Nyquist is hollow.
 - **Dials**: DRIVE (0…36 dB; 0–12 dB takes half the travel), BIAS (±100 %), TONE (±12 dB),
   MIX, OUTPUT; DYN when dynamics arrive (slice 6).
-- Narrow cards (other bands): model glyph, a mini transfer curve, DRIVE.
+- Narrow cards (other bands): number badge, S and M, a transfer square of their own (lit where
+  their music reaches; drag it as the wide one, which selects the band), DRIVE and MIX. The curve
+  is the model's drawing, so no separate glyph.
+- Wide card (the selected band of several, 600 px): badge, model icons, the band's range, S, M,
+  power and remove (a cross in the text colour: Sat draws no danger role), the square, DRIVE
+  large beside BIAS, TONE, MIX and OUTPUT in a 2×2 grid.
 
 ### 3.3 Footer
 Oversampling (dropdown button: 1×, 2×, 4×, 8×; the help strip says each one's latency), the
@@ -149,7 +154,8 @@ the editor does not show it.
 0. Groundwork (done 2026-10-26): shared crossover, 8× oversampling, the crimson accent.
 1. One band: models Tube, Diode, Soft, Hard, Fold and Rectify; oversampling; auto gain; the
    spectrum and one card. The engine already splits into bands (tested); the editor shows one.
-2. Multiband: the rail, cards and band editing shared with Shape.
+2. Multiband (done 2026-10-26): the rail, cards and band editing shared with Shape
+   (`mite_ui::widgets::rail`).
 3. Tape and Transformer (hysteresis).
 4. Harmonics probe and bars.
 5. Per-band stereo modes.

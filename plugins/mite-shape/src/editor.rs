@@ -15,14 +15,15 @@ use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::analyzer::{spectrum_point_freq, Analyzer, LogSpectrum, SPECTRUM_POINTS};
-use mite_dsp::shape::{simulate_hit, BandShape, Layout, AMOUNT_DB, BANDS, CROSSOVERS, FREQ_MAX, FREQ_MIN, MIN_GAP_OCT};
-use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
+use mite_dsp::shape::{simulate_hit, BandShape, Layout, AMOUNT_DB, BANDS, CROSSOVERS, FREQ_MIN};
+use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glass_panel, glow_fill, glow_stroke, icon_button, panel};
 use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::footer::draw_dropdown_button;
-use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::rail::{draw_badge, draw_glyph, fmt_freq, glyph as rail_glyph, hatch, BandMenu, MenuAsk, Rail, RailHot, RailParams};
+use mite_ui::widgets::{Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::record;
@@ -65,12 +66,6 @@ const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 /// The crossover rail: 20 Hz at x 14, 20 kHz at x 1166.
 const RAIL_X0: f64 = 14.0;
 const RAIL_W: f64 = 1152.0;
-/// A crossover grip (14×28) and its hit area.
-const GRIP: (f64, f64) = (14.0, 28.0);
-const GRIP_HIT: f64 = 16.0;
-/// Dragging a crossover this close to a neighbour (px), or this far past an end, merges.
-const MERGE_PX: f64 = 6.0;
-const OFF_END_PX: f64 = 10.0;
 
 /// The rail's spectrum: these levels at its top and bottom, dB on the analyzer's scale.
 const SPEC_TOP_DB: f32 = -18.0;
@@ -103,23 +98,7 @@ mod glyph {
     pub const SLIDERS: &str = "M4 7 H20 M4 12 H20 M4 17 H20 M8.5 5 V9 M15 10 V14 M10.5 15 V19";
     pub const LISTEN: &str = "M4 14 V12 A8 8 0 0 1 20 12 V14 M4 14 H7 V20 H4 Z M20 14 H17 V20 H20 Z";
     pub const DELTA: &str = "M12 4 L20.5 19 H3.5 Z";
-    pub const MUTE: &str = "M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z M15.5 9.5 L20.5 14.5 M20.5 9.5 L15.5 14.5";
-    pub const BIN: &str = "M5 7 H19 M10 7 V5 H14 V7 M7 7 L8 20 H16 L17 7 M10.5 10.5 V16.5 M13.5 10.5 V16.5";
-    pub const RESET: &str = "M5 12 A7 7 0 1 0 7.1 7 M5 4.5 V8.5 H9";
-    pub const COPY: &str = "M8 8 H19 V20 H8 Z M5 16 V4 H15";
-    pub const PASTE: &str = "M7 5 H5 V21 H19 V5 H17 M9 3 H15 V7 H9 Z";
-    pub const MERGE: &str = "M4 6 C10 6 11 12 20 12 M4 18 C10 18 11 12 20 12 M17 9 L20 12 L17 15";
     pub const LR4: &str = "M3 7 H8 C12 7 13 17 21 17 M3 17 C11 17 12 7 16 7 H21";
-    pub const SOLO: &str = "M12 3.5 A8.5 8.5 0 1 0 12.01 3.5";
-}
-
-/// Draws a 24×24 glyph scaled to `size`, centred on `c`.
-fn draw_glyph(scene: &mut mite_ui::vello::Scene, d: &str, c: Point, size: f64, color: Color, width: f64) {
-    let Ok(mut path) = BezPath::from_svg(d) else { return };
-    let k = size / 24.0;
-    path.apply_affine(Affine::translate((c.x - 12.0 * k, c.y - 12.0 * k)) * Affine::scale(k));
-    let stroke = Stroke::new(width).with_caps(Cap::Round).with_join(Join::Round);
-    scene.stroke(&stroke, Affine::IDENTITY, color, None, &path);
 }
 
 /// A stand-in host holding every Mite Shape parameter at its default, for tests, the preview and
@@ -232,22 +211,24 @@ fn rail_x(f: f64) -> f64 {
     RAIL_X0 + RAIL_W * (f / f64::from(FREQ_MIN)).ln() / 1000f64.ln()
 }
 
-fn rail_f(x: f64) -> f64 {
-    f64::from(FREQ_MIN) * 1000f64.powf(((x - RAIL_X0) / RAIL_W).clamp(0.0, 1.0))
+fn fmt_db(v: f64) -> String {
+    format!("{}{:.1}", if v > 0.05 { "+" } else if v < -0.05 { "−" } else { "" }, v.abs())
 }
 
-fn fmt_freq(f: f64) -> String {
-    if f >= 10_000.0 {
-        format!("{:.0} kHz", f / 1000.0)
-    } else if f >= 1000.0 {
-        format!("{:.1} kHz", f / 1000.0)
-    } else {
-        format!("{:.0} Hz", f)
+/// How the shared rail reads and writes Shape's crossovers and bands.
+fn rail_params() -> RailParams {
+    RailParams {
+        cross_on: |k| cross_id(k, X_ON.id),
+        cross_freq: |k| cross_id(k, X_FREQ.id),
+        freq: X_FREQ,
+        solo: |b| band_id(b, B_SOLO.id),
+        mute: |b| band_id(b, B_MUTE.id),
+        copy: ShapeView::copy_band,
     }
 }
 
-fn fmt_db(v: f64) -> String {
-    format!("{}{:.1}", if v > 0.05 { "+" } else if v < -0.05 { "−" } else { "" }, v.abs())
+fn rail_area(l: &Lanes) -> Rect {
+    Rect::new(0.0, l.ry, HIST_W, l.ry + l.rh)
 }
 
 /// Which part of a band's shaping a scope drag or handle sets.
@@ -261,23 +242,8 @@ enum Part {
     Length,
 }
 
-/// What dragging a crossover onto something does on release.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Merge {
-    /// Onto the crossover below (its slot): the band between them goes, the one above grows.
-    Down(usize),
-    /// Onto the one above: the band between them goes, the one below grows.
-    Up,
-    /// Off the low end (the lowest band goes) or the high end (the highest).
-    OffLow,
-    OffHigh,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
-    Cross { slot: usize, start: Point, f0: f64, merge: Option<Merge> },
-    /// Pulling a new crossover in from an end of the rail.
-    Create { low: bool, start: Point, now: Point },
     Scope { band: usize, part: Part, start: Point, value: f32 },
     /// The detector filter's high-pass (true) or low-pass node.
     Filter { hp: bool },
@@ -287,9 +253,7 @@ enum Drag {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
-    Grip(usize),
-    Ghost(bool),
-    Region(usize),
+    Rail(RailHot),
     Card(usize),
     Scope(usize, Part),
     Ceiling,
@@ -300,15 +264,6 @@ enum Hot {
 enum Panel {
     Detector,
     Stereo,
-}
-
-/// The band menu (right-click a band).
-const MENU_ITEMS: &[&str] = &["Solo", "Mute", "Copy settings", "Paste settings", "Reset band", "Merge with the band below", "Merge with the band above", "Remove band"];
-const MENU_GLYPHS: [&str; 8] = [glyph::SOLO, glyph::MUTE, glyph::COPY, glyph::PASTE, glyph::RESET, glyph::MERGE, glyph::MERGE, glyph::BIN];
-
-struct Menu {
-    band: usize,
-    list: Dropdown,
 }
 
 /// One band's card: where it is and what is in it.
@@ -346,7 +301,8 @@ pub struct ShapeView {
     shared: Arc<ShapeShared>,
     session: Session,
     footer: Footer,
-    selected: usize,
+    /// The crossovers, band regions and the selection.
+    rail: Rail<BANDS>,
     pointer: Option<Point>,
     hot: Option<Hot>,
     drag: Option<Drag>,
@@ -354,7 +310,7 @@ pub struct ShapeView {
     panel_knobs: Vec<Knob>,
     knobs_for: Option<Panel>,
     hits: PanelHits,
-    menu: Option<Menu>,
+    menu: Option<BandMenu>,
     head_hits: [Rect; 2],
     lr4_hit: Option<Rect>,
     /// The cards' dials, for the bands and the selection they were made for.
@@ -412,7 +368,7 @@ impl ShapeView {
                 shared.preset.clone(),
             ),
             footer,
-            selected: 0,
+            rail: Rail::new(rail_params(), rail_area(&lanes(0.0)), RAIL_X0, RAIL_W),
             pointer: None,
             hot: None,
             drag: None,
@@ -458,11 +414,11 @@ impl ShapeView {
 
     /// Selects a band slot, for tests and tools.
     pub fn select(&mut self, band: usize) {
-        self.selected = band.min(BANDS - 1);
+        self.rail.selected = band.min(BANDS - 1);
     }
 
     pub fn selected(&self) -> usize {
-        self.selected
+        self.rail.selected
     }
 
     /// Opens a header panel by name (`detector`, `stereo`), for tools.
@@ -480,13 +436,15 @@ impl ShapeView {
         let layout = Self::layout(host);
         let Some(p) = layout.position(band) else { return };
         let lanes = lanes(self.grow);
-        let x = self.region_rect(host, &layout, p, &lanes).center().x;
-        self.open_band_menu(band, Point::new(x - 20.0, lanes.ry - 4.0), host);
+        self.rail.area = rail_area(&lanes);
+        let x = self.rail.region_rect(host, &layout, p).center().x;
+        self.menu = BandMenu::open(&mut self.rail, host, band, Point::new(x - 20.0, lanes.ry - 4.0), self.clipboard.is_some(), (DISPLAY_TOP, FOOTER_TOP));
     }
 
     /// Lets the layout settle at once (tools render a single frame).
     pub fn settle(&mut self, host: &dyn ParamHost) {
         self.grow = if Self::layout(host).n > 0 { 1.0 } else { 0.0 };
+        self.rail.area = rail_area(&lanes(self.grow));
     }
 
     // ---- parameters -------------------------------------------------------------------------
@@ -536,19 +494,9 @@ impl ShapeView {
         }
     }
 
-    /// The soloed band, if any (the first in use).
-    fn soloed(host: &dyn ParamHost, layout: &Layout) -> Option<usize> {
-        layout.bands().iter().copied().find(|&b| Self::on(host, &band_id(b, B_SOLO.id)))
-    }
-
-    fn audible(host: &dyn ParamHost, layout: &Layout, b: usize) -> bool {
-        let solo = Self::soloed(host, layout);
-        !Self::on(host, &band_id(b, B_MUTE.id)) && solo.is_none_or(|s| s == b)
-    }
-
     /// The band the gain lane shows: the soloed one, else the selected one.
     fn shown(&self, host: &dyn ParamHost, layout: &Layout) -> usize {
-        Self::soloed(host, layout).unwrap_or(if layout.position(self.selected).is_some() { self.selected } else { 0 })
+        self.rail.soloed(host, layout).unwrap_or(self.rail.current(layout))
     }
 
     fn lookahead_ms(host: &dyn ParamHost) -> f64 {
@@ -583,96 +531,13 @@ impl ShapeView {
         Self::write_band(host, b, &v);
     }
 
-    /// Turns crossover `slot` off: its band (the region above it) joins the one below.
-    fn remove_crossover(host: &dyn ParamHost, slot: usize) {
-        Self::set(host, &cross_id(slot, X_ON.id), 0.0);
-        Self::set(host, &band_id(slot + 1, B_SOLO.id), 0.0);
-    }
-
-    /// Makes a crossover at `f` Hz (pushed clear of its neighbours): the band it splits keeps its
-    /// settings on both sides. Returns the new band, or `None` when five is the limit or there
-    /// is no room.
-    fn split(&mut self, host: &dyn ParamHost, f: f64) -> Option<usize> {
-        let x = Self::crossovers(host);
-        let slot = (0..CROSSOVERS).find(|&k| x[k].is_none())?;
-        let layout = Layout::new(&x);
-        let gap = 2f64.powf(f64::from(MIN_GAP_OCT));
-        let p = (0..=layout.n).find(|&p| layout.region(layout.owners[p], &x).is_some_and(|(lo, hi)| f >= f64::from(lo) && f < f64::from(hi))).unwrap_or(0);
-        let parent = layout.owners[p];
-        let (lo, hi) = layout.region(parent, &x).unwrap_or((FREQ_MIN, FREQ_MAX));
-        let (lo, hi) = (if p == 0 { f64::from(lo) } else { f64::from(lo) * gap }, if p == layout.n { f64::from(hi) } else { f64::from(hi) / gap });
-        if lo >= hi {
-            return None;
-        }
-        let f = f.clamp(lo.max(f64::from(FREQ_MIN) * 1.06), hi.min(f64::from(FREQ_MAX) / 1.06));
-        Self::copy_band(host, parent, slot + 1);
-        Self::set(host, &band_id(slot + 1, B_SOLO.id), 0.0);
-        Self::set(host, &cross_id(slot, X_FREQ.id), f as f32);
-        Self::set(host, &cross_id(slot, X_ON.id), 1.0);
-        self.selected = slot + 1;
-        Some(slot + 1)
-    }
-
-    /// Removes band `b`: its region joins the band below (the lowest band's joins the one above,
-    /// which takes its place).
-    fn remove_band(&mut self, host: &dyn ParamHost, b: usize) {
-        let layout = Self::layout(host);
-        let Some(p) = layout.position(b) else { return };
-        if layout.n == 0 {
-            return;
-        }
-        if p == 0 {
-            let above = layout.owners[1];
-            Self::copy_band(host, above, 0);
-            Self::remove_crossover(host, above - 1);
-            self.selected = 0;
-        } else {
-            Self::remove_crossover(host, b - 1);
-            self.selected = layout.owners[p - 1];
-        }
-    }
-
-    /// Merges band `b` with its neighbour below (`up` false) or above: `b`'s region grows over
-    /// the neighbour's when merging up, and joins the neighbour below when merging down.
-    fn merge(&mut self, host: &dyn ParamHost, b: usize, up: bool) {
-        let layout = Self::layout(host);
-        let Some(p) = layout.position(b) else { return };
-        if up && p < layout.n {
-            let above = layout.owners[p + 1];
-            Self::remove_crossover(host, above - 1);
-            self.selected = b;
-        } else if !up && p > 0 {
-            self.remove_band(host, b);
-        }
-    }
-
     // ---- geometry ---------------------------------------------------------------------------
-
-    /// Band at position `p`'s region on the rail, x from the first band's left edge to the last's
-    /// right edge.
-    fn region_rect(&self, host: &dyn ParamHost, layout: &Layout, p: usize, lanes: &Lanes) -> Rect {
-        let x = Self::crossovers(host);
-        let edge = |q: usize| rail_x(f64::from(x[layout.crossovers[q]].unwrap_or(FREQ_MIN)));
-        let x0 = if p == 0 { 0.0 } else { edge(p - 1) };
-        let x1 = if p == layout.n { HIST_W } else { edge(p) };
-        Rect::new(x0, lanes.ry, x1, lanes.ry + lanes.rh)
-    }
 
     /// The clip ceiling's grip, at the ceiling's level on the level lane.
     fn ceiling_rect(host: &dyn ParamHost, l: &Lanes) -> Rect {
         let db = f64::from(Self::plain(host, CLIP_CEILING.id));
         let y = l.lv0 + (-db.clamp(-LEVEL_RANGE_DB, 0.0) / LEVEL_RANGE_DB) * (l.lv1 - l.lv0);
         Rect::new(CEILING_GRIP.x0, y - 11.0, CEILING_GRIP.x1, y + 11.0)
-    }
-
-    fn grip_center(host: &dyn ParamHost, slot: usize, lanes: &Lanes) -> Point {
-        let f = Self::plain(host, &cross_id(slot, X_FREQ.id));
-        Point::new(rail_x(f64::from(f)), lanes.ry + lanes.rh / 2.0)
-    }
-
-    fn ghost_centers(lanes: &Lanes) -> [Point; 2] {
-        let y = lanes.ry + lanes.rh / 2.0;
-        [Point::new(rail_x(f64::from(FREQ_MIN)) + 6.0, y), Point::new(rail_x(f64::from(FREQ_MAX)) - 6.0, y)]
     }
 
     fn cards(&self, layout: &Layout, lanes: &Lanes) -> Vec<Card> {
@@ -692,7 +557,7 @@ impl ShapeView {
         bands
             .iter()
             .map(|&band| {
-                let big = band == self.shown_selected(layout);
+                let big = band == self.rail.current(layout);
                 let w = if big { CARD_WIDE } else { narrow };
                 let rect = Rect::new(x, y, x + w, y + h);
                 x += w + CARD_GAP;
@@ -721,11 +586,6 @@ impl ShapeView {
     fn dial_grid(x0: f64, x1: f64, top: f64) -> Vec<Point> {
         let col = (x1 - x0) / DIAL_COLUMNS as f64;
         (0..BAND_SPECS.len()).map(|i| Point::new(x0 + col * ((i % DIAL_COLUMNS) as f64 + 0.5), top + 39.5 + 98.0 * (i / DIAL_COLUMNS) as f64)).collect()
-    }
-
-    /// The band whose card is wide: the selected one when it is in use, else the lowest.
-    fn shown_selected(&self, layout: &Layout) -> usize {
-        if layout.position(self.selected).is_some() { self.selected } else { 0 }
     }
 
     // ---- the scope --------------------------------------------------------------------------
@@ -1011,13 +871,13 @@ impl ShapeView {
         // The gain lane: the shown band's gain, attack part solid, sustain part light.
         cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, l.sep, HIST_W, l.h1));
         let shown = self.shown(cx.host, layout);
-        let muted = !Self::audible(cx.host, layout, shown);
+        let muted = !self.rail.audible(cx.host, layout, shown);
         let gain = |r: &[f32; record::WIDTH], b: usize| f64::from(r[record::GAIN_A + b]);
         let weight = |r: &[f32; record::WIDTH], b: usize| f64::from(r[record::WEIGHT + b]).clamp(0.0, 1.0);
         // Other bands, quietly.
         if layout.n > 0 {
             for &b in layout.bands() {
-                if b == shown || !Self::audible(cx.host, layout, b) {
+                if b == shown || !self.rail.audible(cx.host, layout, b) {
                     continue;
                 }
                 let edge = line(&|r| g_y(gain(r, b)));
@@ -1060,53 +920,11 @@ impl ShapeView {
     fn draw_rail(&self, cx: &mut DrawCx<'_>, layout: &Layout, l: &Lanes) {
         let theme = cx.theme;
         let (ry, rh) = (l.ry, l.rh);
-        let rail = Rect::new(0.0, ry, HIST_W, ry + rh);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &rail);
-        for y in [ry + 0.5, ry + rh - 0.5] {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.well_border, None, &Line::new((0.0, y), (HIST_W, y)));
-        }
-        for f in [100.0, 1000.0, 10_000.0] {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((rail_x(f), ry), (rail_x(f), ry + rh)));
-        }
+        let rail = rail_area(l);
         let multi = layout.n > 0;
-        let x = Self::crossovers(cx.host);
-        let soloed = Self::soloed(cx.host, layout);
-        let merging = self.merging_band(cx.host, layout);
         // Band regions: the selected one lit, the others breathing with their gain.
-        if multi {
-            for (p, &b) in layout.bands().iter().enumerate() {
-                let r = self.region_rect(cx.host, layout, p, l);
-                let muted = Self::on(cx.host, &band_id(b, B_MUTE.id));
-                let audible = Self::audible(cx.host, layout, b);
-                let on = b == self.shown_selected(layout);
-                let breath = (f64::from(self.glow[b]) / 6.0 * 0.12).min(0.12);
-                let mut op = (if on { 0.22 } else { 0.10 }) + if audible { breath } else { 0.0 };
-                if soloed.is_some_and(|s| s != b) {
-                    op *= 0.35;
-                }
-                if merging == Some(b) {
-                    op = 0.08;
-                }
-                if !muted {
-                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(op as f32), None, &r);
-                } else {
-                    // Muted: a 45° hatch, no fill.
-                    let mut hatch = BezPath::new();
-                    let mut k = r.x0 - rh;
-                    while k < r.x1 {
-                        hatch.move_to((k, r.y1));
-                        hatch.line_to((k + rh, r.y0));
-                        k += 6.0;
-                    }
-                    cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &r);
-                    cx.scene.stroke(&Stroke::new(3.0), Affine::IDENTITY, theme.text_lo.multiply_alpha(0.3), None, &hatch);
-                    cx.scene.pop_layer();
-                }
-                if merging == Some(b) {
-                    cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.accent, None, &r.inset(-1.0));
-                }
-            }
-        }
+        let breath: [f32; BANDS] = std::array::from_fn(|b| self.glow[b] / 6.0);
+        self.rail.draw_under(cx, layout, &breath);
         // The input spectrum, and (several bands) the output's.
         let spec_y = |db: f32| ry + 4.0 + f64::from((SPEC_TOP_DB - db.clamp(SPEC_BOTTOM_DB, SPEC_TOP_DB)) / (SPEC_TOP_DB - SPEC_BOTTOM_DB)) * (rh - 8.0);
         if self.spectrum.iter().any(|&v| v > SPEC_BOTTOM_DB) {
@@ -1125,166 +943,13 @@ impl ShapeView {
             }
             cx.scene.pop_layer();
         }
-        let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) };
-        if multi {
-            for (f, s) in [(100.0, "100"), (1000.0, "1k"), (10_000.0, "10k")] {
-                cx.text.draw(cx.scene, s, rail_x(f) + 4.0, ry + rh - 15.0, label, theme.text_lo, Align::Left);
-            }
-        }
-        // Crossovers: a line and a grip each, the frequency above it.
-        let drag_slot = match self.drag {
-            Some(Drag::Cross { slot, .. }) => Some(slot),
-            _ => None,
-        };
-        for p in 0..layout.n {
-            let slot = layout.crossovers[p];
-            let mut c = Self::grip_center(cx.host, slot, l);
-            let merge = match self.drag {
-                Some(Drag::Cross { slot: k, merge, .. }) if k == slot => merge,
-                _ => None,
-            };
-            // Merging: the dragged crossover's ghost sits where it lands (on its neighbour, or
-            // off the end), and only the neighbour keeps a label.
-            match merge {
-                Some(Merge::Down(_)) => c.x = rail_x(f64::from(x[layout.crossovers[p - 1]].unwrap_or(FREQ_MIN))),
-                Some(Merge::Up) => c.x = rail_x(f64::from(x[layout.crossovers[p + 1]].unwrap_or(FREQ_MAX))),
-                Some(Merge::OffLow) => c.x = RAIL_X0,
-                Some(Merge::OffHigh) => c.x = RAIL_X0 + RAIL_W,
-                None => {}
-            }
-            let ghost = merge.is_some();
-            let hot = matches!(self.hot, Some(Hot::Grip(k)) if k == slot) || drag_slot == Some(slot);
-            let line = Line::new((c.x, ry), (c.x, ry + rh));
-            if ghost {
-                cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.accent, None, &line);
-            } else {
-                cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, theme.accent.multiply_alpha(0.75), None, &line);
-            }
-            self.draw_grip(cx, c, ghost, hot, 1.0);
-            if ghost {
-                continue;
-            }
-            let f = f64::from(x[slot].unwrap_or(FREQ_MIN));
-            cx.text.draw(cx.scene, &fmt_freq(f), c.x - 10.0, ry + 5.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(700.0) }, if hot { theme.accent_text } else { theme.text_mid }, Align::Right);
-        }
-        // Pulling a new one in: its line and frequency where it would land.
-        if let Some(Drag::Create { start, now, .. }) = self.drag {
-            if now.distance(start) > 6.0 {
-                let f = rail_f(now.x.clamp(RAIL_X0, RAIL_X0 + RAIL_W));
-                let cxx = rail_x(f);
-                cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.accent, None, &Line::new((cxx, ry), (cxx, ry + rh)));
-                self.draw_grip(cx, Point::new(cxx, ry + rh / 2.0), true, true, 1.0);
-                cx.text.draw(cx.scene, &fmt_freq(f), cxx - 10.0, ry + 5.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(700.0) }, theme.accent_text, Align::Right);
-            }
-        }
-        // Ghost grips at both ends while there is room for another band.
-        if layout.n < CROSSOVERS && self.drag.is_none() {
-            for (i, c) in Self::ghost_centers(l).into_iter().enumerate() {
-                let hot = matches!(self.hot, Some(Hot::Ghost(low)) if low == (i == 0));
-                self.draw_grip(cx, c, true, hot, if hot { 1.0 } else { 0.55 });
-            }
-        }
-        // Band numbers, with S or M tags.
-        if multi {
-            for (p, &b) in layout.bands().iter().enumerate() {
-                if merging == Some(b) {
-                    continue;
-                }
-                let r = self.region_rect(cx.host, layout, p, l);
-                let on = b == self.shown_selected(layout);
-                let solo = Self::on(cx.host, &band_id(b, B_SOLO.id));
-                let muted = Self::on(cx.host, &band_id(b, B_MUTE.id));
-                let alpha = if soloed.is_some_and(|s| s != b) { 0.45 } else { 1.0 };
-                let c = Point::new(r.x0 + if p == 0 { 34.0 } else { 18.0 } + 9.0, ry + 15.0);
-                self.draw_badge(cx, c, 9.0, p + 1, on, solo, alpha);
-                if solo || muted {
-                    let tag = Rect::new(c.x + 13.0, c.y - 9.0, c.x + 31.0, c.y + 9.0);
-                    let color = if solo { theme.needle } else { theme.text_hi };
-                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(alpha), None, &RoundedRect::from_rect(tag, 9.0));
-                    cx.text.draw(cx.scene, if solo { "S" } else { "M" }, tag.center().x, tag.y0 + 3.0, TextStyle::LABEL.sized(10.0).weighted(800.0), theme.display, Align::Center);
-                }
-            }
-        }
-    }
-
-    /// The band that a crossover drag would take away on release.
-    fn merging_band(&self, host: &dyn ParamHost, layout: &Layout) -> Option<usize> {
-        let Some(Drag::Cross { slot, merge: Some(m), .. }) = self.drag else { return None };
-        let p = layout.crossovers[..layout.n].iter().position(|&k| k == slot)?;
-        let _ = host;
-        Some(match m {
-            Merge::Down(_) => layout.owners[p],
-            Merge::Up => slot + 1,
-            Merge::OffLow => layout.owners[0],
-            Merge::OffHigh => slot + 1,
-        })
-    }
-
-    fn draw_grip(&self, cx: &mut DrawCx<'_>, c: Point, ghost: bool, hot: bool, alpha: f32) {
-        let theme = cx.theme;
-        let r = RoundedRect::from_rect(Rect::from_center_size(c, GRIP), 7.0);
-        let fill = if ghost { theme.accent.multiply_alpha(0.12) } else if hot { theme.accent } else { theme.display };
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, fill.multiply_alpha(alpha), None, &r);
-        if ghost {
-            cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [3.0, 2.0]), Affine::IDENTITY, theme.accent.multiply_alpha(alpha), None, &r);
-        } else {
-            glow_stroke(cx, &r, 1.5, theme.accent.multiply_alpha(alpha), theme.accent, if hot { 5.0 } else { 3.0 });
-        }
-        let ink = if hot && !ghost { theme.display } else { theme.accent };
-        for dy in [-4.5, 0.0, 4.5] {
-            cx.scene.stroke(&Stroke::new(1.5).with_caps(Cap::Round), Affine::IDENTITY, ink.multiply_alpha(alpha), None, &Line::new((c.x - 2.0, c.y + dy), (c.x + 2.0, c.y + dy)));
-        }
-    }
-
-    /// A band's number in its circle: lit when selected, ringed white when soloed.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_badge(&self, cx: &mut DrawCx<'_>, c: Point, r: f64, n: usize, on: bool, solo: bool, alpha: f32) {
-        let theme = cx.theme;
-        let fill = if on { theme.accent } else { theme.accent.multiply_alpha(0.25) };
-        if on {
-            glow_fill(cx, &Circle::new(c, r), fill.multiply_alpha(alpha), 4.0);
-        } else {
-            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, fill.multiply_alpha(alpha), None, &Circle::new(c, r));
-        }
-        if solo {
-            glow_stroke(cx, &Circle::new(c, r - 1.0), 2.0, theme.needle.multiply_alpha(alpha), theme.needle, 4.0);
-        }
-        let ink = if on { theme.display } else { theme.accent_text };
-        cx.text.draw(cx.scene, &n.to_string(), c.x, c.y - r * 0.62, TextStyle::LABEL.sized((r * 1.1) as f32).weighted(800.0), ink.multiply_alpha(alpha), Align::Center);
-    }
-
-    fn draw_funnels(&self, cx: &mut DrawCx<'_>, layout: &Layout, l: &Lanes, cards: &[Card]) {
-        if layout.n == 0 {
-            return;
-        }
-        let theme = cx.theme;
-        for (p, card) in cards.iter().enumerate() {
-            let r = self.region_rect(cx.host, layout, p, l);
-            let (rx0, rx1) = (r.x0 + 2.0, r.x1 - 2.0);
-            let (cx0, cx1) = (card.rect.x0 + 2.0, card.rect.x1 - 2.0);
-            let (y0, y1) = (l.fy, l.cy);
-            if y1 - y0 < 2.0 {
-                continue;
-            }
-            let ym = (y0 + y1) / 2.0;
-            let mut f = BezPath::new();
-            f.move_to((rx0, y0));
-            f.curve_to((rx0, ym), (cx0, ym), (cx0, y1));
-            f.line_to((cx1, y1));
-            f.curve_to((cx1, ym), (rx1, ym), (rx1, y0));
-            f.close_path();
-            let on = card.band == self.shown_selected(layout);
-            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(if on { 0.16 } else { 0.05 }), None, &f);
-            if on {
-                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.5), None, &f);
-            }
-        }
+        self.rail.draw_over(cx, layout);
     }
 
     fn draw_cards(&self, cx: &mut DrawCx<'_>, layout: &Layout, cards: &[Card]) {
         let theme = cx.theme;
-        let soloed = Self::soloed(cx.host, layout);
-        let merging = self.merging_band(cx.host, layout);
+        let soloed = self.rail.soloed(cx.host, layout);
+        let merging = self.rail.merging_band(layout);
         for (p, card) in cards.iter().enumerate() {
             let b = card.band;
             let band = Self::band(cx.host, b);
@@ -1302,21 +967,12 @@ impl ShapeView {
                 cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, border, None, &r);
             }
             if band.mute {
-                let mut hatch = BezPath::new();
-                let mut k = card.rect.x0 - card.rect.height();
-                while k < card.rect.x1 {
-                    hatch.move_to((k, card.rect.y1));
-                    hatch.line_to((k + card.rect.height(), card.rect.y0));
-                    k += 6.0;
-                }
-                cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &r);
-                cx.scene.stroke(&Stroke::new(3.0), Affine::IDENTITY, theme.text_lo.multiply_alpha(0.22), None, &hatch);
-                cx.scene.pop_layer();
+                hatch(cx, card.rect, Some(12.0), 0.22);
             }
             if multi {
                 // Header: number, the band's range (wide card), solo, mute, remove.
                 let head = card.rect.y0 + 10.0;
-                self.draw_badge(cx, Point::new(card.rect.x0 + 21.0, head + 16.0), 11.0, p + 1, card.big, band.solo, alpha);
+                draw_badge(cx, Point::new(card.rect.x0 + 21.0, head + 16.0), 11.0, p + 1, card.big, band.solo, alpha);
                 if card.big {
                     let x = Self::crossovers(cx.host);
                     if let Some((lo, hi)) = layout.region(b, &x) {
@@ -1331,11 +987,11 @@ impl ShapeView {
                 }
                 if let Some(m) = card.mute {
                     let ink = icon_button(cx.scene, theme, m, theme.panel_control, hot(m), band.mute, theme.text_hi);
-                    draw_glyph(cx.scene, glyph::MUTE, m.center(), 18.0, ink, 1.7);
+                    draw_glyph(cx.scene, rail_glyph::MUTE, m.center(), 18.0, ink, 1.7);
                 }
                 if let Some(bin) = card.bin {
                     let ink = icon_button(cx.scene, theme, bin, theme.panel_control, hot(bin), false, theme.danger);
-                    draw_glyph(cx.scene, glyph::BIN, bin.center(), 18.0, ink, 1.7);
+                    draw_glyph(cx.scene, rail_glyph::BIN, bin.center(), 18.0, ink, 1.7);
                 }
             }
             self.draw_scope(cx, card.scope, &band, card.big, card.big);
@@ -1572,12 +1228,9 @@ impl ShapeView {
     }
 
     fn draw_menu(&self, cx: &mut DrawCx<'_>) {
-        let Some(menu) = &self.menu else { return };
-        let theme = cx.theme;
-        menu.list.draw(cx, theme.accent, |scene, i, at, ink| {
-            let ink = if i == 7 { theme.danger } else { ink };
-            draw_glyph(scene, MENU_GLYPHS[i], at + (11.0, 6.0), 20.0, ink, 1.6);
-        });
+        if let Some(menu) = &self.menu {
+            menu.draw(cx, (cx.theme.danger, rail_glyph::BIN));
+        }
     }
 
     // ---- help -------------------------------------------------------------------------------
@@ -1587,22 +1240,8 @@ impl ShapeView {
         let x = Self::crossovers(host);
         let band_name = |b: usize| format!("Band {}", layout.position(b).map_or(1, |p| p + 1));
         let range = |b: usize| layout.region(b, &x).map_or(String::new(), |(lo, hi)| format!("{} – {}", fmt_freq(f64::from(lo)), fmt_freq(f64::from(hi))));
-        match self.drag {
-            Some(Drag::Create { start, now, .. }) if now.distance(start) > 6.0 => {
-                if layout.n >= CROSSOVERS {
-                    return Help::default().text("Five bands is the limit.");
-                }
-                let f = rail_f(now.x.clamp(RAIL_X0, RAIL_X0 + RAIL_W));
-                return Help::default().text("New crossover ").slot(fmt_freq(f), "20.0 kHz").text(" — release to split the band there; both sides keep its settings. Esc cancels.");
-            }
-            Some(Drag::Cross { slot, merge, .. }) => {
-                let f = f64::from(Self::plain(host, &cross_id(slot, X_FREQ.id)));
-                if let Some(b) = merge.and_then(|_| self.merging_band(host, &layout)) {
-                    return Help::default().text("Merging ").slot(fmt_freq(f), "20.0 kHz").text(format!(" — release to remove {}; its neighbour grows and keeps its settings", band_name(b).to_lowercase()));
-                }
-                return Help::default().text("Crossover ").slot(fmt_freq(f), "20.0 kHz").text(" — drag onto a neighbour or off the end to merge; Shift for fine steps");
-            }
-            _ => {}
+        if let Some(help) = self.rail.help(host) {
+            return help;
         }
         if let Some(help) = self.session.help() {
             return help;
@@ -1650,11 +1289,6 @@ impl ShapeView {
         let shown = self.shown(host, &layout);
         let gain_now = last.map_or(0.0, |r| r[record::GAIN_A + shown]);
         match self.hot {
-            Some(Hot::Grip(slot)) => {
-                let f = f64::from(Self::plain(host, &cross_id(slot, X_FREQ.id)));
-                return Help::default().text("Crossover ").slot(fmt_freq(f), "20.0 kHz").text(" — drag sideways; onto a neighbour or off the end merges; double-click merges");
-            }
-            Some(Hot::Ghost(_)) => return Help::default().text("Pull a crossover in from here to split the sound into bands"),
             Some(Hot::Ceiling) => {
                 return Help::default()
                     .text("Clip · ceiling ")
@@ -1673,7 +1307,7 @@ impl ShapeView {
                     Part::Length => Help::default().text("Sustain length ").slot(B_LENGTH.format(Self::plain(host, &band_id(b, B_LENGTH.id))), "2.00 s").text(" — drag sideways; how long sustain acts before the gain returns to 0 dB. At the right edge: until the next hit"),
                 };
             }
-            Some(Hot::Region(b)) | Some(Hot::Card(b)) if layout.n > 0 => {
+            Some(Hot::Rail(RailHot::Region(b))) | Some(Hot::Card(b)) if layout.n > 0 => {
                 let s = Self::band(host, b);
                 return Help::default()
                     .slot(band_name(b), "Band 5")
@@ -1721,72 +1355,29 @@ impl ShapeView {
 
     // ---- events -----------------------------------------------------------------------------
 
-    fn open_band_menu(&mut self, band: usize, at: Point, host: &dyn ParamHost) {
-        let layout = Self::layout(host);
-        let Some(p) = layout.position(band) else { return };
-        let mut shown = vec![0, 1, 2];
-        if self.clipboard.is_some() {
-            shown.push(3);
-        }
-        shown.push(4);
-        if p > 0 {
-            shown.push(5);
-        }
-        if p < layout.n {
-            shown.push(6);
-        }
-        if layout.n > 0 {
-            shown.push(7);
-        }
-        let anchor = Rect::new(at.x, at.y, at.x + 236.0, at.y + 1.0);
-        let list = Dropdown::new(anchor, MENU_ITEMS, usize::MAX, (DISPLAY_TOP, FOOTER_TOP)).with_shown(shown).with_min_width(236.0);
-        self.selected = band;
-        self.menu = Some(Menu { band, list });
-    }
-
     fn menu_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         let Some(menu) = &mut self.menu else { return false };
         if let UiEvent::PointerMove { pos, .. } = *event {
             self.pointer = Some(pos);
         }
-        let band = menu.band;
-        match menu.list.event(event) {
-            DropdownEvent::Open => {}
-            DropdownEvent::Picked(i) => {
-                self.menu = None;
-                match i {
-                    0 => self.toggle_solo(host, band),
-                    1 => {
-                        let on = Self::on(host, &band_id(band, B_MUTE.id));
-                        Self::set(host, &band_id(band, B_MUTE.id), if on { 0.0 } else { 1.0 });
-                    }
-                    2 => self.clipboard = Some(Self::band_values(host, band)),
-                    3 => {
-                        if let Some(v) = self.clipboard {
-                            Self::write_band(host, band, &v);
-                        }
-                    }
-                    4 => Self::reset_band(host, band),
-                    5 => self.merge(host, band, false),
-                    6 => self.merge(host, band, true),
-                    _ => self.remove_band(host, band),
+        let Ok(ask) = menu.event(event, &mut self.rail, host) else { return true };
+        self.menu = None;
+        match ask {
+            Some(MenuAsk::Copy(b)) => self.clipboard = Some(Self::band_values(host, b)),
+            Some(MenuAsk::Paste(b)) => {
+                if let Some(v) = self.clipboard {
+                    Self::write_band(host, b, &v);
                 }
             }
-            DropdownEvent::Closed => self.menu = None,
+            Some(MenuAsk::Reset(b)) => Self::reset_band(host, b),
+            None => {}
         }
         true
     }
 
-    fn toggle_solo(&mut self, host: &dyn ParamHost, band: usize) {
-        let on = Self::on(host, &band_id(band, B_SOLO.id));
-        for b in 0..BANDS {
-            Self::set(host, &band_id(b, B_SOLO.id), if b == band && !on { 1.0 } else { 0.0 });
-        }
-    }
-
     /// Whether a gesture is under way (a drag becomes one undo step when it ends).
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.panel_knobs.iter().any(Knob::is_dragging) || self.card_knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.rail.busy() || self.panel_knobs.iter().any(Knob::is_dragging) || self.card_knobs.iter().any(Knob::is_dragging) || self.footer.busy()
     }
 
     /// Makes the cards' dials for the bands in use and the selection, and moves them where the
@@ -1794,7 +1385,7 @@ impl ShapeView {
     fn sync_knobs(&mut self, host: &dyn ParamHost) {
         let layout = Self::layout(host);
         let cards = self.cards(&layout, &lanes(self.grow));
-        let key = (layout.bands().to_vec(), self.shown_selected(&layout));
+        let key = (layout.bands().to_vec(), self.rail.current(&layout));
         if self.card_key.as_ref() != Some(&key) && !self.card_knobs.iter().any(Knob::is_dragging) {
             self.card_knobs.clear();
             for card in &cards {
@@ -1834,8 +1425,8 @@ impl ShapeView {
     fn after_session(&mut self, host: &dyn ParamHost) {
         if self.session.take_replaced() {
             let layout = Self::layout(host);
-            if layout.position(self.selected).is_none() {
-                self.selected = 0;
+            if layout.position(self.rail.selected).is_none() {
+                self.rail.selected = 0;
             }
             self.knobs_for = None;
             self.card_key = None;
@@ -1852,24 +1443,8 @@ impl ShapeView {
                 return Some(Hot::Ceiling);
             }
         }
-        let rail = Rect::new(0.0, l.ry, HIST_W, l.ry + l.rh);
-        if rail.inflate(0.0, 4.0).contains(p) {
-            for k in 0..layout.n {
-                let slot = layout.crossovers[k];
-                if (Self::grip_center(host, slot, &l).x - p.x).abs() <= GRIP_HIT {
-                    return Some(Hot::Grip(slot));
-                }
-            }
-            if layout.n < CROSSOVERS {
-                for (i, c) in Self::ghost_centers(&l).into_iter().enumerate() {
-                    if (c.x - p.x).abs() <= GRIP_HIT {
-                        return Some(Hot::Ghost(i == 0));
-                    }
-                }
-            }
-            let f = rail_f(p.x);
-            let b = (0..=layout.n).map(|q| layout.owners[q]).find(|&b| layout.region(b, &Self::crossovers(host)).is_some_and(|(lo, hi)| f >= f64::from(lo) && f <= f64::from(hi))).unwrap_or(0);
-            return Some(Hot::Region(b));
+        if let Some(h) = self.rail.hit(host, p) {
+            return Some(Hot::Rail(h));
         }
         for card in self.cards(&layout, &l) {
             if card.scope.contains(p) {
@@ -1897,8 +1472,7 @@ impl ShapeView {
                     self.menu = None;
                     return true;
                 }
-                if matches!(self.drag, Some(Drag::Create { .. })) {
-                    self.drag = None;
+                if self.rail.cancel() {
                     return true;
                 }
                 if Self::on(host, LISTEN.id) {
@@ -1909,29 +1483,23 @@ impl ShapeView {
                     self.panel = None;
                     return true;
                 }
-                if Self::soloed(host, &layout).is_some() {
-                    for b in 0..BANDS {
-                        Self::set(host, &band_id(b, B_SOLO.id), 0.0);
-                    }
-                    return true;
-                }
-                false
+                self.rail.clear_solo(host)
             }
             Key::Delete | Key::Backspace if layout.n > 0 => {
-                let b = self.shown_selected(&layout);
-                self.remove_band(host, b);
+                let b = self.rail.current(&layout);
+                self.rail.remove_band(host, b);
                 true
             }
             Key::Left | Key::Right => {
                 let bands = layout.bands();
-                let at = layout.position(self.selected).unwrap_or(0);
+                let at = layout.position(self.rail.selected).unwrap_or(0);
                 let next = if key == Key::Right { (at + 1).min(bands.len() - 1) } else { at.saturating_sub(1) };
-                self.selected = bands[next];
+                self.rail.selected = bands[next];
                 true
             }
             Key::Up | Key::Down => {
                 // Attack ±0.5 dB (Shift ±0.1) on the selected band.
-                let b = self.shown_selected(&layout);
+                let b = self.rail.current(&layout);
                 let step = if mods.fine() { 0.1 } else { 0.5 } * if key == Key::Up { 1.0 } else { -1.0 };
                 let id = band_id(b, B_ATTACK.id);
                 Self::set(host, &id, (Self::plain(host, &id) + step).clamp(-AMOUNT_DB, AMOUNT_DB));
@@ -1939,14 +1507,13 @@ impl ShapeView {
             }
             Key::Character(c) if !(mods.ctrl || mods.meta) => match c.to_ascii_lowercase() {
                 's' => {
-                    let b = self.shown_selected(&layout);
-                    self.toggle_solo(host, b);
+                    let b = self.rail.current(&layout);
+                    self.rail.toggle_solo(host, b);
                     true
                 }
                 'm' => {
-                    let b = self.shown_selected(&layout);
-                    let on = Self::on(host, &band_id(b, B_MUTE.id));
-                    Self::set(host, &band_id(b, B_MUTE.id), if on { 0.0 } else { 1.0 });
+                    let b = self.rail.current(&layout);
+                    self.rail.toggle_mute(host, b);
                     true
                 }
                 _ => false,
@@ -1988,50 +1555,37 @@ impl ShapeView {
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
+                if self.rail.drag_to(host, pos, mods) {
+                    return true;
+                }
                 if let Some(drag) = self.drag {
                     self.drag_to(host, drag, pos, mods);
                     return true;
                 }
-                self.hot = if over_panel(pos, self) { None } else { self.hot_at(host, pos) };
+                let free = !over_panel(pos, self);
+                self.hot = if free { self.hot_at(host, pos) } else { None };
+                self.rail.hover(host, free.then_some(pos));
                 true
             }
             UiEvent::PointerLeft => {
                 self.pointer = None;
                 self.hot = None;
+                self.rail.hover(host, None);
                 true
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => self.press(host, pos, mods),
             UiEvent::PointerDown { pos, button: MouseButton::Right, .. } => match self.hot_at(host, pos) {
-                Some(Hot::Region(b)) | Some(Hot::Card(b)) | Some(Hot::Scope(b, _)) => {
-                    self.open_band_menu(b, pos, host);
+                Some(Hot::Rail(RailHot::Region(b))) | Some(Hot::Card(b)) | Some(Hot::Scope(b, _)) => {
+                    self.menu = BandMenu::open(&mut self.rail, host, b, pos, self.clipboard.is_some(), (DISPLAY_TOP, FOOTER_TOP));
                     true
                 }
                 _ => false,
             },
-            UiEvent::PointerUp { button: MouseButton::Left, .. } => self.release(host),
+            UiEvent::PointerUp { button: MouseButton::Left, .. } => self.rail.release(host) || self.release(host),
             UiEvent::DoubleClick { pos, .. } => self.double_click(host, pos),
-            UiEvent::Wheel { pos, lines, mods } => match self.hot_at(host, pos) {
-                Some(Hot::Grip(slot)) => {
-                    let id = cross_id(slot, X_FREQ.id);
-                    let f = X_FREQ.wheel(Self::plain(host, &id), lines, mods.fine());
-                    Self::set(host, &id, self.clamp_cross(host, slot, f64::from(f)) as f32);
-                    true
-                }
-                _ => false,
-            },
+            UiEvent::Wheel { pos, lines, mods } => self.rail.wheel(host, pos, lines, mods),
             _ => false,
         }
-    }
-
-    /// `f` kept clear of crossover `slot`'s neighbours.
-    fn clamp_cross(&self, host: &dyn ParamHost, slot: usize, f: f64) -> f64 {
-        let layout = Self::layout(host);
-        let x = Self::crossovers(host);
-        let gap = 2f64.powf(f64::from(MIN_GAP_OCT));
-        let Some(p) = layout.crossovers[..layout.n].iter().position(|&k| k == slot) else { return f };
-        let lo = if p == 0 { f64::from(FREQ_MIN) * 1.06 } else { f64::from(x[layout.crossovers[p - 1]].unwrap_or(FREQ_MIN)) * gap };
-        let hi = if p + 1 == layout.n { f64::from(FREQ_MAX) / 1.06 } else { f64::from(x[layout.crossovers[p + 1]].unwrap_or(FREQ_MAX)) / gap };
-        f.clamp(lo.min(hi), hi.max(lo))
     }
 
     fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers) -> bool {
@@ -2079,37 +1633,26 @@ impl ShapeView {
         // A card's buttons.
         for card in self.cards(&layout, &l) {
             if card.solo.is_some_and(|r| r.contains(pos)) {
-                self.toggle_solo(host, card.band);
+                self.rail.toggle_solo(host, card.band);
                 return true;
             }
             if card.mute.is_some_and(|r| r.contains(pos)) {
-                let id = band_id(card.band, B_MUTE.id);
-                let on = Self::on(host, &id);
-                Self::set(host, &id, if on { 0.0 } else { 1.0 });
+                self.rail.toggle_mute(host, card.band);
                 return true;
             }
             if card.bin.is_some_and(|r| r.contains(pos)) {
-                self.remove_band(host, card.band);
+                self.rail.remove_band(host, card.band);
                 return true;
             }
         }
         match self.hot_at(host, pos) {
-            Some(Hot::Grip(slot)) => {
-                host.begin_gesture(&cross_id(slot, X_FREQ.id));
-                let f0 = f64::from(Self::plain(host, &cross_id(slot, X_FREQ.id)));
-                self.drag = Some(Drag::Cross { slot, start: pos, f0, merge: None });
-                true
-            }
-            Some(Hot::Ghost(low)) => {
-                self.drag = Some(Drag::Create { low, start: pos, now: pos });
-                true
-            }
-            Some(Hot::Region(b)) | Some(Hot::Card(b)) => {
-                self.selected = b;
+            Some(Hot::Rail(_)) => self.rail.press(host, pos),
+            Some(Hot::Card(b)) => {
+                self.rail.selected = b;
                 true
             }
             Some(Hot::Scope(b, _)) => {
-                self.selected = b;
+                self.rail.selected = b;
                 let Some(card) = self.cards(&layout, &l).into_iter().find(|c| c.band == b) else { return true };
                 let band = Self::band(host, b);
                 let part = Self::scope_part(card.scope, &band, pos, mods);
@@ -2137,27 +1680,6 @@ impl ShapeView {
     fn drag_to(&mut self, host: &dyn ParamHost, drag: Drag, pos: Point, mods: Modifiers) {
         let fine = if mods.fine() { 0.1 } else { 1.0 };
         match drag {
-            Drag::Cross { slot, start, f0, .. } => {
-                let layout = Self::layout(host);
-                let x = Self::crossovers(host);
-                let Some(p) = layout.crossovers[..layout.n].iter().position(|&k| k == slot) else { return };
-                // Follow the pointer (Shift: a tenth as far).
-                let f = f0 * (rail_f(pos.x) / rail_f(start.x)).powf(fine);
-                let px = rail_x(f);
-                let lower = (p > 0).then(|| layout.crossovers[p - 1]);
-                let upper = (p + 1 < layout.n).then(|| layout.crossovers[p + 1]);
-                let at = |k: usize| rail_x(f64::from(x[k].unwrap_or(FREQ_MIN)));
-                let merge = match (lower, upper) {
-                    (Some(k), _) if px <= at(k) + MERGE_PX => Some(Merge::Down(k)),
-                    (_, Some(k)) if px >= at(k) - MERGE_PX => Some(Merge::Up),
-                    (None, _) if pos.x < RAIL_X0 - OFF_END_PX => Some(Merge::OffLow),
-                    (_, None) if pos.x > RAIL_X0 + RAIL_W + OFF_END_PX => Some(Merge::OffHigh),
-                    _ => None,
-                };
-                Self::set_raw(host, &cross_id(slot, X_FREQ.id), self.clamp_cross(host, slot, f) as f32);
-                self.drag = Some(Drag::Cross { slot, start, f0, merge });
-            }
-            Drag::Create { low, start, .. } => self.drag = Some(Drag::Create { low, start, now: pos }),
             Drag::Scope { band, part, start, value } => {
                 let layout = Self::layout(host);
                 let Some(card) = self.cards(&layout, &lanes(self.grow)).into_iter().find(|c| c.band == band) else { return };
@@ -2210,35 +1732,6 @@ impl ShapeView {
     fn release(&mut self, host: &dyn ParamHost) -> bool {
         let Some(drag) = self.drag.take() else { return false };
         match drag {
-            Drag::Cross { slot, merge, .. } => {
-                host.end_gesture(&cross_id(slot, X_FREQ.id));
-                let layout = Self::layout(host);
-                match merge {
-                    Some(Merge::Down(lower)) => {
-                        // The band between goes; the one above this crossover grows down.
-                        let f = Self::plain(host, &cross_id(lower, X_FREQ.id));
-                        Self::set(host, &cross_id(slot, X_FREQ.id), f);
-                        Self::remove_crossover(host, lower);
-                        self.selected = slot + 1;
-                    }
-                    Some(Merge::Up) | Some(Merge::OffHigh) => {
-                        let p = layout.crossovers[..layout.n].iter().position(|&k| k == slot).unwrap_or(0);
-                        Self::remove_crossover(host, slot);
-                        self.selected = layout.owners[p];
-                    }
-                    Some(Merge::OffLow) => {
-                        Self::copy_band(host, slot + 1, 0);
-                        Self::remove_crossover(host, slot);
-                        self.selected = 0;
-                    }
-                    None => {}
-                }
-            }
-            Drag::Create { start, now, .. } => {
-                if now.distance(start) > 6.0 && (RAIL_X0 - OFF_END_PX..=RAIL_X0 + RAIL_W + OFF_END_PX).contains(&now.x) {
-                    self.split(host, rail_f(now.x.clamp(RAIL_X0, RAIL_X0 + RAIL_W)));
-                }
-            }
             Drag::Scope { band, part, .. } => {
                 let id = match part {
                     Part::Attack => B_ATTACK.id,
@@ -2271,23 +1764,7 @@ impl ShapeView {
             return true;
         }
         match self.hot_at(host, pos) {
-            Some(Hot::Grip(slot)) => {
-                // Merge here: the selected band survives, otherwise the lower one.
-                self.drag = None;
-                let layout = Self::layout(host);
-                let p = layout.crossovers[..layout.n].iter().position(|&k| k == slot).unwrap_or(0);
-                let lower = layout.owners[p];
-                if self.selected == slot + 1 {
-                    Self::copy_band(host, slot + 1, lower);
-                }
-                Self::remove_crossover(host, slot);
-                self.selected = lower;
-                true
-            }
-            Some(Hot::Region(_)) => {
-                self.split(host, rail_f(pos.x));
-                true
-            }
+            Some(Hot::Rail(_)) => self.rail.double_click(host, pos),
             Some(Hot::Ceiling) => {
                 self.drag = None;
                 Self::set(host, CLIP_CEILING.id, CLIP_CEILING.default);
@@ -2397,7 +1874,7 @@ impl View for ShapeView {
         self.draw_history(cx, &layout, &l);
         self.draw_rail(cx, &layout, &l);
         let cards = self.cards(&layout, &l);
-        self.draw_funnels(cx, &layout, &l, &cards);
+        self.rail.draw_funnels(cx, &layout, &cards.iter().map(|c| c.rect).collect::<Vec<_>>(), l.fy, l.cy);
         self.draw_cards(cx, &layout, &cards);
         cx.scene.pop_layer();
         self.draw_meters(cx);
@@ -2443,8 +1920,9 @@ impl View for ShapeView {
         let before = self.grow;
         self.grow = if target > self.grow { (self.grow + step).min(target) } else { (self.grow - step).max(target) };
         let grew = self.grow != before;
-        if Self::layout(host).position(self.selected).is_none() {
-            self.selected = 0;
+        self.rail.area = rail_area(&lanes(self.grow));
+        if Self::layout(host).position(self.rail.selected).is_none() {
+            self.rail.selected = 0;
         }
         // Meters: instant attack, 20 dB/s release.
         if let Some(r) = self.history.back().copied() {
@@ -2456,21 +1934,13 @@ impl View for ShapeView {
         }
         let spectrum = self.update_spectrum(dt, Self::layout(host).n > 0);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || grew || spectrum || self.drag.is_some() || self.meters.iter().any(|&m| m > -149.0)
+        fresh || flowing || grew || spectrum || self.drag.is_some() || self.rail.busy() || self.meters.iter().any(|&m| m > -149.0)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_rail_maps_frequency_both_ways() {
-        for f in [20.0, 150.0, 1000.0, 20_000.0] {
-            assert!((rail_f(rail_x(f)) - f).abs() / f < 1e-9);
-        }
-        assert!((rail_x(20.0) - RAIL_X0).abs() < 1e-9);
-    }
 
     #[test]
     fn the_layout_settles_and_stays_put() {

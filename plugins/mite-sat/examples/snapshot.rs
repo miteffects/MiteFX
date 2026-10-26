@@ -4,7 +4,9 @@
 //!     cargo run -p mite_sat --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
 //! SNAPSHOT_VARIANT picks the state: default, clean, fold, hard, rectify, bypass, delta,
-//! oversampling, presets, ghost. SNAPSHOT_HOVER=x,y moves the pointer there.
+//! oversampling, presets, ghost; several bands: bands (three), six, solo, mute, menu, pull (a
+//! crossover being pulled in), merge (one dragged onto its neighbour). SNAPSHOT_HOVER=x,y moves
+//! the pointer there.
 
 #[path = "common/music.rs"]
 mod music;
@@ -45,6 +47,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     host.set_plain(&band_id(0, B_DRIVE.id), drive);
     host.set_plain(&band_id(0, B_BIAS.id), bias);
     host.set_plain(&band_id(0, B_TONE.id), tone);
+    // Several bands, each with its own model.
+    let bands: &[(f32, Model, f32, f32)] = match variant.as_str() {
+        "bands" | "solo" | "mute" | "menu" | "pull" | "merge" => &[(180.0, Model::Soft, 9.0, 0.0), (2400.0, Model::Fold, 15.0, 0.0)],
+        "six" => &[(90.0, Model::Diode, 18.0, 0.0), (350.0, Model::Soft, 10.0, 0.0), (1200.0, Model::Hard, 20.0, 0.0), (4000.0, Model::Fold, 14.0, 0.0), (11_000.0, Model::Rectify, 12.0, 0.0)],
+        _ => &[],
+    };
+    for (k, &(f, m, d, b)) in bands.iter().enumerate() {
+        host.set_plain(&cross_id(k, X_ON.id), 1.0);
+        host.set_plain(&cross_id(k, X_FREQ.id), f);
+        host.set_plain(&band_id(k + 1, B_MODEL.id), m.index() as f32);
+        host.set_plain(&band_id(k + 1, B_DRIVE.id), d);
+        host.set_plain(&band_id(k + 1, B_BIAS.id), b);
+    }
+    if v("solo") {
+        host.set_plain(&band_id(2, B_SOLO.id), 1.0);
+    }
+    if v("mute") {
+        host.set_plain(&band_id(1, B_MUTE.id), 1.0);
+    }
     if v("bypass") {
         host.set_plain(&band_id(0, B_BYPASS.id), 1.0);
     }
@@ -67,6 +88,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     shared.latency.store(engine.latency() as f32);
 
     let mut view = SatView::new(shared.clone());
+    if v("six") {
+        view.select(3);
+    }
     for _ in 0..30 {
         view.tick(&host);
         std::thread::sleep(std::time::Duration::from_millis(16));
@@ -81,8 +105,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
             view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
         }
+        "menu" => view.open_menu(2, &host),
+        "pull" | "merge" => {
+            let y = view.rail_y();
+            let (from, to) = if v("pull") { (Point::new(view.rail_x(20_000.0) - 6.0, y), Point::new(view.rail_x(700.0), y)) } else { (Point::new(view.rail_x(2400.0), y), Point::new(view.rail_x(180.0) + 3.0, y)) };
+            view.event(&UiEvent::PointerMove { pos: from, mods }, &host);
+            view.event(&UiEvent::PointerDown { pos: from, button: MouseButton::Left, mods }, &host);
+            for k in 1..=8 {
+                view.event(&UiEvent::PointerMove { pos: from.lerp(to, f64::from(k) / 8.0), mods }, &host);
+            }
+        }
         "ghost" => {
-            let at = view.model_icon(Model::Fold).expect("Fold is offered").center();
+            let at = view.model_icon(&host, Model::Fold).expect("Fold is offered").center();
             view.event(&UiEvent::PointerMove { pos: at, mods }, &host);
         }
         _ => {}

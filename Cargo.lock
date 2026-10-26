@@ -1525,6 +1525,7 @@ dependencies = [
  "baseview",
  "keyboard-types",
  "mite-core",
+ "mite-dsp",
  "parley",
  "png",
  "pollster",

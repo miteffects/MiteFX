@@ -418,10 +418,22 @@ A drag is one undo step. The curve is `mite_dsp::sat::transfer` at the live oper
 Oversampling dropdown (1×/2×/4×/8×, each with as many waves as it oversamples; the help strip says
 the latency each adds), latency, auto gain, Δ, bypass, MIX, PAN, OUTPUT.
 
+### Bands (Sat)
+
+The rail, its gestures and the band menu are Shape's (`mite_ui::widgets::rail`): pull a ghost grip
+in or double-click the strip to split (the new band copies the band it splits: model, dials,
+stereo, bypass, mute); drag a crossover sideways (Shift fine, wheel steps), onto its neighbour or
+off an end to merge, or double-click it; right-click a region or card for solo, mute, copy,
+paste, reset, merge down or up, and remove. Click a card or region to edit that band; dragging
+any card's square edits its band and selects it. The layout eases from one band to several over
+220 ms (the spectrum gives the rail 28 px).
+
 ### Keys (Sat)
 
 | Key | Does |
 |---|---|
+| S / M | Solo / mute the edited band |
+| Delete | Removes the edited band (its region joins the band below) |
 | ↑ ↓ | Drive ±0.5 dB (Shift ±0.1) |
 | ← → | Previous / next model |
-| Esc | Closes the oversampling list |
+| Esc | Closes a list or menu, cancels a pull, else lets go of solo |
