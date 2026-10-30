@@ -1302,7 +1302,7 @@ impl ShapeView {
                 return match part {
                     Part::Attack => Help::default().text("Attack ").slot(format!("{} dB", fmt_db(f64::from(s.attack_db))), "+18.0 dB").text(" — drag up or down; how much louder or softer each hit's start is"),
                     Part::Sustain => Help::default().text("Sustain ").slot(format!("{} dB", fmt_db(f64::from(s.sustain_db))), "+18.0 dB").text(" — drag up or down; everything after the hit"),
-                    Part::Time => Help::default().text("Transient time ").slot(B_TIME.format(s.transient_ms), "200 ms").text(" — drag sideways; where attack hands over to sustain. Alt-drag for the handover's width"),
+                    Part::Time => Help::default().text("Transient time ").slot(B_TIME.format(s.transient_ms), "200 ms").text(" — drag sideways; how long attack lasts. Alt-drag for how gradually sustain comes in"),
                     Part::Transition => Help::default().text("Transition ").slot(format!("{:.0} %", s.transition * 100.0), "200 %").text(" — Alt-drag sideways; how gently attack hands over to sustain"),
                     Part::Length => Help::default().text("Sustain length ").slot(B_LENGTH.format(Self::plain(host, &band_id(b, B_LENGTH.id))), "2.00 s").text(" — drag sideways; how long sustain acts before the gain returns to 0 dB. At the right edge: until the next hit"),
                 };

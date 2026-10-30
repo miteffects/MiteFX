@@ -115,7 +115,7 @@ pub struct Dynamics {
     /// Transient mode: how far the band moves on attacks, and in the tails after them.
     pub transient_db: f64,
     pub sustain_db: f64,
-    /// Transient mode: how long the attack phase lasts before the sustain phase takes over, ms.
+    /// Transient mode: how long attack lasts (it has faded to about a twentieth by then), ms.
     pub transient_ms: f64,
     /// Transient mode: how wide the crossfade from attack to sustain is, as a share (0…2) of the
     /// transient time, centred on it.
@@ -213,119 +213,154 @@ impl DetectSource {
 /// The band's gain plus its dynamic gain never leaves ±this, dB (the gain parameter's range).
 pub const GAIN_LIMIT_DB: f64 = 30.0;
 
-/// Transient detector: envelope (attack, release) times in ms, for the default transient time.
-/// Attacks are where a fast-attack envelope leads a slow-attack one (the fast one also releases
-/// sooner, so a decaying hit ends the attack). The slow one follows the fast one, not the raw
-/// level: the fast envelope is already free of the rectified waveform's ripple, so steady noise
-/// and held tones sit within about 0.5 dB of no lead at all, far from the onset mark, and only a
-/// real rise triggers. The slow times scale with the transient time.
-const TRANSIENT_FAST: (f64, f64) = (0.5, 20.0);
-const TRANSIENT_SLOW: (f64, f64) = (25.0, 60.0);
-/// Where attack hands over to sustain by default, ms.
+/// How long attack lasts by default (it has faded to about a twentieth by then), ms.
 pub const DEFAULT_TRANSIENT_MS: f64 = 25.0;
-/// How far the fast envelope must lead the slow one for a hit to count as fully sharp, dB. Softer
-/// hits get a share of the attack amount (eased, smoothstep).
-const SHAPE_FULL_DB: f64 = 12.0;
-/// A hit starts when the fast envelope leads the slow one by this much (as a linear ratio, 3 dB).
-const ONSET_RATIO: f64 = 1.412_537_5;
-/// Once a hit has started, the fast envelope must fall back under this lead (1.5 dB) before
-/// another can: noise hovering around the onset mark would otherwise retrigger every few ms.
-const REARM_RATIO: f64 = 1.188_502_2;
-/// Into the attack phase at a hit: a 0.25 ms ramp, quick enough that no sustain leaks into the
-/// hit's start (the jump coincides with the hit itself, which masks it).
-const PHASE_RISE_MS: f64 = 0.25;
-/// The crossfade from attack to sustain: its default width (share of the transient time) and the
-/// narrowest it gets (ms), which still never clicks.
+/// How quickly sustain comes in by default (share of the transient time).
 pub const DEFAULT_TRANSITION: f64 = 1.0;
-/// Steepness of the crossfade's S (a logistic curve, rescaled to run exactly 1 → 0): long flat
-/// shoulders and a quicker middle, so it reads as a curve rather than a ramp.
-const TRANSITION_CURL: f64 = 8.0;
-const MIN_TRANSITION_MS: f64 = 1.5;
+/// The fast envelope's attack, ms.
+const SHAPE_ATTACK_MS: f64 = 0.5;
+/// The fast envelope holds its peak this long before it releases, ms: longer than half a period of
+/// 25 Hz, so a held tone's envelope has no ripple and its gain does not distort it.
+const SHAPE_HOLD_MS: f64 = 20.0;
+/// The slow-rising envelope's time constant, as a share of the transient time. With one half, the
+/// lead out of silence has fallen to about 1.3 dB by the transient time.
+const SHAPE_RISE: f64 = 0.5;
+/// The slow-falling envelope's time constant, as a multiple of the transient time.
+const SHAPE_FALL: f64 = 20.0;
+/// The lead that brings attack and the fall that brings sustain near their full amounts, dB
+/// (the amount saturates along a tanh, so nothing has a corner).
+const ATTACK_FULL_DB: f64 = 12.0;
+const SUSTAIN_FULL_DB: f64 = 6.0;
+/// The soft knee under the leads, dB: what a noisy envelope wobbles by moves nothing.
+const SHAPE_KNEE_DB: f64 = 1.0;
+/// A hit is reported when the fast envelope leads the slow-rising one by this much (a linear ratio,
+/// 3 dB), and it must fall back under this lead (1.5 dB) before another can. Only the history's
+/// ticks and the sustain length use hits: the gain follows the envelopes alone.
+const ONSET_RATIO: f64 = 1.412_537_5;
+const REARM_RATIO: f64 = 1.188_502_2;
+/// How far the lead must reach for a hit to count as fully sharp, dB.
+const SHARP_FULL_DB: f64 = 12.0;
 /// Below this level the transient detector fades out (silence has no shape), dBFS.
 const SHAPE_GATE_DB: f64 = -80.0;
+/// Under this the envelopes are silence (and never run into denormals).
+const SHAPE_SILENT: f64 = 1e-12;
 
-/// The transient shaper's detector. A hit (the fast envelope pulling ahead of the slow one)
-/// starts the attack phase, which lasts the transient time; then sustain takes over until the
-/// next hit. Through the attack phase the band follows the hit: its attack weight rises with the
-/// hit's sharpness and holds the peak, so a sharp hit gets the whole attack amount and a soft one
-/// a share. The weight then crossfades into sustain. Gain = attack·w + sustain·(1 − w) with w in
-/// 0…1, so it always lies between the two amounts. The band itself and the editor's preview both run it, so
-/// the preview shows exactly what the band does.
+/// The transient shaper's detector, a differential envelope follower with no threshold. Three
+/// envelopes of one level:
+/// - `fast` catches every peak and holds it through the waveform's ripple;
+/// - `rise` follows `fast` up slowly and down at once, so `fast` leads it only during an onset;
+/// - `fall` follows `fast` up at once and down slowly, so it exceeds `fast` only during a decay.
+///
+/// The lead sets the attack weight and the fall the sustain weight, so a steady signal is left
+/// alone however long it lasts, a bigger rise gets more attack, and sustain grows as a sound dies
+/// away. Both are ratios, so the shape does not depend on level. Gain = attack·w + sustain·v·(1 − w),
+/// so it always lies between 0 dB and the two amounts. The band itself and the editor's preview
+/// both run it, so the preview shows exactly what the band does.
 #[derive(Debug, Clone, Copy)]
 pub struct ShapeDetector {
-    /// Fast and slow peak envelopes (linear) and their (attack, release) coefficients.
-    env: [f64; 2],
-    coeffs: [(f64, f64); 2],
-    /// The attack phase: samples since the hit started (while one is under way), where the
-    /// crossfade to sustain starts and how long it is (samples), whether the fast envelope leads
-    /// now, and the switch (1 = attack phase, 0 = sustain) with its rise coefficient.
-    elapsed: Option<u32>,
-    fade_start: f64,
-    fade_len: f64,
-    onset: bool,
-    phase: f64,
+    fast: f64,
     rise: f64,
-    /// The sharpest the current hit has been (0…1), held through its attack phase.
+    fall: f64,
+    /// `fall / fast`, rising no quicker than the transition allows.
+    decay: f64,
+    /// Samples the fast envelope still holds its peak, and how long it holds.
+    hold_left: u32,
+    hold: u32,
+    /// Per-sample coefficients: the fast envelope's attack and release, `rise`'s rise, `fall`'s
+    /// fall and `decay`'s rise.
+    k_attack: f64,
+    k_release: f64,
+    k_rise: f64,
+    k_fall: f64,
+    k_decay: f64,
+    /// Samples a hit stays under way, and those since the current one started, while it is.
+    hit_len: u32,
+    elapsed: Option<u32>,
+    onset: bool,
+    /// The sharpest the current hit has been (0…1), held while it is under way.
     sharpness: f64,
-    /// Samples since the last hit started (any hit, attack phase over or not).
+    /// Samples since the last hit started.
     since: Option<u32>,
+    /// The attack weight the last [`Self::gain_db`] worked with.
+    weight: f64,
 }
 
 impl ShapeDetector {
-    /// A detector fed `rate` levels per second, whose attack phase lasts `transient_ms` and hands
-    /// over to sustain over `transition` (share of the transient time).
+    /// A detector fed `rate` levels per second, whose attack fades over `transient_ms` and whose
+    /// sustain comes in over `transition` (share of the transient time).
     pub fn new(rate: f64, transient_ms: f64, transition: f64) -> Self {
         let mut d = Self {
-            env: [0.0; 2],
-            coeffs: [(1.0, 1.0); 2],
+            fast: 0.0,
+            rise: 0.0,
+            fall: 0.0,
+            decay: 1.0,
+            hold_left: 0,
+            hold: 0,
+            k_attack: 1.0,
+            k_release: 1.0,
+            k_rise: 1.0,
+            k_fall: 1.0,
+            k_decay: 1.0,
+            hit_len: 0,
             elapsed: None,
-            fade_start: 0.0,
-            fade_len: 1.0,
             onset: false,
-            phase: 0.0,
-            rise: 1.0,
             sharpness: 0.0,
             since: None,
+            weight: 0.0,
         };
         d.set_times(rate, transient_ms, transition);
         d
     }
 
     pub fn set_times(&mut self, rate: f64, transient_ms: f64, transition: f64) {
-        let coeff = |ms: f64| 1.0 - (-1000.0 / (ms * rate)).exp();
-        let scale = transient_ms / DEFAULT_TRANSIENT_MS;
-        let scaled = |(a, r): (f64, f64)| (if a > 1.0 { a * scale } else { a }, r * scale);
-        for (c, times) in self.coeffs.iter_mut().zip([TRANSIENT_FAST, TRANSIENT_SLOW]) {
-            let (a, r) = scaled(times);
-            *c = (coeff(a), coeff(r));
-        }
-        let samples = |ms: f64| ms * rate / 1000.0;
-        self.fade_len = samples((transition.clamp(0.0, 2.0) * transient_ms).max(MIN_TRANSITION_MS));
-        self.fade_start = (samples(transient_ms) - 0.5 * self.fade_len).max(0.0);
-        self.rise = coeff(PHASE_RISE_MS);
+        let coeff = |ms: f64| if ms > 0.0 { 1.0 - (-1000.0 / (ms * rate)).exp() } else { 1.0 };
+        self.k_attack = coeff(SHAPE_ATTACK_MS);
+        self.k_release = coeff(transient_ms);
+        self.k_rise = coeff(SHAPE_RISE * transient_ms);
+        self.k_fall = coeff(SHAPE_FALL * transient_ms);
+        self.k_decay = coeff(SHAPE_RISE * transition.clamp(0.0, 2.0) * transient_ms);
+        self.hold = (SHAPE_HOLD_MS * rate / 1000.0).round() as u32;
+        self.hit_len = (transient_ms * rate / 1000.0).round() as u32;
     }
 
-    /// Sets both envelopes to `level` (linear), as if it had been steady, outside any hit.
+    /// Sets the envelopes to `level` (linear), as if it had been steady, outside any hit.
     pub fn reset(&mut self, level: f64) {
-        self.env = [level; 2];
+        self.fast = level;
+        self.rise = level;
+        self.fall = level;
+        self.decay = 1.0;
+        self.hold_left = 0;
         self.elapsed = None;
         self.onset = false;
-        self.phase = 0.0;
         self.sharpness = 0.0;
         self.since = None;
+        self.weight = 0.0;
     }
 
     /// Feeds one level (linear peak).
     #[inline]
     pub fn process(&mut self, level: f64) {
-        let mut input = level;
-        for (e, &(a, r)) in self.env.iter_mut().zip(&self.coeffs) {
-            let k = if input > *e { a } else { r };
-            *e += k * (input - *e);
-            input = *e;
+        if level >= self.fast {
+            self.fast += self.k_attack * (level - self.fast);
+            self.hold_left = self.hold;
+        } else if self.hold_left > 0 {
+            self.hold_left -= 1;
+        } else {
+            self.fast += self.k_release * (level - self.fast);
         }
+        if self.fast < SHAPE_SILENT {
+            self.fast = 0.0;
+        }
+        self.rise = if self.fast > self.rise { self.rise + self.k_rise * (self.fast - self.rise) } else { self.fast };
+        self.fall = if self.fast > self.fall { self.fast } else { self.fall + self.k_fall * (self.fast - self.fall) };
+        if self.fall < SHAPE_SILENT {
+            self.fall = 0.0;
+        }
+        let decay = if self.fast > 0.0 { self.fall / self.fast } else { 1.0 };
+        self.decay = if decay > self.decay { self.decay + self.k_decay * (decay - self.decay) } else { decay };
+
         let ratio = if self.onset { REARM_RATIO } else { ONSET_RATIO };
-        let onset = self.env[0] > self.env[1] * ratio && self.env[0] > 10f64.powf(SHAPE_GATE_DB / 20.0);
+        let onset = self.fast > self.rise * ratio && self.fast > 10f64.powf(SHAPE_GATE_DB / 20.0);
         if onset && !self.onset {
             self.elapsed = Some(0);
             self.sharpness = 0.0;
@@ -334,46 +369,28 @@ impl ShapeDetector {
             self.since = Some(n.saturating_add(1));
         }
         self.onset = onset;
-        // 1 through the attack phase, then an S-shaped crossfade to 0 centred on the transient
-        // time: flat at both ends, so the handover has no corner.
-        let target = match self.elapsed {
-            Some(n) => {
-                let t = f64::from(n) - self.fade_start;
-                self.elapsed = Some(n.saturating_add(1));
-                if t <= 0.0 {
-                    1.0
-                } else if t < self.fade_len {
-                    let logistic = |u: f64| 1.0 / (1.0 + (-TRANSITION_CURL * (u - 0.5)).exp());
-                    let (lo, hi) = (logistic(0.0), logistic(1.0));
-                    1.0 - (logistic(t / self.fade_len) - lo) / (hi - lo)
-                } else {
-                    self.elapsed = None;
-                    0.0
-                }
-            }
-            None => 0.0,
-        };
-        // Rising (a new hit) eases in over 0.2 ms; falling already follows the smooth crossfade.
-        self.phase = if target > self.phase { self.phase + self.rise * (target - self.phase) } else { target };
+        if let Some(n) = self.elapsed {
+            self.elapsed = (n < self.hit_len).then_some(n + 1);
+        }
     }
 
     /// The fast envelope: the level as the detector hears it now (linear).
     pub fn level(&self) -> f64 {
-        self.env[0]
+        self.fast
     }
 
     /// The attack weight w (0…1) the last [`Self::gain_db`] worked with: how much of the attack
     /// amount applies now.
     pub fn weight(&self) -> f64 {
-        self.phase * self.sharpness
+        self.weight
     }
 
-    /// Samples since the last hit started, attack phase over or not (`None` before the first).
+    /// Samples since the last hit started (`None` before the first).
     pub fn since_hit(&self) -> Option<u32> {
         self.since
     }
 
-    /// Samples since the current hit started, while its attack phase runs.
+    /// Samples since the current hit started, while it is under way.
     pub fn hit_age(&self) -> Option<u32> {
         self.elapsed
     }
@@ -383,19 +400,22 @@ impl ShapeDetector {
         self.sharpness
     }
 
-    /// The gain for these amounts right now, dB: `transient_db` through the attack phase (scaled
-    /// by the hit's sharpness), `sustain_db` after it, crossfaded. Call it at the control rate;
-    /// it tracks the hit's peak sharpness.
+    /// The gain for these amounts right now, dB. Call it at the control rate; it tracks the hit's
+    /// peak sharpness.
     pub fn gain_db(&mut self, transient_db: f64, sustain_db: f64) -> f64 {
         let db = |x: f64| 20.0 * x.max(1e-10).log10();
-        let [fast, slow] = self.env;
+        let lead = db(self.fast) - db(self.rise);
         if self.elapsed.is_some() {
-            let u = ((db(fast) - db(slow)) / SHAPE_FULL_DB).clamp(0.0, 1.0);
+            let u = (lead / SHARP_FULL_DB).clamp(0.0, 1.0);
             self.sharpness = self.sharpness.max(u * u * (3.0 - 2.0 * u));
         }
-        let w = self.phase * self.sharpness;
-        let gate = ((db(fast) - SHAPE_GATE_DB) / 20.0).clamp(0.0, 1.0);
-        gate * (transient_db * w + sustain_db * (1.0 - w))
+        // Smooth from 0: under the knee nothing moves, well over it the amount follows the lead.
+        let weight = |d: f64, full: f64| (((d * d + SHAPE_KNEE_DB * SHAPE_KNEE_DB).sqrt() - SHAPE_KNEE_DB) / full).tanh();
+        let w = weight(lead.max(0.0), ATTACK_FULL_DB);
+        let v = weight(db(self.decay).max(0.0), SUSTAIN_FULL_DB);
+        self.weight = w;
+        let gate = ((db(self.fast) - SHAPE_GATE_DB) / 20.0).clamp(0.0, 1.0);
+        gate * (transient_db * w + sustain_db * v * (1.0 - w))
     }
 }
 
@@ -1572,21 +1592,18 @@ mod tests {
         let early = s[100..103].iter().copied().fold(f64::MIN, f64::max);
         let tail = s[180..260].iter().copied().fold(f64::MIN, f64::max);
         assert!(early < 1.0 && tail > 4.0, "early {early}, tail {tail}");
-        // A shelf from the time mark (25 ms after the hit), crossfading over 25 ms around it:
-        // flat before the crossfade, full after it, rising steadily in between.
-        // (The first millisecond is the 0.25 ms switch into the attack phase.)
-        assert!(s[101..112].iter().all(|g| g.abs() < 0.1), "sustain before the crossfade: {:?}", &s[100..112]);
-        let held = s[140..280].iter().copied().fold(f64::MAX, f64::min);
+        // Nothing while the fast envelope holds its peak, then rising with the decay to the amount.
+        assert!(s[100..118].iter().all(|g| g.abs() < 0.1), "sustain during the hit: {:?}", &s[100..118]);
+        let held = s[200..280].iter().copied().fold(f64::MAX, f64::min);
         assert!(held > 8.5, "sustain sagged to {held} dB in the tail");
-        assert!(s[112..140].windows(2).all(|w| w[1] >= w[0] - 1e-9), "crossfade not monotonic: {:?}", &s[112..140]);
+        assert!(s[118..180].windows(2).all(|w| w[1] >= w[0] - 1e-3), "not monotonic: {:?}", &s[118..180]);
     }
 
     #[test]
-    fn cutting_both_attack_and_sustain_never_gets_louder_in_between() {
-        // The gain must stay between the two amounts through the handover: no bump towards 0 dB.
+    fn cutting_both_attack_and_sustain_never_goes_past_either_amount() {
         let t = shape_trace(&transient_bell(-9.0, -6.0));
         let worst = t[102..300].iter().copied().fold(f64::MIN, f64::max);
-        assert!(worst < -5.9, "the band came up to {worst} dB between attack and sustain");
+        assert!(worst <= 0.0, "the band rose to {worst} dB");
         let lowest = t[102..300].iter().copied().fold(f64::MAX, f64::min);
         assert!(lowest > -9.1, "{lowest}");
     }

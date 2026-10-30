@@ -21,10 +21,10 @@ MiteFX is an open-source (GPL) suite of pro audio plugins (CLAP, VST3, later AU)
 This is the detector the EQ's transient bands already ship with (`mite_dsp::eq::ShapeDetector`). Mite Shape reuses it, and the EQ's transient scope is drawn from it.
 
 - A **hit** starts when a fast envelope pulls 3 dB ahead of a slow one.
-- The **attack phase** then lasts exactly the **transient time** (5–200 ms, default 25 ms). Through it the gain follows the hit's **sharpness**: a sharp hit (12 dB of lead) gets the whole attack amount, a soft hit a share of it. The weight rises with the hit and holds its peak.
-- Around the end of the attack phase, the gain crossfades to the sustain amount along an S curve. The crossfade's width is the **transition** (0–200 % of the transient time; it never gets shorter than 1.5 ms, and it never clicks).
-- **Sustain** is a flat amount over everything after that, held notes included, until the next hit.
-- The gain is always `attack·w + sustain·(1 − w)` with w in 0…1, so it always lies between the two amounts. There is no louder spot when both cut.
+- **Attack** follows the fast envelope's lead over a slow-rising one, so it exists only during an onset: a bigger rise gets more of the amount, and it fades as the slow envelope catches up. The **transient time** (5–200 ms, default 25 ms) sets that speed: by then attack is down to about a twentieth.
+- **Sustain** follows a slow-falling envelope's lead over the fast one, so it exists only during a decay and grows as the sound dies away, reaching the amount about 6–10 dB down. The **transition** (0–200 % of the transient time) sets how gradually it comes in.
+- **A steady signal gets no gain at all**, however high the amounts, held notes included. The fast envelope holds its peak for 20 ms, so a held bass tone isn't distorted.
+- The gain is `attack·w + sustain·v·(1 − w)` with w and v in 0…1, so it never goes past either amount. (Revised 2026-10-30: this replaced an attack phase and a flat sustain until the next hit, which behaved like a gate, not a transient designer.)
 - Below −80 dBFS the detector fades out, because silence has no shape.
 
 The consequence for design: the gain over time is **a step-like S curve per hit**, computable for a synthetic hit at any setting. Engineering can give you that function, and the EQ already draws it.
@@ -87,12 +87,12 @@ The engineering plan. **MVP** is what the first build ships; *later* is designed
 |---|---|---|---|
 | **Attack** | −18 … +18 dB | 0 dB | MVP |
 | **Sustain** | −18 … +18 dB | 0 dB | MVP |
-| **Transient time** (where attack hands over to sustain) | 5 … 200 ms | 25 ms | MVP |
-| Transition (width of the handover) | 0 … 200 % of the transient time | 100 % | MVP |
+| **Transient time** (how long attack lasts) | 5 … 200 ms | 25 ms | MVP |
+| Transition (how gradually sustain comes in) | 0 … 200 % of the transient time | 100 % | MVP |
 | Solo, Mute | toggles | off | MVP (multiband only) |
 | Band mix (its own dry/wet) | 0 … 100 % | 100 % | MVP |
 | Band output (its fader in the sum) | −24 … +24 dB | 0 dB | MVP |
-| Sustain length (how long sustain acts before the gain returns to 0; ∞ = until the next hit) | 10 ms … ∞ | ∞ | *later* (roster "beyond") |
+| Sustain length (how long sustain acts before the gain returns to 0; ∞ = as long as the decay) | 10 ms … ∞ | ∞ | *later* (roster "beyond") |
 
 ### 3.2 Bands and crossovers
 

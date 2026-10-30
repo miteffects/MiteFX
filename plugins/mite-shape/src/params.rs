@@ -68,7 +68,7 @@ pub const B_TIME: ParamSpec = spec("time", "Transient Time", "ms", 5.0, 200.0, 2
 pub const B_TRANSITION: ParamSpec = spec("trans", "Transition", "%", 0.0, 200.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_MIX: ParamSpec = spec("mix", "Band Mix", "%", 0.0, 100.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_OUT: ParamSpec = spec("out", "Band Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
-/// How long sustain acts after the handover; the top of the range is endless (until the next hit).
+/// How long sustain acts after the transient time; the top of the range is endless.
 pub const B_LENGTH: ParamSpec = spec("length", "Sustain Length", "ms", 10.0, LENGTH_MAX_MS, LENGTH_MAX_MS, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::TimeOrForever);
 /// A muted band drops out of the sum (sound: kept in presets, as throwing a band away is).
 pub const B_MUTE: BoolSpec = BoolSpec { id: "mute", name: "Mute", default: false };

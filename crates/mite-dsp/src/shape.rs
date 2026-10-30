@@ -1,9 +1,9 @@
 //! Mite Shape's engine (BLUEPRINT §6.10): a transient designer with no threshold, on one band or
 //! split into up to five by LR4 crossovers.
 //!
-//! Each band runs the EQ's transient detector ([`ShapeDetector`]) on its own region and moves
-//! between its attack amount (through each hit's attack phase, scaled by the hit's sharpness) and
-//! its sustain amount (everything after it). The split is a cascade of LR4 crossovers with allpass
+//! Each band runs the EQ's transient detector ([`ShapeDetector`], a differential envelope follower)
+//! on its own region: its attack amount follows each onset, its sustain amount each decay, and a
+//! steady signal is left alone. The split is a cascade of LR4 crossovers with allpass
 //! compensation, so the bands sum back to an allpass of the input: with one band there are no
 //! filters at all and neutral settings null exactly; with more, the dry path for mix and delta is
 //! the same band sum, so mixing never combs.
@@ -55,16 +55,16 @@ const HIT_REPORT_MS: f64 = 2.0;
 pub struct BandShape {
     pub attack_db: f32,
     pub sustain_db: f32,
-    /// Where attack hands over to sustain, ms.
+    /// How long attack lasts (it has faded to about a twentieth by then), ms.
     pub transient_ms: f32,
-    /// The handover's width, as a share (0…2) of the transient time.
+    /// How gradually sustain comes in, as a share (0…2) of the transient time.
     pub transition: f32,
     /// The band's own dry/wet, 0…1.
     pub mix: f32,
     /// The band's fader in the sum, dB.
     pub out_db: f32,
-    /// How long sustain acts after the handover before the gain returns to 0 dB, ms
-    /// (`f32::INFINITY`: until the next hit).
+    /// How long sustain acts after the transient time before the gain returns to 0 dB, ms
+    /// (`f32::INFINITY`: for as long as the sound decays).
     pub length_ms: f32,
     pub mute: bool,
     pub solo: bool,
@@ -704,7 +704,7 @@ impl Shaper {
 }
 
 /// How much of the sustain amount applies `since_ms` after a hit started: all of it through the
-/// attack phase and for `length_ms` after the handover, then back to none along an S curve
+/// transient time and for `length_ms` after it, then back to none along an S curve
 /// (smoothstep, 30 % of the length, 5–150 ms). Endless lengths keep it; before any hit, a finite
 /// length has nothing to sustain.
 pub fn sustain_scale(transient_ms: f64, length_ms: f64, since_ms: Option<f64>) -> f64 {
@@ -814,7 +814,7 @@ mod tests {
     /// A fixed render through splits, a band made, an M/S switch and lookahead, hashed bit for bit:
     /// the crossover's extraction into `crate::crossover` must leave Shape's output unchanged.
     /// (Re-blessed 2026-10-26: with lookahead, a new band now starts with an empty delay and a
-    /// merged band's delay joins the band below.)
+    /// merged band's delay joins the band below. Re-blessed 2026-10-30: the differential detector.)
     #[test]
     fn render_checksum_is_unchanged() {
         let n = 20_000;
@@ -851,7 +851,7 @@ mod tests {
         for v in yl.iter().chain(&yr).chain(&dl).chain(&dr) {
             hash = (hash ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
-        assert_eq!(hash, 0xbc57_371c_0dd1_a946, "checksum {hash:#x}");
+        assert_eq!(hash, 0xe325_8116_7523_17e5, "checksum {hash:#x}");
     }
 
     #[test]
@@ -1065,8 +1065,8 @@ mod tests {
         let mut s = ShapeSettings::default();
         s.bands[0].sustain_db = 12.0;
         s.floor_db = -30.0;
-        // A steady tone at −50 dBFS: under the floor, so sustain lifts nothing.
-        let input: Vec<f32> = tone(24_000, 440.0).iter().map(|v| v * 0.006).collect();
+        // A tone dropping 30 dB to −50 dBFS: its tail is under the floor, so sustain lifts nothing.
+        let input: Vec<f32> = tone(24_000, 440.0).iter().enumerate().map(|(i, v)| v * if i < 6000 { 0.19 } else { 0.006 }).collect();
         let mut sh = Shaper::new(FS, &s);
         let (y, _) = run(&mut sh, &input, &s, 256);
         let ratio = steps(&y[12_000..]) / steps(&input[12_000..]);

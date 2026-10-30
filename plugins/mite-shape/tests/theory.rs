@@ -1,8 +1,8 @@
 //! Mite Shape against what theory says it must do. FabFilter has no transient designer to
 //! compare with, so every expectation here is worked out from first principles: the LR4
-//! crossover's closed-form responses, the detector's definition (attack through the transient
-//! time, sustain after it, the handover an S curve centred on the transient time), and the
-//! output stage's algebra. The whole engine is driven, as the host drives it.
+//! crossover's closed-form responses, the detector's definition (a differential envelope follower:
+//! attack from the fast envelope's lead over a slow-rising one, sustain from a slow-falling one's
+//! lead over the fast one), and the output stage's algebra. The whole engine is driven, as the host drives it.
 //!
 //! With one band there are no filters, so a steady (DC) input makes the output/input ratio the
 //! gain itself, sample by sample: the shaping is read off exactly.
@@ -38,7 +38,7 @@ fn run(s: &ShapeSettings, out: &Output, input: Vec<f32>) -> Vec<f32> {
     run_at(FS, s, out, vec![input]).0.remove(0)
 }
 
-/// Silence for `pre` samples, then a steady `level` for `len` samples: one hit, then sustain.
+/// Silence for `pre` samples, then a steady `level` for `len` samples: one onset, no decay.
 fn step(pre: usize, level: f32, len: usize) -> Vec<f32> {
     let mut v = vec![0.0; pre];
     v.extend(std::iter::repeat_n(level, len));
@@ -197,71 +197,132 @@ fn muting_a_band_and_soloing_it_add_up_to_the_whole() {
 
 // ---- the shaping itself -------------------------------------------------------------------
 
-#[test]
-fn a_sharp_hit_gets_the_whole_attack_then_the_whole_sustain_with_the_handover_at_its_midpoint() {
-    // From silence to a steady level: the sharpest hit there is. Transient time 25 ms, transition
-    // 100 %: attack until 12.5 ms, an S curve centred on 25 ms (where the gain is the mean of the
-    // two amounts in dB), sustain from 37.5 ms on.
-    let (a, s_db) = (7.5, -6.0);
-    let s = shaped(a, s_db);
-    let pre = 4800;
-    let x = step(pre, 0.5, 9600);
-    let y = run(&s, &Output::default(), x.clone());
-    for ms in [2.0, 6.0, 11.0] {
-        let g = gain_at(&y, &x, pre, ms, FS);
-        assert!((g - f64::from(a)).abs() < 0.05, "attack at {ms} ms: {g:.3} dB");
-    }
-    let mid = gain_at(&y, &x, pre, 25.0, FS);
-    assert!((mid - f64::from(a + s_db) / 2.0).abs() < 0.35, "handover midpoint {mid:.3} dB");
-    for ms in [40.0, 80.0, 150.0] {
-        let g = gain_at(&y, &x, pre, ms, FS);
-        assert!((g - f64::from(s_db)).abs() < 0.05, "sustain at {ms} ms: {g:.3} dB");
-    }
-    // Silence before the hit is untouched, and the crossfade is monotone (no overshoot).
-    assert!(y[..pre].iter().all(|v| *v == 0.0));
-    let ramp: Vec<f64> = (100..400).map(|k| gain_at(&y, &x, pre, f64::from(k) * 0.1, FS)).collect();
-    assert!(ramp.windows(2).all(|w| w[1] <= w[0] + 1e-6), "the handover only falls");
+/// How much of its amount a lead of `d` dB brings when `full` dB is the mark (the detector's curve).
+fn weight(d: f64, full: f64) -> f64 {
+    (((d * d + 1.0).sqrt() - 1.0) / full).tanh()
+}
+
+/// Silence for `pre` samples, then a hit at `level` decaying with time constant `tau_ms`.
+fn decaying(pre: usize, level: f32, tau_ms: f64, len: usize) -> Vec<f32> {
+    let k = 1000.0 / (tau_ms * f64::from(FS));
+    (0..pre + len).map(|i| if i < pre { 0.0 } else { (f64::from(level) * (-((i - pre) as f64) * k).exp()) as f32 }).collect()
 }
 
 #[test]
-fn the_transient_time_and_transition_place_and_widen_the_handover() {
+fn a_step_gets_the_attack_curve_theory_gives_and_returns_to_unity() {
+    // Out of silence the fast envelope is 1 − e^(−t/a) of the step and the slow-rising one the
+    // cascade of that with its own pole r (half the transient time); the attack is `weight` of
+    // their ratio in dB. Nothing decays, so sustain adds nothing.
+    let a_db = 7.5;
+    let s = shaped(a_db, -6.0);
     let pre = 4800;
     let x = step(pre, 0.5, 19_200);
-    // Where the gain crosses the midpoint is the transient time; the width is the transition
-    // (share of it, never under 1.5 ms).
-    for (time, transition) in [(10.0f32, 1.0f32), (60.0, 0.5), (40.0, 0.0)] {
-        let mut s = shaped(6.0, -6.0);
-        s.bands[0].transient_ms = time;
-        s.bands[0].transition = transition;
+    let y = run(&s, &Output::default(), x.clone());
+    let (a, r) = (0.5f64, 12.5f64);
+    for ms in [2.0, 5.0, 10.0, 20.0, 30.0] {
+        let fast = 1.0 - (-ms / a).exp();
+        let rise = 1.0 - (r * (-ms / r).exp() - a * (-ms / a).exp()) / (r - a);
+        let theory = f64::from(a_db) * weight(db(fast / rise), 12.0);
+        let g = gain_at(&y, &x, pre, ms, FS);
+        assert!((g - theory).abs() < 0.15, "at {ms} ms: {g:.3} dB, theory {theory:.3} dB");
+    }
+    assert!(y[..pre].iter().all(|v| *v == 0.0));
+    assert!(gain_at(&y, &x, pre, 300.0, FS).abs() < 1e-3, "a held level is left alone");
+}
+
+#[test]
+fn a_steady_signal_is_left_alone_whatever_the_amounts() {
+    // A tone down to 30 Hz and noise: once settled, no gain at all, so neither distortion nor a
+    // change of level. The fast envelope holds through the waveform's ripple.
+    let s = shaped(12.0, -12.0);
+    for f in [30.0, 60.0, 220.0, 4000.0] {
+        let x = sine(48_000, f, 0.5, FS);
         let y = run(&s, &Output::default(), x.clone());
+        let worst = (24_000..48_000).map(|i| (y[i] - x[i]).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 1e-4, "{f} Hz: off by {worst}");
+    }
+    let x = noise(96_000, 8, 0.5);
+    let y = run(&s, &Output::default(), x.clone());
+    let rms = |v: &[f32]| (v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+    let change = db(rms(&y[48_000..]) / rms(&x[48_000..]));
+    assert!(change.abs() < 0.1, "noise changed by {change:.3} dB");
+}
+
+#[test]
+fn sustain_grows_as_a_sound_decays_and_stays_within_its_amount() {
+    let pre = 4800;
+    let x = decaying(pre, 0.5, 80.0, 48_000);
+    for amount in [9.0f32, -9.0] {
+        let y = run(&shaped(0.0, amount), &Output::default(), x.clone());
         let g = |ms: f64| gain_at(&y, &x, pre, ms, FS);
-        // From 1 ms on: the first fraction of a millisecond, before the onset is recognised, still
-        // has the sustain gain (that lead-in is what lookahead is for).
-        let crossing = (20..4000).map(|k| f64::from(k) * 0.05).find(|&ms| g(ms) < 0.0).unwrap_or(0.0);
-        assert!((crossing - f64::from(time)).abs() < 0.4, "time {time}: crosses 0 dB at {crossing:.2} ms");
-        let width = (f64::from(time) * f64::from(transition)).max(1.5);
-        assert!((g(f64::from(time) - width / 2.0 - 0.3) - 6.0).abs() < 0.1, "time {time}: still attack before the handover");
-        assert!((g(f64::from(time) + width / 2.0 + 0.5) + 6.0).abs() < 0.1, "time {time}: sustain after it");
+        assert!(g(15.0).abs() < 0.01, "nothing during the hit: {:.3}", g(15.0));
+        let trace: Vec<f64> = (20..300).map(|ms| g(f64::from(ms)).abs()).collect();
+        assert!(trace.windows(2).all(|w| w[1] >= w[0] - 1e-3), "grows only");
+        assert!(trace[trace.len() - 1] > 8.8 && trace[trace.len() - 1] <= 9.0 + 1e-3, "{:.3}", g(300.0));
+        // A slower decay gets there later.
+        let slow = decaying(pre, 0.5, 300.0, 48_000);
+        let z = run(&shaped(0.0, amount), &Output::default(), slow.clone());
+        assert!(gain_at(&z, &slow, pre, 100.0, FS).abs() < g(100.0).abs());
     }
 }
 
 #[test]
-fn the_attack_scales_with_how_sharp_the_hit_is() {
-    // Steps from a steady level: the fast envelope's lead over the slow one is the step itself
-    // (in dB), and the attack weight is smoothstep(lead / 12 dB). Under the 3 dB onset there is
-    // no hit at all.
+fn the_transient_time_scales_the_attack_and_the_transition_slows_sustain() {
+    let pre = 4800;
+    let x = step(pre, 0.5, 48_000);
+    for time in [10.0f32, 25.0, 60.0, 200.0] {
+        let mut s = shaped(12.0, 0.0);
+        s.bands[0].transient_ms = time;
+        let y = run(&s, &Output::default(), x.clone());
+        let g = gain_at(&y, &x, pre, f64::from(time), FS);
+        assert!(g > 0.2 && g < 1.2, "time {time}: {g:.3} dB left at the transient time");
+    }
+    let tail = decaying(pre, 0.5, 40.0, 19_200);
+    let at = |transition: f32| {
+        let mut s = shaped(0.0, 9.0);
+        s.bands[0].transition = transition;
+        let y = run(&s, &Output::default(), tail.clone());
+        gain_at(&y, &tail, pre, 50.0, FS)
+    };
+    assert!(at(0.0) > at(1.0) + 0.5 && at(1.0) > at(2.0) + 0.5, "{:.2} {:.2} {:.2}", at(0.0), at(1.0), at(2.0));
+}
+
+#[test]
+fn the_attack_scales_with_the_size_of_the_rise() {
+    // Steps from a steady level: the lead starts at the step itself. Peak gain ≤ weight(step).
     let a = 12.0;
     let s = shaped(a, 0.0);
     let pre = 48_000;
-    for (step_db, low, high) in [(2.0f64, 0.0, 0.0), (6.0, 0.40, 0.52), (9.0, 0.72, 0.86), (24.0, 0.995, 1.0)] {
+    let mut last = 0.0;
+    for step_db in [2.0f64, 6.0, 9.0, 24.0] {
         let base = 0.03f32;
         let mut x = vec![base; pre];
         x.extend(std::iter::repeat_n(base * 10f32.powf(step_db as f32 / 20.0), 9600));
         let y = run(&s, &Output::default(), x.clone());
         let peak = (pre..pre + 4800).map(|i| db(f64::from(y[i]) / f64::from(x[i]))).fold(0.0, f64::max);
         let share = peak / f64::from(a);
-        assert!(share >= low - 1e-3 && share <= high + 1e-3, "{step_db} dB step: {share:.3} of the attack");
+        let theory = weight(step_db, 12.0);
+        assert!(share > 0.6 * theory && share < theory + 1e-3, "{step_db} dB step: {share:.3}, at most {theory:.3}");
+        assert!(share > last, "bigger rises get more");
+        last = share;
     }
+}
+
+#[test]
+fn a_second_hit_on_a_tail_gets_its_own_attack() {
+    // 15 ms after a first hit, a louder one: the gain rises again.
+    let s = shaped(12.0, 0.0);
+    let pre = 4800;
+    let second = pre + 720;
+    let x: Vec<f32> = (0..pre + 9600)
+        .map(|i| {
+            let d = |h: usize| if i >= h { (-((i - h) as f64) / 480.0).exp() } else { 0.0 };
+            (0.001 + 0.25 * d(pre) + 0.9 * d(second)) as f32
+        })
+        .collect();
+    let y = run(&s, &Output::default(), x.clone());
+    let g = |i: usize| db(f64::from(y[i]) / f64::from(x[i]));
+    assert!(g(second + 48) > g(second - 48) + 4.0, "{:.2} then {:.2}", g(second - 48), g(second + 48));
 }
 
 #[test]
@@ -297,20 +358,21 @@ fn below_the_gate_nothing_is_shaped() {
 
 #[test]
 fn the_floor_fades_a_lift_out_over_six_db() {
-    // Sustain +12 dB, floor −30 dBFS: full lift at or above the floor, half 3 dB under it, none
-    // 6 dB under it.
+    // Sustain +12 dB, floor −30 dBFS, on a level that dropped 40 dB (the whole amount by now): full
+    // lift at or above the floor, half 3 dB under it, none 6 dB under it.
     let mut s = shaped(0.0, 12.0);
     s.floor_db = -30.0;
     for (level_db, lift) in [(-20.0f64, 12.0), (-30.0, 12.0), (-33.0, 6.0), (-36.0, 0.0), (-45.0, 0.0)] {
-        let x = step(4800, 10f32.powf(level_db as f32 / 20.0), 24_000);
+        let level = 10f32.powf(level_db as f32 / 20.0);
+        let x: Vec<f32> = (0..24_000).map(|i| if i < 4800 { level * 100.0 } else { level }).collect();
         let y = run(&s, &Output::default(), x.clone());
-        let g = gain_at(&y, &x, 4800, 400.0, FS);
+        let g = gain_at(&y, &x, 4800, 300.0, FS);
         assert!((g - lift).abs() < 0.05, "{level_db} dBFS: {g:.3} dB, theory {lift}");
     }
 }
 
 #[test]
-fn the_gain_always_lies_between_attack_and_sustain() {
+fn the_gain_never_goes_past_either_amount() {
     let s = shaped(6.0, -4.0);
     // Bursts of noise at many levels and speeds.
     let raw = noise(96_000, 3, 0.5);
@@ -327,15 +389,17 @@ fn the_gain_always_lies_between_attack_and_sustain() {
 #[test]
 fn a_sustain_length_hands_back_to_unity_along_its_s_curve() {
     // Transient time 25 ms, length 50 ms: sustain until 75 ms, then back to 0 dB over 15 ms
-    // (30 % of the length), halfway at 82.5 ms.
+    // (30 % of the length), half of what it would be at 82.5 ms. The endless one is the reference.
     let mut s = shaped(0.0, -9.0);
-    s.bands[0].length_ms = 50.0;
     let pre = 4800;
-    let x = step(pre, 0.5, 9600);
+    let x = decaying(pre, 0.5, 20.0, 9600);
+    let endless = run(&s, &Output::default(), x.clone());
+    s.bands[0].length_ms = 50.0;
     let y = run(&s, &Output::default(), x.clone());
     let g = |ms: f64| gain_at(&y, &x, pre, ms, FS);
-    assert!((g(60.0) + 9.0).abs() < 0.05, "{:.3}", g(60.0));
-    assert!((g(82.5) + 4.5).abs() < 0.3, "{:.3}", g(82.5));
+    let e = |ms: f64| gain_at(&endless, &x, pre, ms, FS);
+    assert!(e(60.0) < -3.0 && (g(60.0) - e(60.0)).abs() < 0.05, "{:.3} against {:.3}", g(60.0), e(60.0));
+    assert!((g(82.5) - e(82.5) / 2.0).abs() < 0.4, "{:.3} against {:.3}", g(82.5), e(82.5));
     assert!(g(91.0).abs() < 0.05, "{:.3}", g(91.0));
     assert!(g(150.0).abs() < 1e-3);
 }
@@ -389,9 +453,9 @@ fn a_linked_pair_moves_together_and_an_unlinked_one_does_not() {
     for (link, same) in [(1.0f32, true), (0.0, false)] {
         let s = ShapeSettings { link, ..shaped(9.0, 0.0) };
         let (y, _) = run_at(FS, &s, &Output::default(), vec![left.clone(), right.clone()]);
-        let g_left = gain_at(&y[0], &left, pre, 5.0, FS);
-        let g_right = gain_at(&y[1], &right, pre, 5.0, FS);
-        assert!(g_left > 8.9, "the hit's side: {g_left:.2}");
+        let g_left = gain_at(&y[0], &left, pre, 1.0, FS);
+        let g_right = gain_at(&y[1], &right, pre, 1.0, FS);
+        assert!(g_left > 8.0, "the hit's side: {g_left:.2}");
         if same {
             assert!((g_right - g_left).abs() < 1e-3, "linked: {g_right:.3} against {g_left:.3}");
         } else {

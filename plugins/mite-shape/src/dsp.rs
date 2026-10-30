@@ -534,13 +534,14 @@ mod tests {
     #[test]
     fn auto_gain_brings_the_loudness_back() {
         let mut s = ShapeSettings::default();
+        s.bands[0].attack_db = -9.0;
         s.bands[0].sustain_db = -9.0;
-        // Steady noise: after its one hit, all of it is sustain.
+        // Bursts of noise, 8 per second: all onset and decay.
         let mut x = 6u32;
         let input: Vec<f32> = (0..96_000)
-            .map(|_| {
+            .map(|i| {
                 x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                ((x >> 8) as f32 / (1u32 << 24) as f32 - 0.5) * 0.5
+                ((x >> 8) as f32 / (1u32 << 24) as f32 - 0.5) * 0.5 * (-((i % 6000) as f32) / 1800.0).exp()
             })
             .collect();
         let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();

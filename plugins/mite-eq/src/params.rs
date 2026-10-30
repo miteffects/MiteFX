@@ -213,7 +213,7 @@ pub const SUSTAIN: ParamSpec = ParamSpec {
     display: ParamDisplay::Number,
 };
 
-/// Transient mode: where the attack phase hands over to the sustain phase.
+/// Transient mode: how long attack lasts.
 pub const TTIME: ParamSpec = ParamSpec {
     id: "ttime",
     name: "Transient Time",
