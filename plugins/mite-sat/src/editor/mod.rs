@@ -4,10 +4,11 @@
 //! adds filled in the accent, the bands' regions tinted), the crossover rail shared with Shape
 //! (`mite_ui::widgets::rail`), and a card per band: the selected one wide, with its model icons
 //! (each a drawing of its own curve), the transfer square (the curve the DSP plays, lit where the
-//! music reaches) and its dials; the others narrow, with a small square, DRIVE and MIX. One band
+//! music reaches), the harmonics a probe tone measures through the band, and its dials; the others narrow, with a small square, DRIVE and MIX. One band
 //! is the same screen with a thin rail and one card across. Everything drawn comes from
 //! `mite_dsp::sat` and the engine's history records.
 
+mod bars;
 mod curve;
 mod glyphs;
 mod spectrum;
@@ -131,6 +132,8 @@ struct Card {
     kind: CardKind,
     rect: Rect,
     square: Rect,
+    /// The harmonics bars (single and wide cards).
+    bars: Option<Rect>,
     /// The model icons (single and wide cards).
     models: Vec<(Model, Rect)>,
     power: Option<Rect>,
@@ -254,6 +257,8 @@ enum Drag {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
     Square(usize),
+    /// A partial on the band's bars (0 = H2).
+    Harmonic(usize, usize),
     Model(usize, Model),
     Power(usize),
     Solo(usize),
@@ -293,6 +298,8 @@ pub struct SatView {
     spectrum: spectrum::Spectrum,
     /// Tape's and Transformer's loops, as traced lately.
     loops: curve::Loops,
+    /// The harmonics of the band whose card shows them.
+    probe: bars::ProbeBars,
     /// Each band's peak going in (linear), operating point and auto gain, eased.
     peak: [f32; BANDS],
     point: [f32; BANDS],
@@ -339,6 +346,7 @@ impl SatView {
             grow: 0.0,
             spectrum: spectrum::Spectrum::new(),
             loops: curve::Loops::default(),
+            probe: bars::ProbeBars::default(),
             peak: [0.0; BANDS],
             point: [0.0; BANDS],
             auto: [1.0; BANDS],
@@ -392,6 +400,18 @@ impl SatView {
     pub fn model_icon(&self, host: &dyn ParamHost, m: Model) -> Option<Rect> {
         let layout = Self::layout(host);
         self.card(host, self.rail.current(&layout))?.models.iter().find(|(o, _)| *o == m).map(|(_, r)| *r)
+    }
+
+    /// The edited band's bars, if its card has them (tests and tools).
+    pub fn bars(&self, host: &dyn ParamHost) -> Option<Rect> {
+        let layout = Self::layout(host);
+        self.card(host, self.rail.current(&layout)).and_then(|c| c.bars)
+    }
+
+    /// The edited band's harmonics as drawn: H2…H9, dB against the strongest partial, and whether
+    /// each is hollow (tests and tools).
+    pub fn harmonics(&self) -> [(f32, bool); 8] {
+        self.probe.shown()
     }
 
     /// The rail's centre line (tests and tools).
@@ -512,6 +532,17 @@ impl SatView {
         curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, auto, peak: self.peak[b], freq }
     }
 
+    /// Re-measures the shown band's harmonics when what they depend on moved, and eases the bars.
+    fn update_probe(&mut self, host: &dyn ParamHost, layout: &Layout, dt: f64) -> bool {
+        let b = self.rail.current(layout);
+        let c = self.curve(host, b);
+        let x = settings(host);
+        let tone_db = x.bands[b].tone_db;
+        let mix = if x.bands[b].bypass { 0.0 } else { x.bands[b].mix };
+        let fs = self.shared.sample_rate.load().max(1.0);
+        self.probe.update(b, &c, tone_db, mix, fs, dt)
+    }
+
     fn os_list(host: &dyn ParamHost) -> Dropdown {
         let current = Self::plain(host, OVERSAMPLING.id).round().max(0.0) as usize;
         let anchor = Rect::new(16.0, FOOTER_TOP + 9.0, 126.0, FOOTER_TOP + 47.0);
@@ -531,11 +562,12 @@ impl SatView {
             let rect = Rect::new(PLOT_X0, y0, PLOT_X1, y1);
             let side = rect.height() - 70.0;
             let square = Rect::new(rect.x0 + 18.0, rect.y0 + 58.0, rect.x0 + 18.0 + side, rect.y0 + 58.0 + side);
-            let (x0, x1) = (square.x1 + 30.0, rect.x1 - 20.0);
+            let bars = Rect::new(square.x1 + 16.0, square.y0, square.x1 + 16.0 + 320.0, square.y1);
+            let (x0, x1) = (bars.x1 + 16.0, rect.x1 - 12.0);
             let step = (x1 - x0) / DIALS.len() as f64;
-            let dials = (0..DIALS.len()).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), square.center().y - 4.0), if k == 0 { 104.0 } else { 76.0 })).collect();
+            let dials = (0..DIALS.len()).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), square.center().y - 4.0), if k == 0 { 92.0 } else { 64.0 })).collect();
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
-            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), solo: None, mute: None, remove: None, dials }];
+            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), solo: None, mute: None, remove: None, dials }];
         }
         let current = self.rail.current(layout);
         let narrow = (PLOT_W - CARD_WIDE - CARD_GAP * (n - 1) as f64) / (n - 1) as f64;
@@ -552,19 +584,23 @@ impl SatView {
                     let button = |k: f64| Rect::new(rect.x1 - 10.0 - 32.0 * (k + 1.0) - 6.0 * k, rect.y0 + 10.0, rect.x1 - 10.0 - 32.0 * k - 6.0 * k, rect.y0 + 42.0);
                     let side = rect.height() - 62.0;
                     let square = Rect::new(rect.x0 + 10.0, rect.y0 + 52.0, rect.x0 + 10.0 + side, rect.y0 + 52.0 + side);
-                    // DRIVE large on the left of the dial area, the other four in a 2×2 grid.
+                    // The bars along the top of the right side, under them DRIVE large on the left
+                    // and the other four in a 2×2 grid.
                     let (ax0, ax1) = (square.x1 + 12.0, rect.x1 - 8.0);
+                    let bars = Rect::new(ax0, square.y0 + 18.0, ax1, square.y0 + 106.0);
                     let col = (ax1 - ax0) / 3.0;
-                    let cy = square.center().y - 10.0;
-                    let mut dials = vec![(Point::new(ax0 + col * 0.5, cy), 92.0)];
+                    let (top, step) = (bars.y1 + 34.0, 80.0);
+                    let cy = top + step / 2.0;
+                    let mut dials = vec![(Point::new(ax0 + col * 0.5, cy - 4.0), 84.0)];
                     for k in 0..4 {
-                        dials.push((Point::new(ax0 + col * (1.5 + (k % 2) as f64), cy - 52.0 + 104.0 * (k / 2) as f64), 60.0));
+                        dials.push((Point::new(ax0 + col * (1.5 + (k % 2) as f64), top + step * (k / 2) as f64), 52.0));
                     }
                     Card {
                         band,
                         kind: CardKind::Wide,
                         rect,
                         square,
+                        bars: Some(bars),
                         models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 36.0, 32.0, 40.0),
                         power: Some(button(1.0)),
                         solo: Some(button(3.0)),
@@ -579,7 +615,7 @@ impl SatView {
                     // Two small dials, side by side when there is room.
                     let top = square.y1 + 30.0;
                     let dials = if w >= 216.0 { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0 + 104.0, top), 34.0)] } else { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0, top + 44.0), 34.0)] };
-                    Card { band, kind: CardKind::Narrow, rect, square, models: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
+                    Card { band, kind: CardKind::Narrow, rect, square, bars: None, models: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
                 }
             })
             .collect()
@@ -695,6 +731,13 @@ impl SatView {
             };
             let lit = if bypassed { 0.45 } else { 1.0 } * alpha;
             curve::draw(cx, card.square, &self.curve(cx.host, b), ghost, card.kind != CardKind::Narrow, lit, &self.loops);
+            if let Some(r) = card.bars {
+                let focus = match self.hot {
+                    Some(Hot::Harmonic(hb, i)) if hb == b => Some(i),
+                    _ => None,
+                };
+                self.probe.draw(cx, r, focus, lit);
+            }
         }
         for k in &self.knobs {
             k.draw(cx);
@@ -805,6 +848,7 @@ impl SatView {
                 let (drive, bias, _) = values(b);
                 return Help::default().text("Drive ").slot(format!("{drive:.1} dB"), "36.0 dB").text("  bias ").slot(format!("{bias:+.0} %"), "+100 %").text(" — drag up for more drive, across for bias; Alt-drag: tone; wheel: drive; double-click resets.");
             }
+            Some(Hot::Harmonic(_, i)) => return self.probe.help(i),
             Some(Hot::Model(_, m)) => return Help::default().text(format!("{} — {}", m.name(), model_words(m))),
             Some(Hot::Power(b)) => return Help::default().text(if Self::on(host, &band_id(b, B_BYPASS.id)) { "The band passes clean — click to saturate it again." } else { "Band on — click to let it pass clean (still heard)." }),
             Some(Hot::Solo(_)) => return Help::default().text("Solo — hear only this band (S)"),
@@ -844,7 +888,7 @@ impl SatView {
         if values(b).0 == 0.0 {
             Help::default().text("Clean: drag the curve up, or turn DRIVE, to saturate. Pull a crossover in from either end of the strip to saturate bands apart.")
         } else {
-            Help::default().text("Lit: where the music reaches on the curve. Crimson in the spectrum: the harmonics it adds.")
+            Help::default().text("Lit: where the music reaches on the curve. The bars: the harmonics it makes. Crimson in the spectrum: what it adds.")
         }
     }
 
@@ -903,6 +947,9 @@ impl SatView {
             }
             if card.square.contains(p) {
                 return Some(Hot::Square(card.band));
+            }
+            if let Some(i) = card.bars.and_then(|r| bars::hit(r, p)) {
+                return Some(Hot::Harmonic(card.band, i));
             }
             if let Some(&(m, _)) = card.models.iter().find(|(_, r)| r.contains(p)) {
                 return Some(Hot::Model(card.band, m));
@@ -1022,7 +1069,7 @@ impl SatView {
                 self.rail.remove_band(host, b);
                 true
             }
-            Some(Hot::Card(b)) => {
+            Some(Hot::Card(b) | Hot::Harmonic(b, _)) => {
                 self.rail.selected = b;
                 true
             }
@@ -1095,7 +1142,7 @@ impl SatView {
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => self.press(host, pos, mods),
             UiEvent::PointerDown { pos, button: MouseButton::Right, .. } => match self.hot_at(host, pos) {
-                Some(Hot::Rail(RailHot::Region(b)) | Hot::Card(b) | Hot::Square(b)) => {
+                Some(Hot::Rail(RailHot::Region(b)) | Hot::Card(b) | Hot::Square(b) | Hot::Harmonic(b, _)) => {
                     self.menu = BandMenu::open(&mut self.rail, host, b, pos, self.clipboard.is_some(), (DISPLAY_TOP, FOOTER_TOP));
                     true
                 }
@@ -1261,8 +1308,9 @@ impl View for SatView {
             }
             moved |= (self.peak[b] - before.0).abs() > 1e-4 || (self.point[b] - before.1).abs() > 1e-4 || (self.auto[b] - before.2).abs() > 1e-4;
         }
+        let probe = self.update_probe(host, &layout, dt);
         let spectrum = self.spectrum.update(&self.shared, dt);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || moved || grew || spectrum || self.busy() || self.meters.iter().any(|&m| m > -149.0)
+        fresh || flowing || moved || grew || probe || spectrum || self.busy() || self.meters.iter().any(|&m| m > -149.0)
     }
 }

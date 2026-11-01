@@ -6,7 +6,8 @@
 //! SNAPSHOT_VARIANT picks the state: default, clean, fold, hard, rectify, tape, transformer,
 //! bypass, delta,
 //! oversampling, presets, ghost; several bands: bands (three), six, solo, mute, menu, pull (a
-//! crossover being pulled in), merge (one dragged onto its neighbour). SNAPSHOT_HOVER=x,y moves
+//! crossover being pulled in), merge (one dragged onto its neighbour), hollow (a band whose
+//! harmonics all lie above Nyquist). SNAPSHOT_HOVER=x,y moves
 //! the pointer there.
 
 #[path = "common/music.rs"]
@@ -53,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Several bands, each with its own model.
     let bands: &[(f32, Model, f32, f32)] = match variant.as_str() {
         "bands" | "solo" | "mute" | "menu" | "pull" | "merge" => &[(180.0, Model::Soft, 9.0, 0.0), (2400.0, Model::Fold, 15.0, 0.0)],
-        "six" => &[(90.0, Model::Diode, 18.0, 0.0), (350.0, Model::Soft, 10.0, 0.0), (1200.0, Model::Hard, 20.0, 0.0), (4000.0, Model::Fold, 14.0, 0.0), (11_000.0, Model::Rectify, 12.0, 0.0)],
+        "six" | "hollow" => &[(90.0, Model::Diode, 18.0, 0.0), (350.0, Model::Soft, 10.0, 0.0), (1200.0, Model::Hard, 20.0, 0.0), (4000.0, Model::Fold, 14.0, 0.0), (11_000.0, Model::Rectify, 12.0, 0.0)],
         _ => &[],
     };
     for (k, &(f, m, d, b)) in bands.iter().enumerate() {
@@ -93,6 +94,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut view = SatView::new(shared.clone());
     if v("six") {
         view.select(3);
+    }
+    if v("hollow") {
+        view.select(5);
     }
     for _ in 0..30 {
         view.tick(&host);

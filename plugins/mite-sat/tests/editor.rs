@@ -255,3 +255,68 @@ fn the_layout_settles_and_stays_put() {
     assert!(seen.windows(2).all(|w| w[1] <= w[0]), "the rail only rises: {seen:?}");
     assert!(seen.windows(2).rev().take(5).all(|w| w[0] == w[1]), "and rests");
 }
+
+/// Ticks long enough for the bars to measure and settle.
+fn settle_bars(view: &mut SatView, host: &MemoryParamHost) -> [(f32, bool); 8] {
+    // The bars fall with a 300 ms time constant, from as high as 0 dB.
+    for _ in 0..100 {
+        view.tick(host);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    view.harmonics()
+}
+
+fn shared_at(fs: f32) -> (SatView, MemoryParamHost) {
+    let shared = Arc::new(SatShared::new());
+    shared.sample_rate.store(fs);
+    let dir = std::env::temp_dir().join(format!("mitefx-sat-bars-{}", std::process::id()));
+    let mut view = SatView::new(shared).with_preset_dir(dir);
+    let host = memory_host();
+    draw(&mut view, &host);
+    (view, host)
+}
+
+#[test]
+fn the_bars_show_what_the_band_does() {
+    let (mut view, host) = shared_at(48_000.0);
+    // Clean: no drive, no harmonics.
+    assert!(settle_bars(&mut view, &host).iter().all(|&(db, _)| db < -71.0), "drive 0 makes nothing");
+    // Soft is symmetric: odd harmonics only.
+    host.set_plain(&band_id(0, B_MODEL.id), Model::Soft.index() as f32);
+    host.set_plain(&band_id(0, B_DRIVE.id), 18.0);
+    let bars = settle_bars(&mut view, &host);
+    assert!(bars[1].0 > -40.0, "H3 {}", bars[1].0);
+    assert!(bars[0].0 < -71.0 && bars[2].0 < -71.0, "H2 {} H4 {}", bars[0].0, bars[2].0);
+    // Biased, the even ones arrive.
+    host.set_plain(&band_id(0, B_BIAS.id), 50.0);
+    assert!(settle_bars(&mut view, &host)[0].0 > -40.0, "biased H2");
+    // Bypassed: clean again.
+    host.set_plain(&band_id(0, B_BYPASS.id), 1.0);
+    assert!(settle_bars(&mut view, &host).iter().all(|&(db, _)| db < -71.0), "bypass makes nothing");
+}
+
+#[test]
+fn a_harmonic_above_nyquist_is_hollow() {
+    let (mut view, host) = shared_at(48_000.0);
+    host.set_plain(&cross_id(0, X_ON.id), 1.0);
+    host.set_plain(&cross_id(0, X_FREQ.id), 6000.0);
+    host.set_plain(&band_id(1, B_DRIVE.id), 18.0);
+    view.select(1);
+    draw(&mut view, &host);
+    // Band 2's centre is √(6 k · 20 k) ≈ 11 kHz: H2 (22 kHz) is under 24 kHz, H3 is not.
+    let bars = settle_bars(&mut view, &host);
+    assert!(!bars[0].1);
+    assert!(bars[1..].iter().all(|b| b.1), "{bars:?}");
+}
+
+#[test]
+fn the_bars_read_and_never_write() {
+    let (mut view, host) = shared_at(48_000.0);
+    host.set_plain(&cross_id(0, X_ON.id), 1.0);
+    draw(&mut view, &host);
+    let r = view.bars(&host).expect("the selected card has bars");
+    let before = plain(&host, &band_id(0, B_DRIVE.id));
+    drag(&mut view, &host, r.center(), r.center() + (0.0, -40.0), MODS);
+    assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), before);
+    assert_eq!(view.selected(), 0);
+}

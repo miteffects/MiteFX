@@ -413,7 +413,9 @@ where it peaks either way.
   is lit in the accent. Hovering one draws its curve as a ghost in the square (never writes the
   parameter); clicking picks it (a 20 ms crossfade between the curves).
 - Power button (top right): the band passes clean but is still heard (`b{N}_bypass`).
-- Dials: DRIVE (104 px; 0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT.
+- Harmonics: H2–H9 bars, read only. Hover: the help strip gives the partial's level against the
+  strongest and whether it is even, odd or above Nyquist (hollow). Clicking selects the band.
+- Dials: DRIVE (92 px; 0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT.
 
 ### Footer
 

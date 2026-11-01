@@ -136,8 +136,11 @@ x 1180–1280, as in Shape.
   a figure of eight.
   - Drag up/down: drive. Drag sideways: bias. Shift: fine. Alt-drag up/down: tone. Wheel: drive.
     Double-click: drive and bias back to their defaults.
-- **Harmonics** (slice 4): H2–H9 bars, measured by a probe tone through the band's real
-  processor at its live operating point. A harmonic above the base Nyquist is hollow.
+- **Harmonics** (slice 4): H2–H9 bars, measured by a probe tone through the band's own code
+  (`probe_harmonics`) at the band's centre, its peak and the live operating point, 0 to −72 dB
+  against the strongest partial (Rectify gives the fundamental away). A harmonic above the base
+  Nyquist is hollow. With no music the probe plays at −12 dBFS and the bars are dim. Single and
+  wide cards only; on the wide card they sit above the dials.
 - **Dials**: DRIVE (0…36 dB; 0–12 dB takes half the travel), BIAS (±100 %), TONE (±12 dB),
   MIX, OUTPUT; DYN when dynamics arrive (slice 6).
 - Narrow cards (other bands): number badge, S and M, a transfer square of their own (lit where
@@ -181,7 +184,7 @@ the editor does not show it.
 2. Multiband (done 2026-10-26): the rail, cards and band editing shared with Shape
    (`mite_ui::widgets::rail`).
 3. Tape and Transformer (done 2026-10-26): `mite_dsp::hysteresis` (see §1.3).
-4. Harmonics probe and bars.
+4. Harmonics probe and bars (done 2026-11-01).
 5. Per-band stereo modes.
 6. Per-band dynamics.
 7. Modulation matrix (shared with Delay, Filter and Mod).

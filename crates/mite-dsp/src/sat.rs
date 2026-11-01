@@ -367,6 +367,17 @@ impl Tilt {
         (num.0.hypot(num.1)) / den.0.hypot(den.1)
     }
 
+    /// `z` (re, im) through the section at `f` Hz: gain and phase.
+    fn apply(&self, f: f64, fs: f64, z: (f64, f64)) -> (f64, f64) {
+        let w = std::f64::consts::TAU * f / fs;
+        let (c, s) = (w.cos(), w.sin());
+        let (nr, ni) = (f64::from(self.b0) + f64::from(self.b1) * c, -f64::from(self.b1) * s);
+        let (dr, di) = (1.0 + f64::from(self.a1) * c, -f64::from(self.a1) * s);
+        let d = dr * dr + di * di;
+        let (hr, hi) = ((nr * dr + ni * di) / d, (ni * dr - nr * di) / d);
+        (z.0 * hr - z.1 * hi, z.0 * hi + z.1 * hr)
+    }
+
     #[inline]
     fn process(&self, state: &mut f32, x: f32) -> f32 {
         let y = self.b0 * x + *state;
@@ -447,6 +458,124 @@ pub fn magnet_loop(model: Model, amp: f32, drive_db: f32, point: f32, freq: f32,
     let x: Vec<f32> = (0..2 * n).map(|i| amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32).collect();
     let y = magnet_response(model, &x, drive_db, point, fs);
     x[n..].iter().copied().zip(y[n..].iter().copied()).collect()
+}
+
+// ---- Harmonics probe ------------------------------------------------------------------------
+
+/// The partials the probe reads: the fundamental and H2…H9.
+pub const PARTIALS: usize = 9;
+/// Samples a cycle through a static curve (cheap, and fine enough for a fold at full drive).
+const PROBE_STATIC: usize = 1024;
+/// Through a hysteresis core each sample is a solve, and the core is rate independent: enough
+/// samples to resolve H9, and for the emphasis to see its corner (at least this rate).
+const PROBE_MAGNET: (usize, usize) = (64, 256);
+const PROBE_MAGNET_FS: f32 = 16_000.0;
+/// A biased core's loop takes up to about 32 cycles to find its centre, an unbiased one 2: it runs
+/// until a cycle repeats the last within this share of the band's swing, or this many cycles.
+const PROBE_SETTLED: f32 = 2e-4;
+const PROBE_CYCLES: usize = 48;
+
+/// The band a probe tone goes through.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Probe {
+    pub model: Model,
+    /// The tone's amplitude going in, linear.
+    pub amp: f32,
+    pub drive_db: f32,
+    /// The live operating point ([`bias_point`], or where Tube has drifted to).
+    pub point: f32,
+    /// The tone, Hz (the band's centre).
+    pub freq: f32,
+    pub tone_db: f32,
+    /// The tilt's pivot, Hz ([`tone_pivot`]).
+    pub pivot: f32,
+    /// The band's mix, 0…1 (0 when it is bypassed).
+    pub mix: f32,
+    /// The base sample rate.
+    pub fs: f32,
+}
+
+/// What a probe measured: each partial's amplitude coming out of the band, before its gains.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Harmonics {
+    /// H1…H9, linear.
+    pub amp: [f32; PARTIALS],
+    /// Above the base Nyquist: the curve makes it at the high rate, the way down removes it.
+    pub hollow: [bool; PARTIALS],
+}
+
+impl Harmonics {
+    /// Partial `i` (0 = H1) in dB against the strongest (Rectify trades H1 for H2, so the
+    /// fundamental cannot be the reference). Silence reads −∞.
+    pub fn db(&self, i: usize) -> f32 {
+        let top = self.amp.iter().copied().fold(0.0, f32::max);
+        if top <= 0.0 || self.amp[i] <= 0.0 {
+            return f32::NEG_INFINITY;
+        }
+        20.0 * (self.amp[i] / top).log10()
+    }
+}
+
+/// Sends a sine through the band's own code (the curve or core and emphasis, then the tone and
+/// the dry blend, as sat-brief §1.1) and reads H1…H9, phase included. It runs at a rate of its
+/// own, well above every partial, so it measures what the curve makes rather than the aliases
+/// of one oversampling factor. Tube's drift is held at `point` (its follower is far slower than
+/// a cycle above a few hundred Hz). For the editor; allocates.
+pub fn probe_harmonics(p: &Probe) -> Harmonics {
+    let share = f64::from(engagement(p.drive_db)) * f64::from(p.mix);
+    let mut out = Harmonics { amp: [0.0; PARTIALS], hollow: std::array::from_fn(|i| (i + 1) as f32 * p.freq >= p.fs / 2.0) };
+    let n = match p.model.magnet() {
+        Some(_) => ((PROBE_MAGNET_FS / p.freq.max(1.0)).ceil() as usize).clamp(PROBE_MAGNET.0, PROBE_MAGNET.1),
+        None => PROBE_STATIC,
+    };
+    let sine = |i: usize| p.amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32;
+    let g = crate::db_to_gain(p.drive_db);
+    let wet: Vec<f32> = if let Some(w) = p.model.magnet() {
+        let em = emphasis(w, p.freq * n as f32);
+        let mut magnet = Magnet::default();
+        let mut last = vec![0.0f32; n];
+        let mut cycle = vec![0.0f32; n];
+        for c in 0..PROBE_CYCLES {
+            for (i, y) in cycle.iter_mut().enumerate() {
+                *y = magnet.process(w, &em, g * sine(i), p.point);
+            }
+            let swing = cycle.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            let moved = cycle.iter().zip(&last).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            std::mem::swap(&mut cycle, &mut last);
+            if c > 0 && moved <= PROBE_SETTLED * swing {
+                break;
+            }
+        }
+        last
+    } else {
+        let rest = curve(p.model, p.point);
+        (0..n).map(|i| curve(p.model, g * sine(i) + p.point) - rest).collect()
+    };
+    let tilt = Tilt::new(p.tone_db, p.pivot, p.fs);
+    let (fs, freq) = (f64::from(p.fs), f64::from(p.freq));
+    for (i, a) in out.amp.iter_mut().enumerate() {
+        let h = i + 1;
+        let w = std::f64::consts::TAU * h as f64 / n as f64;
+        let (mut re, mut im) = wet.iter().enumerate().fold((0.0f64, 0.0f64), |(re, im), (k, &v)| {
+            let th = w * k as f64;
+            (re + f64::from(v) * th.cos(), im - f64::from(v) * th.sin())
+        });
+        re *= 2.0 / n as f64;
+        im *= 2.0 / n as f64;
+        // The tone tilts what is left after the way down; what the way down removes never meets it.
+        if !out.hollow[i] {
+            (re, im) = tilt.apply(h as f64 * freq, fs, (re, im));
+        }
+        // y = x + a·HP₅(wet − x), the dry band being the sine itself (−j·A in this transform).
+        let dry = if h == 1 { f64::from(p.amp) } else { 0.0 };
+        im += dry;
+        let f = h as f64 * freq;
+        let d = f * f + HP_HZ * HP_HZ;
+        let (hr, hi) = (f * f / d, f * HP_HZ / d);
+        (re, im) = ((re * hr - im * hi) * share, (re * hi + im * hr) * share - dry);
+        *a = re.hypot(im) as f32;
+    }
+    out
 }
 
 // ---- Engine --------------------------------------------------------------------------------
@@ -1299,6 +1428,112 @@ mod tests {
                 u += h;
             }
         }
+    }
+
+    #[test]
+    fn the_probe_reads_what_the_engine_plays() {
+        // Every model through the engine at 8×, tone and mix included: the probe's partials are
+        // the output's, within 0.25 dB down to −60 dB under the strongest. Tube at the point the
+        // engine reports.
+        let freq = K as f32 / N as f32 * FS;
+        for m in Model::ALL {
+            for (amp, drive, bias, tilt, mix) in [(0.25f32, 12.0f32, 0.0f32, 0.0f32, 1.0f32), (0.1, 24.0, 0.4, 6.0, 1.0), (0.3, 9.0, -0.3, -8.0, 0.6), (0.2, 3.0, 0.0, 0.0, 1.0)] {
+                let mut s = band(m, drive);
+                s.bands[0].bias = bias;
+                s.bands[0].tone_db = tilt;
+                s.bands[0].mix = mix;
+                let mut sat = Saturator::new(FS, 8, &s);
+                let x = tone(32 * N, amp, K);
+                let mut y = x.clone();
+                let mut d = vec![0.0; x.len()];
+                // The point eased over the last blocks, as the editor reads it (one block's report
+                // lands anywhere on the drift's ripple within a cycle).
+                let mut point = bias_point(bias);
+                for (a, b) in y.chunks_mut(333).zip(d.chunks_mut(333)) {
+                    point += (sat.process(&mut [a], &mut [b], &s).point[0] - point) * 0.2;
+                }
+                let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, point, freq, tone_db: tilt, pivot: TONE_PIVOT, mix, fs: FS });
+                let want: [f64; PARTIALS] = std::array::from_fn(|i| harmonic(&y, i + 1));
+                let top = want.iter().copied().fold(0.0, f64::max);
+                for (i, &w) in want.iter().enumerate() {
+                    if w < top * 1e-3 {
+                        continue;
+                    }
+                    let db = 20.0 * (f64::from(got.amp[i]) / w).log10();
+                    assert!(db.abs() < 0.25, "{m:?} amp {amp} drive {drive} bias {bias} tone {tilt} mix {mix}: H{} {db:.3} dB off", i + 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_probe_follows_tape_and_transformer_across_the_band() {
+        // Their emphasis makes them depend on the frequency: a low and a high tone through the
+        // engine, partials against the probe's (those the oversampler's filter passes flat).
+        for m in [Model::Tape, Model::Transformer] {
+            for k in [6usize, 40, 377, 1009] {
+                let freq = k as f32 / N as f32 * FS;
+                for (amp, drive, bias) in [(0.2f32, 12.0f32, 0.0f32), (0.1, 24.0, 0.4)] {
+                    let mut s = band(m, drive);
+                    s.bands[0].bias = bias;
+                    let mut sat = Saturator::new(FS, 8, &s);
+                    let (y, _) = run(&mut sat, &tone(32 * N, amp, k), &s, 333);
+                    let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, point: bias_point(bias), freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+                    let tail = &y[y.len() - N..];
+                    let read = |h: usize| {
+                        let w = std::f64::consts::TAU * (h * k) as f64 / N as f64;
+                        let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+                        2.0 * f64::hypot(re, im) / N as f64
+                    };
+                    let top = (1..=PARTIALS).filter(|&h| !got.hollow[h - 1]).map(read).fold(0.0, f64::max);
+                    for h in 1..=PARTIALS {
+                        // Above 0.9 × Nyquist the way down is rolling off (the probe reads the curve).
+                        if h as f32 * freq > 0.9 * FS / 2.0 || read(h) < top * 1e-2 {
+                            continue;
+                        }
+                        let db = 20.0 * (f64::from(got.amp[h - 1]) / read(h)).log10();
+                        assert!(db.abs() < 0.5, "{m:?} bin {k} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "prints what a probe costs"]
+    fn probe_cost() {
+        for m in Model::ALL {
+            for (freq, bias) in [(49.0f32, 0.0f32), (800.0, 0.0), (1043.0, 0.8), (9000.0, 0.8)] {
+                let p = Probe { model: m, amp: 0.3, drive_db: 24.0, point: bias_point(bias), freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
+                let t = std::time::Instant::now();
+                for _ in 0..20 {
+                    std::hint::black_box(probe_harmonics(&p));
+                }
+                println!("{m:?} {freq} Hz bias {bias}: {:.0} µs", t.elapsed().as_secs_f64() * 1e6 / 20.0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_probe_marks_what_the_way_down_removes() {
+        // A 9 kHz tone at 48 kHz: H2 (18 kHz) is heard, H3 (27 kHz) is not, though the curve makes it.
+        let p = Probe { model: Model::Soft, amp: 0.5, drive_db: 12.0, point: 0.0, freq: 9000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
+        let h = probe_harmonics(&p);
+        assert_eq!(&h.hollow[..3], &[false, false, true]);
+        assert!(h.amp[2] > 0.01, "the curve makes H3: {}", h.amp[2]);
+    }
+
+    #[test]
+    fn a_clean_band_probes_clean() {
+        // Drive 0 or mix 0 is the band itself: the tone and nothing else, at its own level.
+        for (drive, mix) in [(0.0f32, 1.0f32), (18.0, 0.0)] {
+            let h = probe_harmonics(&Probe { model: Model::Tube, amp: 0.5, drive_db: drive, point: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix, fs: FS });
+            assert!((h.amp[0] - 0.5).abs() < 1e-6, "H1 {}", h.amp[0]);
+            assert!(h.amp[1..].iter().all(|&a| a == 0.0));
+        }
+        // Rectify trades the fundamental for the octave: H2 is the reference.
+        let h = probe_harmonics(&Probe { model: Model::Rectify, amp: 0.5, drive_db: 14.0, point: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+        assert_eq!(h.db(1), 0.0);
     }
 
     #[test]
