@@ -8,7 +8,7 @@ use std::sync::Arc;
 use mite_dsp::sat::Model;
 use mite_sat::editor::{memory_host, SatView};
 use mite_dsp::sat::Layout;
-use mite_sat::params::{band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
+use mite_sat::params::{band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
 use mite_sat::SatShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -319,4 +319,21 @@ fn the_bars_read_and_never_write() {
     drag(&mut view, &host, r.center(), r.center() + (0.0, -40.0), MODS);
     assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), before);
     assert_eq!(view.selected(), 0);
+}
+
+#[test]
+fn the_stereo_list_sets_the_band_and_a_narrow_card_has_none() {
+    let (mut view, host) = shared_at(48_000.0);
+    let button = view.band_stereo(&host, 0).expect("the card has one");
+    click(&mut view, &host, button.center());
+    let rows = view.stereo_rows();
+    assert_eq!(rows.len(), 4);
+    click(&mut view, &host, rows[2].center());
+    assert_eq!(plain(&host, &band_id(0, B_STEREO.id)), 2.0);
+    assert!(view.stereo_rows().is_empty());
+    assert_eq!(mite_sat::editor::settings(&host).bands[0].stereo, mite_dsp::sat::StereoMode::Side);
+    host.set_plain(&cross_id(0, X_ON.id), 1.0);
+    view.select(0);
+    draw(&mut view, &host);
+    assert!(view.band_stereo(&host, 1).is_none(), "a narrow card only shows it");
 }

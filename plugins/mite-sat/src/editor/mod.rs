@@ -137,6 +137,7 @@ struct Card {
     /// The model icons (single and wide cards).
     models: Vec<(Model, Rect)>,
     power: Option<Rect>,
+    stereo: Option<Rect>,
     solo: Option<Rect>,
     mute: Option<Rect>,
     remove: Option<Rect>,
@@ -145,9 +146,9 @@ struct Card {
 }
 
 impl Card {
-    fn buttons(&self) -> [(Option<Rect>, Hot); 4] {
+    fn buttons(&self) -> [(Option<Rect>, Hot); 5] {
         let b = self.band;
-        [(self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b))]
+        [(self.stereo, Hot::Stereo(b)), (self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b))]
     }
 }
 
@@ -232,6 +233,7 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::sat::SatSettings {
             model: Model::from_index(p(&band_id(b, B_MODEL.id)).round().max(0.0) as usize),
             drive_db: p(&band_id(b, B_DRIVE.id)),
             bias: p(&band_id(b, B_BIAS.id)) / 100.0,
+            stereo: mite_dsp::sat::StereoMode::from_index(p(&band_id(b, B_STEREO.id)).round().max(0.0) as usize),
             tone_db: p(&band_id(b, B_TONE.id)),
             mix: p(&band_id(b, B_MIX.id)) / 100.0,
             out_db: p(&band_id(b, B_OUT.id)),
@@ -261,6 +263,7 @@ enum Hot {
     Harmonic(usize, usize),
     Model(usize, Model),
     Power(usize),
+    Stereo(usize),
     Solo(usize),
     Mute(usize),
     Remove(usize),
@@ -279,6 +282,8 @@ pub struct SatView {
     hot: Option<Hot>,
     drag: Option<Drag>,
     os_menu: Option<Dropdown>,
+    /// The stereo list and the band it is for.
+    stereo_menu: Option<(usize, Dropdown)>,
     os_hit: Rect,
     menu: Option<BandMenu>,
     /// Copied band settings (`copy_band`'s order).
@@ -333,6 +338,7 @@ impl SatView {
             hot: None,
             drag: None,
             os_menu: None,
+            stereo_menu: None,
             os_hit: Rect::ZERO,
             menu: None,
             clipboard: None,
@@ -412,6 +418,16 @@ impl SatView {
     /// each is hollow (tests and tools).
     pub fn harmonics(&self) -> [(f32, bool); 8] {
         self.probe.shown()
+    }
+
+    /// Band `b`'s stereo button, if its card has one (tests and tools).
+    pub fn band_stereo(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).and_then(|c| c.stereo)
+    }
+
+    /// The open stereo list's rows, Stereo first (tests and tools).
+    pub fn stereo_rows(&self) -> Vec<Rect> {
+        self.stereo_menu.as_ref().map(|(_, l)| l.item_rects()).unwrap_or_default()
     }
 
     /// The rail's centre line (tests and tools).
@@ -567,7 +583,7 @@ impl SatView {
             let step = (x1 - x0) / DIALS.len() as f64;
             let dials = (0..DIALS.len()).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), square.center().y - 4.0), if k == 0 { 92.0 } else { 64.0 })).collect();
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
-            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), solo: None, mute: None, remove: None, dials }];
+            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 44.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
         }
         let current = self.rail.current(layout);
         let narrow = (PLOT_W - CARD_WIDE - CARD_GAP * (n - 1) as f64) / (n - 1) as f64;
@@ -603,6 +619,7 @@ impl SatView {
                         bars: Some(bars),
                         models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 36.0, 32.0, 40.0),
                         power: Some(button(1.0)),
+                        stereo: Some(Rect::new(rect.x0 + 372.0, rect.y0 + 10.0, rect.x0 + 404.0, rect.y0 + 42.0)),
                         solo: Some(button(3.0)),
                         mute: Some(button(2.0)),
                         remove: Some(button(0.0)),
@@ -615,7 +632,7 @@ impl SatView {
                     // Two small dials, side by side when there is room.
                     let top = square.y1 + 30.0;
                     let dials = if w >= 216.0 { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0 + 104.0, top), 34.0)] } else { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0, top + 44.0), 34.0)] };
-                    Card { band, kind: CardKind::Narrow, rect, square, bars: None, models: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
+                    Card { band, kind: CardKind::Narrow, rect, square, bars: None, models: Vec::new(), power: None, stereo: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
                 }
             })
             .collect()
@@ -711,6 +728,11 @@ impl SatView {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), !bypassed, theme.accent);
                 glyphs::draw(cx.scene, glyphs::POWER, r.center(), r.height() * 0.5, ink, 1.8);
             }
+            let mode = Self::plain(cx.host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
+            if let Some(r) = card.stereo {
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), mode != 0, theme.accent);
+                glyphs::draw_stereo(cx.scene, mode, r.center(), r.height() * 0.68, ink);
+            }
             if let Some(r) = card.solo {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), solo, theme.needle);
                 let size = if r.height() > 28.0 { 13.0 } else { 11.0 };
@@ -737,6 +759,9 @@ impl SatView {
                     _ => None,
                 };
                 self.probe.draw(cx, r, focus, lit);
+            }
+            if card.kind == CardKind::Narrow && mode != 0 {
+                glyphs::draw_stereo(cx.scene, mode, Point::new(card.square.x0 + 13.0, card.square.y0 + 11.0), 16.0, theme.accent.multiply_alpha(alpha));
             }
         }
         for k in &self.knobs {
@@ -849,6 +874,10 @@ impl SatView {
                 return Help::default().text("Drive ").slot(format!("{drive:.1} dB"), "36.0 dB").text("  bias ").slot(format!("{bias:+.0} %"), "+100 %").text(" — drag up for more drive, across for bias; Alt-drag: tone; wheel: drive; double-click resets.");
             }
             Some(Hot::Harmonic(_, i)) => return self.probe.help(i),
+            Some(Hot::Stereo(b)) => {
+                let i = Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
+                return Help::default().text(format!("{} — {}", B_STEREO.choices[i.min(3)], stereo_words(i)));
+            }
             Some(Hot::Model(_, m)) => return Help::default().text(format!("{} — {}", m.name(), model_words(m))),
             Some(Hot::Power(b)) => return Help::default().text(if Self::on(host, &band_id(b, B_BYPASS.id)) { "The band passes clean — click to saturate it again." } else { "Band on — click to let it pass clean (still heard)." }),
             Some(Hot::Solo(_)) => return Help::default().text("Solo — hear only this band (S)"),
@@ -973,7 +1002,7 @@ impl SatView {
         let b = self.rail.current(&layout);
         match key {
             Key::Escape => {
-                if self.os_menu.take().is_some() || self.menu.take().is_some() || self.rail.cancel() {
+                if self.os_menu.take().is_some() || self.stereo_menu.take().is_some() || self.menu.take().is_some() || self.rail.cancel() {
                     return true;
                 }
                 self.rail.clear_solo(host)
@@ -1077,6 +1106,14 @@ impl SatView {
                 self.os_menu = Some(Self::os_list(host));
                 true
             }
+            Some(Hot::Stereo(b)) => {
+                self.rail.selected = b;
+                if let Some(r) = self.card(host, b).and_then(|c| c.stereo) {
+                    let current = Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
+                    self.stereo_menu = Some((b, Dropdown::new(r, B_STEREO.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(150.0)));
+                }
+                true
+            }
             None => false,
         }
     }
@@ -1096,6 +1133,21 @@ impl SatView {
                     Self::set(host, OVERSAMPLING.id, i as f32);
                 }
                 DropdownEvent::Closed => self.os_menu = None,
+            }
+            return true;
+        }
+        if let Some((b, list)) = &mut self.stereo_menu {
+            if let UiEvent::PointerMove { pos, .. } = *event {
+                self.pointer = Some(pos);
+            }
+            let b = *b;
+            match list.event(event) {
+                DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) => {
+                    self.stereo_menu = None;
+                    Self::set(host, &band_id(b, B_STEREO.id), i as f32);
+                }
+                DropdownEvent::Closed => self.stereo_menu = None,
             }
             return true;
         }
@@ -1219,6 +1271,15 @@ fn knob_words(id: &str) -> &'static str {
     }
 }
 
+fn stereo_words(mode: usize) -> &'static str {
+    match mode {
+        1 => "only the middle of the image saturates, the sides stay clean. Click to choose",
+        2 => "only the sides saturate, the middle stays clean. Click to choose",
+        3 => "the middle and the sides saturate each on their own. Click to choose",
+        _ => "left and right saturate each on their own. Click to choose",
+    }
+}
+
 impl View for SatView {
     fn logical_size(&self) -> (f64, f64) {
         (WIDTH, HEIGHT)
@@ -1242,6 +1303,9 @@ impl View for SatView {
         self.draw_states(cx, l.spectrum);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
         self.draw_footer(cx);
+        if let Some((_, list)) = &self.stereo_menu {
+            list.draw(cx, theme.accent, |scene, i, at, ink| glyphs::draw_stereo(scene, i, at + (11.0, 12.0), 22.0, ink));
+        }
         if let Some(menu) = &self.menu {
             menu.draw(cx, (theme.text_hi, rail_glyph::CROSS));
         }

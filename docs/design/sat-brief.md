@@ -23,8 +23,8 @@ Neutral settings null: drive 0 dB, band bypass, band mix 0 or global mix 0 are t
 ### 1.1 The band signal path (what the visuals draw)
 
 ```
-u      = g·x + b            g = drive (0…36 dB), b = bias (operating point)
-F(x)   = f(u) − f(b)        so silence stays silence
+u      = K·g·x + b          g = drive (0…36 dB), K = +12 dB calibration, b = bias (operating point)
+F(x)   = (f(u) − f(b)) / K  so silence stays silence, and quiet signals keep slope g
 wet    = Tone( down( F( up(x) ) ) )
 y      = x_d + a·HP₅(wet − x_d)      a = smoothstep(drive / 6 dB) · engaged · band mix
 out    = y · auto gain · band output
@@ -36,6 +36,16 @@ band's own lows alone. Drive is input gain into the curve (louder, as hardware);
 by default) brings the level back.
 
 The editor's transfer curve is `x + a·(F(x) − x)` times the auto gain, from the same functions.
+
+**Calibration (2026-11-01):** user report: drive had to reach 36 dB to be heard on a kick. Measured:
+the knees sat near 0 dBFS, so a kick peaking at −18 dBFS only started to distort past +18 dB, and
+auto gain hid the level change too. `K` puts the knees 12 dB under full scale at drive 0.
+
+**Stereo modes (slice 5):** left and right, or `M = (L+R)/2` and `S = (L−R)/2`, go through the path
+above. Each part that is driven gets its difference and auto gain, and a part left clean only the
+band's fader. L and R start from what they were and only take on the differences, so a neutral band
+is bit-exact in every mode. Auto gain reads the level of what is driven. A mode change crossfades
+two cores, as a split change does. Mono ignores the mode.
 
 ### 1.2 Models (frozen order; append only)
 
@@ -185,7 +195,7 @@ the editor does not show it.
    (`mite_ui::widgets::rail`).
 3. Tape and Transformer (done 2026-10-26): `mite_dsp::hysteresis` (see §1.3).
 4. Harmonics probe and bars (done 2026-11-01).
-5. Per-band stereo modes.
+5. Per-band stereo modes (done 2026-11-01).
 6. Per-band dynamics.
 7. Modulation matrix (shared with Delay, Filter and Mod).
 8. Aliasing and THD report, CPU table, presets, validators.

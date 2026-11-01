@@ -337,6 +337,14 @@ struct Peak {
     db: f64,
 }
 
+/// The band a click on the plot just made.
+struct Clicked {
+    band: usize,
+    at: Point,
+    /// The peak under the click, Hz, if any.
+    peak: Option<f64>,
+}
+
 /// A peak being dragged: the Bell it will become (a ghost until release). It stays on the
 /// peak's frequency; the drag sets only its gain.
 struct Grab {
@@ -971,6 +979,9 @@ pub struct EqView {
     peak: Option<Peak>,
     peak_marker: (Point, f32),
     grab: Option<Grab>,
+    /// The band a click on the plot just made: a second click on it completes a double-click
+    /// rather than resetting it.
+    clicked: Option<Clicked>,
     /// Peak hold: the accumulated maxima of the spectrum (dB per grid point), since when the
     /// pointer has rested over the plot, whether it is collecting, and its opacity as drawn.
     held: Vec<f64>,
@@ -1089,6 +1100,7 @@ impl EqView {
             peak: None,
             peak_marker: (Point::ZERO, 0.0),
             grab: None,
+            clicked: None,
             held: vec![-150.0; POINTS],
             hold_since: None,
             holding: false,
@@ -1760,15 +1772,15 @@ impl EqView {
                 .slot(note_name(f), "C#10 −50 ct")
                 .text(" · ")
                 .slot(format!("{:+.1} dB", yg(p.y)).replace('-', "−"), "+30.0 dB")
-                .text(" — double-click to add a band");
+                .text(" — click to add a band");
         }
         if let Some(b) = self.selected {
             return band_line(b);
         }
         if (0..BANDS).any(|b| self.band(host, b).enabled) {
-            Help::default().text("Click a band to edit it. Double-click empty space to add one.")
+            Help::default().text("Click a band to edit it. Click empty space to add one.")
         } else {
-            Help::default().text("No bands — the audio passes unchanged. Double-click the display to add a band.")
+            Help::default().text("No bands — the audio passes unchanged. Click the display to add a band.")
         }
     }
 
@@ -1860,7 +1872,7 @@ impl EqView {
             return used;
         }
         match key {
-            Key::Escape => self.menu.take().is_some() || self.grab.take().is_some() || self.matcher.take().is_some(),
+            Key::Escape => self.menu.take().is_some() || self.grab.take().is_some() || self.matcher.take().is_some() || self.close_selection(),
             _ => false,
         }
     }
@@ -1876,8 +1888,18 @@ impl EqView {
         }
     }
 
-    fn add_band(&mut self, host: &dyn ParamHost, p: Point) {
+    /// Closes the band panel (Esc). False if none is open.
+    fn close_selection(&mut self) -> bool {
+        let open = self.selected.is_some();
+        self.select(None);
+        open
+    }
+
+    /// A Bell at the pointer, Q 1. The band it made, unless all are in use.
+    fn add_band(&mut self, host: &dyn ParamHost, p: Point) -> Option<usize> {
+        let free = (0..BANDS).find(|&b| !self.band(host, b).enabled)?;
         self.add_bell(host, xf(p.x), yg(p.y).clamp(-18.0, 18.0), 1.0);
+        Some(free)
     }
 
     /// Adds a Bell in the first free band and selects it.
@@ -3873,6 +3895,7 @@ impl EqView {
                 changed || (pos.x < PLOT_W && pos.y > DISPLAY_TOP && pos.y < HELP_TOP) || pos.y > FOOTER_TOP || pos.y < HEADER
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => {
+                self.clicked = None;
                 // Header (the session's controls answered already): EQ Match.
                 if pos.y < HEADER {
                     let (y0, y1) = HEADER_ROW;
@@ -3987,6 +4010,14 @@ impl EqView {
                     self.grab = Some(Grab { freq: peak.freq, gain: 0.0, start: pos, last: pos, moved: false });
                     return true;
                 }
+                // A click on the empty plot makes a band there, already in hand to drag.
+                if pos.x < PLOT_W && pos.y > PLOT_TOP && pos.y < PLOT_BOT {
+                    if let Some(b) = self.add_band(host, pos) {
+                        self.clicked = Some(Clicked { band: b, at: pos, peak: None });
+                        self.begin_drag(host, b, DragMode::Move, pos, 0.0);
+                    }
+                    return true;
+                }
                 if pos.y > DISPLAY_TOP && pos.y < HELP_TOP && self.selected.is_some() {
                     self.select(None);
                     return true;
@@ -3995,12 +4026,12 @@ impl EqView {
             }
             UiEvent::PointerUp { button: MouseButton::Left, .. } => {
                 if let Some(g) = self.grab.take() {
-                    // Released after a drag: the ghost becomes a band. A plain click on a peak
-                    // is a click on the display (clears the selection).
+                    // Released after a drag: the ghost becomes a narrow band on the peak. A plain
+                    // click there is a click on the plot like any other: a band at the pointer.
                     if g.moved {
                         self.add_bell(host, g.freq, g.gain, PEAK_Q);
-                    } else {
-                        self.select(None);
+                    } else if let Some(b) = self.add_band(host, g.start) {
+                        self.clicked = Some(Clicked { band: b, at: g.start, peak: Some(g.freq) });
                     }
                     self.peak = None;
                     return true;
@@ -4056,6 +4087,17 @@ impl EqView {
                         changed |= k.event(event, host);
                     }
                     return changed;
+                }
+                // The second click of a double-click on the plot: the first made a band here. On a
+                // peak the pair means "cut this peak"; elsewhere the band just stays as it is.
+                if let Some(c) = self.clicked.take().filter(|c| c.at.distance(pos) <= 8.0 && self.band(host, c.band).enabled) {
+                    if let Some(freq) = c.peak {
+                        let ids = &self.ids[c.band];
+                        Self::set(host, &ids.freq, freq.clamp(FREQ_MIN, FREQ_MAX) as f32);
+                        Self::set(host, &ids.gain, PEAK_CUT_DB as f32);
+                        Self::set(host, &ids.q, PEAK_Q as f32);
+                    }
+                    return true;
                 }
                 if let Some(b) = self.node_at(host, pos) {
                     // Resets the band: 0 dB, Q 0.71 (interaction.md).

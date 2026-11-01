@@ -33,8 +33,26 @@ fn icon_drive(model: Model) -> f32 {
 /// (Tape at 200 Hz, Transformer at 1 kHz), so it shows the core's curve and loop; traced once.
 fn icon_loop(model: Model) -> &'static [(f32, f32)] {
     static LOOPS: OnceLock<[Vec<(f32, f32)>; 2]> = OnceLock::new();
-    let loops = LOOPS.get_or_init(|| [magnet_loop(Model::Tape, 1.0, 12.0, 0.0, 200.0, 64), magnet_loop(Model::Transformer, 1.0, 9.0, 0.0, 1000.0, 64)]);
+    let loops = LOOPS.get_or_init(|| [magnet_loop(Model::Tape, 1.0 / mite_dsp::sat::CALIBRATION, 12.0, 0.0, 200.0, 64), magnet_loop(Model::Transformer, 1.0 / mite_dsp::sat::CALIBRATION, 9.0, 0.0, 1000.0, 64)]);
     &loops[model.magnet().unwrap_or(0)]
+}
+
+/// A stereo mode's icon: two overlapping rings (left and right), with a dot on what is saturated
+/// separately: nothing for plain stereo, the overlap for Mid, the outer parts for Side, all for M/S.
+pub fn draw_stereo(scene: &mut Scene, mode: usize, c: Point, size: f64, color: Color) {
+    let r = size * 0.3;
+    let dx = size * 0.17;
+    for s in [-1.0, 1.0] {
+        scene.stroke(&Stroke::new(1.3), Affine::IDENTITY, color, None, &mite_ui::kurbo::Circle::new((c.x + s * dx, c.y), r));
+    }
+    let dot = |scene: &mut Scene, x: f64| scene.fill(mite_ui::peniko::Fill::NonZero, Affine::IDENTITY, color, None, &mite_ui::kurbo::Circle::new((x, c.y), size * 0.075));
+    if mode == 1 || mode == 3 {
+        dot(scene, c.x);
+    }
+    if mode == 2 || mode == 3 {
+        dot(scene, c.x - dx - r * 0.52);
+        dot(scene, c.x + dx + r * 0.52);
+    }
 }
 
 /// A model's icon: its own transfer curve (from the DSP) over −1…1, `size` across, centred on
@@ -47,7 +65,7 @@ pub fn draw_model(scene: &mut Scene, model: Model, c: Point, size: f64, color: C
         let peak = pts.iter().fold(0.0f32, |m, p| m.max(p.1.abs())).max(1e-6);
         let mut path = BezPath::new();
         for (i, &(x, y)) in pts.iter().enumerate() {
-            let p = Point::new(c.x + f64::from(x) * half, c.y - f64::from(y / peak) * half * 0.8);
+            let p = Point::new(c.x + f64::from(x) * f64::from(mite_dsp::sat::CALIBRATION) * half, c.y - f64::from(y / peak) * half * 0.8);
             if i == 0 {
                 path.move_to(p);
             } else {
@@ -61,7 +79,7 @@ pub fn draw_model(scene: &mut Scene, model: Model, c: Point, size: f64, color: C
     let drive = icon_drive(model);
     // Fit the curve's height to the box, so models that never reach ±1 still read.
     let n = 48;
-    let ys: Vec<f64> = (0..=n).map(|i| f64::from(transfer(model, -1.0 + 2.0 * i as f32 / n as f32, drive, 0.0))).collect();
+    let ys: Vec<f64> = (0..=n).map(|i| f64::from(transfer(model, (-1.0 + 2.0 * i as f32 / n as f32) / mite_dsp::sat::CALIBRATION, drive, 0.0))).collect();
     let peak = ys.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1e-6);
     let mut path = BezPath::new();
     for (i, y) in ys.iter().enumerate() {

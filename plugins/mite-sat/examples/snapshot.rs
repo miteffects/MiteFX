@@ -7,7 +7,7 @@
 //! bypass, delta,
 //! oversampling, presets, ghost; several bands: bands (three), six, solo, mute, menu, pull (a
 //! crossover being pulled in), merge (one dragged onto its neighbour), hollow (a band whose
-//! harmonics all lie above Nyquist). SNAPSHOT_HOVER=x,y moves
+//! harmonics all lie above Nyquist), stereo (a Mid and an M/S band). SNAPSHOT_HOVER=x,y moves
 //! the pointer there.
 
 #[path = "common/music.rs"]
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     host.set_plain(&band_id(0, B_TONE.id), tone);
     // Several bands, each with its own model.
     let bands: &[(f32, Model, f32, f32)] = match variant.as_str() {
-        "bands" | "solo" | "mute" | "menu" | "pull" | "merge" => &[(180.0, Model::Soft, 9.0, 0.0), (2400.0, Model::Fold, 15.0, 0.0)],
+        "bands" | "solo" | "mute" | "menu" | "pull" | "merge" | "stereo" => &[(180.0, Model::Soft, 9.0, 0.0), (2400.0, Model::Fold, 15.0, 0.0)],
         "six" | "hollow" => &[(90.0, Model::Diode, 18.0, 0.0), (350.0, Model::Soft, 10.0, 0.0), (1200.0, Model::Hard, 20.0, 0.0), (4000.0, Model::Fold, 14.0, 0.0), (11_000.0, Model::Rectify, 12.0, 0.0)],
         _ => &[],
     };
@@ -66,6 +66,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if v("solo") {
         host.set_plain(&band_id(2, B_SOLO.id), 1.0);
+    }
+    if v("stereo") {
+        host.set_plain(&band_id(1, B_STEREO.id), 3.0);
+        host.set_plain(&band_id(2, B_STEREO.id), 1.0);
     }
     if v("mute") {
         host.set_plain(&band_id(1, B_MUTE.id), 1.0);

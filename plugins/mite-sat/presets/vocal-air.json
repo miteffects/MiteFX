@@ -4,7 +4,7 @@
   "name": "Vocal Air",
   "params": {
     "b1_model": 4.0,
-    "b1_drive": 7.0,
+    "b1_drive": 3.0,
     "b1_tone": 4.0,
     "b1_mix": 60.0
   }

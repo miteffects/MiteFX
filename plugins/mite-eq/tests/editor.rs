@@ -292,8 +292,9 @@ fn with_a_peak() -> (EqView, MemoryParamHost) {
     let shared = Arc::new(EqShared::new());
     let tone: Vec<f32> = (0..mite_eq::editor::ANALYZER_SIZE).map(|n| (std::f32::consts::TAU * 1000.0 * n as f32 / 48_000.0).sin() * 0.5).collect();
     let (mut view, host) = setup_with(shared.clone());
-    // Rest under the tone's peak (inside the spectrum), clear of the bell's node.
-    click(&mut view, &host, REST);
+    // Nothing selected, the pointer resting under the tone's peak, clear of the bell's node.
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host);
+    view.event(&UiEvent::PointerMove { pos: REST, mods: mods() }, &host);
     // The analyzer runs at most every 15.5 ms and eases in; give it time to settle.
     for _ in 0..40 {
         shared.pre.push(tone.iter().copied());
@@ -335,8 +336,9 @@ fn resting_over_the_plot_holds_the_peaks_after_the_sound_has_gone() {
     let shared = Arc::new(EqShared::new());
     let tone: Vec<f32> = (0..mite_eq::editor::ANALYZER_SIZE).map(|n| (std::f32::consts::TAU * 1000.0 * n as f32 / 48_000.0).sin() * 0.5).collect();
     let (mut view, host) = setup_with(shared.clone());
-    // Rest under the tone's peak (inside the spectrum), clear of the bell's node.
-    click(&mut view, &host, REST);
+    // Nothing selected, the pointer resting under the tone's peak, clear of the bell's node.
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host);
+    view.event(&UiEvent::PointerMove { pos: REST, mods: mods() }, &host);
     for i in 0..100 {
         let block: Vec<f32> = if i < 40 { tone.clone() } else { vec![0.0; tone.len()] };
         shared.pre.push(block.iter().copied());
@@ -627,7 +629,6 @@ fn masking_hatches_where_both_peak_and_its_ring_carves_there() {
     let (mut view, host) = setup_with(shared.clone());
     // Close the band panel; both play a 100 Hz tone over noise.
     key(&mut view, &host, Key::Escape, false, false);
-    click(&mut view, &host, Point::new(600.0, 150.0));
     let tone = |phase: &mut f32| -> Vec<f32> {
         (0..800)
             .map(|_| {
@@ -803,4 +804,65 @@ fn eq_match_matches_to_a_file_without_a_sidechain() {
     };
     assert!(gain_at(8000.0) < gain_at(200.0) - 10.0, "200 Hz {:.1} dB, 8 kHz {:.1} dB", gain_at(200.0), gain_at(8000.0));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_click_on_the_empty_plot_makes_a_band_in_hand() {
+    let (mut view, host) = setup();
+    let at = Point::new(500.0, 200.0);
+    view.event(&UiEvent::PointerMove { pos: at, mods: mods() }, &host);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, ON.id), 1.0, "made on the press");
+    let (freq, gain) = (band_plain(&host, 1, FREQ.id), band_plain(&host, 1, GAIN.id));
+    assert!((band_plain(&host, 1, Q.id) - 1.0).abs() < 0.01);
+    // Still held: dragging moves it.
+    view.event(&UiEvent::PointerMove { pos: Point::new(560.0, 240.0), mods: mods() }, &host);
+    view.event(&UiEvent::PointerUp { pos: Point::new(560.0, 240.0), button: MouseButton::Left, mods: mods() }, &host);
+    assert!(band_plain(&host, 1, FREQ.id) > freq);
+    assert!(band_plain(&host, 1, GAIN.id) < gain);
+    assert_eq!(band_plain(&host, 2, ON.id), 0.0, "one band, not two");
+}
+
+#[test]
+fn a_double_click_on_the_plot_keeps_the_band_the_first_click_made() {
+    let (mut view, host) = setup();
+    let at = Point::new(500.0, 200.0);
+    // As the window sends it: the second press arrives as the double-click alone.
+    view.event(&UiEvent::PointerMove { pos: at, mods: mods() }, &host);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: mods() }, &host);
+    let gain = band_plain(&host, 1, GAIN.id);
+    assert!(gain.abs() > 0.5);
+    view.event(&UiEvent::DoubleClick { pos: at, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, GAIN.id), gain, "not reset");
+    assert_eq!(band_plain(&host, 2, ON.id), 0.0, "and no second band");
+    view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: mods() }, &host);
+    // A later double-click on its node does reset it.
+    view.event(&UiEvent::PointerDown { pos: Point::new(900.0, 200.0), button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::PointerUp { pos: Point::new(900.0, 200.0), button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::DoubleClick { pos: at, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, GAIN.id), 0.0, "reset");
+}
+
+#[test]
+fn a_click_then_double_click_on_a_peak_cuts_it() {
+    let (mut view, host) = with_a_peak();
+    view.event(&UiEvent::PointerMove { pos: PEAK, mods: mods() }, &host);
+    view.event(&UiEvent::PointerDown { pos: PEAK, button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::PointerUp { pos: PEAK, button: MouseButton::Left, mods: mods() }, &host);
+    assert_eq!(band_plain(&host, 1, ON.id), 1.0, "the click made a band");
+    view.event(&UiEvent::DoubleClick { pos: PEAK, mods: mods() }, &host);
+    assert!((band_plain(&host, 1, GAIN.id) + 3.0).abs() < 0.01);
+    assert!((band_plain(&host, 1, Q.id) - 3.0).abs() < 0.01);
+    assert_eq!(band_plain(&host, 2, ON.id), 0.0);
+}
+
+#[test]
+fn escape_closes_the_panel() {
+    let (mut view, host) = setup();
+    let at = Point::new(500.0, 200.0);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: mods() }, &host);
+    view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: mods() }, &host);
+    assert!(view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host));
+    assert!(!view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host), "nothing left to close");
 }

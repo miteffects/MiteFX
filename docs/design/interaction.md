@@ -9,8 +9,8 @@ The Comp transfer curve has its own table under **Mite Comp** below.
 | Gesture | Empty display | Band node | Spectrum peak |
 |---|---|---|---|
 | Hover | Help strip shows frequency, note, level | Node grows (micro); help strip names the band | Peak marker + tooltip after 300 ms |
-| Click | Clears selection | Selects; panel opens (base, enter) | — |
-| Double-click | Adds a Bell at the pointer, Q 1.0 | Resets band: 0 dB, Q 0.71 | Adds a Bell at the peak, Q 3.0, −3 dB |
+| Click | Adds a Bell at the pointer, Q 1.0, already in hand to drag (user decision, 2026-11-01, as FabFilter); Esc closes the panel | Selects; panel opens (base, enter) | Adds a Bell at the pointer, Q 1.0 |
+| Double-click | The first click's Bell stays | Resets band: 0 dB, Q 0.71 | Turns the first click's Bell into a cut on the peak, Q 3.0, −3 dB |
 | Drag | Lasso select | x = frequency, y = gain (cut/shelf: x only) | Ghost Bell follows; release commits, Esc cancels |
 | Shift-drag | Adds to selection | Fine ×0.1 | Fine ×0.1 |
 | Alt-drag | — | Q: 1 octave of width per 120 px | — |
@@ -413,6 +413,7 @@ where it peaks either way.
   is lit in the accent. Hovering one draws its curve as a ghost in the square (never writes the
   parameter); clicking picks it (a 20 ms crossfade between the curves).
 - Power button (top right): the band passes clean but is still heard (`b{N}_bypass`).
+- Stereo button (beside power): a list of Stereo, Mid, Side and M/S. Mid or Side saturates that part and leaves the other clean; M/S saturates each on its own. A narrow card shows the mode in the corner of its square when it is not Stereo. A change crossfades.
 - Harmonics: H2–H9 bars, read only. Hover: the help strip gives the partial's level against the
   strongest and whether it is even, odd or above Nyquist (hollow). Clicking selects the band.
 - Dials: DRIVE (92 px; 0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT.

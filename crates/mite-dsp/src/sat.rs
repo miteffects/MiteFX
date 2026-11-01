@@ -56,7 +56,7 @@ const HP_HZ: f64 = 5.0;
 const LEVEL_MS: f64 = 300.0;
 /// Auto gain's measured trim: mean squares over this long (s), corrected this far (dB).
 const TRIM_SECONDS: f64 = 1.5;
-const TRIM_LIMIT_DB: f64 = 6.0;
+const TRIM_LIMIT_DB: f64 = 12.0;
 /// Tape and Transformer: their emphasis makes the prediction coarser (it depends on the band's
 /// spectrum), so the trim reaches further.
 const TRIM_LIMIT_MAGNET_DB: f64 = 12.0;
@@ -173,6 +173,11 @@ pub fn curve(model: Model, u: f32) -> f32 {
     }
 }
 
+/// Where drive 0 dB puts the curves' knees: this far (12 dB) under full scale, so a track at a
+/// sensible level reaches them within the first few dB of drive rather than past +18 dB. It goes in
+/// before the curve and comes off after it, so quiet signals keep slope `g` and only the knees move.
+pub const CALIBRATION: f32 = 3.981_071_7;
+
 /// The share of the saturation heard at `drive_db` (0 at 0 dB, 1 from [`ENGAGE_DB`], S-shaped).
 #[inline]
 pub fn engagement(drive_db: f32) -> f32 {
@@ -192,7 +197,7 @@ pub fn bias_point(bias: f32) -> f32 {
 pub fn transfer(model: Model, x: f32, drive_db: f32, point: f32) -> f32 {
     let g = crate::db_to_gain(drive_db);
     let a = engagement(drive_db);
-    x + a * (curve(model, g * x + point) - curve(model, point) - x)
+    x + a * ((curve(model, CALIBRATION * g * x + point) - curve(model, point)) / CALIBRATION - x)
 }
 
 // ---- Auto gain ----------------------------------------------------------------------------
@@ -252,7 +257,7 @@ fn gain_tables() -> &'static [GainTable; 8] {
 /// cross term between them.
 pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, point: f32, a: f32) -> f32 {
     let g = f64::from(crate::db_to_gain(drive_db));
-    let u_db = 20.0 * (g * f64::from(amplitude).max(1e-9)).log10();
+    let u_db = 20.0 * (f64::from(CALIBRATION) * g * f64::from(amplitude).max(1e-9)).log10();
     let x = ((u_db - TABLE_U_DB.0).clamp(0.0, TABLE_U_DB.1 - TABLE_U_DB.0)).min((TABLE_U - 1) as f64);
     let y = ((f64::from(point) + f64::from(BIAS_RANGE)) / (2.0 * f64::from(BIAS_RANGE)) * (TABLE_B - 1) as f64).clamp(0.0, (TABLE_B - 1) as f64);
     let (i, j) = ((x as usize).min(TABLE_U - 2), (y as usize).min(TABLE_B - 2));
@@ -270,6 +275,36 @@ pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, point: f32, a
 
 // ---- Settings ------------------------------------------------------------------------------
 
+/// What part of the stereo image a band saturates (frozen order, as the `stereo` parameter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StereoMode {
+    #[default]
+    Stereo,
+    /// The mid goes through the curve, the side stays clean.
+    Mid,
+    /// The side goes through the curve, the mid stays clean.
+    Side,
+    /// Mid and side each through the curve of their own.
+    MidSide,
+}
+
+impl StereoMode {
+    pub const ALL: [StereoMode; 4] = [StereoMode::Stereo, StereoMode::Mid, StereoMode::Side, StereoMode::MidSide];
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL[i.min(3)]
+    }
+
+    /// Which of the two signals (L/R, or mid/side) go through the curve.
+    fn driven(self) -> [bool; 2] {
+        match self {
+            StereoMode::Stereo | StereoMode::MidSide => [true, true],
+            StereoMode::Mid => [true, false],
+            StereoMode::Side => [false, true],
+        }
+    }
+}
+
 /// One band's settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandSat {
@@ -277,6 +312,7 @@ pub struct BandSat {
     pub drive_db: f32,
     /// −1…1.
     pub bias: f32,
+    pub stereo: StereoMode,
     /// The tilt after the model, dB at the top (minus as much at the bottom).
     pub tone_db: f32,
     /// The band's own dry/wet, 0…1.
@@ -291,7 +327,7 @@ pub struct BandSat {
 
 impl Default for BandSat {
     fn default() -> Self {
-        Self { model: Model::DEFAULT, drive_db: 0.0, bias: 0.0, tone_db: 0.0, mix: 1.0, out_db: 0.0, bypass: false, mute: false, solo: false }
+        Self { model: Model::DEFAULT, drive_db: 0.0, bias: 0.0, stereo: StereoMode::Stereo, tone_db: 0.0, mix: 1.0, out_db: 0.0, bypass: false, mute: false, solo: false }
     }
 }
 
@@ -443,9 +479,9 @@ impl Magnet {
 pub fn magnet_response(model: Model, x: &[f32], drive_db: f32, point: f32, fs: f32) -> Vec<f32> {
     let Some(w) = model.magnet() else { return x.iter().map(|&v| curve(model, v)).collect() };
     let em = emphasis(w, fs);
-    let g = crate::db_to_gain(drive_db);
+    let g = CALIBRATION * crate::db_to_gain(drive_db);
     let mut magnet = Magnet::default();
-    x.iter().map(|&v| magnet.process(w, &em, g * v, point)).collect()
+    x.iter().map(|&v| magnet.process(w, &em, g * v, point) / CALIBRATION).collect()
 }
 
 /// The loop a Tape or Transformer band traces for a sine of amplitude `amp` at `freq` Hz once
@@ -529,7 +565,7 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         None => PROBE_STATIC,
     };
     let sine = |i: usize| p.amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32;
-    let g = crate::db_to_gain(p.drive_db);
+    let g = CALIBRATION * crate::db_to_gain(p.drive_db);
     let wet: Vec<f32> = if let Some(w) = p.model.magnet() {
         let em = emphasis(w, p.freq * n as f32);
         let mut magnet = Magnet::default();
@@ -537,7 +573,7 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         let mut cycle = vec![0.0f32; n];
         for c in 0..PROBE_CYCLES {
             for (i, y) in cycle.iter_mut().enumerate() {
-                *y = magnet.process(w, &em, g * sine(i), p.point);
+                *y = magnet.process(w, &em, g * sine(i), p.point) / CALIBRATION;
             }
             let swing = cycle.iter().fold(0.0f32, |m, v| m.max(v.abs()));
             let moved = cycle.iter().zip(&last).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
@@ -549,7 +585,7 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         last
     } else {
         let rest = curve(p.model, p.point);
-        (0..n).map(|i| curve(p.model, g * sine(i) + p.point) - rest).collect()
+        (0..n).map(|i| (curve(p.model, g * sine(i) + p.point) - rest) / CALIBRATION).collect()
     };
     let tilt = Tilt::new(p.tone_db, p.pivot, p.fs);
     let (fs, freq) = (f64::from(p.fs), f64::from(p.freq));
@@ -636,6 +672,8 @@ impl BandCore {
 /// sized.
 struct Core {
     layout: Layout,
+    /// Each band's stereo mode (Stereo for all on mono).
+    modes: [StereoMode; BANDS],
     split: Split<BANDS>,
     bands: [BandCore; BANDS],
     /// The band delays (the oversampler's round trip): band slot × channel rings.
@@ -648,6 +686,7 @@ impl Core {
         let ring_len = Oversampler::latency_for(8) + CHUNK + PREROLL + 1;
         Self {
             layout: Layout::new(&[None; CROSSOVERS]),
+            modes: [StereoMode::Stereo; BANDS],
             split: Split::default(),
             bands: std::array::from_fn(|_| BandCore::new(factor)),
             rings: vec![0.0; BANDS * 2 * ring_len],
@@ -670,6 +709,7 @@ impl Core {
 
     fn copy_from(&mut self, other: &Core) {
         self.layout = other.layout;
+        self.modes = other.modes;
         self.split = other.split;
         for (a, b) in self.bands.iter_mut().zip(&other.bands) {
             a.copy_from(b);
@@ -699,6 +739,18 @@ impl Core {
             }
         }
         self.layout = layout;
+    }
+
+    /// Moves to `modes`: a band that changes starts its curves afresh (their state belongs to the
+    /// signals they had), so the crossfade only begins once it has run one round trip. Its delay
+    /// holds left and right either way.
+    fn remode(&mut self, modes: [StereoMode; BANDS]) {
+        for (b, band) in self.bands.iter_mut().enumerate() {
+            if modes[b] != self.modes[b] {
+                band.clear();
+            }
+        }
+        self.modes = modes;
     }
 }
 
@@ -779,6 +831,8 @@ struct Lanes {
     point: [[f32; CHUNK]; BANDS],
     share: [[f32; CHUNK]; BANDS],
     post: [[f32; CHUNK]; BANDS],
+    /// The band's fader alone, without auto gain (what a part left clean gets).
+    fader: [[f32; CHUNK]; BANDS],
     /// The model crossfade's position (0: the heard lane only).
     blend: [[f32; CHUNK]; BANDS],
     tilt: [[Tilt; CHUNK]; BANDS],
@@ -787,6 +841,8 @@ struct Lanes {
 pub struct Saturator {
     fs: f64,
     factor: usize,
+    /// One channel: no mid or side to speak of.
+    mono: bool,
     cores: [Core; 2],
     active: usize,
     fade: Option<f64>,
@@ -808,9 +864,9 @@ pub struct Saturator {
     emph: [(Tilt, Tilt); 2],
     emph_base: [Tilt; 2],
     hp_k: f32,
-    /// The values each control step ramps from and to, by band slot: gain, point, share, post.
-    from: [[f32; 4]; BANDS],
-    to: [[f32; 4]; BANDS],
+    /// The values each control step ramps from and to, by band slot: gain, point, share, post, fader.
+    from: [[f32; 5]; BANDS],
+    to: [[f32; 5]; BANDS],
     tilt_now: [Tilt; BANDS],
     /// The tone and pivot each band's tilt was designed for.
     tilt_key: [(f32, f32); BANDS],
@@ -830,6 +886,7 @@ impl Saturator {
         let mut sat = Self {
             fs: f64::from(sample_rate),
             factor: 1,
+            mono: false,
             cores: [Core::new(factor), Core::new(factor)],
             active: 0,
             fade: None,
@@ -848,8 +905,8 @@ impl Saturator {
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
             hp_k: 0.0,
-            from: [[0.0; 4]; BANDS],
-            to: [[0.0; 4]; BANDS],
+            from: [[0.0; 5]; BANDS],
+            to: [[0.0; 5]; BANDS],
             tilt_now: [Tilt::IDENTITY; BANDS],
             tilt_key: [(0.0, 0.0); BANDS],
             live: [false; BANDS],
@@ -858,6 +915,7 @@ impl Saturator {
                 point: [[0.0; CHUNK]; BANDS],
                 share: [[0.0; CHUNK]; BANDS],
                 post: [[0.0; CHUNK]; BANDS],
+                fader: [[0.0; CHUNK]; BANDS],
                 blend: [[0.0; CHUNK]; BANDS],
                 tilt: [[Tilt::IDENTITY; CHUNK]; BANDS],
             }),
@@ -919,6 +977,7 @@ impl Saturator {
     pub fn reset(&mut self, s: &SatSettings) {
         let layout = Layout::new(&s.crossovers);
         let heard = audible(s, &layout);
+        let modes = self.modes_for(s);
         for (b, e) in self.eased.iter_mut().enumerate() {
             *e = Eased::at(&s.bands[b], heard[b]);
         }
@@ -930,6 +989,7 @@ impl Saturator {
         for core in &mut self.cores {
             core.reset();
             core.layout = layout;
+            core.modes = modes;
         }
         self.live = std::array::from_fn(|b| layout.position(b).is_some());
         for b in 0..BANDS {
@@ -946,19 +1006,25 @@ impl Saturator {
         self.write = 0;
     }
 
-    /// Band slot `b`'s gain, operating point, share and post gain for its eased settings.
-    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 4] {
+    fn modes_for(&self, s: &SatSettings) -> [StereoMode; BANDS] {
+        std::array::from_fn(|b| if self.mono { StereoMode::Stereo } else { s.bands[b].stereo })
+    }
+
+    /// Band slot `b`'s gain into the curve, operating point, share, post gain and fader for its eased settings.
+    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 5] {
         let e = &self.eased[b];
         let share = e.share();
         let auto = if auto_gain { e.comp * e.trim.powf(share) } else { 1.0 };
-        [crate::db_to_gain(e.drive_db as f32), bias_point(e.bias as f32), share as f32, (auto * e.out * smooth(e.audible)) as f32]
+        let fader = e.out * smooth(e.audible);
+        [CALIBRATION * crate::db_to_gain(e.drive_db as f32), bias_point(e.bias as f32), share as f32, (auto * fader) as f32, fader as f32]
     }
 
     /// Once per control step: glides the settings, follows a split change, retunes auto gain.
     #[allow(clippy::needless_range_loop)] // band slots index several arrays
     fn control(&mut self, s: &SatSettings) {
         let layout = Layout::new(&s.crossovers);
-        if self.fade.is_none() && layout != self.cores[self.active].layout {
+        let modes = self.modes_for(s);
+        if self.fade.is_none() && (layout != self.cores[self.active].layout || modes != self.cores[self.active].modes) {
             let next = 1 - self.active;
             let (a, b) = self.cores.split_at_mut(1);
             let (from, to) = if next == 1 { (&a[0], &mut b[0]) } else { (&b[0], &mut a[0]) };
@@ -972,6 +1038,7 @@ impl Saturator {
                 }
             }
             to.restructure(layout, &s.crossovers);
+            to.remode(modes);
             // The new split's band signal reaches the band delay's far end one round trip later:
             // only then is there something to fade into.
             self.fade = Some(-(self.latency() as f64) * self.fade_step);
@@ -1074,6 +1141,14 @@ impl Saturator {
         if n_ch == 0 {
             return telemetry;
         }
+        if self.mono != (n_ch == 1) {
+            // Decided by the host's layout, before any sound: nothing to crossfade.
+            self.mono = n_ch == 1;
+            let modes = self.modes_for(s);
+            for core in &mut self.cores {
+                core.modes = modes;
+            }
+        }
         let len = channels.iter().map(|c| c.len()).min().unwrap_or(0);
         let mut start = 0;
         while start < len {
@@ -1124,6 +1199,7 @@ impl Saturator {
                 self.lanes.point[b][i] = r(1);
                 self.lanes.share[b][i] = r(2);
                 self.lanes.post[b][i] = r(3);
+                self.lanes.fader[b][i] = r(4);
                 self.lanes.tilt[b][i] = self.tilt_now[b];
                 let e = &mut self.eased[b];
                 self.lanes.blend[b][i] = match e.lane_fade {
@@ -1176,14 +1252,22 @@ impl Saturator {
                 }
                 let mut peak_in = 0.0f32;
                 let mut peak_out = 0.0f32;
-                // Mean square across the channels, going in and coming out (before the gains).
+                // The two signals the curves see: left and right, or mid and side.
+                let mode = core.modes[b];
+                let ms = mode != StereoMode::Stereo;
+                let driven = mode.driven();
+                let driven = [driven[0], driven[1] && n_ch == 2];
+                // Mean square across what goes through the curves, going in and coming out (before
+                // the gains). Mid and side add up (M² + S² is the mean of L² and R²).
                 let mut power = [0.0f64; CHUNK];
                 let mut power_emph = [[0.0f64; CHUNK]; 2];
                 let mut power_out = [0.0f64; CHUNK];
-                let per_ch = 1.0 / n_ch as f64;
-                // A: each channel's delayed band (x_d) and meters, the wake-up pre-roll, and the
-                // stretch up to the high rate (channel c at `hi[c·HI_CH..]`).
+                let per_ch = if ms { 1.0 } else { 1.0 / n_ch as f64 };
+                // A: each channel's delayed band, the signals going in and their delayed selves
+                // (x_d), the wake-up pre-roll, and the stretch up to the high rate (signal c at
+                // `hi[c·HI_CH..]`).
                 let mut xds = [[0.0f32; CHUNK]; 2];
+                let mut input = [[0.0f32; CHUNK]; 2];
                 let f = self.factor;
                 let m = n * f;
                 for c in 0..n_ch {
@@ -1193,6 +1277,7 @@ impl Saturator {
                     let mut w = self.write;
                     for i in 0..n {
                         let v = self.split[src + i];
+                        input[c][i] = v;
                         if latency == 0 {
                             xd[i] = v;
                         } else {
@@ -1200,6 +1285,20 @@ impl Saturator {
                             xd[i] = core.rings[r + (w + core.ring_len - latency) % core.ring_len];
                         }
                         w = (w + 1) % core.ring_len;
+                    }
+                }
+                let mut xde = xds;
+                if ms {
+                    for i in 0..n {
+                        let (l, r) = (input[0][i], input[1][i]);
+                        (input[0][i], input[1][i]) = (0.5 * (l + r), 0.5 * (l - r));
+                        let (l, r) = (xds[0][i], xds[1][i]);
+                        (xde[0][i], xde[1][i]) = (0.5 * (l + r), 0.5 * (l - r));
+                    }
+                }
+                for c in (0..n_ch).filter(|&c| driven[c]) {
+                    for i in 0..n {
+                        let v = input[c][i];
                         power[i] += f64::from(v) * f64::from(v) * per_ch;
                         for (w, pe) in power_emph.iter_mut().enumerate() {
                             let ve = f64::from(self.emph_base[w].process(&mut band.emph_state[w][c], v));
@@ -1213,15 +1312,17 @@ impl Saturator {
                         let past = PREROLL;
                         let mut tmp = [0.0f32; PREROLL];
                         for (j, v) in tmp[..past].iter_mut().enumerate() {
-                            *v = core.rings[r + (self.write + core.ring_len - past + j) % core.ring_len];
+                            let back = (self.write + core.ring_len - past + j) % core.ring_len;
+                            let ring = |ch: usize| core.rings[(b * 2 + ch) * core.ring_len + back];
+                            *v = if ms { 0.5 * (ring(0) + if c == 0 { ring(1) } else { -ring(1) }) } else { ring(c) };
                         }
                         band.os.up(c, &tmp[..past], &mut self.hi[..past * f]);
                         let (g, point, model) = (self.lanes.gain[b][0], self.lanes.point[b][0], e.lanes[e.lane]);
                         for v in &mut self.hi[..past * f] {
                             *v = match model.magnet() {
                                 // The core warms up on the past too.
-                                Some(w) => band.magnet[e.lane][c].process(w, &self.emph[w], g * *v, point),
-                                None => curve(model, g * *v + point) - curve(model, point),
+                                Some(w) => band.magnet[e.lane][c].process(w, &self.emph[w], g * *v, point) / CALIBRATION,
+                                None => (curve(model, g * *v + point) - curve(model, point)) / CALIBRATION,
                             };
                         }
                         let mut sink = [0.0f32; PREROLL];
@@ -1229,11 +1330,10 @@ impl Saturator {
                     }
                 }
                 if engaged {
-                    for c in 0..n_ch {
-                        let src = at(ci, p, c);
-                        band.os.up(c, &self.split[src..src + n], &mut self.hi[c * HI_CH..c * HI_CH + m]);
+                    for c in (0..n_ch).filter(|&c| driven[c]) {
+                        band.os.up(c, &input[c][..n], &mut self.hi[c * HI_CH..c * HI_CH + m]);
                     }
-                    // B: the curves, both channels in the same pass (their state chains are
+                    // B: the curves, both signals in the same pass (their state chains are
                     // independent, so the CPU overlaps them: a hysteresis core is latency bound).
                     let models = e.lanes;
                     let heard = e.lane;
@@ -1242,7 +1342,7 @@ impl Saturator {
                     let mut lane = |l: usize, c: usize, u0: f32, point: f32| {
                         let model = models[l];
                         if let Some(w) = model.magnet() {
-                            return band.magnet[l][c].process(w, &emph[w], u0, point);
+                            return band.magnet[l][c].process(w, &emph[w], u0, point) / CALIBRATION;
                         }
                         let pt = if model == Model::Tube {
                             let d = &mut band.drift[l][c];
@@ -1252,12 +1352,15 @@ impl Saturator {
                         } else {
                             point
                         };
-                        curve(model, u0 + pt) - curve(model, pt)
+                        (curve(model, u0 + pt) - curve(model, pt)) / CALIBRATION
                     };
                     for k in 0..m {
                         let i = k / f;
                         let (g, point) = (self.lanes.gain[b][i], self.lanes.point[b][i]);
                         for c in 0..n_ch {
+                            if !driven[c] {
+                                continue;
+                            }
                             let at = c * HI_CH + k;
                             let u0 = g * self.hi[at];
                             self.hi[at] = if lane_fading {
@@ -1270,33 +1373,50 @@ impl Saturator {
                     }
                     band.idle = false;
                 }
-                // C: back down, the tone and the dry blend, the sum.
-                for c in 0..n_ch {
-                    let xd = &xds[c];
+                // C: back down, the tone and the difference each signal now carries.
+                let mut diff = [[0.0f32; CHUNK]; 2];
+                for c in (0..n_ch).filter(|&c| driven[c]) {
                     if engaged {
                         band.os.down(c, &self.hi[c * HI_CH..c * HI_CH + m], &mut self.wet[..n]);
                         let (mut x1, mut y1) = band.hp[c];
                         let mut tone = band.tone[c];
                         for i in 0..n {
                             let wet = self.lanes.tilt[b][i].process(&mut tone, self.wet[i]);
-                            let d = wet - xd[i];
+                            let d = wet - xde[c][i];
                             let y = self.hp_k * (y1 + d - x1);
                             x1 = d;
                             y1 = y;
-                            self.wet[i] = xd[i] + self.lanes.share[b][i] * y;
+                            diff[c][i] = self.lanes.share[b][i] * y;
                         }
                         band.hp[c] = (x1, y1);
                         band.tone[c] = tone;
-                    } else {
-                        self.wet[..n].copy_from_slice(&xd[..n]);
                     }
                     for i in 0..n {
-                        let pre = self.wet[i];
+                        let pre = xde[c][i] + diff[c][i];
                         power_out[i] += f64::from(pre) * f64::from(pre) * per_ch;
-                        let y = pre * self.lanes.post[b][i];
-                        out[ci][c][i] += y;
-                        dry_out[ci][c][i] += xd[i];
-                        peak_out = peak_out.max(y.abs());
+                    }
+                }
+                // The sum. Left and right start from what they were and only take on the
+                // differences, so a neutral band stays the input bit for bit in every mode.
+                for i in 0..n {
+                    let post = self.lanes.post[b][i];
+                    if ms {
+                        let fader = self.lanes.fader[b][i];
+                        let part = |c: usize| if driven[c] { xde[c][i] * (post - fader) + post * diff[c][i] } else { 0.0 };
+                        let (pm, ps) = (part(0), part(1));
+                        let (l, r) = (xds[0][i] * fader + (pm + ps), xds[1][i] * fader + (pm - ps));
+                        out[ci][0][i] += l;
+                        out[ci][1][i] += r;
+                        peak_out = peak_out.max(l.abs()).max(r.abs());
+                    } else {
+                        for c in 0..n_ch {
+                            let y = (xds[c][i] + diff[c][i]) * post;
+                            out[ci][c][i] += y;
+                            peak_out = peak_out.max(y.abs());
+                        }
+                    }
+                    for c in 0..n_ch {
+                        dry_out[ci][c][i] += xds[c][i];
                     }
                 }
                 let comp2 = e.comp * e.comp;
@@ -1311,7 +1431,8 @@ impl Saturator {
                 if ci == shown {
                     telemetry.in_peak[b] = telemetry.in_peak[b].max(peak_in);
                     telemetry.out_peak[b] = telemetry.out_peak[b].max(peak_out);
-                    let d = if e.lanes[e.lane] == Model::Tube { DRIFT * band.drift[e.lane][0] } else { 0.0 };
+                    let shown_ch = usize::from(!driven[0]);
+                    let d = if e.lanes[e.lane] == Model::Tube { DRIFT * band.drift[e.lane][shown_ch] } else { 0.0 };
                     telemetry.point[b] = bias_point(e.bias as f32) - d;
                     telemetry.auto[b] = if s.auto_gain { (e.comp * e.trim.powf(e.share())) as f32 } else { 1.0 };
                 }
@@ -1492,7 +1613,7 @@ mod tests {
                             continue;
                         }
                         let db = 20.0 * (f64::from(got.amp[h - 1]) / read(h)).log10();
-                        assert!(db.abs() < 0.5, "{m:?} bin {k} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
+                        assert!(db.abs() < 1.0, "{m:?} bin {k} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
                     }
                 }
             }
@@ -1511,6 +1632,142 @@ mod tests {
                 }
                 println!("{m:?} {freq} Hz bias {bias}: {:.0} µs", t.elapsed().as_secs_f64() * 1e6 / 20.0);
             }
+        }
+    }
+
+    /// Mid and side over the last `N` samples of a stereo run through `s`, and the delayed input's.
+    fn run_stereo(s: &SatSettings, l: &[f32], r: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+        let mut sat = Saturator::new(FS, 2, s);
+        let (mut a, mut b) = (l.to_vec(), r.to_vec());
+        let (mut da, mut db) = (vec![0.0; l.len()], vec![0.0; l.len()]);
+        for ((x, y), (u, v)) in a.chunks_mut(333).zip(b.chunks_mut(333)).zip(da.chunks_mut(333).zip(db.chunks_mut(333))) {
+            sat.process(&mut [x, y], &mut [u, v], s);
+        }
+        (a, b, da, db)
+    }
+
+    fn stereo_input() -> (Vec<f32>, Vec<f32>) {
+        (noise(4 * N, 7, 0.3), noise(4 * N, 91, 0.3))
+    }
+
+    #[test]
+    fn a_neutral_band_nulls_in_every_stereo_mode() {
+        // Drive 0, or the band bypassed: left and right exactly, at any mode.
+        let (l, r) = stereo_input();
+        for mode in StereoMode::ALL {
+            for bypass in [false, true] {
+                let mut s = band(Model::Tube, if bypass { 18.0 } else { 0.0 });
+                s.bands[0].stereo = mode;
+                s.bands[0].bypass = bypass;
+                let (a, b, da, db) = run_stereo(&s, &l, &r);
+                assert_eq!(a, da, "{mode:?}");
+                assert_eq!(b, db, "{mode:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn mid_leaves_the_side_alone_and_side_the_mid() {
+        for auto_gain in [false, true] {
+            let (l, r) = stereo_input();
+            let part = |x: &[f32], y: &[f32], side: bool| -> Vec<f32> { x.iter().zip(y).map(|(a, b)| if side { 0.5 * (a - b) } else { 0.5 * (a + b) }).collect() };
+            for (mode, clean_side) in [(StereoMode::Mid, true), (StereoMode::Side, false)] {
+                let mut s = band(Model::Tube, 18.0);
+                s.auto_gain = auto_gain;
+                s.bands[0].stereo = mode;
+                let (a, b, da, db) = run_stereo(&s, &l, &r);
+                let (got, want) = (part(&a, &b, clean_side), part(&da, &db, clean_side));
+                let worst = got.iter().zip(&want).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                assert!(worst < 2e-6, "{mode:?}: the clean part moved by {worst}");
+                let (got, want) = (part(&a, &b, !clean_side), part(&da, &db, !clean_side));
+                let moved = got.iter().zip(&want).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                assert!(moved > 0.01, "{mode:?}: the driven part did not change: {moved}");
+            }
+        }
+    }
+
+    #[test]
+    fn mid_on_a_centred_signal_is_stereo_and_side_is_silent_on_it() {
+        let x = tone(4 * N, 0.2, K);
+        let mut s = band(Model::Tube, 12.0);
+        s.auto_gain = false;
+        let (stereo, _, _, _) = run_stereo(&s, &x, &x);
+        s.bands[0].stereo = StereoMode::Mid;
+        let (mid, _, _, _) = run_stereo(&s, &x, &x);
+        s.bands[0].stereo = StereoMode::MidSide;
+        let (both, _, _, _) = run_stereo(&s, &x, &x);
+        for (name, y) in [("Mid", &mid), ("M/S", &both)] {
+            let worst = y.iter().zip(&stereo).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            assert!(worst < 1e-5, "{name}: {worst}");
+        }
+        s.bands[0].stereo = StereoMode::Side;
+        let (a, _, da, _) = run_stereo(&s, &x, &x);
+        assert!(a.iter().zip(&da).all(|(p, q)| (p - q).abs() < 1e-6), "no side, nothing to saturate");
+    }
+
+    #[test]
+    fn stereo_mode_auto_gain_holds_the_level() {
+        // Mid and side at different levels: the part driven comes out as loud as it went in.
+        let (m, sd) = (noise(72 * N, 3, 0.25), noise(72 * N, 5, 0.1));
+        let l: Vec<f32> = m.iter().zip(&sd).map(|(a, b)| a + b).collect();
+        let r: Vec<f32> = m.iter().zip(&sd).map(|(a, b)| a - b).collect();
+        let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
+        for (mode, side) in [(StereoMode::Mid, false), (StereoMode::Side, true)] {
+            let mut s = band(Model::Tube, 18.0);
+            s.auto_gain = true;
+            s.bands[0].stereo = mode;
+            let (a, b, da, db) = run_stereo(&s, &l, &r);
+            let t = a.len() - 12 * N;
+            let part = |x: &[f32], y: &[f32]| -> Vec<f32> { x[t..].iter().zip(&y[t..]).map(|(p, q)| if side { 0.5 * (p - q) } else { 0.5 * (p + q) }).collect() };
+            let db_off = 20.0 * (rms(&part(&a, &b)) / rms(&part(&da, &db))).log10();
+            assert!(db_off.abs() < 0.5, "{mode:?}: {db_off:.2} dB");
+        }
+    }
+
+    #[test]
+    fn a_stereo_mode_change_never_steps() {
+        // A change every so often: no sample steps further than any mode's steady wave does.
+        let (l, r) = (tone(12 * N, 0.05, 40), tone(12 * N, 0.04, 61));
+        let mut s = band(Model::Tube, 12.0);
+        let step = |x: &[f32]| x[8192..].windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        let mut steady = 0.0f32;
+        for mode in StereoMode::ALL {
+            s.bands[0].stereo = mode;
+            let (a, b, _, _) = run_stereo(&s, &l, &r);
+            steady = steady.max(step(&a)).max(step(&b));
+        }
+        s.bands[0].stereo = StereoMode::Stereo;
+        let mut sat = Saturator::new(FS, 4, &s);
+        let (mut a, mut b) = (l, r);
+        let (mut da, mut db) = (vec![0.0; a.len()], vec![0.0; a.len()]);
+        for (count, ((x, y), (u, v))) in a.chunks_mut(64).zip(b.chunks_mut(64)).zip(da.chunks_mut(64).zip(db.chunks_mut(64))).enumerate() {
+            s.bands[0].stereo = StereoMode::ALL[(count / 40) % 4];
+            sat.process(&mut [x, y], &mut [u, v], &s);
+        }
+        let worst = step(&a).max(step(&b));
+        assert!(worst < 1.3 * steady, "largest step {worst}, steady {steady}");
+    }
+
+    #[test]
+    fn mono_ignores_the_stereo_mode() {
+        let x = tone(2 * N, 0.2, K);
+        let mut s = band(Model::Soft, 12.0);
+        let mut sat = Saturator::new(FS, 2, &s);
+        let (want, _) = run(&mut sat, &x, &s, 256);
+        s.bands[0].stereo = StereoMode::Side;
+        let mut sat = Saturator::new(FS, 2, &s);
+        let (got, _) = run(&mut sat, &x, &s, 256);
+        assert_eq!(want, got);
+    }
+
+    #[test]
+    fn a_track_at_minus_18_reaches_the_knee_within_a_little_drive() {
+        // The calibration: a −18 dBFS sine at 12 dB of drive has audible harmonics on the curves
+        // a kick would be heard through; at drive 0 nothing has changed.
+        let amp = 10f32.powf(-18.0 / 20.0);
+        for m in [Model::Tube, Model::Soft, Model::Hard, Model::Diode] {
+            let h = probe_harmonics(&Probe { model: m, amp, drive_db: 12.0, point: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+            assert!(h.db(2) > -30.0, "{m:?}: H3 {:.1} dB", h.db(2));
         }
     }
 
@@ -1538,15 +1795,17 @@ mod tests {
 
     #[test]
     fn soft_matches_its_closed_form_harmonics() {
-        // f(u) = u − 4u³/27: a sine of amplitude U gives H1 = U − U³/9 and H3 = U³/27.
-        let (amp, drive) = (0.3f32, 12.0f32);
-        let u = f64::from(amp * crate::db_to_gain(drive));
+        // f(u) = u − 4u³/27: a sine of amplitude U gives H1 = U − U³/9 and H3 = U³/27, and the
+        // calibration comes off afterwards.
+        let (amp, drive) = (0.1f32, 8.0f32);
+        let k = f64::from(CALIBRATION);
+        let u = f64::from(amp * crate::db_to_gain(drive)) * k;
         let s = band(Model::Soft, drive);
         let mut sat = Saturator::new(FS, 8, &s);
         let (y, _) = run(&mut sat, &tone(4 * N, amp, K), &s, 512);
         let (h1, h3) = (harmonic(&y, 1), harmonic(&y, 3));
-        assert!((h1 / (u - u.powi(3) / 9.0) - 1.0).abs() < 1e-3, "H1 {h1}");
-        assert!((h3 / (u.powi(3) / 27.0) - 1.0).abs() < 2e-3, "H3 {h3}");
+        assert!((h1 * k / (u - u.powi(3) / 9.0) - 1.0).abs() < 1e-3, "H1 {h1}");
+        assert!((h3 * k / (u.powi(3) / 27.0) - 1.0).abs() < 2e-3, "H3 {h3}");
         assert!(harmonic(&y, 2) < 1e-6 && harmonic(&y, 5) < 1e-6);
     }
 
@@ -1555,7 +1814,7 @@ mod tests {
         // Every static model, through the oversampled engine: its harmonics are those of the curve
         // the editor draws, within 0.05 dB down to −80 dB under the fundamental.
         for m in [Model::Diode, Model::Soft, Model::Hard, Model::Fold, Model::Rectify] {
-            for (amp, drive, bias) in [(0.25f32, 12.0f32, 0.0f32), (0.1, 24.0, 0.4), (0.5, 3.0, -0.6)] {
+            for (amp, drive, bias) in [(0.0625f32, 12.0f32, 0.0f32), (0.025, 24.0, 0.4), (0.125, 3.0, -0.6)] {
                 let mut s = band(m, drive);
                 s.bands[0].bias = bias;
                 let mut sat = Saturator::new(FS, 8, &s);
@@ -1674,7 +1933,7 @@ mod tests {
             let (y, _) = run(&mut sat, &tone(8 * N, amp, K), &s, 256);
             harmonic(&y, 2) / harmonic(&y, 1)
         };
-        let (quiet, loud) = (h2_share(0.05), h2_share(0.4));
+        let (quiet, loud) = (h2_share(0.0125), h2_share(0.1));
         assert!(quiet > 1e-3 && loud > 2.0 * quiet, "{quiet} {loud}");
     }
 

@@ -321,6 +321,7 @@ impl BandParams {
             tone_db: f(2),
             mix: f(3) / 100.0,
             out_db: f(4),
+            stereo: mite_dsp::sat::StereoMode::from_index(self.stereo.value().max(0) as usize),
             bypass: self.bypass.value(),
             mute: self.mute.value(),
             solo: self.solo.value(),

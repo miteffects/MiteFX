@@ -4,7 +4,7 @@
   "name": "Bass Grit",
   "params": {
     "b1_model": 3.0,
-    "b1_drive": 15.0,
+    "b1_drive": 9.0,
     "b1_bias": -20.0,
     "b1_tone": -3.0
   }
