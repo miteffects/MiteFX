@@ -241,4 +241,8 @@ the editor does not show it.
 6. Per-band dynamics (done 2026-11-03).
 7. Modulation matrix (shared with Delay, Filter and Mod): deferred (user, 2026-11-03); its
    parameters stay at their neutral defaults.
-8. Aliasing and THD report, CPU table, presets, validators.
+8. Aliasing and THD report, CPU table, presets, validators (done 2026-11-03):
+   `docs/dsp/sat-aliasing.md` (from `mite_dsp::sat::distortion`, regression-tested), the half-band's
+   first stage vectorised (six Tube bands at 4×: 8.9 → 7.7 %), five presets that use dynamics,
+   bands and stereo modes (every factory preset is played through the engine in a test), and
+   clap-validator 34 passed, 0 failed (pluginval runs in CI).

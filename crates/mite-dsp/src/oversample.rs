@@ -80,10 +80,28 @@ impl History {
     }
 }
 
-/// `Σ a_j (x[K−1−j] + x[K+j])` over a newest-first window `x` of `2K` samples: the symmetric
-/// branch of a half-band.
+/// Lanes of the dot product (the window and the taps are padded to a multiple of it).
+const LANES: usize = 8;
+
+/// The symmetric branch of a half-band, `Σ a_j (x[K−1−j] + x[K+j])` over a newest-first window
+/// `x`, as a plain dot product with the mirrored taps `full` (`a` reversed, then `a`, then zeros
+/// to a multiple of [`LANES`]): eight running sums the compiler keeps in vector registers.
 #[inline]
-fn symmetric(a: &[f32], x: &[f32]) -> f32 {
+fn symmetric(full: &[f32], x: &[f32]) -> f32 {
+    let mut acc = [0.0f32; LANES];
+    for (c, v) in full.chunks_exact(LANES).zip(x.chunks_exact(LANES)) {
+        for l in 0..LANES {
+            acc[l] += c[l] * v[l];
+        }
+    }
+    let [a, b, c, d, e, f, g, h] = acc;
+    ((a + e) + (b + f)) + ((c + g) + (d + h))
+}
+
+/// `Σ a_j (x[K−1−j] + x[K+j])` folded, one tap at a time: quicker than [`symmetric`] for the
+/// short half-bands of the later stages (padding them to the lanes would add work).
+#[inline]
+fn folded(a: &[f32], x: &[f32]) -> f32 {
     let k = a.len();
     let mut acc = 0.0f32;
     for (j, &c) in a.iter().enumerate() {
@@ -92,10 +110,23 @@ fn symmetric(a: &[f32], x: &[f32]) -> f32 {
     acc
 }
 
+/// From this many pairs a stage runs [`symmetric`], below it [`folded`].
+const VECTOR_PAIRS: usize = 16;
+
+/// `a` mirrored for [`symmetric`]: `a[K−1] … a[0] a[0] … a[K−1]`, zero-padded.
+fn mirrored(a: &[f32]) -> Vec<f32> {
+    let mut full: Vec<f32> = a.iter().rev().chain(a.iter()).copied().collect();
+    full.resize(full.len().div_ceil(LANES) * LANES, 0.0);
+    full
+}
+
 /// One 2× stage for one channel: an interpolator and a decimator sharing the taps.
 #[derive(Clone)]
 struct Stage {
+    /// The half-band's taps for one side (`K` of them), and mirrored for [`symmetric`] (long
+    /// half-bands only).
     taps: Vec<f32>,
+    full: Option<Vec<f32>>,
     /// Interpolator input (base rate of this stage), and the decimator's even and odd inputs
     /// (the high rate's samples split by phase).
     up: History,
@@ -106,7 +137,17 @@ struct Stage {
 impl Stage {
     fn new(pairs: usize, beta: f64) -> Self {
         let taps = half_band(pairs, beta);
-        Self { taps, up: History::new(2 * pairs), even: History::new(2 * pairs), odd: History::new(2 * pairs) }
+        let full = (pairs >= VECTOR_PAIRS).then(|| mirrored(&taps));
+        let len = full.as_ref().map_or(2 * pairs, Vec::len);
+        Self { taps, full, up: History::new(len), even: History::new(len), odd: History::new(len) }
+    }
+
+    #[inline]
+    fn branch(&self, x: &[f32]) -> f32 {
+        match &self.full {
+            Some(full) => symmetric(full, x),
+            None => folded(&self.taps, x),
+        }
     }
 
     fn pairs(&self) -> usize {
@@ -119,7 +160,7 @@ impl Stage {
         self.up.push(x);
         let h = self.up.recent();
         let k = self.pairs();
-        [2.0 * symmetric(&self.taps, h), h[k - 1]]
+        [2.0 * self.branch(h), h[k - 1]]
     }
 
     /// Two input samples in, one out.
@@ -130,7 +171,7 @@ impl Stage {
         // y[i] = ½·odd[i−K] + Σ a_j (even[i−K+1+j] + even[i−K−j]). Newest first, even[i−K+1+j]
         // sits at index K−1−j and even[i−K−j] at K+j: the interpolator's symmetric window.
         let k = self.pairs();
-        0.5 * self.odd.recent()[k] + symmetric(&self.taps, self.even.recent())
+        0.5 * self.odd.recent()[k] + self.branch(self.even.recent())
     }
 
     fn clear(&mut self) {

@@ -809,6 +809,60 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
     out
 }
 
+// ---- Measurement -----------------------------------------------------------------------------
+
+/// What one band does to a steady sine, measured on the engine's output.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Distortion {
+    /// The harmonics below Nyquist against the fundamental, dB (THD; Rectify's fundamental is
+    /// small, so it reads high).
+    pub thd_db: f64,
+    /// Everything that is neither a harmonic nor DC (aliases: harmonics above Nyquist folded
+    /// back, and any other leakage) against the strongest harmonic, dB.
+    pub alias_db: f64,
+}
+
+/// Window of [`distortion`]: the tone is whole in it, so every partial sits on a bin.
+pub const MEASURE_N: usize = 16_384;
+
+/// Runs a sine of `cycles` periods per [`MEASURE_N`] samples at `amp` through one band of
+/// `model` at `factor`, `drive_db` and `bias` (auto gain off) at `fs` for a second, and reads
+/// the last window's spectrum. For reports and tests; allocates.
+pub fn distortion(model: Model, factor: usize, fs: f32, cycles: usize, amp: f32, drive_db: f32, bias: f32) -> Distortion {
+    use realfft::RealFftPlanner;
+    let mut s = SatSettings { auto_gain: false, ..SatSettings::default() };
+    s.bands[0] = BandSat { model, drive_db, bias, ..BandSat::default() };
+    let n = MEASURE_N;
+    let total = fs as usize + n;
+    let w = std::f64::consts::TAU * cycles as f64 / n as f64;
+    let mut x: Vec<f32> = (0..total).map(|i| (f64::from(amp) * (w * i as f64).sin()) as f32).collect();
+    let mut sat = Saturator::new(fs, factor, &s);
+    for block in x.chunks_mut(512) {
+        sat.process(&mut [block], &mut [], &s);
+    }
+    let mut tail: Vec<f64> = x[total - n..].iter().map(|&v| f64::from(v)).collect();
+    let fft = RealFftPlanner::<f64>::new().plan_fft_forward(n);
+    let mut spec = fft.make_output_vec();
+    fft.process(&mut tail, &mut spec).expect("sizes match");
+    let power: Vec<f64> = spec.iter().map(|c| c.norm_sqr()).collect();
+    let half = n / 2;
+    let harmonic = |bin: usize| bin % cycles == 0;
+    let fundamental = power[cycles];
+    let (mut harmonics, mut strongest, mut rest) = (0.0f64, fundamental, 0.0f64);
+    for (bin, &p) in power.iter().enumerate().take(half).skip(1) {
+        if harmonic(bin) {
+            if bin != cycles {
+                harmonics += p;
+            }
+            strongest = strongest.max(p);
+        } else {
+            rest += p;
+        }
+    }
+    let db = |r: f64| 10.0 * r.max(1e-30).log10();
+    Distortion { thd_db: db(harmonics / fundamental.max(1e-30)), alias_db: db(rest / strongest.max(1e-30)) }
+}
+
 // ---- Engine --------------------------------------------------------------------------------
 
 /// One band slot's state in one core, per channel.
@@ -2531,6 +2585,19 @@ mod tests {
         ];
         for (before, after) in &cases {
             assert_change_is_clean(&x, before, after, 14_400, 2);
+        }
+    }
+
+    #[test]
+    fn aliasing_stays_where_the_report_has_it() {
+        // docs/dsp/sat-aliasing.md: a 5 kHz tone at −6 dBFS, drive 18 dB. A clean pass is the
+        // oversampler alone (its filters reject more than 100 dB).
+        let at = |m: Model, f: usize| distortion(m, f, FS, 1709, 0.5, 18.0, 0.0).alias_db;
+        assert!(distortion(Model::Soft, 8, FS, 1709, 0.01, 0.0, 0.0).alias_db < -100.0);
+        for (m, worst_8x) in [(Model::Tube, -38.0), (Model::Hard, -34.0), (Model::Diode, -40.0)] {
+            let (one, eight) = (at(m, 1), at(m, 8));
+            assert!(eight < worst_8x, "{m:?} at 8×: {eight:.1} dB");
+            assert!(eight < one - 20.0, "{m:?}: 8× {eight:.1} against 1× {one:.1}");
         }
     }
 
