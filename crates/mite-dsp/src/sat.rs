@@ -13,6 +13,11 @@
 //! first, as on a tape machine), Transformer the lows (the core's flux is the integral of the
 //! voltage). Quiet signals come out as they went in.
 //!
+//! After the model, each band has its own dynamics (`dynamics_gain_db`): its detector hears the
+//! band going in (before drive), so the threshold stays where it is as drive moves; below 0 it
+//! compresses, above 0 it lifts what passes the threshold (an upward expander, so hits squashed by
+//! the curve come back). Amount 0 and band bypass are the band bit for bit.
+//!
 //! Every curve is smooth (C¹): the oversampler does the anti-aliasing. First-order ADAA was
 //! dropped (sat-brief §1.2): on the nonlinear part alone it leaks `g·Δu/2` at high drive; on the
 //! whole curve its half-sample delay combs against the dry path.
@@ -20,6 +25,7 @@
 use std::sync::OnceLock;
 
 use crate::crossover::{Cross, Split};
+use crate::dynamics::{soft_above, soft_cap};
 use crate::hysteresis::{self, anhysteretic, Ja, JaParams};
 use crate::oversample::Oversampler;
 
@@ -40,6 +46,12 @@ pub const BIAS_TRACK: f32 = 0.5;
 /// blocking), with no ceiling, so it stays asymmetric at any drive.
 pub const TUBE_DRIFT: f32 = 0.2;
 pub const TONE_MAX_DB: f32 = 12.0;
+/// The dynamics' knee (dB of input, centred on the threshold) and the most it lifts, dB.
+pub const DYN_KNEE_DB: f32 = 6.0;
+pub const DYN_LIFT_MAX_DB: f32 = 12.0;
+/// The dynamics detector: instant attack, this release (so a waveform's zero crossings are not
+/// silence), ms.
+const DYN_PEAK_MS: f64 = 10.0;
 /// Where each crossover slot sits when it is first made, Hz.
 pub const DEFAULT_CROSSOVERS: [f32; CROSSOVERS] = [120.0, 500.0, 2000.0, 6000.0, 12_000.0];
 /// The tone tilt's pivot with one band, Hz (with several, each band's geometric centre).
@@ -410,6 +422,13 @@ pub struct BandSat {
     pub mix: f32,
     /// The band's fader in the sum, dB.
     pub out_db: f32,
+    /// The dynamics after the model, −1…1: below 0 compresses (−0.5 is 2:1, −1 ∞:1), above 0
+    /// lifts what passes the threshold (1 is 1:2, at most [`DYN_LIFT_MAX_DB`]).
+    pub dyn_amount: f32,
+    /// Where the dynamics start, the band's input peak in dBFS.
+    pub dyn_threshold_db: f32,
+    pub dyn_attack_ms: f32,
+    pub dyn_release_ms: f32,
     /// Clean but heard.
     pub bypass: bool,
     pub mute: bool,
@@ -418,7 +437,34 @@ pub struct BandSat {
 
 impl Default for BandSat {
     fn default() -> Self {
-        Self { model: Model::DEFAULT, drive_db: 0.0, bias: 0.0, stereo: StereoMode::Stereo, tone_db: 0.0, mix: 1.0, out_db: 0.0, bypass: false, mute: false, solo: false }
+        Self {
+            model: Model::DEFAULT,
+            drive_db: 0.0,
+            bias: 0.0,
+            stereo: StereoMode::Stereo,
+            tone_db: 0.0,
+            mix: 1.0,
+            out_db: 0.0,
+            dyn_amount: 0.0,
+            dyn_threshold_db: -24.0,
+            dyn_attack_ms: 10.0,
+            dyn_release_ms: 150.0,
+            bypass: false,
+            mute: false,
+            solo: false,
+        }
+    }
+}
+
+/// The gain (dB) a band's dynamics settle at for an input peak of `level_db` (the engine's gain
+/// computer; the editor draws with it too).
+pub fn dynamics_gain_db(amount: f32, threshold_db: f32, level_db: f32) -> f32 {
+    let a = amount.clamp(-1.0, 1.0);
+    let over = soft_above(level_db - threshold_db, DYN_KNEE_DB);
+    if a < 0.0 {
+        a * over
+    } else {
+        soft_cap(a * over, DYN_LIFT_MAX_DB)
     }
 }
 
@@ -788,13 +834,17 @@ struct BandCore {
     /// recent loudest.
     short: f64,
     top: f64,
+    /// The dynamics: the detector's peak (linear) and the gain now, dB. They run whether or not
+    /// the curve does, so `clear` leaves them.
+    dyn_peak: f32,
+    dyn_db: f32,
     /// Nothing runs: the oversampler and filters are clear.
     idle: bool,
 }
 
 impl BandCore {
     fn new(factor: usize) -> Self {
-        Self { os: Oversampler::new(factor), env: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, short: 0.0, top: 0.0, idle: true }
+        Self { os: Oversampler::new(factor), env: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, short: 0.0, top: 0.0, dyn_peak: 0.0, dyn_db: 0.0, idle: true }
     }
 
     fn clear(&mut self) {
@@ -819,6 +869,8 @@ impl BandCore {
         self.trim_out = other.trim_out;
         self.short = other.short;
         self.top = other.top;
+        self.dyn_peak = other.dyn_peak;
+        self.dyn_db = other.dyn_db;
         self.idle = other.idle;
     }
 }
@@ -860,6 +912,8 @@ impl Core {
             b.trim_out = 0.0;
             b.short = 0.0;
             b.top = 0.0;
+            b.dyn_peak = 0.0;
+            b.dyn_db = 0.0;
         }
         self.rings.fill(0.0);
     }
@@ -888,9 +942,11 @@ impl Core {
             let Some(parent) = *parent else { continue };
             let p = &self.bands[parent];
             let meters = (p.level, p.level_emph, p.trim_in, p.trim_out, p.short, p.top);
+            let dynamics = (p.dyn_peak, p.dyn_db);
             let band = &mut self.bands[slot];
             band.clear();
             (band.level, band.level_emph, band.trim_in, band.trim_out, band.short, band.top) = meters;
+            (band.dyn_peak, band.dyn_db) = dynamics;
             for c in 0..2 {
                 let r = self.ring(slot, c);
                 self.rings[r].fill(0.0);
@@ -924,6 +980,11 @@ struct Eased {
     audible: f64,
     comp: f64,
     trim: f64,
+    /// The dynamics amount and threshold as they glide, and the gain's attack and release
+    /// coefficients per sample.
+    dyn_amount: f64,
+    dyn_threshold_db: f64,
+    dyn_k: (f32, f32),
     /// The two curve lanes' models, the one heard, and the crossfade into the other (0…1).
     lanes: [Model; 2],
     lane: usize,
@@ -942,6 +1003,9 @@ impl Eased {
             audible: if audible { 1.0 } else { 0.0 },
             comp: 1.0,
             trim: 1.0,
+            dyn_amount: f64::from(b.dyn_amount),
+            dyn_threshold_db: f64::from(b.dyn_threshold_db),
+            dyn_k: (0.0, 0.0),
             lanes: [b.model; 2],
             lane: 0,
             lane_fade: None,
@@ -965,11 +1029,13 @@ pub struct SatTelemetry {
     pub point: [f32; BANDS],
     /// Auto gain's correction, linear.
     pub auto: [f32; BANDS],
+    /// The dynamics' gain at the chunk's end, linear.
+    pub dynamics: [f32; BANDS],
 }
 
 impl Default for SatTelemetry {
     fn default() -> Self {
-        Self { in_peak: [0.0; BANDS], out_peak: [0.0; BANDS], point: [0.0; BANDS], auto: [1.0; BANDS] }
+        Self { in_peak: [0.0; BANDS], out_peak: [0.0; BANDS], point: [0.0; BANDS], auto: [1.0; BANDS], dynamics: [1.0; BANDS] }
     }
 }
 
@@ -1020,6 +1086,8 @@ pub struct Saturator {
     trim_k: f64,
     short_k: f64,
     top_fall: f64,
+    /// The dynamics detector's fall per sample.
+    dyn_fall: f32,
     env_k: (f32, f32),
     /// Tape's and Transformer's emphasis at the high rate, and (pre only) at the base rate for
     /// the levels auto gain reads.
@@ -1065,6 +1133,7 @@ impl Saturator {
             trim_k: 0.0,
             short_k: 0.0,
             top_fall: 1.0,
+            dyn_fall: 0.0,
             env_k: (0.0, 0.0),
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
@@ -1104,6 +1173,7 @@ impl Saturator {
         self.trim_k = per(TRIM_SECONDS * 1000.0);
         self.short_k = per(SHORT_MS);
         self.top_fall = 1.0 - per(TOP_RELEASE_MS);
+        self.dyn_fall = (1.0 - per(DYN_PEAK_MS)) as f32;
         self.hp_k = (-std::f64::consts::TAU * HP_HZ / self.fs).exp() as f32;
         self.set_oversampling(factor, s);
     }
@@ -1145,6 +1215,7 @@ impl Saturator {
         let modes = self.modes_for(s);
         for (b, e) in self.eased.iter_mut().enumerate() {
             *e = Eased::at(&s.bands[b], heard[b]);
+            e.dyn_k = Self::dyn_coefficients(&s.bands[b], self.fs);
         }
         for (k, (lf, x)) in self.log_freq.iter_mut().zip(&mut self.cross).enumerate() {
             let f = s.crossovers[k].unwrap_or(DEFAULT_CROSSOVERS[k]);
@@ -1169,6 +1240,12 @@ impl Saturator {
         self.fade = None;
         self.countdown = 0;
         self.write = 0;
+    }
+
+    /// A band's dynamics attack and release, per sample.
+    fn dyn_coefficients(b: &BandSat, fs: f64) -> (f32, f32) {
+        let per = |ms: f32| (1.0 - (-1000.0 / (f64::from(ms.clamp(0.05, 5000.0)) * fs)).exp()) as f32;
+        (per(b.dyn_attack_ms), per(b.dyn_release_ms))
     }
 
     fn modes_for(&self, s: &SatSettings) -> [StereoMode; BANDS] {
@@ -1228,6 +1305,7 @@ impl Saturator {
             if self.live[b] && !was_live[b] {
                 self.eased[b] = Eased::at(&s.bands[b], heard[b]);
             }
+            self.eased[b].dyn_k = Self::dyn_coefficients(&s.bands[b], self.fs);
         }
         let ease = |v: &mut f64, target: f64, k: f64| {
             let d = target - *v;
@@ -1249,6 +1327,8 @@ impl Saturator {
             ease(&mut e.tone_db, f64::from(t.tone_db.clamp(-TONE_MAX_DB, TONE_MAX_DB)), self.glide);
             ease(&mut e.mix, f64::from(t.mix.clamp(0.0, 1.0)), self.glide);
             ease(&mut e.out, f64::from(crate::db_to_gain(t.out_db)), self.glide);
+            ease(&mut e.dyn_amount, f64::from(t.dyn_amount.clamp(-1.0, 1.0)), self.glide);
+            ease(&mut e.dyn_threshold_db, f64::from(t.dyn_threshold_db), self.glide);
             toward(&mut e.engage, if t.bypass { 0.0 } else { 1.0 }, self.switch_step);
             toward(&mut e.audible, if heard[b] { 1.0 } else { 0.0 }, self.switch_step);
             // A new model: crossfade into it on the other lane (one change at a time).
@@ -1553,10 +1633,37 @@ impl Saturator {
                         power_out[i] += f64::from(pre) * f64::from(pre) * per_ch;
                     }
                 }
+                // The dynamics: a peak detector on what goes into the curves (the band before
+                // drive), its gain eased by the band's attack and release, on what they drive.
+                // Bypass eases the amount away; at 0 the gain is exactly 1.
+                let amount = (e.dyn_amount * smooth(e.engage)) as f32;
+                let threshold = e.dyn_threshold_db as f32;
+                let (att, rel) = e.dyn_k;
+                let mut dyn_gain = [1.0f32; CHUNK];
+                for i in 0..n {
+                    let mut x = 0.0f32;
+                    for c in (0..n_ch).filter(|&c| driven[c]) {
+                        x = x.max(xde[c][i].abs());
+                    }
+                    band.dyn_peak = x.max(band.dyn_peak * self.dyn_fall);
+                    if amount == 0.0 && band.dyn_db == 0.0 {
+                        continue;
+                    }
+                    let level = 20.0 * band.dyn_peak.max(1e-6).log10();
+                    let target = dynamics_gain_db(amount, threshold, level);
+                    let k = if target.abs() > band.dyn_db.abs() { att } else { rel };
+                    band.dyn_db += k * (target - band.dyn_db);
+                    if amount == 0.0 && band.dyn_db.abs() < 1e-4 {
+                        band.dyn_db = 0.0;
+                    }
+                    if band.dyn_db != 0.0 {
+                        dyn_gain[i] = crate::db_to_gain(band.dyn_db);
+                    }
+                }
                 // The sum. Left and right start from what they were and only take on the
                 // differences, so a neutral band stays the input bit for bit in every mode.
                 for i in 0..n {
-                    let post = self.lanes.post[b][i];
+                    let post = self.lanes.post[b][i] * dyn_gain[i];
                     if ms {
                         let fader = self.lanes.fader[b][i];
                         let part = |c: usize| if driven[c] { xde[c][i] * (post - fader) + post * diff[c][i] } else { 0.0 };
@@ -1600,6 +1707,7 @@ impl Saturator {
                         Some(w) => band.magnet[e.lane][shown_ch].point(w, bias),
                         None => operating_point(model, bias, band.env[e.lane][shown_ch]),
                     };
+                    telemetry.dynamics[b] = crate::db_to_gain(band.dyn_db);
                     telemetry.auto[b] = if s.auto_gain { (e.comp * e.trim.powf(e.share())) as f32 } else { 1.0 };
                 }
             }
@@ -2308,6 +2416,121 @@ mod tests {
             }
             let db = 10.0 * (pout / pin).log10();
             assert!(k > 0 && db.abs() < 2.0, "{m:?}: the hits come out {db:.2} dB off");
+        }
+    }
+
+    #[test]
+    fn the_dynamics_gain_is_a_ratio_above_the_threshold() {
+        let g = dynamics_gain_db;
+        // Below the knee: nothing, whatever the amount.
+        for a in [-1.0, -0.3, 0.4, 1.0] {
+            assert_eq!(g(a, -24.0, -40.0), 0.0);
+        }
+        assert_eq!(g(0.0, -24.0, 0.0), 0.0);
+        // Above it: −50 % is 2:1, −100 % ∞:1, +100 % 1:2.
+        assert!((g(-0.5, -24.0, -12.0) + 6.0).abs() < 1e-4);
+        assert!((g(-1.0, -24.0, -12.0) + 12.0).abs() < 1e-4);
+        assert!((g(-0.75, -30.0, -10.0) + 15.0).abs() < 1e-4);
+        assert!((g(1.0, -24.0, -21.0) - 3.0).abs() < 1e-4);
+        // The lift is capped, softly, and it never turns back.
+        let mut last = 0.0f32;
+        for l in (-40..=0).map(|d| d as f32) {
+            let v = g(1.0, -40.0, l);
+            assert!(v >= last && v <= DYN_LIFT_MAX_DB, "{l}: {v}");
+            last = v;
+        }
+        assert!(last > DYN_LIFT_MAX_DB - 0.1);
+        // Smooth through the knee: no step between neighbouring levels.
+        for k in 0..1200 {
+            let l = -30.0 + k as f32 * 0.01;
+            assert!((g(-1.0, -24.0, l + 0.01) - g(-1.0, -24.0, l)).abs() < 0.0101);
+        }
+    }
+
+    /// The level of the last `N` samples against the input's, dB.
+    fn settled_db(y: &[f32], x: &[f32]) -> f64 {
+        let rms = |v: &[f32]| (v.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+        20.0 * (rms(&y[y.len() - N..]) / rms(&x[x.len() - N..])).log10()
+    }
+
+    #[test]
+    fn the_dynamics_settle_where_the_curve_says_and_ignore_drive() {
+        let x = tone(96_000, 0.5, K);
+        let level = 20.0 * 0.5f32.log10();
+        for (amount, threshold) in [(-0.5f32, -24.0f32), (-1.0, -18.0), (1.0, -12.0), (0.5, -30.0)] {
+            let expected = f64::from(dynamics_gain_db(amount, threshold, level));
+            // Clean (drive 0): the band times the gain. Driven (with auto gain off): the curve's
+            // own level change plus the same gain, since the detector hears the band going in.
+            for drive in [0.0f32, 18.0] {
+                let mut plain = band(Model::Soft, drive);
+                let mut s = plain;
+                s.bands[0].dyn_amount = amount;
+                s.bands[0].dyn_threshold_db = threshold;
+                plain.bands[0].dyn_amount = 0.0;
+                let (y, _) = run(&mut Saturator::new(FS, 2, &s), &x, &s, 512);
+                let (y0, _) = run(&mut Saturator::new(FS, 2, &plain), &x, &plain, 512);
+                let db = settled_db(&y, &x) - settled_db(&y0, &x);
+                assert!((db - expected).abs() < 0.5, "{amount} at {threshold} dB, drive {drive}: {db:.2} dB, curve says {expected:.2}");
+            }
+        }
+    }
+
+    #[test]
+    fn dynamics_follow_their_attack_and_release() {
+        // A step from −40 to −6 dBFS: compression reaches 63 % of its way within about the attack,
+        // and lets go over about the release once it drops back.
+        let n = 48_000;
+        let x: Vec<f32> = (0..n).map(|i| if (12_000..30_000).contains(&i) { 0.5 } else { 0.01 } * (std::f64::consts::TAU * 1000.0 * i as f64 / f64::from(FS)).sin() as f32).collect();
+        let mut s = band(Model::Soft, 0.0);
+        s.bands[0].dyn_amount = -1.0;
+        s.bands[0].dyn_threshold_db = -30.0;
+        s.bands[0].dyn_attack_ms = 20.0;
+        s.bands[0].dyn_release_ms = 200.0;
+        let mut sat = Saturator::new(FS, 1, &s);
+        let mut gains = Vec::new();
+        let mut y = x.clone();
+        for chunk in y.chunks_mut(CHUNK) {
+            gains.push(sat.process(&mut [chunk], &mut [], &s).dynamics[0]);
+        }
+        let db = |g: f32| 20.0 * g.log10();
+        let at = |ms: f64| db(gains[(ms * f64::from(FS) / 1000.0) as usize / CHUNK]);
+        let full = at(620.0);
+        assert!(full < -20.0, "{full}");
+        // 20 ms after the step, about 63 % (the detector itself is instant).
+        let a = at(250.0 + 20.0) / full;
+        assert!((0.5..0.75).contains(&a), "attack: {a}");
+        let r = at(625.0 + 200.0) / full;
+        assert!((0.25..0.45).contains(&r), "release: {r}");
+    }
+
+    #[test]
+    fn dynamics_null_when_bypassed_and_never_click() {
+        let input = noise(20_000, 7, 0.7);
+        let mut s = band(Model::Fold, 24.0);
+        s.bands[0].dyn_amount = -1.0;
+        s.bands[0].bypass = true;
+        let mut sat = Saturator::new(FS, 2, &s);
+        let lat = sat.latency();
+        let (y, _) = run(&mut sat, &input, &s, 257);
+        for i in lat..input.len() {
+            assert_eq!(y[i], input[i - lat], "at {i}");
+        }
+        let x = tone(48_000, 0.4, 4);
+        let base = band(Model::Hard, 12.0);
+        let with = |f: &dyn Fn(&mut BandSat)| {
+            let mut s = base;
+            f(&mut s.bands[0]);
+            s
+        };
+        let cases = [
+            (base, with(&|b| b.dyn_amount = -1.0)),
+            (base, with(&|b| b.dyn_amount = 1.0)),
+            (with(&|b| b.dyn_amount = 1.0), with(&|b| b.dyn_amount = -1.0)),
+            (with(&|b| b.dyn_amount = -1.0), with(&|b| { b.dyn_amount = -1.0; b.dyn_threshold_db = -60.0 })),
+            (with(&|b| { b.dyn_amount = -1.0; b.dyn_attack_ms = 0.1 }), with(&|b| { b.dyn_amount = -1.0; b.dyn_attack_ms = 0.1; b.bypass = true })),
+        ];
+        for (before, after) in &cases {
+            assert_change_is_clean(&x, before, after, 14_400, 2);
         }
     }
 

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use mite_dsp::sat::Model;
 use mite_sat::editor::{memory_host, SatView};
 use mite_dsp::sat::Layout;
-use mite_sat::params::{band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
+use mite_sat::params::{band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_DYN, B_DYN_THR, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
 use mite_sat::SatShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -336,4 +336,20 @@ fn the_stereo_list_sets_the_band_and_a_narrow_card_has_none() {
     view.select(0);
     draw(&mut view, &host);
     assert!(view.band_stereo(&host, 1).is_none(), "a narrow card only shows it");
+}
+
+#[test]
+fn the_dynamics_dials_sit_on_the_wide_card_and_not_the_narrow_ones() {
+    let (mut view, host) = setup();
+    let d = view.dial(&band_id(0, B_DYN.id)).expect("the single card shows DYNAMICS");
+    drag(&mut view, &host, d, d + (0.0, -60.0), MODS);
+    assert!(plain(&host, &band_id(0, B_DYN.id)) > 10.0, "dragging up lifts");
+    let t = view.dial(&band_id(0, B_DYN_THR.id)).expect("and THRESHOLD");
+    drag(&mut view, &host, t, t + (0.0, 60.0), MODS);
+    assert!(plain(&host, &band_id(0, B_DYN_THR.id)) < -30.0, "dragging down lowers the threshold");
+    split(&host, &[(0, 400.0)]);
+    draw(&mut view, &host);
+    assert!(view.dial(&band_id(0, B_DYN.id)).is_some(), "the selected band's wide card has them");
+    assert!(view.dial(&band_id(1, B_DYN.id)).is_none(), "a narrow card does not");
+    assert!(view.dial(&band_id(1, B_DRIVE.id)).is_some());
 }

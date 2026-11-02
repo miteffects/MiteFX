@@ -23,7 +23,9 @@ pub mod record {
     pub const POINT: usize = BAND_OUT + BANDS;
     /// Per band slot: auto gain's correction, linear.
     pub const AUTO: usize = POINT + BANDS;
-    pub const WIDTH: usize = 32;
+    /// Per band slot: the dynamics' gain, linear.
+    pub const DYN: usize = AUTO + BANDS;
+    pub const WIDTH: usize = DYN + BANDS;
 }
 
 /// One history record per this much audio.
@@ -237,6 +239,7 @@ impl SatEngine {
             a[record::BAND_OUT + b] = a[record::BAND_OUT + b].max(db(t.out_peak[b]));
             a[record::POINT + b] = t.point[b];
             a[record::AUTO + b] = t.auto[b];
+            a[record::DYN + b] = t.dynamics[b];
         }
     }
 }
@@ -258,6 +261,7 @@ fn empty_record() -> [f32; record::WIDTH] {
         r[record::BAND_IN + b] = MINUS_INFINITY_DB;
         r[record::BAND_OUT + b] = MINUS_INFINITY_DB;
         r[record::AUTO + b] = 1.0;
+        r[record::DYN + b] = 1.0;
     }
     r
 }

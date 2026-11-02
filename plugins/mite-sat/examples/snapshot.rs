@@ -4,7 +4,7 @@
 //!     cargo run -p mite_sat --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
 //! SNAPSHOT_VARIANT picks the state: default, clean, fold, hard, rectify, tape, transformer,
-//! bypass, delta,
+//! bypass, delta, dynamics,
 //! oversampling, presets, ghost; several bands: bands (three), six, solo, mute, menu, pull (a
 //! crossover being pulled in), merge (one dragged onto its neighbour), hollow (a band whose
 //! harmonics all lie above Nyquist), stereo (a Mid and an M/S band). SNAPSHOT_HOVER=x,y moves
@@ -51,6 +51,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     host.set_plain(&band_id(0, B_DRIVE.id), drive);
     host.set_plain(&band_id(0, B_BIAS.id), bias);
     host.set_plain(&band_id(0, B_TONE.id), tone);
+    if v("dynamics") || v("bands") {
+        // Band 1 compresses after its curve.
+        host.set_plain(&band_id(0, B_DYN.id), -60.0);
+        host.set_plain(&band_id(0, B_DYN_THR.id), -30.0);
+    }
     // Several bands, each with its own model.
     let bands: &[(f32, Model, f32, f32)] = match variant.as_str() {
         "bands" | "solo" | "mute" | "menu" | "pull" | "merge" | "stereo" => &[(180.0, Model::Soft, 9.0, 0.0), (2400.0, Model::Fold, 15.0, 0.0)],

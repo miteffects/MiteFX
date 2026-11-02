@@ -28,7 +28,7 @@ b      = β·(0.5 + 0.5·e) [− 0.2·e Tube]   β = bias (−1…1), e = envelo
 F(x)   = (f(u) − f(b)) / K  so silence stays silence, and quiet signals keep slope g
 wet    = Tone( down( F( up(x) ) ) )
 y      = x_d + a·HP₅(wet − x_d)      a = smoothstep(drive / 6 dB) · engaged · band mix
-out    = y · auto gain · band output
+out    = y · auto gain · D(e_in) · band output      D: the band's dynamics (below)
 ```
 
 `x_d` is the band delayed by the oversampler's round trip, so `a = 0` is the band exactly.
@@ -73,6 +73,17 @@ above. Each part that is driven gets its difference and auto gain, and a part le
 band's fader. L and R start from what they were and only take on the differences, so a neutral band
 is bit-exact in every mode. Auto gain reads the level of what is driven. A mode change crossfades
 two cores, as a split change does. Mono ignores the mode.
+
+**Dynamics (slice 6, 2026-11-03):** after the curve, each band has a gain `D` set by its input,
+not its output: a peak detector (instant attack, 10 ms release) hears what goes into the curves
+(the band before drive, the driven parts in a stereo mode), so the threshold stays put as drive
+moves, and the gain computer is `dynamics_gain_db`: with `o` the input's excess over the threshold
+through a 6 dB soft knee, DYN `d < 0` gives `d·o` (−50 % is 2:1, −100 % ∞:1) and `d > 0` gives
+`d·o` capped softly at +12 dB (an upward expander: +100 % is 1:2, so hits the curve flattened come
+back). The gain eases in dB with the band's attack (moving away from 0 dB) and release (back).
+It acts on what the band drives (in Mid, the side keeps its fader only), even at drive 0, and it
+is not seen by auto gain (which matches the curve alone). DYN 0 and band bypass leave `D` exactly 1,
+so both null bit for bit. Cost: six bands of Tube at 4×, 8.9 → 9.2 % of a core.
 
 ### 1.2 Models (frozen order; append only)
 
@@ -179,13 +190,17 @@ x 1180–1280, as in Shape.
   Nyquist is hollow. With no music the probe plays at −12 dBFS and the bars are dim. Single and
   wide cards only; on the wide card they sit above the dials.
 - **Dials**: DRIVE (0…36 dB; 0–12 dB takes half the travel), BIAS (±100 %), TONE (±12 dB),
-  MIX, OUTPUT; DYN when dynamics arrive (slice 6).
+  MIX, OUTPUT; under them the dynamics row: DYNAMICS (±100 %), THRESHOLD (−60…0 dBFS),
+  ATTACK (0.1–100 ms), RELEASE (10–1000 ms). While DYNAMICS is not 0 the square shows the
+  threshold as two dashed lines at ±T (the lit stretch crossing them is when the dynamics move),
+  and the curve is drawn times the live dynamics gain, so it breathes with it.
 - Narrow cards (other bands): number badge, S and M, a transfer square of their own (lit where
   their music reaches; drag it as the wide one, which selects the band), DRIVE and MIX. The curve
   is the model's drawing, so no separate glyph.
 - Wide card (the selected band of several, 600 px): badge, model icons, the band's range, S, M,
   power and remove (a cross in the text colour: Sat draws no danger role), the square, DRIVE
-  large beside BIAS, TONE, MIX and OUTPUT in a 2×2 grid.
+  large beside BIAS, TONE, MIX and OUTPUT in a 2×2 grid, the dynamics row of four below them
+  (the bars 56 px tall to make room).
 
 ### 3.3 Footer
 Oversampling (dropdown button: 1×, 2×, 4×, 8×; the help strip says each one's latency), the
@@ -223,6 +238,7 @@ the editor does not show it.
 3. Tape and Transformer (done 2026-10-26): `mite_dsp::hysteresis` (see §1.3).
 4. Harmonics probe and bars (done 2026-11-01).
 5. Per-band stereo modes (done 2026-11-01).
-6. Per-band dynamics.
-7. Modulation matrix (shared with Delay, Filter and Mod).
+6. Per-band dynamics (done 2026-11-03).
+7. Modulation matrix (shared with Delay, Filter and Mod): deferred (user, 2026-11-03); its
+   parameters stay at their neutral defaults.
 8. Aliasing and THD report, CPU table, presets, validators.

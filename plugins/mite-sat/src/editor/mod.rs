@@ -107,13 +107,18 @@ fn offered() -> Vec<Model> {
     Model::ALL.to_vec()
 }
 
-/// The wide card's dials: drive large, then bias, tone, mix and output.
-const DIALS: [(ParamSpec, &str, KnobKind); 5] = [
+/// The wide card's dials: drive large, then bias, tone, mix and output; under them the
+/// dynamics row.
+const DIALS: [(ParamSpec, &str, KnobKind); 9] = [
     (B_DRIVE, "DRIVE", KnobKind::Unipolar),
     (B_BIAS, "BIAS", KnobKind::Bipolar),
     (B_TONE, "TONE", KnobKind::Bipolar),
     (B_MIX, "MIX", KnobKind::Unipolar),
     (B_OUT, "OUTPUT", KnobKind::Bipolar),
+    (B_DYN, "DYNAMICS", KnobKind::Bipolar),
+    (B_DYN_THR, "THRESHOLD", KnobKind::Unipolar),
+    (B_DYN_ATT, "ATTACK", KnobKind::Unipolar),
+    (B_DYN_REL, "RELEASE", KnobKind::Unipolar),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +146,7 @@ struct Card {
     solo: Option<Rect>,
     mute: Option<Rect>,
     remove: Option<Rect>,
-    /// Dial centres and diameters: the five of `DIALS`, or DRIVE and MIX on a narrow card.
+    /// Dial centres and diameters: the nine of `DIALS`, or DRIVE and MIX on a narrow card.
     dials: Vec<(Point, f64)>,
 }
 
@@ -237,6 +242,10 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::sat::SatSettings {
             tone_db: p(&band_id(b, B_TONE.id)),
             mix: p(&band_id(b, B_MIX.id)) / 100.0,
             out_db: p(&band_id(b, B_OUT.id)),
+            dyn_amount: p(&band_id(b, B_DYN.id)) / 100.0,
+            dyn_threshold_db: p(&band_id(b, B_DYN_THR.id)),
+            dyn_attack_ms: p(&band_id(b, B_DYN_ATT.id)),
+            dyn_release_ms: p(&band_id(b, B_DYN_REL.id)),
             bypass: on(&band_id(b, B_BYPASS.id)),
             mute: on(&band_id(b, B_MUTE.id)),
             solo: on(&band_id(b, B_SOLO.id)),
@@ -305,10 +314,11 @@ pub struct SatView {
     loops: curve::Loops,
     /// The harmonics of the band whose card shows them.
     probe: bars::ProbeBars,
-    /// Each band's peak going in (linear), operating point and auto gain, eased.
+    /// Each band's peak going in (linear), operating point, auto gain and dynamics gain, eased.
     peak: [f32; BANDS],
     point: [f32; BANDS],
     auto: [f32; BANDS],
+    dynamics: [f32; BANDS],
 }
 
 impl SatView {
@@ -356,6 +366,7 @@ impl SatView {
             peak: [0.0; BANDS],
             point: [0.0; BANDS],
             auto: [1.0; BANDS],
+            dynamics: [1.0; BANDS],
             shared,
         }
     }
@@ -431,6 +442,11 @@ impl SatView {
     }
 
     /// The rail's centre line (tests and tools).
+    /// Where the dial for host parameter `id` sits, if a card shows it.
+    pub fn dial(&self, id: &str) -> Option<Point> {
+        self.knobs.iter().find(|k| k.id == id).map(|k| k.center)
+    }
+
     pub fn rail_y(&self) -> f64 {
         self.rail.area.center().y
     }
@@ -545,7 +561,9 @@ impl SatView {
         let auto = if Self::on(host, AUTO_GAIN.id) { self.auto[b] } else { 1.0 };
         let x = settings(host).crossovers;
         let freq = tone_pivot(&Layout::new(&x), &x, b);
-        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, bias, auto, peak: self.peak[b], freq }
+        let acting = Self::plain(host, &band_id(b, B_DYN.id)) != 0.0 && !Self::on(host, &band_id(b, B_BYPASS.id));
+        let threshold = acting.then(|| mite_dsp::db_to_gain(Self::plain(host, &band_id(b, B_DYN_THR.id))));
+        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, bias, auto, dynamics: self.dynamics[b], threshold, peak: self.peak[b], freq }
     }
 
     /// Re-measures the shown band's harmonics when what they depend on moved, and eases the bars.
@@ -580,8 +598,11 @@ impl SatView {
             let square = Rect::new(rect.x0 + 18.0, rect.y0 + 58.0, rect.x0 + 18.0 + side, rect.y0 + 58.0 + side);
             let bars = Rect::new(square.x1 + 16.0, square.y0, square.x1 + 16.0 + 320.0, square.y1);
             let (x0, x1) = (bars.x1 + 16.0, rect.x1 - 12.0);
-            let step = (x1 - x0) / DIALS.len() as f64;
-            let dials = (0..DIALS.len()).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), square.center().y - 4.0), if k == 0 { 92.0 } else { 64.0 })).collect();
+            // The saturation's five in a row, the dynamics' four under the first four.
+            let step = (x1 - x0) / 5.0;
+            let (row1, row2) = (square.y0 + 70.0, square.y0 + 200.0);
+            let mut dials: Vec<(Point, f64)> = (0..5).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row1), if k == 0 { 84.0 } else { 60.0 })).collect();
+            dials.extend((0..4).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row2), if k == 0 { 60.0 } else { 52.0 })));
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
             return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 44.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
         }
@@ -601,15 +622,20 @@ impl SatView {
                     let side = rect.height() - 62.0;
                     let square = Rect::new(rect.x0 + 10.0, rect.y0 + 52.0, rect.x0 + 10.0 + side, rect.y0 + 52.0 + side);
                     // The bars along the top of the right side, under them DRIVE large on the left
-                    // and the other four in a 2×2 grid.
+                    // and the other four in a 2×2 grid, and the dynamics' four in a row below.
                     let (ax0, ax1) = (square.x1 + 12.0, rect.x1 - 8.0);
-                    let bars = Rect::new(ax0, square.y0 + 18.0, ax1, square.y0 + 106.0);
+                    let bars = Rect::new(ax0, square.y0 + 18.0, ax1, square.y0 + 74.0);
                     let col = (ax1 - ax0) / 3.0;
-                    let (top, step) = (bars.y1 + 34.0, 80.0);
+                    let (top, step) = (bars.y1 + 28.0, 66.0);
                     let cy = top + step / 2.0;
-                    let mut dials = vec![(Point::new(ax0 + col * 0.5, cy - 4.0), 84.0)];
+                    let mut dials = vec![(Point::new(ax0 + col * 0.5, cy - 6.0), 72.0)];
                     for k in 0..4 {
-                        dials.push((Point::new(ax0 + col * (1.5 + (k % 2) as f64), top + step * (k / 2) as f64), 52.0));
+                        dials.push((Point::new(ax0 + col * (1.5 + (k % 2) as f64), top + step * (k / 2) as f64), 44.0));
+                    }
+                    let quarter = (ax1 - ax0) / 4.0;
+                    let row = (top + 2.0 * step + 4.0).min(rect.y1 - 47.0);
+                    for k in 0..4 {
+                        dials.push((Point::new(ax0 + quarter * (k as f64 + 0.5), row), 40.0));
                     }
                     Card {
                         band,
@@ -1267,6 +1293,10 @@ fn knob_words(id: &str) -> &'static str {
         "tone" => " — tilts what the saturation gives around the band's centre",
         "mix" => " — this band's saturation against its clean signal",
         "out" => " — this band's level in the sum",
+        "dyn" => " — after the curve: left compresses, right brings back the hits the curve flattened",
+        "dyn_thr" => " — the band's input peak where the dynamics start (dashed in the square)",
+        "dyn_att" => " — how fast the dynamics move once the band passes the threshold",
+        "dyn_rel" => " — how fast they let go",
         _ => "",
     }
 }
@@ -1364,13 +1394,14 @@ impl View for SatView {
         for b in 0..BANDS {
             let peak_db = self.history.iter().rev().take(4).map(|r| r[record::BAND_IN + b]).fold(-150.0f32, f32::max);
             let target = if peak_db > -120.0 { 10f32.powf(peak_db / 20.0) } else { 0.0 };
-            let before = (self.peak[b], self.point[b], self.auto[b]);
+            let before = (self.peak[b], self.point[b], self.auto[b], self.dynamics[b]);
             self.peak[b] += (target - self.peak[b]) * if target > self.peak[b] { k(PEAK_RISE_S) } else { k(PEAK_FALL_S) };
             if let Some(r) = self.history.back() {
                 self.point[b] += (r[record::POINT + b] - self.point[b]) * k(0.03);
                 self.auto[b] += (r[record::AUTO + b] - self.auto[b]) * k(0.03);
+                self.dynamics[b] += (r[record::DYN + b] - self.dynamics[b]) * k(0.03);
             }
-            moved |= (self.peak[b] - before.0).abs() > 1e-4 || (self.point[b] - before.1).abs() > 1e-4 || (self.auto[b] - before.2).abs() > 1e-4;
+            moved |= (self.peak[b] - before.0).abs() > 1e-4 || (self.point[b] - before.1).abs() > 1e-4 || (self.auto[b] - before.2).abs() > 1e-4 || (self.dynamics[b] - before.3).abs() > 1e-4;
         }
         let probe = self.update_probe(host, &layout, dt);
         let spectrum = self.spectrum.update(&self.shared, dt);

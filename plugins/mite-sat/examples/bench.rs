@@ -1,5 +1,5 @@
 //! CPU of the engine on 20 s of stereo music at 48 kHz: one band per model and oversampling
-//! factor, and six bands of Tube or Tape at 4×.
+//! factor, and six bands of Tube or Tape at 4× (Tube also with every band's dynamics on).
 //!
 //!     cargo run --release -p mite_sat --example bench
 
@@ -35,6 +35,11 @@ fn main() {
     let mut tape = six;
     tape.bands = [one(Model::Tape).bands[0]; 6];
     cases.push(("six bands Tape 4×".into(), tape, 4));
+    let mut dynamic = six;
+    for b in &mut dynamic.bands {
+        b.dyn_amount = -0.5;
+    }
+    cases.push(("six bands Tube 4× with dynamics".into(), dynamic, 4));
     // ONLY=<text> runs the cases whose name holds it (profiling).
     let only = std::env::var("ONLY").ok();
     for (name, s, factor) in cases.into_iter().filter(|c| only.as_ref().is_none_or(|o| c.0.contains(o.as_str()))) {

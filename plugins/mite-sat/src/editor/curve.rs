@@ -34,6 +34,10 @@ pub struct Curve {
     pub bias: f32,
     /// Auto gain's correction, linear (1 when off).
     pub auto: f32,
+    /// The dynamics' gain now, linear (the curve breathes with it).
+    pub dynamics: f32,
+    /// Where the dynamics start, as an input peak (linear), while they act.
+    pub threshold: Option<f32>,
     /// The band's peak going in, linear (where the music reaches on the curve).
     pub peak: f32,
     /// The band's centre, Hz (where a loop is traced: Tape's and Transformer's emphasis make it
@@ -43,7 +47,7 @@ pub struct Curve {
 
 impl Curve {
     pub fn at(&self, x: f32) -> f32 {
-        transfer(self.model, x, self.drive_db, self.point) * self.auto
+        transfer(self.model, x, self.drive_db, self.point) * self.auto * self.dynamics
     }
 
     /// Tape and Transformer: the loop for a sine of amplitude `amp`, as the band plays it
@@ -52,7 +56,8 @@ impl Curve {
         self.model.magnet()?;
         let raw = cache.get(self, amp);
         let a = engagement(self.drive_db);
-        Some(Arc::new(raw.iter().map(|&(x, f)| (x, (x + a * (f - x)) * self.auto)).collect()))
+        let gain = self.auto * self.dynamics;
+        Some(Arc::new(raw.iter().map(|&(x, f)| (x, (x + a * (f - x)) * gain)).collect()))
     }
 }
 
@@ -140,6 +145,14 @@ pub fn draw(cx: &mut DrawCx<'_>, r: Rect, curve: &Curve, ghost: Option<Model>, b
     }
     grid(cx, to_screen(r, 0.0, -1.2), to_screen(r, 0.0, 1.2), true);
     grid(cx, to_screen(r, -1.2, 0.0), to_screen(r, 1.2, 0.0), true);
+    // The dynamics' threshold: where the music's peak starts to move them.
+    if let Some(t) = curve.threshold {
+        let t = f64::from(t.min(1.0));
+        let dash = Stroke::new(1.0).with_dashes(0.0, [3.0, 3.0]);
+        for x in [-t, t] {
+            cx.scene.stroke(&dash, Affine::IDENTITY, theme.accent.multiply_alpha(0.45 * alpha), None, &Line::new(to_screen(r, x, -1.2), to_screen(r, x, 1.2)));
+        }
+    }
     // The identity: what the band was.
     cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.text_lo.multiply_alpha(0.35 * alpha), None, &Line::new(to_screen(r, -1.0, -1.0), to_screen(r, 1.0, 1.0)));
     let whole_of = |c: &Curve| path(r, |x| c.at(x), -1.0, 1.0);

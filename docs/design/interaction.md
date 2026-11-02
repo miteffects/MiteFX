@@ -416,7 +416,9 @@ where it peaks either way.
 - Stereo button (beside power): a list of Stereo, Mid, Side and M/S. Mid or Side saturates that part and leaves the other clean; M/S saturates each on its own. A narrow card shows the mode in the corner of its square when it is not Stereo. A change crossfades.
 - Harmonics: H2–H9 bars, read only. Hover: the help strip gives the partial's level against the
   strongest and whether it is even, odd or above Nyquist (hollow). Clicking selects the band.
-- Dials: DRIVE (92 px; 0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT.
+- Dials: DRIVE (0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT, and the dynamics row:
+  DYNAMICS (left compresses, right lifts the hits), THRESHOLD, ATTACK, RELEASE. Narrow cards: DRIVE
+  and MIX only. While DYNAMICS is not 0 the square draws the threshold dashed at ±T.
 
 ### Footer
 

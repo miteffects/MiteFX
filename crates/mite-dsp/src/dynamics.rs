@@ -184,7 +184,7 @@ pub fn soft_above(x: f32, knee: f32) -> f32 {
 
 /// `m` (≥ 0) capped at `range`, softly: unchanged well under it, `range` well over it.
 #[inline]
-fn soft_cap(m: f32, range: f32) -> f32 {
+pub fn soft_cap(m: f32, range: f32) -> f32 {
     m - soft_above(m - range.max(0.0), RANGE_SOFTNESS)
 }
 
