@@ -30,8 +30,15 @@ pub const CROSSOVERS: usize = BANDS - 1;
 pub const DRIVE_MAX_DB: f32 = 36.0;
 /// The saturation fades in over the first this many dB of drive.
 pub const ENGAGE_DB: f32 = 6.0;
-/// Bias ±1 (±100 %) moves the operating point this far.
+/// Bias ±1 (±100 %) moves the operating point this far, plus [`BIAS_TRACK`] of the signal's peak.
 pub const BIAS_RANGE: f32 = 0.5;
+/// Bias ±1 also moves the operating point this share of the peak going into the curve (its
+/// envelope), so the asymmetry holds however hard the band is driven: a fixed offset is lost under
+/// a signal 60 times its size, and a curve clipped on both sides at equal times makes no evens.
+pub const BIAS_TRACK: f32 = 0.5;
+/// Tube: the operating point drifts down by this share of the peak going in (grid-current
+/// blocking), with no ceiling, so it stays asymmetric at any drive.
+pub const TUBE_DRIFT: f32 = 0.2;
 pub const TONE_MAX_DB: f32 = 12.0;
 /// Where each crossover slot sits when it is first made, Hz.
 pub const DEFAULT_CROSSOVERS: [f32; CROSSOVERS] = [120.0, 500.0, 2000.0, 6000.0, 12_000.0];
@@ -64,12 +71,12 @@ const TRIM_LIMIT_MAGNET_DB: f64 = 12.0;
 const AUTO_LIMIT_DB: f64 = 24.0;
 /// Below this mean square (−80 dBFS) the trim is not measured.
 const TRIM_GATE: f64 = 1e-8;
-/// Tube: the bias drifts down by this much per unit of rectified drive, following it with these
-/// times (grid-current blocking).
-const DRIFT: f32 = 0.25;
-const DRIFT_ATTACK_MS: f64 = 10.0;
-const DRIFT_RELEASE_MS: f64 = 150.0;
-const DRIFT_MAX: f32 = 2.0;
+/// The envelope the operating point follows (the peak going into the curve): attack and release, ms.
+pub const ENV_ATTACK_MS: f64 = 10.0;
+pub const ENV_RELEASE_MS: f64 = 150.0;
+/// Tape and Transformer: the core's rest magnetisation is worked out again once the operating
+/// point has moved this far (times `1 + |point|`), and interpolated along its slope in between.
+const REST_STEP: f32 = 0.01;
 /// Longest stretch processed at once: one control step, so every stretch starts on one and the
 /// meters a step reads are those of the whole stretch before (the output is the same for every
 /// host block size).
@@ -119,9 +126,11 @@ impl Model {
         }
     }
 
-    /// Whether the curve itself has state (drift or hysteresis), so the drawn curve moves.
-    pub fn is_stateful(self) -> bool {
-        matches!(self, Model::Tape | Model::Tube | Model::Transformer)
+    /// Whether the operating point follows the signal's envelope ([`operating_point`]): every
+    /// model that saturates. Fold's and Rectify's bias is a place on a curve that never flattens,
+    /// so it stays put (a moving one would sweep through the folds).
+    pub fn tracks(self) -> bool {
+        !matches!(self, Model::Fold | Model::Rectify)
     }
 }
 
@@ -149,7 +158,12 @@ pub fn curve(model: Model, u: f32) -> f32 {
                 -1.25 * (1.0 - (u / 1.25).exp())
             }
         }
-        Model::Diode => 0.3 * (u / 0.3).asinh(),
+        // An unmatched pair: one diode conducts the top, two in series the bottom, so the halves
+        // differ in shape at any level (even harmonics without bias).
+        Model::Diode => {
+            let k = if u > 0.0 { DIODE_KNEES.0 } else { DIODE_KNEES.1 };
+            k * (u / k).asinh()
+        }
         Model::Tape | Model::Transformer | Model::Soft => {
             if u.abs() < 1.5 {
                 u - 4.0 / 27.0 * u * u * u
@@ -185,14 +199,79 @@ pub fn engagement(drive_db: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The operating point a bias setting (−1…1) gives.
+/// Diode: the knees of its top and bottom halves (one diode against two).
+const DIODE_KNEES: (f32, f32) = (0.3, 0.6);
+
+/// The operating point a bias setting (−1…1) gives in silence.
 #[inline]
 pub fn bias_point(bias: f32) -> f32 {
     bias.clamp(-1.0, 1.0) * BIAS_RANGE
 }
 
+/// The operating point at bias `bias` (−1…1) with `env` the envelope of what goes into the curve:
+/// [`bias_point`], then for a model that [`tracks`](Model::tracks) a share of the envelope, and
+/// Tube's drift.
+#[inline]
+pub fn operating_point(model: Model, bias: f32, env: f32) -> f32 {
+    let bias = bias.clamp(-1.0, 1.0);
+    let mut p = bias * BIAS_RANGE;
+    if model.tracks() {
+        p += bias * BIAS_TRACK * env;
+    }
+    if model == Model::Tube {
+        p -= TUBE_DRIFT * env;
+    }
+    p
+}
+
+/// One step of the envelope follower: `env` toward `|x|` with coefficients (attack, release).
+#[inline]
+pub fn follow(env: &mut f32, x: f32, k: (f32, f32)) {
+    let a = x.abs();
+    *env += (a - *env) * if a > *env { k.0 } else { k.1 };
+}
+
+/// Where the follower starts a cycle of the periodic signal `x` once settled: the
+/// start one cycle maps back onto itself, by bisection (the map is monotone, and from rest the
+/// envelope only climbs, from the peak only falls). The release would take hundreds of cycles
+/// to get there by running.
+pub fn settled_env(x: &[f32], k: (f32, f32)) -> f32 {
+    let peak = x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let (mut lo, mut hi) = (0.0f32, peak);
+    // 2⁻²⁰ of the peak: far finer than the point needs.
+    for _ in 0..20 {
+        let mid = 0.5 * (lo + hi);
+        let mut env = mid;
+        for &v in x {
+            follow(&mut env, v, k);
+        }
+        if env > mid {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+/// The follower's (attack, release) coefficients at `rate`.
+pub fn env_coefficients(rate: f64) -> (f32, f32) {
+    let per = |ms: f64| (1.0 - (-1000.0 / (ms * rate)).exp()) as f32;
+    (per(ENV_ATTACK_MS), per(ENV_RELEASE_MS))
+}
+
+/// A static model's `F` for the driven sample `u0` at bias `bias`, following the envelope `env`.
+#[inline]
+fn static_lane(model: Model, env: &mut f32, u0: f32, bias: f32, k: (f32, f32)) -> f32 {
+    if model.tracks() {
+        follow(env, u0, k);
+    }
+    let pt = operating_point(model, bias, *env);
+    (curve(model, u0 + pt) - curve(model, pt)) / CALIBRATION
+}
+
 /// The band's static transfer at input `x`: `x + a·(F(x) − x)` with `a` = [`engagement`] (before
-/// tone, mix and gains). `point` is the operating point ([`bias_point`], or Tube's drifted one).
+/// tone, mix and gains). `point` is the operating point ([`operating_point`]).
 #[inline]
 pub fn transfer(model: Model, x: f32, drive_db: f32, point: f32) -> f32 {
     let g = crate::db_to_gain(drive_db);
@@ -205,10 +284,13 @@ pub fn transfer(model: Model, x: f32, drive_db: f32, point: f32) -> f32 {
 /// Sine amplitudes into the curve the gain tables cover, dB (1 dB steps).
 const TABLE_U_DB: (f64, f64) = (-60.0, 48.0);
 const TABLE_U: usize = 109;
-/// Operating points the tables cover (the bias range, 0.1 steps).
+/// Bias settings the tables cover (−1…1, 0.2 steps).
 const TABLE_B: usize = 11;
+/// The envelope in a table's measurement: the peak at once, held.
+const HELD_PEAK: (f32, f32) = (1.0, 0.0);
 
-/// For one model, a sine of amplitude `U` into the curve at operating point `b`:
+/// For one model, a sine of amplitude `U` into the curve at bias `b` (the operating point it
+/// gives with the envelope at the sine's peak):
 /// `p = ⟨F²⟩ / (U²/2)` and `c = ⟨sin·F⟩ / (U/2)` (both `f'(b)²` and `f'(b)` while it is linear).
 struct GainTable {
     p: [f32; TABLE_U * TABLE_B],
@@ -222,7 +304,7 @@ fn gain_tables() -> &'static [GainTable; 8] {
             let mut t = GainTable { p: [0.0; TABLE_U * TABLE_B], c: [0.0; TABLE_U * TABLE_B] };
             let flat = (Tilt::IDENTITY, Tilt::IDENTITY);
             for j in 0..TABLE_B {
-                let b = -BIAS_RANGE + j as f32 * (2.0 * BIAS_RANGE / (TABLE_B - 1) as f32);
+                let b = -1.0 + j as f32 * (2.0 / (TABLE_B - 1) as f32);
                 for i in 0..TABLE_U {
                     let u = 10f64.powf((TABLE_U_DB.0 + i as f64) / 20.0);
                     let (mut p, mut c) = (0.0f64, 0.0f64);
@@ -231,11 +313,12 @@ fn gain_tables() -> &'static [GainTable; 8] {
                     // on its loop (without the emphasis: the trim measures the rest).
                     let mut magnet = Magnet::default();
                     let settle = if m.magnet().is_some() { N } else { 0 };
+                    let pt = operating_point(m, b, u as f32);
                     for k in 0..settle + N {
                         let s = (std::f64::consts::TAU * (k as f64 + 0.5) / N as f64).sin();
                         let f = match m.magnet() {
-                            Some(w) => f64::from(magnet.process(w, &flat, (u * s) as f32, b)),
-                            None => f64::from(curve(m, (u * s) as f32 + b)) - f64::from(curve(m, b)),
+                            Some(w) => f64::from(magnet.process(w, &flat, (u * s) as f32, b, HELD_PEAK)),
+                            None => f64::from(curve(m, (u * s) as f32 + pt)) - f64::from(curve(m, pt)),
                         };
                         if k < settle {
                             continue;
@@ -252,14 +335,14 @@ fn gain_tables() -> &'static [GainTable; 8] {
     })
 }
 
-/// The band path's gain (linear, RMS) for a sine of amplitude `amplitude` at `drive_db`,
-/// operating point `point`, with the saturation at share `a`: the dry part, the curve and the
-/// cross term between them.
-pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, point: f32, a: f32) -> f32 {
+/// The band path's gain (linear, RMS) for a sine of amplitude `amplitude` at `drive_db` and bias
+/// `bias` (−1…1), with the saturation at share `a`: the dry part, the curve and the cross term
+/// between them.
+pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, bias: f32, a: f32) -> f32 {
     let g = f64::from(crate::db_to_gain(drive_db));
     let u_db = 20.0 * (f64::from(CALIBRATION) * g * f64::from(amplitude).max(1e-9)).log10();
     let x = ((u_db - TABLE_U_DB.0).clamp(0.0, TABLE_U_DB.1 - TABLE_U_DB.0)).min((TABLE_U - 1) as f64);
-    let y = ((f64::from(point) + f64::from(BIAS_RANGE)) / (2.0 * f64::from(BIAS_RANGE)) * (TABLE_B - 1) as f64).clamp(0.0, (TABLE_B - 1) as f64);
+    let y = ((f64::from(bias) + 1.0) / 2.0 * (TABLE_B - 1) as f64).clamp(0.0, (TABLE_B - 1) as f64);
     let (i, j) = ((x as usize).min(TABLE_U - 2), (y as usize).min(TABLE_B - 2));
     let (fx, fy) = (x - i as f64, y - j as f64);
     let t = &gain_tables()[model.index()];
@@ -438,9 +521,13 @@ pub struct Magnet {
     core: Ja,
     pre: f32,
     post: f32,
-    /// The core's rest magnetisation at the operating point it was worked out for.
+    /// The core's rest magnetisation at the operating point it was worked out for, and its slope
+    /// there (per unit of operating point).
     rest: f32,
     rest_at: f32,
+    rest_slope: f32,
+    /// The envelope of what goes into the core (after the emphasis), for the operating point.
+    env: f32,
     /// The core's output scale ([`hysteresis::unity`]).
     unity: f32,
     fresh: bool,
@@ -448,51 +535,100 @@ pub struct Magnet {
 
 impl Default for Magnet {
     fn default() -> Self {
-        Self { core: Ja::default(), pre: 0.0, post: 0.0, rest: 0.0, rest_at: 0.0, unity: 1.0, fresh: true }
+        Self { core: Ja::default(), pre: 0.0, post: 0.0, rest: 0.0, rest_at: 0.0, rest_slope: 0.0, env: 0.0, unity: 1.0, fresh: true }
     }
 }
 
 impl Magnet {
-    /// `F` for the driven sample `u0` (`g·x`) at operating point `point`, through core `w` with
-    /// its emphasis `em`: slope 1 for quiet signals, 0 at rest.
+    /// A fresh core whose envelope starts at `env` and emphasis filter at `pre` (where a steady
+    /// tone holds them).
+    pub fn seeded(env: f32, pre: f32) -> Self {
+        Self { env, pre, ..Self::default() }
+    }
+
+    /// Seeded for a sine `amp·sin(2π·i/n)` from `i = 0` (the drive in it) through emphasis `em` at
+    /// rate `fs`: the emphasis in its steady state, and the envelope where it settles.
+    fn steady(em: &(Tilt, Tilt), amp: f32, n: usize, fs: f32, k: (f32, f32)) -> Self {
+        let freq = f64::from(fs) / n as f64;
+        let (hr, hi) = em.0.apply(freq, f64::from(fs), (1.0, 0.0));
+        let v: Vec<f32> = (0..n)
+            .map(|i| {
+                let th = std::f64::consts::TAU * i as f64 / n as f64;
+                (f64::from(amp) * (hr * th.sin() + hi * th.cos())) as f32
+            })
+            .collect();
+        // At i = 0 the input is 0, so the filter's state is its output.
+        Self::seeded(settled_env(&v, k), v[0])
+    }
+
+    /// The model core `w` plays.
+    fn model(w: usize) -> Model {
+        if w == 0 { Model::Tape } else { Model::Transformer }
+    }
+
+    /// The operating point now, from bias `bias` and the envelope.
+    pub fn point(&self, w: usize, bias: f32) -> f32 {
+        operating_point(Self::model(w), bias, self.env)
+    }
+
+    fn set_rest(&mut self, p: &JaParams, point: f32) {
+        let d = 1e-3;
+        self.rest = anhysteretic(p, p.h_in * point);
+        self.rest_slope = (anhysteretic(p, p.h_in * (point + d)) - anhysteretic(p, p.h_in * (point - d))) / (2.0 * d);
+        self.rest_at = point;
+    }
+
+    /// `F` for the driven sample `u0` (`g·x`) at bias `bias` (−1…1), through core `w` with its
+    /// emphasis `em`, the envelope following with coefficients `k`: slope 1 for quiet signals, 0
+    /// at rest.
     #[inline]
-    pub fn process(&mut self, w: usize, em: &(Tilt, Tilt), u0: f32, point: f32) -> f32 {
+    pub fn process(&mut self, w: usize, em: &(Tilt, Tilt), u0: f32, bias: f32, k: (f32, f32)) -> f32 {
         let p = &MAGNETS[w];
-        let at = p.h_in * point;
         if self.fresh {
-            self.core = Ja::rest(p, at);
-            (self.pre, self.post, self.rest, self.rest_at, self.fresh) = (0.0, 0.0, self.core.m, point, false);
+            let point = self.point(w, bias);
+            self.core = Ja::rest(p, p.h_in * point);
+            (self.post, self.fresh) = (0.0, false);
             self.unity = hysteresis::unity(p);
-        } else if point != self.rest_at {
-            self.rest = anhysteretic(p, at);
-            self.rest_at = point;
+            self.set_rest(p, point);
         }
         let v = em.0.process(&mut self.pre, u0);
-        let m = self.core.step(p, p.h_in * v + at);
-        em.1.process(&mut self.post, self.unity * (m - self.rest))
+        follow(&mut self.env, v, k);
+        let point = self.point(w, bias);
+        if (point - self.rest_at).abs() > REST_STEP * (1.0 + point.abs()) {
+            self.set_rest(p, point);
+        }
+        let rest = self.rest + self.rest_slope * (point - self.rest_at);
+        let m = self.core.step(p, p.h_in * (v + point));
+        em.1.process(&mut self.post, self.unity * (m - rest))
     }
 }
 
 /// What a Tape or Transformer band makes of `x` at rate `fs` (the rate the curve runs at),
 /// from rest: `F` through the emphasis and the core, the code the engine runs per lane (without
 /// the oversampler, the tone and the dry blend). For the editor and tests; allocates.
-pub fn magnet_response(model: Model, x: &[f32], drive_db: f32, point: f32, fs: f32) -> Vec<f32> {
+pub fn magnet_response(model: Model, x: &[f32], drive_db: f32, bias: f32, fs: f32) -> Vec<f32> {
+    respond(model, x, drive_db, bias, fs, None)
+}
+
+/// [`magnet_response`] from `magnet`'s state (`None`: from rest).
+fn respond(model: Model, x: &[f32], drive_db: f32, bias: f32, fs: f32, steady: Option<(f32, usize)>) -> Vec<f32> {
     let Some(w) = model.magnet() else { return x.iter().map(|&v| curve(model, v)).collect() };
     let em = emphasis(w, fs);
     let g = CALIBRATION * crate::db_to_gain(drive_db);
-    let mut magnet = Magnet::default();
-    x.iter().map(|&v| magnet.process(w, &em, g * v, point) / CALIBRATION).collect()
+    let k = env_coefficients(f64::from(fs));
+    let mut magnet = steady.map_or_else(Magnet::default, |(amp, n)| Magnet::steady(&em, g * amp, n, fs, k));
+    x.iter().map(|&v| magnet.process(w, &em, g * v, bias, k) / CALIBRATION).collect()
 }
 
 /// The loop a Tape or Transformer band traces for a sine of amplitude `amp` at `freq` Hz once
 /// settled (after one cycle from rest): `(x, F(x))` over the next, `n` points from phase 0 (the
 /// editor draws it).
-pub fn magnet_loop(model: Model, amp: f32, drive_db: f32, point: f32, freq: f32, n: usize) -> Vec<(f32, f32)> {
+pub fn magnet_loop(model: Model, amp: f32, drive_db: f32, bias: f32, freq: f32, n: usize) -> Vec<(f32, f32)> {
     // The core is rate independent and the emphasis only sees `freq / fs`: any rate with `n`
-    // samples a cycle gives the same loop.
+    // samples a cycle gives the same loop. The emphasis and envelope start where the tone holds them.
     let fs = freq * n as f32;
     let x: Vec<f32> = (0..2 * n).map(|i| amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32).collect();
-    let y = magnet_response(model, &x, drive_db, point, fs);
+    let y = respond(model, &x, drive_db, bias, fs, Some((amp, n)));
     x[n..].iter().copied().zip(y[n..].iter().copied()).collect()
 }
 
@@ -518,8 +654,8 @@ pub struct Probe {
     /// The tone's amplitude going in, linear.
     pub amp: f32,
     pub drive_db: f32,
-    /// The live operating point ([`bias_point`], or where Tube has drifted to).
-    pub point: f32,
+    /// The band's bias, −1…1 (the operating point follows from it and the tone's envelope).
+    pub bias: f32,
     /// The tone, Hz (the band's centre).
     pub freq: f32,
     pub tone_db: f32,
@@ -555,8 +691,8 @@ impl Harmonics {
 /// Sends a sine through the band's own code (the curve or core and emphasis, then the tone and
 /// the dry blend, as sat-brief §1.1) and reads H1…H9, phase included. It runs at a rate of its
 /// own, well above every partial, so it measures what the curve makes rather than the aliases
-/// of one oversampling factor. Tube's drift is held at `point` (its follower is far slower than
-/// a cycle above a few hundred Hz). For the editor; allocates.
+/// of one oversampling factor. The envelope the operating point follows runs as in the engine, at
+/// the probe's rate, from the tone's peak until it repeats. For the editor; allocates.
 pub fn probe_harmonics(p: &Probe) -> Harmonics {
     let share = f64::from(engagement(p.drive_db)) * f64::from(p.mix);
     let mut out = Harmonics { amp: [0.0; PARTIALS], hollow: std::array::from_fn(|i| (i + 1) as f32 * p.freq >= p.fs / 2.0) };
@@ -566,14 +702,16 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
     };
     let sine = |i: usize| p.amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32;
     let g = CALIBRATION * crate::db_to_gain(p.drive_db);
+    let rate = p.freq * n as f32;
+    let k = env_coefficients(f64::from(rate));
     let wet: Vec<f32> = if let Some(w) = p.model.magnet() {
-        let em = emphasis(w, p.freq * n as f32);
-        let mut magnet = Magnet::default();
+        let em = emphasis(w, rate);
+        let mut magnet = Magnet::steady(&em, g * p.amp, n, rate, k);
         let mut last = vec![0.0f32; n];
         let mut cycle = vec![0.0f32; n];
         for c in 0..PROBE_CYCLES {
             for (i, y) in cycle.iter_mut().enumerate() {
-                *y = magnet.process(w, &em, g * sine(i), p.point) / CALIBRATION;
+                *y = magnet.process(w, &em, g * sine(i), p.bias, k) / CALIBRATION;
             }
             let swing = cycle.iter().fold(0.0f32, |m, v| m.max(v.abs()));
             let moved = cycle.iter().zip(&last).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
@@ -584,8 +722,11 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         }
         last
     } else {
-        let rest = curve(p.model, p.point);
-        (0..n).map(|i| (curve(p.model, g * sine(i) + p.point) - rest) / CALIBRATION).collect()
+        let u: Vec<f32> = (0..n).map(|i| g * sine(i)).collect();
+        // The envelope only matters where it moves the point.
+        let moves = p.model.tracks() && (p.bias != 0.0 || p.model == Model::Tube);
+        let mut env = if moves { settled_env(&u, k) } else { 0.0 };
+        u.iter().map(|&v| static_lane(p.model, &mut env, v, p.bias, k)).collect()
     };
     let tilt = Tilt::new(p.tone_db, p.pivot, p.fs);
     let (fs, freq) = (f64::from(p.fs), f64::from(p.freq));
@@ -619,8 +760,8 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
 /// One band slot's state in one core, per channel.
 struct BandCore {
     os: Oversampler,
-    /// Tube's drift follower per lane and channel.
-    drift: [[f32; 2]; 2],
+    /// The static models' envelope (for the operating point) per lane and channel.
+    env: [[f32; 2]; 2],
     /// Tape's or Transformer's core per lane and channel.
     magnet: [[Magnet; 2]; 2],
     tone: [f32; 2],
@@ -641,12 +782,12 @@ struct BandCore {
 
 impl BandCore {
     fn new(factor: usize) -> Self {
-        Self { os: Oversampler::new(factor), drift: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, idle: true }
+        Self { os: Oversampler::new(factor), env: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, idle: true }
     }
 
     fn clear(&mut self) {
         self.os.reset();
-        self.drift = [[0.0; 2]; 2];
+        self.env = [[0.0; 2]; 2];
         self.magnet = [[Magnet::default(); 2]; 2];
         self.tone = [0.0; 2];
         self.hp = [(0.0, 0.0); 2];
@@ -655,7 +796,7 @@ impl BandCore {
 
     fn copy_from(&mut self, other: &BandCore) {
         self.os.copy_from(&other.os);
-        self.drift = other.drift;
+        self.env = other.env;
         self.magnet = other.magnet;
         self.tone = other.tone;
         self.hp = other.hp;
@@ -802,7 +943,8 @@ pub struct SatTelemetry {
     /// The band's peak going in and coming out (after its fader), linear.
     pub in_peak: [f32; BANDS],
     pub out_peak: [f32; BANDS],
-    /// The operating point the heard lane ends the chunk at (Tube drifts), channel 1.
+    /// The operating point the heard lane ends the chunk at (it follows the envelope), on the
+    /// first signal it drives.
     pub point: [f32; BANDS],
     /// Auto gain's correction, linear.
     pub auto: [f32; BANDS],
@@ -828,7 +970,8 @@ fn audible(s: &SatSettings, layout: &Layout) -> [bool; BANDS] {
 /// Per-sample values of one chunk, by band slot.
 struct Lanes {
     gain: [[f32; CHUNK]; BANDS],
-    point: [[f32; CHUNK]; BANDS],
+    /// The bias, −1…1.
+    bias: [[f32; CHUNK]; BANDS],
     share: [[f32; CHUNK]; BANDS],
     post: [[f32; CHUNK]; BANDS],
     /// The band's fader alone, without auto gain (what a part left clean gets).
@@ -858,13 +1001,13 @@ pub struct Saturator {
     fade_step: f64,
     level_k: f64,
     trim_k: f64,
-    drift_k: (f32, f32),
+    env_k: (f32, f32),
     /// Tape's and Transformer's emphasis at the high rate, and (pre only) at the base rate for
     /// the levels auto gain reads.
     emph: [(Tilt, Tilt); 2],
     emph_base: [Tilt; 2],
     hp_k: f32,
-    /// The values each control step ramps from and to, by band slot: gain, point, share, post, fader.
+    /// The values each control step ramps from and to, by band slot: gain, bias, share, post, fader.
     from: [[f32; 5]; BANDS],
     to: [[f32; 5]; BANDS],
     tilt_now: [Tilt; BANDS],
@@ -901,7 +1044,7 @@ impl Saturator {
             fade_step: 0.0,
             level_k: 0.0,
             trim_k: 0.0,
-            drift_k: (0.0, 0.0),
+            env_k: (0.0, 0.0),
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
             hp_k: 0.0,
@@ -912,7 +1055,7 @@ impl Saturator {
             live: [false; BANDS],
             lanes: Box::new(Lanes {
                 gain: [[0.0; CHUNK]; BANDS],
-                point: [[0.0; CHUNK]; BANDS],
+                bias: [[0.0; CHUNK]; BANDS],
                 share: [[0.0; CHUNK]; BANDS],
                 post: [[0.0; CHUNK]; BANDS],
                 fader: [[0.0; CHUNK]; BANDS],
@@ -952,8 +1095,7 @@ impl Saturator {
         }
         self.factor = self.cores[0].bands[0].os.factor();
         let hi_rate = self.fs * self.factor as f64;
-        let per = |ms: f64| (1.0 - (-1000.0 / (ms * hi_rate)).exp()) as f32;
-        self.drift_k = (per(DRIFT_ATTACK_MS), per(DRIFT_RELEASE_MS));
+        self.env_k = env_coefficients(hi_rate);
         self.emph = [emphasis(0, hi_rate as f32), emphasis(1, hi_rate as f32)];
         self.emph_base = [emphasis(0, self.fs as f32).0, emphasis(1, self.fs as f32).0];
         self.reset(s);
@@ -1010,13 +1152,13 @@ impl Saturator {
         std::array::from_fn(|b| if self.mono { StereoMode::Stereo } else { s.bands[b].stereo })
     }
 
-    /// Band slot `b`'s gain into the curve, operating point, share, post gain and fader for its eased settings.
+    /// Band slot `b`'s gain into the curve, bias, share, post gain and fader for its eased settings.
     fn targets(&self, b: usize, auto_gain: bool) -> [f32; 5] {
         let e = &self.eased[b];
         let share = e.share();
         let auto = if auto_gain { e.comp * e.trim.powf(share) } else { 1.0 };
         let fader = e.out * smooth(e.audible);
-        [CALIBRATION * crate::db_to_gain(e.drive_db as f32), bias_point(e.bias as f32), share as f32, (auto * fader) as f32, fader as f32]
+        [CALIBRATION * crate::db_to_gain(e.drive_db as f32), e.bias as f32, share as f32, (auto * fader) as f32, fader as f32]
     }
 
     /// Once per control step: glides the settings, follows a split change, retunes auto gain.
@@ -1092,7 +1234,7 @@ impl Saturator {
                 e.lanes[other] = t.model;
                 e.lane_fade = Some(0.0);
                 for core in &mut self.cores {
-                    core.bands[b].drift[other] = [0.0; 2];
+                    core.bands[b].env[other] = [0.0; 2];
                     core.bands[b].magnet[other] = [Magnet::default(); 2];
                 }
             }
@@ -1104,7 +1246,7 @@ impl Saturator {
             // after it takes back about as much as it lifted).
             let ms = model.magnet().map_or(level[b].0, |w| level[b].1[w]);
             let amplitude = (2.0 * ms).sqrt() as f32;
-            let predicted = f64::from(predicted_gain(model, amplitude, e.drive_db as f32, bias_point(e.bias as f32), share as f32)).max(1e-6);
+            let predicted = f64::from(predicted_gain(model, amplitude, e.drive_db as f32, e.bias as f32, share as f32)).max(1e-6);
             let limit = 10f64.powf(AUTO_LIMIT_DB / 20.0);
             // Its inputs (level, eased settings) are smooth already: no lag of its own, so the
             // level holds while drive or bypass move.
@@ -1196,7 +1338,7 @@ impl Saturator {
                 let (f, t) = (self.from[b], self.to[b]);
                 let r = |k: usize| f[k] + (t[k] - f[k]) * u;
                 self.lanes.gain[b][i] = r(0);
-                self.lanes.point[b][i] = r(1);
+                self.lanes.bias[b][i] = r(1);
                 self.lanes.share[b][i] = r(2);
                 self.lanes.post[b][i] = r(3);
                 self.lanes.fader[b][i] = r(4);
@@ -1317,12 +1459,12 @@ impl Saturator {
                             *v = if ms { 0.5 * (ring(0) + if c == 0 { ring(1) } else { -ring(1) }) } else { ring(c) };
                         }
                         band.os.up(c, &tmp[..past], &mut self.hi[..past * f]);
-                        let (g, point, model) = (self.lanes.gain[b][0], self.lanes.point[b][0], e.lanes[e.lane]);
+                        let (g, bias, model) = (self.lanes.gain[b][0], self.lanes.bias[b][0], e.lanes[e.lane]);
+                        // The core and the envelope warm up on the past too.
                         for v in &mut self.hi[..past * f] {
                             *v = match model.magnet() {
-                                // The core warms up on the past too.
-                                Some(w) => band.magnet[e.lane][c].process(w, &self.emph[w], g * *v, point) / CALIBRATION,
-                                None => (curve(model, g * *v + point) - curve(model, point)) / CALIBRATION,
+                                Some(w) => band.magnet[e.lane][c].process(w, &self.emph[w], g * *v, bias, self.env_k) / CALIBRATION,
+                                None => static_lane(model, &mut band.env[e.lane][c], g * *v, bias, self.env_k),
                             };
                         }
                         let mut sink = [0.0f32; PREROLL];
@@ -1337,26 +1479,18 @@ impl Saturator {
                     // independent, so the CPU overlaps them: a hysteresis core is latency bound).
                     let models = e.lanes;
                     let heard = e.lane;
-                    let (ka, kr) = self.drift_k;
+                    let env_k = self.env_k;
                     let emph = &self.emph;
-                    let mut lane = |l: usize, c: usize, u0: f32, point: f32| {
+                    let mut lane = |l: usize, c: usize, u0: f32, bias: f32| {
                         let model = models[l];
-                        if let Some(w) = model.magnet() {
-                            return band.magnet[l][c].process(w, &emph[w], u0, point) / CALIBRATION;
+                        match model.magnet() {
+                            Some(w) => band.magnet[l][c].process(w, &emph[w], u0, bias, env_k) / CALIBRATION,
+                            None => static_lane(model, &mut band.env[l][c], u0, bias, env_k),
                         }
-                        let pt = if model == Model::Tube {
-                            let d = &mut band.drift[l][c];
-                            let target = u0.clamp(0.0, DRIFT_MAX);
-                            *d += (target - *d) * if target > *d { ka } else { kr };
-                            point - DRIFT * *d
-                        } else {
-                            point
-                        };
-                        (curve(model, u0 + pt) - curve(model, pt)) / CALIBRATION
                     };
                     for k in 0..m {
                         let i = k / f;
-                        let (g, point) = (self.lanes.gain[b][i], self.lanes.point[b][i]);
+                        let (g, bias) = (self.lanes.gain[b][i], self.lanes.bias[b][i]);
                         for c in 0..n_ch {
                             if !driven[c] {
                                 continue;
@@ -1364,10 +1498,10 @@ impl Saturator {
                             let at = c * HI_CH + k;
                             let u0 = g * self.hi[at];
                             self.hi[at] = if lane_fading {
-                                let (a, z) = (lane(heard, c, u0, point), lane(1 - heard, c, u0, point));
+                                let (a, z) = (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
                                 a + (z - a) * self.lanes.blend[b][i]
                             } else {
-                                lane(heard, c, u0, point)
+                                lane(heard, c, u0, bias)
                             };
                         }
                     }
@@ -1432,8 +1566,11 @@ impl Saturator {
                     telemetry.in_peak[b] = telemetry.in_peak[b].max(peak_in);
                     telemetry.out_peak[b] = telemetry.out_peak[b].max(peak_out);
                     let shown_ch = usize::from(!driven[0]);
-                    let d = if e.lanes[e.lane] == Model::Tube { DRIFT * band.drift[e.lane][shown_ch] } else { 0.0 };
-                    telemetry.point[b] = bias_point(e.bias as f32) - d;
+                    let (model, bias) = (e.lanes[e.lane], e.bias as f32);
+                    telemetry.point[b] = match model.magnet() {
+                        Some(w) => band.magnet[e.lane][shown_ch].point(w, bias),
+                        None => operating_point(model, bias, band.env[e.lane][shown_ch]),
+                    };
                     telemetry.auto[b] = if s.auto_gain { (e.comp * e.trim.powf(e.share())) as f32 } else { 1.0 };
                 }
             }
@@ -1554,8 +1691,8 @@ mod tests {
     #[test]
     fn the_probe_reads_what_the_engine_plays() {
         // Every model through the engine at 8×, tone and mix included: the probe's partials are
-        // the output's, within 0.25 dB down to −60 dB under the strongest. Tube at the point the
-        // engine reports.
+        // the output's, within 0.25 dB down to −60 dB under the strongest, the operating point
+        // following the envelope in both.
         let freq = K as f32 / N as f32 * FS;
         for m in Model::ALL {
             for (amp, drive, bias, tilt, mix) in [(0.25f32, 12.0f32, 0.0f32, 0.0f32, 1.0f32), (0.1, 24.0, 0.4, 6.0, 1.0), (0.3, 9.0, -0.3, -8.0, 0.6), (0.2, 3.0, 0.0, 0.0, 1.0)] {
@@ -1564,16 +1701,8 @@ mod tests {
                 s.bands[0].tone_db = tilt;
                 s.bands[0].mix = mix;
                 let mut sat = Saturator::new(FS, 8, &s);
-                let x = tone(32 * N, amp, K);
-                let mut y = x.clone();
-                let mut d = vec![0.0; x.len()];
-                // The point eased over the last blocks, as the editor reads it (one block's report
-                // lands anywhere on the drift's ripple within a cycle).
-                let mut point = bias_point(bias);
-                for (a, b) in y.chunks_mut(333).zip(d.chunks_mut(333)) {
-                    point += (sat.process(&mut [a], &mut [b], &s).point[0] - point) * 0.2;
-                }
-                let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, point, freq, tone_db: tilt, pivot: TONE_PIVOT, mix, fs: FS });
+                let (y, _) = run(&mut sat, &tone(32 * N, amp, K), &s, 333);
+                let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, bias, freq, tone_db: tilt, pivot: TONE_PIVOT, mix, fs: FS });
                 let want: [f64; PARTIALS] = std::array::from_fn(|i| harmonic(&y, i + 1));
                 let top = want.iter().copied().fold(0.0, f64::max);
                 for (i, &w) in want.iter().enumerate() {
@@ -1599,7 +1728,7 @@ mod tests {
                     s.bands[0].bias = bias;
                     let mut sat = Saturator::new(FS, 8, &s);
                     let (y, _) = run(&mut sat, &tone(32 * N, amp, k), &s, 333);
-                    let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, point: bias_point(bias), freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+                    let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, bias, freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
                     let tail = &y[y.len() - N..];
                     let read = |h: usize| {
                         let w = std::f64::consts::TAU * (h * k) as f64 / N as f64;
@@ -1625,7 +1754,7 @@ mod tests {
     fn probe_cost() {
         for m in Model::ALL {
             for (freq, bias) in [(49.0f32, 0.0f32), (800.0, 0.0), (1043.0, 0.8), (9000.0, 0.8)] {
-                let p = Probe { model: m, amp: 0.3, drive_db: 24.0, point: bias_point(bias), freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
+                let p = Probe { model: m, amp: 0.3, drive_db: 24.0, bias, freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
                 let t = std::time::Instant::now();
                 for _ in 0..20 {
                     std::hint::black_box(probe_harmonics(&p));
@@ -1766,7 +1895,7 @@ mod tests {
         // a kick would be heard through; at drive 0 nothing has changed.
         let amp = 10f32.powf(-18.0 / 20.0);
         for m in [Model::Tube, Model::Soft, Model::Hard, Model::Diode] {
-            let h = probe_harmonics(&Probe { model: m, amp, drive_db: 12.0, point: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+            let h = probe_harmonics(&Probe { model: m, amp, drive_db: 12.0, bias: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
             assert!(h.db(2) > -30.0, "{m:?}: H3 {:.1} dB", h.db(2));
         }
     }
@@ -1774,7 +1903,7 @@ mod tests {
     #[test]
     fn the_probe_marks_what_the_way_down_removes() {
         // A 9 kHz tone at 48 kHz: H2 (18 kHz) is heard, H3 (27 kHz) is not, though the curve makes it.
-        let p = Probe { model: Model::Soft, amp: 0.5, drive_db: 12.0, point: 0.0, freq: 9000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
+        let p = Probe { model: Model::Soft, amp: 0.5, drive_db: 12.0, bias: 0.0, freq: 9000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
         let h = probe_harmonics(&p);
         assert_eq!(&h.hollow[..3], &[false, false, true]);
         assert!(h.amp[2] > 0.01, "the curve makes H3: {}", h.amp[2]);
@@ -1784,12 +1913,12 @@ mod tests {
     fn a_clean_band_probes_clean() {
         // Drive 0 or mix 0 is the band itself: the tone and nothing else, at its own level.
         for (drive, mix) in [(0.0f32, 1.0f32), (18.0, 0.0)] {
-            let h = probe_harmonics(&Probe { model: Model::Tube, amp: 0.5, drive_db: drive, point: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix, fs: FS });
+            let h = probe_harmonics(&Probe { model: Model::Tube, amp: 0.5, drive_db: drive, bias: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix, fs: FS });
             assert!((h.amp[0] - 0.5).abs() < 1e-6, "H1 {}", h.amp[0]);
             assert!(h.amp[1..].iter().all(|&a| a == 0.0));
         }
         // Rectify trades the fundamental for the octave: H2 is the reference.
-        let h = probe_harmonics(&Probe { model: Model::Rectify, amp: 0.5, drive_db: 14.0, point: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+        let h = probe_harmonics(&Probe { model: Model::Rectify, amp: 0.5, drive_db: 14.0, bias: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
         assert_eq!(h.db(1), 0.0);
     }
 
@@ -1812,9 +1941,13 @@ mod tests {
     #[test]
     fn the_engine_plays_the_drawn_curve() {
         // Every static model, through the oversampled engine: its harmonics are those of the curve
-        // the editor draws, within 0.05 dB down to −80 dB under the fundamental.
+        // the editor draws, within 0.05 dB down to −80 dB under the fundamental. With a bias, only
+        // where the point stays put (elsewhere it follows the envelope: the probe test covers it).
         for m in [Model::Diode, Model::Soft, Model::Hard, Model::Fold, Model::Rectify] {
             for (amp, drive, bias) in [(0.0625f32, 12.0f32, 0.0f32), (0.025, 24.0, 0.4), (0.125, 3.0, -0.6)] {
+                if bias != 0.0 && m.tracks() {
+                    continue;
+                }
                 let mut s = band(m, drive);
                 s.bands[0].bias = bias;
                 let mut sat = Saturator::new(FS, 8, &s);
@@ -1855,7 +1988,7 @@ mod tests {
                 let mut sat = Saturator::new(FS, 8, &s);
                 let (y, _) = run(&mut sat, &tone(6 * N, amp, K), &s, 333);
                 let x_hi: Vec<f32> = (0..6 * N * 8).map(|i| amp * (std::f64::consts::TAU * (K * i) as f64 / (8 * N) as f64).sin() as f32).collect();
-                let want_y = magnet_response(m, &x_hi, drive, bias_point(bias), 8.0 * FS);
+                let want_y = magnet_response(m, &x_hi, drive, bias, 8.0 * FS);
                 let reference = (1..=5).map(|h| harmonic_at(&want_y, h, 8)).fold(0.0, f64::max);
                 for h in 1..=5 {
                     let want = harmonic_at(&want_y, h, 8);
@@ -1906,8 +2039,8 @@ mod tests {
     }
 
     #[test]
-    fn symmetric_models_make_no_even_harmonics_and_tube_does() {
-        for m in [Model::Diode, Model::Soft, Model::Hard, Model::Fold] {
+    fn symmetric_models_make_no_even_harmonics_and_tube_and_diode_do() {
+        for m in [Model::Soft, Model::Hard, Model::Fold] {
             let s = band(m, 18.0);
             let mut sat = Saturator::new(FS, 4, &s);
             let (y, _) = run(&mut sat, &tone(4 * N, 0.3, K), &s, 256);
@@ -1935,6 +2068,29 @@ mod tests {
         };
         let (quiet, loud) = (h2_share(0.0125), h2_share(0.1));
         assert!(quiet > 1e-3 && loud > 2.0 * quiet, "{quiet} {loud}");
+    }
+
+    /// H2 against H1 through the engine, dB, for a −18 dBFS tone.
+    fn h2_db(m: Model, drive: f32, bias: f32) -> f64 {
+        let mut s = band(m, drive);
+        s.bands[0].bias = bias;
+        let mut sat = Saturator::new(FS, 4, &s);
+        let (y, _) = run(&mut sat, &tone(8 * N, 0.125, K), &s, 256);
+        20.0 * (harmonic(&y, 2) / harmonic(&y, 1)).log10()
+    }
+
+    #[test]
+    fn even_harmonics_hold_however_hard_the_band_is_driven() {
+        // The operating point follows the envelope: from 12 dB of drive to 36 the asymmetry, and so
+        // H2, does not fade (a fixed offset would be lost under the signal, the halves clipping at
+        // equal times). Tube and Diode without a bias, every saturating model with one.
+        let mut cases: Vec<(Model, f32)> = vec![(Model::Tube, 0.0), (Model::Diode, 0.0)];
+        cases.extend([Model::Tape, Model::Transformer, Model::Diode, Model::Soft, Model::Hard].map(|m| (m, 0.3)));
+        cases.push((Model::Tube, -0.3));
+        for (m, bias) in cases {
+            let (mid, top) = (h2_db(m, 12.0, bias), h2_db(m, 36.0, bias));
+            assert!(top > -26.0 && top > mid - 6.0, "{m:?} bias {bias}: H2 {mid:.1} dB at 12, {top:.1} dB at 36");
+        }
     }
 
     #[test]

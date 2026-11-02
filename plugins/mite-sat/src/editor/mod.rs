@@ -540,12 +540,12 @@ impl SatView {
     fn curve(&self, host: &dyn ParamHost, b: usize) -> curve::Curve {
         let model = Self::model(host, b);
         let bias = Self::plain(host, &band_id(b, B_BIAS.id)) / 100.0;
-        // Tube's point drifts with the music: the engine reports where it sits.
-        let point = if model.is_stateful() && self.history.back().is_some() { self.point[b] } else { bias_point(bias) };
+        // The point follows the music's envelope: the engine reports where it sits.
+        let point = if self.history.back().is_some() { self.point[b] } else { bias_point(bias) };
         let auto = if Self::on(host, AUTO_GAIN.id) { self.auto[b] } else { 1.0 };
         let x = settings(host).crossovers;
         let freq = tone_pivot(&Layout::new(&x), &x, b);
-        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, auto, peak: self.peak[b], freq }
+        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, bias, auto, peak: self.peak[b], freq }
     }
 
     /// Re-measures the shown band's harmonics when what they depend on moved, and eases the bars.
@@ -1249,8 +1249,8 @@ impl SatView {
 
 fn model_words(m: Model) -> &'static str {
     match m {
-        Model::Tube => "asymmetric, so even harmonics; pushed harder, its bias drifts and it warms further",
-        Model::Diode => "a hard knee into a soft, never-ending climb",
+        Model::Tube => "asymmetric, so even harmonics; its bias drifts with the level, so they hold however hard it is pushed",
+        Model::Diode => "one diode against two: a hard knee into a soft, never-ending climb, each half its own, so even harmonics",
         Model::Soft => "a gentle cubic: odd harmonics, rounding into a ceiling",
         Model::Hard => "clipping, its corner rounded so it folds nothing harsh back",
         Model::Fold => "a wavefolder: past the top it folds back down",
@@ -1263,7 +1263,7 @@ fn model_words(m: Model) -> &'static str {
 fn knob_words(id: &str) -> &'static str {
     match id {
         "drive" => " — how hard the band goes into the curve (0 dB: clean)",
-        "bias" => " — moves the operating point off centre: even harmonics",
+        "bias" => " — moves the operating point off centre, with the level: even harmonics at any drive",
         "tone" => " — tilts what the saturation gives around the band's centre",
         "mix" => " — this band's saturation against its clean signal",
         "out" => " — this band's level in the sum",

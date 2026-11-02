@@ -28,8 +28,10 @@ const LOOP_POINTS: usize = 144;
 pub struct Curve {
     pub model: Model,
     pub drive_db: f32,
-    /// The operating point (Tube's drifts with the music).
+    /// The operating point the engine reports (it follows the music's envelope).
     pub point: f32,
+    /// The band's bias, −1…1 (a traced loop works its own point out from it).
+    pub bias: f32,
     /// Auto gain's correction, linear (1 when off).
     pub auto: f32,
     /// The band's peak going in, linear (where the music reaches on the curve).
@@ -59,7 +61,7 @@ impl Curve {
 #[derive(Default)]
 pub struct Loops(RefCell<Vec<(LoopKey, Trace)>>);
 
-/// Model, drive, point, frequency and amplitude (bits); the traced points.
+/// Model, drive, bias, frequency and amplitude (bits); the traced points.
 type LoopKey = [u32; 5];
 type Trace = Arc<Vec<(f32, f32)>>;
 
@@ -67,7 +69,7 @@ impl Loops {
     const KEEP: usize = 24;
 
     fn get(&self, c: &Curve, amp: f32) -> Arc<Vec<(f32, f32)>> {
-        let key = [c.model.index() as u32, c.drive_db.to_bits(), c.point.to_bits(), c.freq.to_bits(), amp.to_bits()];
+        let key = [c.model.index() as u32, c.drive_db.to_bits(), c.bias.to_bits(), c.freq.to_bits(), amp.to_bits()];
         let mut list = self.0.borrow_mut();
         if let Some(i) = list.iter().position(|(k, _)| *k == key) {
             let hit = list.remove(i);
@@ -75,7 +77,7 @@ impl Loops {
             list.push(hit);
             return v;
         }
-        let v = Arc::new(magnet_loop(c.model, amp, c.drive_db, c.point, c.freq, LOOP_POINTS));
+        let v = Arc::new(magnet_loop(c.model, amp, c.drive_db, c.bias, c.freq, LOOP_POINTS));
         if list.len() == Self::KEEP {
             list.remove(0);
         }

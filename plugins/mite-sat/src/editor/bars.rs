@@ -1,6 +1,7 @@
 //! The harmonics bars: H2…H9 of a probe tone through the band's own code
-//! (`mite_dsp::sat::probe_harmonics`) at the band's centre, the music's peak and the live operating
-//! point, in dB against the strongest partial. A partial above the base Nyquist is hollow: the
+//! (`mite_dsp::sat::probe_harmonics`) at the band's centre, the music's peak and its bias (the
+//! operating point following the tone's envelope, as in the engine), in dB against the strongest
+//! partial. A partial above the base Nyquist is hollow: the
 //! curve makes it, the way down removes it. With no music the probe plays at a reference level and
 //! the bars are dim: what the band would do, not what it is doing.
 
@@ -38,7 +39,7 @@ struct Key {
     band: usize,
     model: Model,
     drive_db: f32,
-    point: f32,
+    bias: f32,
     peak: i32,
     freq: f32,
     tone_db: f32,
@@ -71,7 +72,7 @@ impl ProbeBars {
         let silent = c.peak < SILENT;
         let amp = if silent { REFERENCE } else { c.peak.min(4.0) };
         let peak = (20.0 * amp.log10() / PEAK_STEP_DB).round() as i32;
-        let key = Key { band, model: c.model, drive_db: c.drive_db, point: c.point, peak, freq: c.freq, tone_db, mix, fs };
+        let key = Key { band, model: c.model, drive_db: c.drive_db, bias: c.bias, peak, freq: c.freq, tone_db, mix, fs };
         let snap = self.key.is_none_or(|k| k.band != band || k.model != c.model);
         if self.key != Some(key) && (snap || self.last.elapsed().as_secs_f64() >= MIN_INTERVAL_S) {
             let h = measure(&key);
@@ -177,5 +178,5 @@ pub fn hit(r: Rect, p: Point) -> Option<usize> {
 
 fn measure(k: &Key) -> Harmonics {
     let amp = 10f32.powf(k.peak as f32 * PEAK_STEP_DB / 20.0);
-    probe_harmonics(&Probe { model: k.model, amp, drive_db: k.drive_db, point: k.point, freq: k.freq, tone_db: k.tone_db, pivot: k.freq, mix: k.mix, fs: k.fs })
+    probe_harmonics(&Probe { model: k.model, amp, drive_db: k.drive_db, bias: k.bias, freq: k.freq, tone_db: k.tone_db, pivot: k.freq, mix: k.mix, fs: k.fs })
 }

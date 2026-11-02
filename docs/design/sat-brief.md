@@ -23,7 +23,8 @@ Neutral settings null: drive 0 dB, band bypass, band mix 0 or global mix 0 are t
 ### 1.1 The band signal path (what the visuals draw)
 
 ```
-u      = K·g·x + b          g = drive (0…36 dB), K = +12 dB calibration, b = bias (operating point)
+u      = K·g·x + b          g = drive (0…36 dB), K = +12 dB calibration, b = operating point
+b      = β·(0.5 + 0.5·e) [− 0.2·e Tube]   β = bias (−1…1), e = envelope of what enters f (10/150 ms)
 F(x)   = (f(u) − f(b)) / K  so silence stays silence, and quiet signals keep slope g
 wet    = Tone( down( F( up(x) ) ) )
 y      = x_d + a·HP₅(wet − x_d)      a = smoothstep(drive / 6 dB) · engaged · band mix
@@ -41,6 +42,21 @@ The editor's transfer curve is `x + a·(F(x) − x)` times the auto gain, from t
 the knees sat near 0 dBFS, so a kick peaking at −18 dBFS only started to distort past +18 dB, and
 auto gain hid the level change too. `K` puts the knees 12 dB under full scale at drive 0.
 
+**The operating point follows the level (2026-11-02):** user report: hardly any even harmonics.
+Measured: six of eight models made none at bias 0, and every model's H2 fell as drive rose (Tube
+from −24 dB at 12 dB of drive to −35 at 36; with bias 30 %, Transformer to −56), because a fixed
+offset is lost under a signal 60 times its size, and a curve clipped on both sides at equal times
+(50 % duty) makes no evens. Now the point is `β·0.5` in silence plus `β·0.5` of the envelope of what
+enters the curve (Tape and Transformer: after their emphasis), so bias sets where on the wave the
+clipping starts, at any drive (a hard clip at relative offset θ gives H2/H1 = θ); Tube's blocking
+drift is `0.2·e` with no ceiling (it was capped at 0.5). Fold and Rectify keep a fixed point (theirs
+is a place on a curve that never flattens; a moving one would sweep through the folds). Since
+`f(b)` comes off, a moving point does not thump. Measured at −18 dBFS: Tube's H2 −25 → −16 dB from
+12 to 36 dB of drive, Diode −22…−25 dB at bias 0, and at bias 30 % every saturating model holds
+−13…−17 dB at 36 dB of drive. The probe solves the envelope's steady state (bisection on one cycle;
+running it would take hundreds of cycles), Tape's and Transformer's rest magnetisation is
+interpolated along its slope between recomputes (every 1 % of `1 + |b|`); CPU unchanged.
+
 **Stereo modes (slice 5):** left and right, or `M = (L+R)/2` and `S = (L−R)/2`, go through the path
 above. Each part that is driven gets its difference and auto gain, and a part left clean only the
 band's fader. L and R start from what they were and only take on the differences, so a neutral band
@@ -52,9 +68,9 @@ two cores, as a split change does. Mono ignores the mode.
 | # | Model | Curve `f(u)` (`f(0) = 0`, `f'(0) = 1` but Rectify's 0, smooth: no corners) | Character |
 |---|---|---|---|
 | 0 | Tape | +18 dB shelf above ~2 kHz → Jiles–Atherton core (wide loop) → its exact inverse | Soft, loose, HF saturates first (and comes out compressed, little added distortion) |
-| 1 | **Tube** (default) | `u > 0`: `0.8·tanh(u/0.8)`; `u < 0`: `−1.25·(1 − e^{u/1.25})`; bias drifts down with level (blocking) | Asymmetric: even harmonics, more as it is pushed |
+| 1 | **Tube** (default) | `u > 0`: `0.8·tanh(u/0.8)`; `u < 0`: `−1.25·(1 − e^{u/1.25})`; the point drifts down by 0.2 of the envelope (blocking) | Asymmetric: even harmonics, more as it is pushed, held at any drive |
 | 2 | Transformer | +18 dB shelf below ~120 Hz (the flux integrates) → JA core (narrow loop) → its exact inverse | Low end saturates first |
-| 3 | Diode | `0.3·asinh(u/0.3)` | Hard knee, log growth, never a ceiling |
+| 3 | Diode | `k·asinh(u/k)`, `k` 0.3 above 0, 0.6 below (one diode against two) | Hard knee, log growth, never a ceiling; halves unlike, so even harmonics |
 | 4 | Soft | `u − 4u³/27` to ±1.5, then ±1 | Classic cubic: odd harmonics, gentle |
 | 5 | Hard | `u` to 0.95, a quadratic knee to 1 at 1.05, then ±1 | Clipping, rounded so it never folds a corner into the spectrum |
 | 6 | Fold | `sin(u)` | Wavefolder: past ±π/2 it folds back |
