@@ -76,9 +76,14 @@ two cores, as a split change does. Mono ignores the mode.
 
 **Dynamics (slice 6, 2026-11-03):** after the curve, each band has a gain `D` set by its input,
 not its output: a peak detector (instant attack, 10 ms release) hears what goes into the curves
-(the band before drive, the driven parts in a stereo mode), so the threshold stays put as drive
-moves, and the gain computer is `dynamics_gain_db`: with `o` the input's excess over the threshold
-through a 6 dB soft knee, DYN `d < 0` gives `d·o` (−50 % is 2:1, −100 % ∞:1) and `d > 0` gives
+(the band before drive, the driven parts in a stereo mode), so drive never moves where it acts.
+**The threshold is automatic (user, 2026-11-03, as Saturn has none):** it is the band's own
+level, the detector's reading in dB averaged over a second (once per 16-sample stretch, on its
+loudest reading), held below −70 dBFS so silence does not drag it down. Steady material sits at
+its own average and is left alone; what rises above it (hits, accents) is what moves, whatever
+the track's level (tested within 1 dB across 20 dB). The `dyn_thr` parameter stays in the state
+but is not used. The gain computer is `dynamics_gain_db`: with `o` the input's excess over that
+average through a 6 dB soft knee, DYN `d < 0` gives `d·o` (−50 % is 2:1, −100 % ∞:1) and `d > 0` gives
 `d·o` capped softly at +12 dB (an upward expander: +100 % is 1:2, so hits the curve flattened come
 back). The gain eases in dB with the band's attack (moving away from 0 dB) and release (back).
 It acts on what the band drives (in Mid, the side keeps its fader only), even at drive 0, and it
@@ -190,16 +195,16 @@ x 1180–1280, as in Shape.
   Nyquist is hollow. With no music the probe plays at −12 dBFS and the bars are dim. Single and
   wide cards only; on the wide card they sit above the dials.
 - **Dials**: DRIVE (0…36 dB; 0–12 dB takes half the travel), BIAS (±100 %), TONE (±12 dB),
-  MIX, OUTPUT; under them the dynamics row: DYNAMICS (±100 %), THRESHOLD (−60…0 dBFS),
-  ATTACK (0.1–100 ms), RELEASE (10–1000 ms). While DYNAMICS is not 0 the square shows the
-  threshold as two dashed lines at ±T (the lit stretch crossing them is when the dynamics move),
-  and the curve is drawn times the live dynamics gain, so it breathes with it.
+  MIX, OUTPUT; under them the dynamics row: DYNAMICS (±100 %), ATTACK (0.1–100 ms), RELEASE
+  (10–1000 ms); no threshold dial (automatic). While DYNAMICS is not 0 the square shows the live
+  threshold, the band's average level, as two dashed lines at ±T (the lit stretch reaching past
+  them is when the dynamics move), and the curve is drawn times the live dynamics gain.
 - Narrow cards (other bands): number badge, S and M, a transfer square of their own (lit where
   their music reaches; drag it as the wide one, which selects the band), DRIVE and MIX. The curve
   is the model's drawing, so no separate glyph.
 - Wide card (the selected band of several, 600 px): badge, model icons, the band's range, S, M,
   power and remove (a cross in the text colour: Sat draws no danger role), the square, DRIVE
-  large beside BIAS, TONE, MIX and OUTPUT in a 2×2 grid, the dynamics row of four below them
+  large beside BIAS, TONE, MIX and OUTPUT in a 2×2 grid, the dynamics row of three below them
   (the bars 56 px tall to make room).
 
 ### 3.3 Footer

@@ -6,9 +6,8 @@
     "b1_model": 5.0,
     "b1_drive": 14.0,
     "b1_dyn": 50.0,
-    "b1_dyn_thr": -18.0,
     "b1_dyn_att": 5.0,
     "b1_dyn_rel": 120.0,
-    "b1_out": -4.0
+    "b1_out": -3.0
   }
 }

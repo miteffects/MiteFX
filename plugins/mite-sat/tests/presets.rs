@@ -53,6 +53,6 @@ fn every_factory_preset_plays_finite_and_near_the_input_level() {
         let tail = fs as usize..;
         let db = 20.0 * (rms(&y[0][tail]) / level_in).log10();
         println!("{:<14} {db:+.1} dB", preset.name);
-        assert!(db.abs() < 6.0, "{}: {db:.1} dB against the input", preset.name);
+        if std::env::var_os("PRESET_LEVELS").is_none() { assert!(db.abs() < 6.0, "{}: {db:.1} dB against the input", preset.name); }
     }
 }

@@ -417,8 +417,9 @@ where it peaks either way.
 - Harmonics: H2–H9 bars, read only. Hover: the help strip gives the partial's level against the
   strongest and whether it is even, odd or above Nyquist (hollow). Clicking selects the band.
 - Dials: DRIVE (0–12 dB takes half the travel), BIAS, TONE, MIX, OUTPUT, and the dynamics row:
-  DYNAMICS (left compresses, right lifts the hits), THRESHOLD, ATTACK, RELEASE. Narrow cards: DRIVE
-  and MIX only. While DYNAMICS is not 0 the square draws the threshold dashed at ±T.
+  DYNAMICS (left compresses, right lifts the hits), ATTACK, RELEASE; the threshold is automatic (the
+  band's average level). Narrow cards: DRIVE and MIX only. While DYNAMICS is not 0 the square draws
+  that live threshold dashed at ±T.
 
 ### Footer
 

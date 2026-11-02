@@ -54,7 +54,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("dynamics") || v("bands") {
         // Band 1 compresses after its curve.
         host.set_plain(&band_id(0, B_DYN.id), -60.0);
-        host.set_plain(&band_id(0, B_DYN_THR.id), -30.0);
     }
     // Several bands, each with its own model.
     let bands: &[(f32, Model, f32, f32)] = match variant.as_str() {

@@ -59,6 +59,7 @@ pub const B_OUT: ParamSpec = spec("out", "Band Output", "dB", -24.0, 24.0, 0.0, 
 /// Per-band dynamics after the model: below 0 compresses (−50 % is 2:1), above lifts what passes
 /// the threshold (+100 % is 1:2).
 pub const B_DYN: ParamSpec = spec("dyn", "Dynamics", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
+/// Saved but unused since 2026-11-03: the threshold is automatic (the band's own average level).
 pub const B_DYN_THR: ParamSpec = spec("dyn_thr", "Dynamics Threshold", "dBFS", -60.0, 0.0, -24.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const B_DYN_ATT: ParamSpec = spec("dyn_att", "Dynamics Attack", "ms", 0.1, 100.0, 10.0, ParamScale::Log, 1, (0.25, 1.0 / 16.0), ParamDisplay::Time);
 pub const B_DYN_REL: ParamSpec = spec("dyn_rel", "Dynamics Release", "ms", 10.0, 1000.0, 150.0, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::Time);

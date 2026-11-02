@@ -23,9 +23,11 @@ pub mod record {
     pub const POINT: usize = BAND_OUT + BANDS;
     /// Per band slot: auto gain's correction, linear.
     pub const AUTO: usize = POINT + BANDS;
-    /// Per band slot: the dynamics' gain, linear.
+    /// Per band slot: the dynamics' gain, linear, and their automatic threshold (linear, 0 before
+    /// the band has been heard).
     pub const DYN: usize = AUTO + BANDS;
-    pub const WIDTH: usize = DYN + BANDS;
+    pub const DYN_THR: usize = DYN + BANDS;
+    pub const WIDTH: usize = DYN_THR + BANDS;
 }
 
 /// One history record per this much audio.
@@ -240,6 +242,7 @@ impl SatEngine {
             a[record::POINT + b] = t.point[b];
             a[record::AUTO + b] = t.auto[b];
             a[record::DYN + b] = t.dynamics[b];
+            a[record::DYN_THR + b] = t.threshold[b];
         }
     }
 }
