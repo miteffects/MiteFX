@@ -71,6 +71,14 @@ const TRIM_LIMIT_MAGNET_DB: f64 = 12.0;
 const AUTO_LIMIT_DB: f64 = 24.0;
 /// Below this mean square (−80 dBFS) the trim is not measured.
 const TRIM_GATE: f64 = 1e-8;
+/// Auto gain matches the music, not the gaps in it: its meters (the prediction's level and the
+/// trim's) only run while the band's short-term level (mean square over this long, ms) is within
+/// [`HIT_GATE_DB`] of its recent loudest, which falls back with this time constant (ms). On sparse
+/// material (a kick, speech) the tails and bleed between hits are left out: saturation lifts them
+/// by the whole drive, and matching them pulled the hits down by as much.
+const SHORT_MS: f64 = 20.0;
+const TOP_RELEASE_MS: f64 = 1000.0;
+const HIT_GATE_DB: f64 = 10.0;
 /// The envelope the operating point follows (the peak going into the curve): attack and release, ms.
 pub const ENV_ATTACK_MS: f64 = 10.0;
 pub const ENV_RELEASE_MS: f64 = 150.0;
@@ -776,13 +784,17 @@ struct BandCore {
     /// Auto gain's trim meters: mean squares in and out (after the prediction).
     trim_in: f64,
     trim_out: f64,
+    /// The gate auto gain's meters run behind: the short-term mean square going in, and its
+    /// recent loudest.
+    short: f64,
+    top: f64,
     /// Nothing runs: the oversampler and filters are clear.
     idle: bool,
 }
 
 impl BandCore {
     fn new(factor: usize) -> Self {
-        Self { os: Oversampler::new(factor), env: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, idle: true }
+        Self { os: Oversampler::new(factor), env: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, short: 0.0, top: 0.0, idle: true }
     }
 
     fn clear(&mut self) {
@@ -805,6 +817,8 @@ impl BandCore {
         self.emph_state = other.emph_state;
         self.trim_in = other.trim_in;
         self.trim_out = other.trim_out;
+        self.short = other.short;
+        self.top = other.top;
         self.idle = other.idle;
     }
 }
@@ -844,6 +858,8 @@ impl Core {
             b.emph_state = [[0.0; 2]; 2];
             b.trim_in = 0.0;
             b.trim_out = 0.0;
+            b.short = 0.0;
+            b.top = 0.0;
         }
         self.rings.fill(0.0);
     }
@@ -870,10 +886,11 @@ impl Core {
         let parents = self.split.restructure(&self.layout, &layout, crossovers);
         for (slot, parent) in parents.iter().enumerate() {
             let Some(parent) = *parent else { continue };
-            let (level, level_emph, trim_in, trim_out) = (self.bands[parent].level, self.bands[parent].level_emph, self.bands[parent].trim_in, self.bands[parent].trim_out);
+            let p = &self.bands[parent];
+            let meters = (p.level, p.level_emph, p.trim_in, p.trim_out, p.short, p.top);
             let band = &mut self.bands[slot];
             band.clear();
-            (band.level, band.level_emph, band.trim_in, band.trim_out) = (level, level_emph, trim_in, trim_out);
+            (band.level, band.level_emph, band.trim_in, band.trim_out, band.short, band.top) = meters;
             for c in 0..2 {
                 let r = self.ring(slot, c);
                 self.rings[r].fill(0.0);
@@ -1001,6 +1018,8 @@ pub struct Saturator {
     fade_step: f64,
     level_k: f64,
     trim_k: f64,
+    short_k: f64,
+    top_fall: f64,
     env_k: (f32, f32),
     /// Tape's and Transformer's emphasis at the high rate, and (pre only) at the base rate for
     /// the levels auto gain reads.
@@ -1044,6 +1063,8 @@ impl Saturator {
             fade_step: 0.0,
             level_k: 0.0,
             trim_k: 0.0,
+            short_k: 0.0,
+            top_fall: 1.0,
             env_k: (0.0, 0.0),
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
@@ -1081,6 +1102,8 @@ impl Saturator {
         self.fade_step = 1000.0 / (STRUCTURE_MS * self.fs);
         self.level_k = per(LEVEL_MS);
         self.trim_k = per(TRIM_SECONDS * 1000.0);
+        self.short_k = per(SHORT_MS);
+        self.top_fall = 1.0 - per(TOP_RELEASE_MS);
         self.hp_k = (-std::f64::consts::TAU * HP_HZ / self.fs).exp() as f32;
         self.set_oversampling(factor, s);
     }
@@ -1554,7 +1577,13 @@ impl Saturator {
                     }
                 }
                 let comp2 = e.comp * e.comp;
+                let gate = 10f64.powf(-HIT_GATE_DB / 10.0);
                 for i in 0..n {
+                    band.short += self.short_k * (power[i] - band.short);
+                    band.top = band.short.max(band.top * self.top_fall);
+                    if band.short < band.top * gate {
+                        continue;
+                    }
                     band.level += self.level_k * (power[i] - band.level);
                     for w in 0..2 {
                         band.level_emph[w] += self.level_k * (power_emph[w][i] - band.level_emph[w]);
@@ -2245,6 +2274,40 @@ mod tests {
                     assert!(db.abs() < 1.0, "{m:?} at {drive} dB: {db:.2} dB");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn auto_gain_matches_the_hits_not_the_gaps() {
+        // Sparse material: a 60 Hz hit a second decaying over 60 ms, over noise 40 dB down (a kick
+        // and its bleed). Saturation lifts the gaps by the whole drive; auto gain must match the
+        // hits, not the average they make with the gaps (that pulled the hits down by as much).
+        let n = 6 * FS as usize;
+        let period = FS as usize;
+        let burst = |i: usize| i % period < period / 25;
+        let bed = noise(n, 5, 0.01);
+        let x: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = (i % period) as f64 / f64::from(FS);
+                bed[i] + (0.5 * (-t / 0.06).exp() * (std::f64::consts::TAU * 60.0 * t).sin()) as f32
+            })
+            .collect();
+        for m in [Model::Tube, Model::Hard, Model::Tape] {
+            let mut s = band(m, 36.0);
+            s.auto_gain = true;
+            let mut sat = Saturator::new(FS, 2, &s);
+            let lat = sat.latency();
+            let (y, _) = run(&mut sat, &x, &s, 512);
+            let (mut pin, mut pout, mut k) = (0.0f64, 0.0f64, 0usize);
+            for i in 3 * FS as usize..n - lat {
+                if burst(i) {
+                    pin += f64::from(x[i]).powi(2);
+                    pout += f64::from(y[i + lat]).powi(2);
+                    k += 1;
+                }
+            }
+            let db = 10.0 * (pout / pin).log10();
+            assert!(k > 0 && db.abs() < 2.0, "{m:?}: the hits come out {db:.2} dB off");
         }
     }
 

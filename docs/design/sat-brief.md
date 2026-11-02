@@ -42,6 +42,17 @@ The editor's transfer curve is `x + a·(F(x) − x)` times the auto gain, from t
 the knees sat near 0 dBFS, so a kick peaking at −18 dBFS only started to distort past +18 dB, and
 auto gain hid the level change too. `K` puts the knees 12 dB under full scale at drive 0.
 
+**Auto gain matches the hits (2026-11-02):** user report, after the calibration: 36 dB still did not
+sound like much. Measured on the user's kick stem (peak −12 dBFS, RMS −39): the engine clipped it
+nearly square, but auto gain predicted the curve's gain at the band's 300 ms level, which on sparse
+material is the gaps; it read the kick as quiet, expected the whole 36 dB and took it off, so the
+hits came out at −29 dBFS. Its meters (the prediction's level and the trim's) now only run while
+the band's 20 ms level is within 10 dB of its recent loudest (falling back with a 1 s time
+constant), so tails and bleed are left out and steady material is unchanged. Same stem: the hits'
+peaks −22 dBFS, the hit bodies within 2 dB of the input (tested on synthetic hits over bleed, for
+Tube, Hard and Tape; with the gate open they came out 6.8 dB low). A kick clipped near square has a
+crest factor of about 3 dB, so at matched loudness its peaks sit lower; turn auto gain off for level.
+
 **The operating point follows the level (2026-11-02):** user report: hardly any even harmonics.
 Measured: six of eight models made none at bias 0, and every model's H2 fell as drive rose (Tube
 from −24 dB at 12 dB of drive to −35 at 36; with bias 30 %, Transformer to −56), because a fixed
