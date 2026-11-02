@@ -52,6 +52,11 @@ const PROGRAM_FAST_MS: f32 = 60.0;
 const SLOW_TAIL_MS: f32 = 1800.0;
 /// Program-dependent release starts once the gain is this far past its target, dB.
 const PROGRAM_MARGIN_DB: f32 = 3.0;
+/// Auto release: how long sustained gain change takes to build the slow envelope, ms, how many
+/// times slower than the stage's release it lets go, and the bounds of that slow release, ms.
+pub const AUTO_BUILD_MS: f32 = 300.0;
+pub const AUTO_SLOW_FACTOR: f32 = 5.0;
+const AUTO_SLOW_MS: (f32, f32) = (300.0, 5000.0);
 /// Auto makeup cancels the curve's gain at this input level, dBFS.
 pub const AUTO_MAKEUP_REF_DB: f32 = -12.0;
 /// Smart: crest factor that leaves the release alone, dB; programme below this level is silence.
@@ -145,6 +150,10 @@ pub struct Stage {
     pub range_db: f32,
     pub attack_ms: f32,
     pub release_ms: f32,
+    /// Auto release: the release follows the program. A short peak lets go at `release_ms`;
+    /// sustained gain change builds a slow second envelope (over [`AUTO_BUILD_MS`]) that lets go
+    /// [`AUTO_SLOW_FACTOR`] times slower, so steady compression recovers without pumping.
+    pub auto_release: bool,
     pub detector: Detector,
 }
 
@@ -159,6 +168,7 @@ impl Default for Stage {
             range_db: 60.0,
             attack_ms: 10.0,
             release_ms: 120.0,
+            auto_release: false,
             detector: Detector::Rms,
         }
     }
@@ -186,6 +196,27 @@ pub fn soft_above(x: f32, knee: f32) -> f32 {
 #[inline]
 pub fn soft_cap(m: f32, range: f32) -> f32 {
     m - soft_above(m - range.max(0.0), RANGE_SOFTNESS)
+}
+
+/// Auto release's slow envelope coefficients at `sample_rate` for an effective release of
+/// `release_ms`: (build, fall).
+#[inline]
+fn auto_coefs(release_ms: f32, sample_rate: f32) -> (f32, f32) {
+    (coef(AUTO_BUILD_MS, sample_rate), coef((release_ms * AUTO_SLOW_FACTOR).clamp(AUTO_SLOW_MS.0, AUTO_SLOW_MS.1), sample_rate))
+}
+
+/// Auto release, one sample: the slow envelope `slow` follows `target` (building over the build
+/// time, letting go over the slow release), and the stage plays whichever of it and the fast
+/// envelope `e` moves the level more.
+#[inline]
+fn auto_release(slow: &mut f32, e: f32, target: f32, (build, fall): (f32, f32)) -> f32 {
+    let k = if target.abs() > slow.abs() { build } else { fall };
+    *slow = k * *slow + (1.0 - k) * target;
+    if slow.abs() > e.abs() {
+        *slow
+    } else {
+        e
+    }
 }
 
 /// The gain (dB, signed) stage `s` applies at detected level `level_db`. `mu_boost` (≥ 0) firms
@@ -513,6 +544,8 @@ enum Biquad {
 #[derive(Clone)]
 struct Chan {
     env: [f32; STAGES],
+    /// Auto release's slow envelopes.
+    slow: [f32; STAGES],
     hold: [u32; STAGES],
     tail: f32,
     peak: f32,
@@ -533,6 +566,7 @@ impl Chan {
     fn new() -> Self {
         Self {
             env: [0.0; STAGES],
+            slow: [0.0; STAGES],
             hold: [0; STAGES],
             tail: 0.0,
             peak: 0.0,
@@ -824,6 +858,7 @@ impl Compressor {
         let style = s.style;
         let attack_a: [f32; STAGES] = std::array::from_fn(|i| coef((s.stages[i].attack_ms * style.attack).max(0.02), fs));
         let release_a: [f32; STAGES] = std::array::from_fn(|i| coef((s.stages[i].release_ms * style.release * rel_scale).max(4.0), fs));
+        let auto_a: [(f32, f32); STAGES] = std::array::from_fn(|i| auto_coefs((s.stages[i].release_ms * style.release * rel_scale).max(4.0), fs));
         let fast_a = coef(PROGRAM_FAST_MS, fs);
         let tail_a = coef(SLOW_TAIL_MS, fs);
         let hold = (s.hold_ms.max(0.0) * 0.001 * fs) as u32;
@@ -1043,14 +1078,14 @@ impl Compressor {
             // state (the usual stereo case): the second copies the first's work.
             let shared = n_ch == 2 && level_db[0] == level_db[1] && {
                 let [a, b] = &self.chans;
-                a.env == b.env && a.hold == b.hold && a.tail == b.tail
+                a.env == b.env && a.slow == b.slow && a.hold == b.hold && a.tail == b.tail
             };
             let mut first_gain_db = 0.0f32;
             let mut gain_lin = 1.0f32;
             for c in 0..n_ch {
                 if c == 1 && shared {
                     let [a, b] = &mut self.chans;
-                    (b.env, b.hold, b.tail) = (a.env, a.hold, a.tail);
+                    (b.env, b.slow, b.hold, b.tail) = (a.env, a.slow, a.hold, a.tail);
                 }
                 let ch = &mut self.chans[c];
                 let gain_db = if c == 1 && shared {
@@ -1090,6 +1125,15 @@ impl Compressor {
                             *e = rc * *e + (1.0 - rc) * target;
                             if weight == 0.0 && e.abs() < 1e-6 {
                                 *e = 0.0;
+                            }
+                        }
+                        if stage.auto_release || ch.slow[k] != 0.0 {
+                            // Switched off, the slow envelope lets go as if the target were 0 dB,
+                            // so the change never steps.
+                            let aim = if stage.auto_release { target } else { 0.0 };
+                            *e = auto_release(&mut ch.slow[k], *e, aim, auto_a[k]);
+                            if !stage.auto_release && ch.slow[k].abs() < 1e-6 {
+                                ch.slow[k] = 0.0;
                             }
                         }
                         sum += *e;
@@ -1151,7 +1195,8 @@ pub fn simulate_stage(stage: &Stage, style: &Style, sample_rate: f32, input_db: 
     let att = coef((st.attack_ms * style.attack).max(0.02), sample_rate);
     let rel = coef((st.release_ms * style.release).max(4.0), sample_rate);
     let fast = coef(PROGRAM_FAST_MS, sample_rate);
-    let mut e = 0.0f32;
+    let auto = auto_coefs((st.release_ms * style.release).max(4.0), sample_rate);
+    let (mut e, mut slow) = (0.0f32, 0.0f32);
     input_db
         .iter()
         .map(|&x| {
@@ -1165,6 +1210,9 @@ pub fn simulate_stage(stage: &Stage, style: &Style, sample_rate: f32, input_db: 
                 }
                 e = rc * e + (1.0 - rc) * target;
             }
+            if st.auto_release {
+                e = auto_release(&mut slow, e, target, auto);
+            }
             e
         })
         .collect()
@@ -1177,7 +1225,7 @@ mod tests {
     const FS: f32 = 48_000.0;
 
     fn stage(quadrant: Quadrant, threshold_db: f32, ratio: f32) -> Stage {
-        Stage { on: true, quadrant, threshold_db, ratio, knee_db: 0.0, attack_ms: 0.05, release_ms: 5.0, detector: Detector::Peak, ..Stage::default() }
+        Stage { on: true, quadrant, threshold_db, ratio, knee_db: 0.0, attack_ms: 0.05, release_ms: 5.0, auto_release: false, detector: Detector::Peak, ..Stage::default() }
     }
 
     fn settings(stages: &[Stage]) -> CompSettings {
@@ -1304,6 +1352,73 @@ mod tests {
         c.process(&mut [&mut quieter], None, &s);
         let after_release = gain_to_db(quieter[4799] / mid);
         assert!((after_release + 5.0 + 5.0 * (-1.0f32).exp()).abs() < 0.2, "release {after_release}");
+    }
+
+    /// A stage at ∞:1 from −20 dB, 100 ms release (auto or not): −10 dB for `burst` samples after
+    /// a quiet second, then −40 dB; the gain (dB) every sample of the recovery.
+    fn recovery(auto_release: bool, burst: usize) -> Vec<f32> {
+        let st = Stage { attack_ms: 1.0, release_ms: 100.0, auto_release, ..stage(Quadrant::Compress, -20.0, RATIO_MAX) };
+        let s = settings(&[st]);
+        let mut c = Compressor::new(FS);
+        c.prepare(FS, &s);
+        let (lo, hi) = (db_to_gain(-40.0), db_to_gain(-10.0));
+        let mut x = vec![lo; FS as usize];
+        x.extend(std::iter::repeat_n(hi, burst));
+        x.extend(std::iter::repeat_n(lo, 2 * FS as usize));
+        let mut y = x.clone();
+        c.process(&mut [&mut y], None, &s);
+        y.iter().zip(&x).skip(FS as usize + burst).map(|(a, b)| gain_to_db(a / b)).collect()
+    }
+
+    #[test]
+    fn auto_release_lets_a_peak_go_quickly_and_sustained_compression_slowly() {
+        // When the gain is back within 37 % of where it started (ms).
+        let back = |g: &[f32]| g.iter().position(|v| v.abs() <= 0.37 * g[0].abs()).unwrap_or(g.len()) as f32 * 1000.0 / FS;
+        let (peak, held) = (480, 2 * FS as usize);
+        let (plain_peak, plain_held) = (back(&recovery(false, peak)), back(&recovery(false, held)));
+        let (auto_peak, auto_held) = (back(&recovery(true, peak)), back(&recovery(true, held)));
+        println!("recovery to 37 %: plain {plain_peak:.0} / {plain_held:.0} ms, auto {auto_peak:.0} / {auto_held:.0} ms");
+        // Without it, the same release either way (the detector's 10 ms adds a little).
+        assert!((plain_peak - plain_held).abs() < 15.0 && (90.0..130.0).contains(&plain_held), "{plain_peak} / {plain_held} ms");
+        // With it: a 10 ms peak still lets go within 1.5 × the release ...
+        assert!(auto_peak < 150.0, "peak: {auto_peak} ms");
+        // ... and two seconds of compression take several times longer, smoothly (no step).
+        assert!(auto_held > 3.0 * plain_held, "held: {auto_held} ms");
+        let held = recovery(true, held);
+        assert!(held.windows(2).all(|w| (w[1] - w[0]).abs() < 0.05 && w[1] >= w[0] - 1e-6), "the recovery steps or turns back");
+    }
+
+    #[test]
+    fn auto_release_off_is_unchanged_and_the_scope_draws_the_engine() {
+        // The engine's gain on a level envelope against `simulate_stage` for the same stage, with
+        // auto release (a DC signal is its own level, detector Peak).
+        let st = Stage { attack_ms: 5.0, release_ms: 80.0, auto_release: true, ..stage(Quadrant::Compress, -20.0, 4.0) };
+        let levels: Vec<f32> = (0..96_000).map(|i| if (4800..60_000).contains(&i) { -6.0 } else { -40.0 }).collect();
+        let sim = simulate_stage(&st, &Style::default(), FS, &levels);
+        let s = settings(&[st]);
+        let mut c = Compressor::new(FS);
+        c.prepare(FS, &s);
+        let x: Vec<f32> = levels.iter().map(|&l| db_to_gain(l)).collect();
+        let mut y = x.clone();
+        c.process(&mut [&mut y], None, &s);
+        for i in (0..x.len()).step_by(97) {
+            let g = gain_to_db(y[i] / x[i]);
+            // The engine's peak detector releases over 10 ms where the level falls.
+            let near = (i.saturating_sub(1500)..(i + 1).min(sim.len())).any(|j| (sim[j] - g).abs() < 0.3);
+            assert!(near, "at {i}: engine {g:.2} dB, scope {:.2}", sim[i]);
+        }
+        // Switching it off mid-recovery lets the slow envelope go without a step.
+        let mut s = settings(&[Stage { auto_release: true, ..st }]);
+        let mut c = Compressor::new(FS);
+        c.prepare(FS, &s);
+        let mut a = vec![db_to_gain(-6.0); 96_000];
+        c.process(&mut [&mut a], None, &s);
+        s.stages[0].auto_release = false;
+        let lo = db_to_gain(-40.0);
+        let mut b = vec![lo; 96_000];
+        c.process(&mut [&mut b], None, &s);
+        let g: Vec<f32> = b.iter().map(|v| gain_to_db(v / lo)).collect();
+        assert!(g.windows(2).all(|w| (w[1] - w[0]).abs() < 0.1), "switching auto release off steps");
     }
 
     #[test]

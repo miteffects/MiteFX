@@ -410,7 +410,7 @@ mod tests {
     fn aliasing(factor: usize) -> f64 {
         let fs = 44_100.0f32;
         let mut s = CompSettings { oversampling: factor, ..CompSettings::default() };
-        s.stages[0] = Stage { on: true, threshold_db: -30.0, ratio: 4.0, knee_db: 0.0, attack_ms: 0.05, release_ms: 10.0, detector: Detector::Peak, ..Stage::default() };
+        s.stages[0] = Stage { on: true, threshold_db: -30.0, ratio: 4.0, knee_db: 0.0, attack_ms: 0.05, release_ms: 10.0, auto_release: false, detector: Detector::Peak, ..Stage::default() };
         let mut e = CompEngine::new(fs, &s);
         let n = 44_100;
         let input: Vec<f32> = (0..n).map(|i| ((std::f64::consts::TAU * 5_000.0 * i as f64 / f64::from(fs)).sin() * 0.5) as f32).collect();

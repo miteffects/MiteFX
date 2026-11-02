@@ -72,6 +72,10 @@ fn lift_snapshots(json: &str) -> Option<String> {
     serde_json::to_string(&state).ok()
 }
 
+/// State 2 → 3: each stage gained an auto release switch. Absent from an older state, it reads
+/// as off, so the state sounds as it did: nothing to change.
+pub fn v2_to_v3(_state: &mut PluginState) {}
+
 /// Version 2's (threshold, knee) per stage: the input level where each of version 1's stages
 /// started acting, and the width of input its knee spanned (its knee over the slope of the
 /// stages below it there). Stages that are off keep theirs.

@@ -21,8 +21,8 @@ use mite_ui::{run_standalone, DrawCx, Modifiers, MouseButton, ParamHost, ThemeKi
 fn main() -> Result<(), String> {
     let host = memory_host();
     let stages = [
-        Stage { on: true, quadrant: Quadrant::UpCompress, threshold_db: -40.0, ratio: 2.0, knee_db: 8.0, range_db: 12.0, attack_ms: 30.0, release_ms: 800.0, detector: Detector::Rms },
-        Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -20.0, ratio: 4.0, knee_db: 6.0, range_db: 60.0, attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms },
+        Stage { on: true, quadrant: Quadrant::UpCompress, threshold_db: -40.0, ratio: 2.0, knee_db: 8.0, range_db: 12.0, attack_ms: 30.0, release_ms: 800.0, auto_release: false, detector: Detector::Rms },
+        Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -20.0, ratio: 4.0, knee_db: 6.0, range_db: 60.0, attack_ms: 10.0, release_ms: 120.0, auto_release: false, detector: Detector::Rms },
     ];
     let mut settings = CompSettings { auto_makeup: true, ..CompSettings::default() };
     for (slot, s) in stages.iter().enumerate() {

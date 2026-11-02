@@ -1,8 +1,8 @@
 {
   "fields": {
-    "mitefx_state": "2",
+    "mitefx_state": "3",
     "preset": "Vocal Leveller",
-    "snapshots": "{\"active\":0,\"slots\":[{\"auto_makeup\":1.0,\"c_attack\":0.60023665,\"c_bend\":0.0,\"c_drive\":0.33333334,\"c_program\":0.0,\"c_release\":0.60023665,\"c_tail\":0.0,\"character\":0.5,\"hold\":0.0,\"k1_freq\":0.36735705,\"k1_gain\":0.5,\"k1_on\":1.0,\"k1_q\":0.44621733,\"k1_type\":0.33333334,\"k2_freq\":0.5490027,\"k2_gain\":0.5,\"k2_on\":0.0,\"k2_q\":0.44621733,\"k2_type\":0.0,\"k3_freq\":0.78668463,\"k3_gain\":0.5,\"k3_on\":0.0,\"k3_q\":0.44621733,\"k3_type\":0.22222222,\"link\":0.5,\"lookahead\":0.25,\"makeup\":0.33333334,\"mix\":1.0,\"out_gain\":0.5,\"out_pan\":0.5,\"oversampling\":0.0,\"s1_attack\":0.5927535,\"s1_det\":0.5,\"s1_knee\":0.25,\"s1_on\":1.0,\"s1_quad\":0.6666667,\"s1_range\":1.0,\"s1_ratio\":0.26493058,\"s1_release\":0.5081992,\"s1_thresh\":0.33333334,\"s2_attack\":0.5715628,\"s2_det\":0.5,\"s2_knee\":0.25,\"s2_on\":1.0,\"s2_quad\":0.0,\"s2_range\":1.0,\"s2_ratio\":0.32370487,\"s2_release\":0.5081992,\"s2_thresh\":0.6666667,\"s3_attack\":0.5927535,\"s3_det\":0.5,\"s3_knee\":0.25,\"s3_on\":0.0,\"s3_quad\":0.0,\"s3_range\":1.0,\"s3_ratio\":0.3639578,\"s3_release\":0.5081992,\"s3_thresh\":0.7,\"s4_attack\":0.5927535,\"s4_det\":0.5,\"s4_knee\":0.25,\"s4_on\":0.0,\"s4_quad\":0.0,\"s4_range\":1.0,\"s4_ratio\":0.3639578,\"s4_release\":0.5081992,\"s4_thresh\":0.7,\"sc_source\":0.0,\"sibilance\":0.5,\"smart\":0.6666667,\"smart_amt\":0.7,\"stereo\":1.0,\"target_gr\":0.25,\"topology\":0.0},{\"s1_ratio\":0.3},null,null]}"
+    "snapshots": "{\"active\":0,\"slots\":[{\"auto_makeup\":1.0,\"c_attack\":0.60023665,\"c_bend\":0.0,\"c_drive\":0.33333334,\"c_program\":0.0,\"c_release\":0.60023665,\"c_tail\":0.0,\"character\":0.5,\"hold\":0.0,\"k1_freq\":0.36735705,\"k1_gain\":0.5,\"k1_on\":1.0,\"k1_q\":0.44621733,\"k1_type\":0.33333334,\"k2_freq\":0.5490027,\"k2_gain\":0.5,\"k2_on\":0.0,\"k2_q\":0.44621733,\"k2_type\":0.0,\"k3_freq\":0.78668463,\"k3_gain\":0.5,\"k3_on\":0.0,\"k3_q\":0.44621733,\"k3_type\":0.22222222,\"link\":0.5,\"lookahead\":0.25,\"makeup\":0.33333334,\"mix\":1.0,\"out_gain\":0.5,\"out_pan\":0.5,\"oversampling\":0.0,\"s1_attack\":0.5927535,\"s1_auto_rel\":0.0,\"s1_det\":0.5,\"s1_knee\":0.25,\"s1_on\":1.0,\"s1_quad\":0.6666667,\"s1_range\":1.0,\"s1_ratio\":0.26493058,\"s1_release\":0.5081992,\"s1_thresh\":0.33333334,\"s2_attack\":0.5715628,\"s2_auto_rel\":0.0,\"s2_det\":0.5,\"s2_knee\":0.25,\"s2_on\":1.0,\"s2_quad\":0.0,\"s2_range\":1.0,\"s2_ratio\":0.32370487,\"s2_release\":0.5081992,\"s2_thresh\":0.6666667,\"s3_attack\":0.5927535,\"s3_auto_rel\":0.0,\"s3_det\":0.5,\"s3_knee\":0.25,\"s3_on\":0.0,\"s3_quad\":0.0,\"s3_range\":1.0,\"s3_ratio\":0.3639578,\"s3_release\":0.5081992,\"s3_thresh\":0.7,\"s4_attack\":0.5927535,\"s4_auto_rel\":0.0,\"s4_det\":0.5,\"s4_knee\":0.25,\"s4_on\":0.0,\"s4_quad\":0.0,\"s4_range\":1.0,\"s4_ratio\":0.3639578,\"s4_release\":0.5081992,\"s4_thresh\":0.7,\"sc_source\":0.0,\"sibilance\":0.5,\"smart\":0.6666667,\"smart_amt\":0.7,\"stereo\":1.0,\"target_gr\":0.25,\"topology\":0.0},{\"s1_ratio\":0.3},null,null]}"
   },
   "params": {
     "auto_makeup": {
@@ -110,6 +110,9 @@
     "s1_attack": {
       "f32": 10.0
     },
+    "s1_auto_rel": {
+      "bool": false
+    },
     "s1_det": {
       "i32": 1
     },
@@ -139,6 +142,9 @@
     },
     "s2_attack": {
       "f32": 8.0
+    },
+    "s2_auto_rel": {
+      "bool": false
     },
     "s2_det": {
       "i32": 1
@@ -170,6 +176,9 @@
     "s3_attack": {
       "f32": 10.0
     },
+    "s3_auto_rel": {
+      "bool": false
+    },
     "s3_det": {
       "i32": 1
     },
@@ -199,6 +208,9 @@
     },
     "s4_attack": {
       "f32": 10.0
+    },
+    "s4_auto_rel": {
+      "bool": false
     },
     "s4_det": {
       "i32": 1

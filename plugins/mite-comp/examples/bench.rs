@@ -11,7 +11,7 @@ fn main() {
     let fs = 48_000.0_f32;
     let one = {
         let mut s = CompSettings::default();
-        s.stages[0] = Stage { on: true, threshold_db: -30.0, ratio: 4.0, attack_ms: 10.0, release_ms: 100.0, detector: mite_dsp::dynamics::Detector::Peak, ..Stage::default() };
+        s.stages[0] = Stage { on: true, threshold_db: -30.0, ratio: 4.0, attack_ms: 10.0, release_ms: 100.0, auto_release: false, detector: mite_dsp::dynamics::Detector::Peak, ..Stage::default() };
         s
     };
     let four = {

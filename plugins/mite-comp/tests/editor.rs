@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use mite_comp::editor::{memory_host, CompView};
-use mite_comp::params::{stage_id, CHARACTER, S_ON, S_QUAD, S_RATIO, S_THRESH};
+use mite_comp::params::{stage_id, CHARACTER, S_AUTO_REL, S_ON, S_QUAD, S_RATIO, S_THRESH};
 use mite_comp::CompShared;
 use mite_dsp::dynamics::{curve_db, Quadrant, Stage, STAGES};
 use mite_ui::kurbo::Point;
@@ -224,5 +224,23 @@ fn every_state_renders() {
             assert!(e.contains("GPU"), "{e}");
             return;
         }
+    }
+}
+
+#[test]
+fn the_stage_panel_switches_auto_release() {
+    let (mut view, host, _) = setup();
+    drag(&mut view, &host, sq(-20.0, -20.0), sq(-20.0, -20.0) + (0.0, 60.0));
+    assert!(stages(&host)[0].on);
+    view.select(Some(0));
+    draw(&mut view, &host);
+    // Under the detector dropdown: x 288…343, y 616…650.
+    let at = Point::new(315.0, 633.0);
+    for want in [1.0, 0.0] {
+        view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+        view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+        view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+        draw(&mut view, &host);
+        assert_eq!(plain(&host, &stage_id(0, S_AUTO_REL.id)), want);
     }
 }

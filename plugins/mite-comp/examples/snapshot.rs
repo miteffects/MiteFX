@@ -3,7 +3,7 @@
 //!
 //!     cargo run -p mite_comp --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT picks the state, as the design's `variant` prop: default, stages,
+//! SNAPSHOT_VARIANT picks the state, as the design's `variant` prop: default, stages, auto-release,
 //! stage-selected, create, character, custom, smart, sidechain, listen, stereo, lookahead, delta,
 //! empty, presets, menu.
 
@@ -18,10 +18,10 @@ use mite_ui::kurbo::Point;
 use mite_ui::render::render_view;
 use mite_ui::{Modifiers, MouseButton, Theme, ThemeKind, UiEvent, View};
 
-const LEVELLER: Stage = Stage { on: true, quadrant: Quadrant::UpCompress, threshold_db: -32.0, ratio: 2.0, knee_db: 6.0, range_db: 12.0, attack_ms: 30.0, release_ms: 800.0, detector: Detector::Rms };
-const GATE: Stage = Stage { on: true, quadrant: Quadrant::Expand, threshold_db: -48.0, ratio: 4.0, knee_db: 4.0, range_db: 60.0, attack_ms: 0.5, release_ms: 60.0, detector: Detector::Peak };
-const COMP: Stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -18.0, ratio: 4.0, knee_db: 6.0, range_db: 60.0, attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms };
-const LIMIT: Stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -6.0, ratio: 20.0, knee_db: 2.0, range_db: 60.0, attack_ms: 0.3, release_ms: 50.0, detector: Detector::Peak };
+const LEVELLER: Stage = Stage { on: true, quadrant: Quadrant::UpCompress, threshold_db: -32.0, ratio: 2.0, knee_db: 6.0, range_db: 12.0, attack_ms: 30.0, release_ms: 800.0, auto_release: false, detector: Detector::Rms };
+const GATE: Stage = Stage { on: true, quadrant: Quadrant::Expand, threshold_db: -48.0, ratio: 4.0, knee_db: 4.0, range_db: 60.0, attack_ms: 0.5, release_ms: 60.0, auto_release: false, detector: Detector::Peak };
+const COMP: Stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -18.0, ratio: 4.0, knee_db: 6.0, range_db: 60.0, attack_ms: 10.0, release_ms: 120.0, auto_release: false, detector: Detector::Rms };
+const LIMIT: Stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -6.0, ratio: 20.0, knee_db: 2.0, range_db: 60.0, attack_ms: 0.3, release_ms: 50.0, auto_release: false, detector: Detector::Peak };
 
 fn set_stage(host: &mite_ui::MemoryParamHost, slot: usize, s: &Stage) {
     let id = |p: &str| stage_id(slot, p);
@@ -154,6 +154,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mods = Modifiers::default();
     match variant.as_str() {
         "stage-selected" => view.select(Some(2)),
+        "auto-release" => {
+            host.set_plain(&stage_id(2, S_AUTO_REL.id), 1.0);
+            view.select(Some(2));
+        }
         "custom" => {
             host.set_plain(CHARACTER.id, 6.0);
             view.open_panel("custom");

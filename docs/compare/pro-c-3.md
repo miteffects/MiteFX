@@ -17,7 +17,7 @@ names in brackets) and the plugin itself. Ours comes from the code as of the dat
 | Attack, release | 0.005–250 ms; release program-dependent; auto release [Time controls] | 0.05–250 ms; release 5–2500 ms; program dependence per Character |
 | Lookahead, hold | lookahead 0–20 ms with a maximum that sets the latency; hold [Time controls] | lookahead 0–20 ms (the latency follows it); hold |
 | Auto threshold | yes (level-independent) [Dynamics controls] | **Smart Vocal / Master**: the thresholds slide to hold a target reduction |
-| Adaptive release | auto release [Time controls] | Smart Adaptive (crest factor) |
+| Adaptive release | auto release [Time controls] | **auto release per stage** (a slow second envelope built by sustained compression, 2026-11-03), and Smart Adaptive (crest factor) |
 | Topology | per style (Classic and Vari-Mu feedback) | feed-forward or feedback, any Character |
 | Makeup, mix | wet gain with M/S pan, auto gain, dry gain, mix 0–200 % [Time controls, Input and output options] | makeup, auto makeup, mix 0–100 %, **delta** |
 | Input level / pan | yes | **no** |
@@ -38,7 +38,7 @@ names in brackets) and the plugin itself. Ours comes from the code as of the dat
 
 In order of impact: Character saturation; oversampling above 4×; more styles (Versatile, Smooth, Upward,
 TTM, Op-El, Classic, Vocal, Mastering, Pumping); a 6-band side chain EQ with every shape and M/S
-bands; M>S and S>M stereo modes; auto release; input level; mix above 100 %; knee to 72 dB;
+bands; M>S and S>M stereo modes; input level; mix above 100 %; knee to 72 dB;
 attack down to 0.005 ms; host-tempo and MIDI triggering; loudness meters; compact layout and
 resizing; MIDI learn; instance list; surround. Each is in the roadmap (BLUEPRINT §9).
 

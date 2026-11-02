@@ -19,7 +19,9 @@ use nih_plug::prelude::*;
 ///
 /// - 2 (2026-10-23): thresholds are on the input, so a higher stage never changes a lower one
 ///   (`crate::migrate::v1_to_v2`).
-pub const STATE_VERSION: u32 = 2;
+/// - 3 (2026-11-03): each stage's auto release (`s{N}_auto_rel`, appended; off in older states,
+///   so they sound as before: `crate::migrate::v2_to_v3` has nothing to do).
+pub const STATE_VERSION: u32 = 3;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -100,6 +102,9 @@ pub const S_RANGE: ParamSpec = spec("range", "Range", "dB", 0.0, 60.0, 60.0, Par
 pub const S_DET: ChoiceSpec = ChoiceSpec { id: "det", name: "Detector", choices: &Detector::NAMES, default: 1 };
 /// Hear only this stage's gain change (monitoring: never in presets).
 pub const S_SOLO: BoolSpec = BoolSpec { id: "solo", name: "Solo", default: false };
+/// The release follows the program (`Stage::auto_release`). Added in state 3: its ids come after
+/// every older one.
+pub const S_AUTO_REL: BoolSpec = BoolSpec { id: "auto_rel", name: "Auto Release", default: false };
 
 /// Attack and release dials: common values get more travel (as the EQ's dynamics dials).
 pub const ATTACK_DIAL: DialCurve = DialCurve(&[(0.0, 0.05), (0.25, 1.0), (0.5, 10.0), (0.8, 50.0), (1.0, 250.0)]);
@@ -149,6 +154,10 @@ pub fn manifest() -> String {
         lines.push(prefix(S_DET.manifest_line()));
         lines.push(prefix(S_SOLO.manifest_line()));
     }
+    // State 3.
+    for s in 0..STAGES {
+        lines.push(format!("s{}_{}", s + 1, S_AUTO_REL.manifest_line()));
+    }
     lines.join("\n") + "\n"
 }
 
@@ -178,6 +187,7 @@ pub struct StageParams {
     pub range: FloatParam,
     pub det: IntParam,
     pub solo: BoolParam,
+    pub auto_rel: BoolParam,
 }
 
 impl StageParams {
@@ -194,6 +204,7 @@ impl StageParams {
             range: float_param_named(&S_RANGE, name("Range")),
             det: choice_param(&S_DET, name("Detector")),
             solo: bool_param(&S_SOLO, name("Solo")),
+            auto_rel: bool_param(&S_AUTO_REL, name("Auto Release")),
         }
     }
 
@@ -207,6 +218,7 @@ impl StageParams {
             range_db: self.range.value(),
             attack_ms: self.attack.value(),
             release_ms: self.release.value(),
+            auto_release: self.auto_rel.value(),
             detector: Detector::from_index(self.det.value().max(0) as usize),
         }
     }
@@ -431,6 +443,9 @@ unsafe impl Params for CompParams {
             map.push((stage_id(i, S_RANGE.id), s.range.as_ptr(), group.clone()));
             map.push((stage_id(i, S_DET.id), s.det.as_ptr(), group.clone()));
             map.push((stage_id(i, S_SOLO.id), s.solo.as_ptr(), group));
+        }
+        for (i, s) in self.stages.iter().enumerate() {
+            map.push((stage_id(i, S_AUTO_REL.id), s.auto_rel.as_ptr(), format!("Stage {}", i + 1)));
         }
         map
     }

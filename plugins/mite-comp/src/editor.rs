@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::dynamics::{curve_db, level_before, level_thresholds, order, partial_curve_db, simulate_stage, Detector, Quadrant, Smart, Stage, CHARACTERS, CUSTOM, INF_RATIO, KEY_BANDS, RATIO_MAX, STAGES, STYLES};
+use mite_dsp::dynamics::{curve_db, level_before, level_thresholds, order, partial_curve_db, simulate_stage, Detector, AUTO_SLOW_FACTOR, Quadrant, Smart, Stage, CHARACTERS, CUSTOM, INF_RATIO, KEY_BANDS, RATIO_MAX, STAGES, STYLES};
 use mite_dsp::eq::{analog_response_db, BandSettings, BandType};
 use mite_dsp::oversample::Oversampler;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
@@ -325,6 +325,8 @@ struct PanelHits {
     handles: Vec<(bool, Point)>,
     icons: Vec<(Rect, &'static str, f32)>,
     toggle: Option<Rect>,
+    /// The stage panel's auto release switch.
+    auto_release: Option<Rect>,
     key_area: Option<Rect>,
     key_source: Option<Rect>,
     listen: Option<Rect>,
@@ -484,6 +486,7 @@ impl CompView {
             range_db: Self::plain(host, &id(S_RANGE.id)),
             attack_ms: Self::plain(host, &id(S_ATTACK.id)),
             release_ms: Self::plain(host, &id(S_RELEASE.id)),
+            auto_release: Self::on(host, &id(S_AUTO_REL.id)),
             detector: Detector::from_index(Self::index(host, &id(S_DET.id))),
         }
     }
@@ -620,7 +623,7 @@ impl CompView {
         };
         let quadrant = Quadrant::from_pull(up, above);
         let (knee_db, attack_ms, release_ms, range_db, detector) = quadrant_defaults(quadrant);
-        Some(Stage { on: true, quadrant, threshold_db: input_db.clamp(-60.0, 0.0), ratio: pull_ratio(d), knee_db, range_db, attack_ms, release_ms, detector })
+        Some(Stage { on: true, quadrant, threshold_db: input_db.clamp(-60.0, 0.0), ratio: pull_ratio(d), knee_db, range_db, attack_ms, release_ms, auto_release: false, detector })
     }
 
     /// Writes `stage` into `slot` (one gesture per parameter).
@@ -634,6 +637,7 @@ impl CompView {
         Self::set(host, &id(S_RELEASE.id), s.release_ms);
         Self::set(host, &id(S_RANGE.id), s.range_db);
         Self::set(host, &id(S_DET.id), s.detector as usize as f32);
+        Self::set(host, &id(S_AUTO_REL.id), if s.auto_release { 1.0 } else { 0.0 });
         Self::set(host, &id(S_ON.id), 1.0);
     }
 
@@ -1288,7 +1292,9 @@ impl CompView {
         let scope = Rect::new(rect.x0 + 14.0, rect.y0 + 12.0, rect.x0 + 264.0, rect.y0 + 136.0);
         panel(cx.scene, RoundedRect::from_rect(scope, 8.0), theme.well, theme.well_border);
         let style = self.style(cx.host);
-        let window_ms = (260.0 + s.release_ms * style.release * 2.2).clamp(300.0, 1600.0);
+        // Long enough to see the recovery: auto release's slow part lets go several times slower.
+        let slow = if s.auto_release { AUTO_SLOW_FACTOR } else { 1.0 };
+        let window_ms = (260.0 + s.release_ms * style.release * slow * 2.2).clamp(300.0, if s.auto_release { 4000.0 } else { 1600.0 });
         let n = 250usize;
         let dt = window_ms / n as f32;
         // A 260 ms burst, 12 dB into the stage's active side, between rests 24 dB on the other
@@ -1357,6 +1363,11 @@ impl CompView {
         let d = s.detector as usize;
         draw_dropdown_button(cx, det, Detector::NAMES[d], open, hot(det), |scene, at| draw_glyph(scene, glyph::DETECTORS[d], at + (8.0, 6.0), 18.0, theme.accent, 1.8));
         hits.detector = Some(det);
+        // Auto release under the detector (the same glyph as auto makeup).
+        let r = Rect::new(qx, rect.y0 + 158.0, qx + 55.0, rect.y0 + 192.0);
+        let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), s.auto_release, theme.accent);
+        mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Auto, r.center(), ink);
+        hits.auto_release = Some(r);
         // The bin under the close button.
         let bin = Rect::new(rect.x1 - 14.0 - 36.0, rect.y1 - 12.0 - 36.0, rect.x1 - 14.0, rect.y1 - 12.0);
         let ink = icon_button(cx.scene, theme, bin, theme.panel_control, hot(bin), false, theme.danger);
@@ -1539,6 +1550,9 @@ impl CompView {
                 }
                 if self.hits.handles.iter().any(|(_, c)| c.distance(p) < 12.0) {
                     return Help::default().text("Drag sideways: attack (first handle) or release (second)");
+                }
+                if self.hits.auto_release.is_some_and(|r| r.contains(p)) {
+                    return Help::default().text("Auto release — a short peak lets go at RELEASE, sustained compression recovers slowly, without pumping. Click to switch");
                 }
                 if let Panel::Stage(slot) = panel {
                     let s = stages[slot];
@@ -1772,7 +1786,7 @@ impl CompView {
                 ('n', _) => {
                     if let Some(slot) = Self::free_slot(host) {
                         let (knee_db, attack_ms, release_ms, range_db, detector) = quadrant_defaults(Quadrant::Compress);
-                        Self::write_stage(host, slot, &Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -18.0, ratio: 4.0, knee_db, range_db, attack_ms, release_ms, detector });
+                        Self::write_stage(host, slot, &Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -18.0, ratio: 4.0, knee_db, range_db, attack_ms, release_ms, auto_release: false, detector });
                         self.select(Some(slot));
                     }
                     true
@@ -1888,6 +1902,11 @@ impl CompView {
                 }
                 if let Some(r) = hits.detector.filter(|r| r.contains(pos)) {
                     self.toggle_menu(MenuKind::StageDetector(slot), r, host);
+                    return true;
+                }
+                if hits.auto_release.is_some_and(|r| r.contains(pos)) {
+                    let id = stage_id(slot, S_AUTO_REL.id);
+                    Self::set(host, &id, if Self::on(host, &id) { 0.0 } else { 1.0 });
                     return true;
                 }
                 if let Some(&(attack, _)) = hits.handles.iter().find(|(_, c)| c.distance(pos) < 12.0) {
@@ -2114,7 +2133,7 @@ impl CompView {
                 if let Some(slot) = Self::free_slot(host) {
                     let (input_db, _) = sq_db(pos);
                     let (knee_db, attack_ms, release_ms, range_db, detector) = quadrant_defaults(Quadrant::Compress);
-                    Self::write_stage(host, slot, &Stage { on: true, quadrant: Quadrant::Compress, threshold_db: input_db.clamp(-60.0, 0.0), ratio: 4.0, knee_db, range_db, attack_ms, release_ms, detector });
+                    Self::write_stage(host, slot, &Stage { on: true, quadrant: Quadrant::Compress, threshold_db: input_db.clamp(-60.0, 0.0), ratio: 4.0, knee_db, range_db, attack_ms, release_ms, auto_release: false, detector });
                     self.select(Some(slot));
                 }
                 true

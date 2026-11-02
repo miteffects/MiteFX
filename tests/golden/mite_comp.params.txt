@@ -79,3 +79,7 @@ s4_release | ms | 5 | 2500 | 120 | Log
 s4_range | dB | 0 | 60 | 60 | Linear
 s4_det | choice | Peak, RMS, Loudness | 1
 s4_solo | bool | false
+s1_auto_rel | bool | false
+s2_auto_rel | bool | false
+s3_auto_rel | bool | false
+s4_auto_rel | bool | false
