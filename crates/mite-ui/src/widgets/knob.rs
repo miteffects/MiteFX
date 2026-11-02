@@ -44,6 +44,9 @@ pub struct Knob {
     pub color: Option<Color>,
     /// How the dial maps to values, when not the host's normalisation (see [`DialCurve`]).
     pub curve: Option<DialCurve>,
+    /// Show the value as the dial's travel, 0–100 %, instead of the parameter's units (a relative
+    /// setting, e.g. Comp's release under auto release). The parameter itself is unchanged.
+    pub percent: bool,
     hover: bool,
     drag: Option<Drag>,
 }
@@ -66,6 +69,7 @@ impl Knob {
             diameter,
             color: None,
             curve: None,
+            percent: false,
             hover: false,
             drag: None,
         }
@@ -107,6 +111,14 @@ impl Knob {
         }
     }
 
+    /// The value as the dial shows it, and its unit.
+    pub fn value_text(&self, host: &dyn ParamHost) -> (String, &'static str) {
+        if self.percent {
+            return (format!("{:.0}", self.position(host) * 100.0), "%");
+        }
+        self.spec.format_parts(host.plain(&self.id, host.normalized(&self.id)))
+    }
+
     /// Whether a drag of this dial is in progress.
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
@@ -122,7 +134,6 @@ impl Knob {
         let s = self.scale();
         let theme = cx.theme;
         let color = self.color.unwrap_or(theme.accent);
-        let norm = cx.host.normalized(&self.id);
         let to_deg = |n: f32| -SWEEP_DEG / 2.0 + SWEEP_DEG * f64::from(n);
         let value_deg = to_deg(self.position(cx.host));
         // Bipolar dials light from the zero point, which is not the middle of an asymmetric
@@ -169,8 +180,7 @@ impl Knob {
         glow_stroke(cx, &pointer, 2.5 * s, theme.needle, color, 2.2 * s);
 
         // Value + unit inside the disc.
-        let plain = cx.host.plain(&self.id, norm);
-        let (value, unit) = self.spec.format_parts(plain);
+        let (value, unit) = self.value_text(cx.host);
         if !self.value_inside {
             return;
         }
@@ -307,6 +317,19 @@ mod tests {
         assert!((host.plain("gain", host.normalized("gain")) - 0.5).abs() < 1e-4);
         k.event(&UiEvent::Wheel { pos: at, lines: -1.0, mods: mods(true) }, &host);
         assert!((host.plain("gain", host.normalized("gain")) - 0.4).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_percent_dial_reads_its_travel_and_leaves_the_parameter_alone() {
+        let release = ParamSpec { id: "release", unit: "ms", min: 10.0, max: 2500.0, default: 150.0, scale: ParamScale::Log, ..SPEC };
+        let curve = DialCurve(&[(0.0, 10.0), (0.3, 100.0), (0.75, 300.0), (1.0, 2500.0)]);
+        let host = MemoryParamHost::new().with(release);
+        host.set_plain("release", 300.0);
+        let mut k = Knob::new(release, "RELEASE", KnobKind::Unipolar, Point::new(100.0, 100.0), 48.0).with_curve(curve);
+        assert_eq!(k.value_text(&host).1, "ms");
+        k.percent = true;
+        assert_eq!(k.value_text(&host), ("75".to_owned(), "%"));
+        assert!((host.plain("release", host.normalized("release")) - 300.0).abs() < 0.5);
     }
 
     #[test]

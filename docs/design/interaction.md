@@ -220,7 +220,7 @@ GR and upward gain are never drawn on the same baseline.
 - **Envelope scope:** the stage's real attack/release response to a burst. Drag the attack handle horizontally for attack and the release handle for release, using the time rows of the type table.
 - **Quadrant:** a 2 × 2 icon radio. Changing the quadrant mirrors the curve across the diagonal or across the threshold, and keeps the ratio.
 - **Detector:** a dropdown with Peak, RMS or Loudness.
-- **Auto release** (under the detector; the auto glyph, as auto makeup): the release follows the program. A short peak lets go at RELEASE; sustained compression builds a slow second envelope (over 300 ms) that lets go five times slower, so steady material recovers without pumping. The scope draws it (its window stretches to show the slow tail).
+- **Auto release** (under the detector; the auto glyph, as auto makeup): the release follows the program. A short peak lets go at RELEASE; sustained compression builds a slow second envelope (over 300 ms) that lets go five times slower, so steady material recovers without pumping. The scope draws it (its window stretches to show the slow tail). While it is on, RELEASE reads as a relative setting, 0–100 % of the dial's travel (as Pro-C's), right being slower; the stored value is still the release in ms.
 - **Dials:** THRESHOLD (level), RATIO (ratio), KNEE (0–24 dB, linear), ATTACK and RELEASE (time), RANGE (0–60 dB, linear).
 - **Bin:** deletes the stage.
 

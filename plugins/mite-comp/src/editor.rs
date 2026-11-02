@@ -1272,6 +1272,15 @@ impl CompView {
                 }
             }
         }
+        // Under auto release the RELEASE dial reads as a relative setting, 0–100 % of its travel
+        // (as Pro-C's): the slow part follows the program, the dial sets how quick it all is.
+        if let Some(Panel::Stage(slot)) = self.panel {
+            let auto = Self::on(cx.host, &stage_id(slot, S_AUTO_REL.id));
+            let id = stage_id(slot, S_RELEASE.id);
+            for k in self.panel_knobs.iter_mut().filter(|k| k.id == id) {
+                k.percent = auto;
+            }
+        }
         for k in &self.panel_knobs {
             k.draw(cx);
         }
@@ -1535,8 +1544,9 @@ impl CompView {
         if let Some(panel) = self.panel {
             if self.hits.rect.contains(p) {
                 if let Some(k) = self.panel_knobs.iter().find(|k| k.bounds().contains(p)) {
-                    let v = Self::plain(host, &k.id);
-                    return Help::default().text(format!("{} · ", k.label)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(" — drag; double-click resets");
+                    let (value, unit) = k.value_text(host);
+                    let words = if k.percent { " — relative under auto release: right is slower; drag; double-click resets" } else { " — drag; double-click resets" };
+                    return Help::default().text(format!("{} · ", k.label)).slot(format!("{value} {unit}"), k.spec.format(k.spec.max)).text(words);
                 }
                 if let Some(&(_, _, v)) = self.hits.icons.iter().find(|(r, id, _)| *id == OVERSAMPLING.id && r.contains(p)) {
                     let factor = 1usize << (v as usize);
