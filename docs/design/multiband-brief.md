@@ -32,8 +32,10 @@ Peak/RMS/loudness detector), a band gain, bypass, mute, solo and Delta.
 - **Neutral:** every band inert (stage off) → the allpass sum, delayed; one band (no crossover) →
   the input delayed bit for bit (tested).
 - **Bands appearing or merging:** `Split::restructure` carries the filters' states, so the sum stays
-  continuous; a new band's dynamics start from rest. *Slice 1 limitation:* with lookahead on, a
-  new band's region is silent for the lookahead's length.
+  continuous; a new band's dynamics start from rest. With lookahead, the band a new one split
+  from plays out the whole region it had delayed while the new band's (empty) delay fills, and a
+  merged band's delays (lookahead and band Delta's dry path) are added into the band that takes
+  its region (tested at 5 and 20 ms: every 1 ms window within ±6 % of the tone).
 
 ## 2. Main view (1280 × 760): Sat's and Shape's frame
 
@@ -79,3 +81,8 @@ sidechain source and EQ button, latency, Δ, bypass, MIX, OUTPUT. Meters IN, OUT
    the engine compressed it (−1.9 dB at those settings), but the gain bar spanned ±24 dB, so a
    couple of dB was a sliver; it spans ±12 dB now, and the history shows the reduction at the
    levels' scale.
+4. (done 2026-11-03) Lookahead across a band made or merged. Measured first: at 5 ms a merge left
+   the merged region silent for the lookahead's length (a 1 ms window at 0.0005 of the tone).
+   `Compressor::absorb_delayed` and `DryDelay::absorb` hand the merged band's delays to the band
+   that takes its region; a new band's dry path starts empty; every live band's dry path is kept
+   current (band Delta switched on mid-play no longer reads stale audio).

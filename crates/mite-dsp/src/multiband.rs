@@ -282,11 +282,30 @@ impl Multiband {
                     self.cross[k] = Cross::new(f64::from(f), self.fs);
                 }
             }
+            // A merged band hands what it delayed to the band that takes its region (its lower
+            // crossover's frequency, still held in `log_freq`), so nothing goes missing for the
+            // lookahead's length.
+            for slot in 1..BANDS {
+                if self.layout.position(slot).is_some() && layout.position(slot).is_none() {
+                    let to = layout.band_at(&s.crossovers, (self.log_freq[slot - 1].exp() * 1.001) as f32);
+                    if to != slot {
+                        let (lo, hi) = self.comps.split_at_mut(slot.max(to));
+                        let (dst, src) = if to < slot { (&mut lo[to], &hi[0]) } else { (&mut hi[0], &lo[slot]) };
+                        dst.absorb_delayed(src);
+                        let (lo, hi) = self.dry_band.split_at_mut(slot.max(to));
+                        let (dst, src) = if to < slot { (&mut lo[to], &hi[0]) } else { (&mut hi[0], &lo[slot]) };
+                        dst.absorb(src);
+                    }
+                }
+            }
             let parents = self.split.restructure(&self.layout, &layout, &s.crossovers);
             self.key_split.restructure(&self.layout, &layout, &s.crossovers);
+            // A new band starts from rest, its delays empty (the band it came from plays out the
+            // whole region it had delayed).
             for (slot, parent) in parents.iter().enumerate() {
                 if parent.is_some() {
                     self.comps[slot].reset(&comp_settings(s, slot));
+                    self.dry_band[slot].reset();
                 }
             }
             self.layout = layout;
@@ -366,12 +385,11 @@ impl Multiband {
             }
             self.dry_ap.write(&self.sum_scratch[0][..n], (n_ch == 2).then(|| &self.sum_scratch[1][..n]));
             self.dry_in.write(&channels[0][start..end], (n_ch == 2).then(|| &channels[1][start..end]));
-            if any_delta {
-                for p in 0..=layout.n {
-                    let slot = layout.owners[p];
-                    let [a, b] = &self.band[slot];
-                    self.dry_band[slot].write(&a[..n], (n_ch == 2).then(|| &b[..n]));
-                }
+            // Every live band's dry path stays current (a Delta switched on, or a merge, reads it).
+            for p in 0..=layout.n {
+                let slot = layout.owners[p];
+                let [a, b] = &self.band[slot];
+                self.dry_band[slot].write(&a[..n], (n_ch == 2).then(|| &b[..n]));
             }
             // 2. Each band's dynamics, in place on its slot.
             for p in 0..=layout.n {
@@ -425,10 +443,8 @@ impl Multiband {
             }
             self.dry_ap.advance(n);
             self.dry_in.advance(n);
-            if any_delta {
-                for p in 0..=layout.n {
-                    self.dry_band[layout.owners[p]].advance(n);
-                }
+            for p in 0..=layout.n {
+                self.dry_band[layout.owners[p]].advance(n);
             }
             start = end;
         }
@@ -620,5 +636,52 @@ mod tests {
             m.process(&mut [a, b], None, &s);
         }
         assert!(l.iter().all(|v| v.is_finite() && v.abs() < 2.0));
+    }
+
+    /// The lowest and highest level of the 1 ms windows of `y` after `from`, against a tone of
+    /// amplitude `a`.
+    fn window_levels(y: &[f32], from: usize, a: f32) -> (f32, f32) {
+        let w = 48;
+        let (mut lo, mut hi) = (f32::MAX, 0.0f32);
+        for chunk in y[from..].chunks_exact(w) {
+            let rms = (chunk.iter().map(|v| v * v).sum::<f32>() / w as f32).sqrt();
+            let rel = rms / (a * std::f32::consts::FRAC_1_SQRT_2);
+            lo = lo.min(rel);
+            hi = hi.max(rel);
+        }
+        (lo, hi)
+    }
+
+    #[test]
+    fn lookahead_carries_a_band_made_or_merged() {
+        // A tone in the region a crossover splits off and gives back: with lookahead, the band
+        // that held it plays out what it delayed (a split), and a merged band's delay is handed
+        // to the band that takes its region (no gap for the lookahead's length).
+        for look in [5.0, 20.0] {
+            for delta in [false, true] {
+                let mut s = MbSettings { lookahead_ms: look, ..MbSettings::default() };
+                if delta {
+                    // Every band's Delta with a fixed gain: the tone times (g − 1), through the
+                    // bands' dry paths.
+                    for b in &mut s.bands {
+                        b.delta = true;
+                        b.gain_db = 6.0;
+                    }
+                }
+                let mut m = Multiband::new(FS);
+                m.reset(&s);
+                let a = 0.25f32;
+                let x: Vec<f32> = (0..48000).map(|i| a * (2.0 * std::f32::consts::PI * 2000.0 * i as f32 / FS).sin()).collect();
+                let (mut l, mut r) = (x.clone(), x.clone());
+                for (k, (bl, br)) in l.chunks_mut(256).zip(r.chunks_mut(256)).enumerate() {
+                    // Split at 300 Hz from block 40 to 100, then merged back.
+                    s.crossovers[0] = (40..100).contains(&k).then_some(300.0);
+                    m.process(&mut [bl, br], None, &s);
+                }
+                let gain = if delta { db_to_gain(6.0) - 1.0 } else { 1.0 };
+                let (lo, hi) = window_levels(&l, 9600, a * gain);
+                assert!(lo > 0.94 && hi < 1.06, "look {look} delta {delta}: windows {lo}…{hi}");
+            }
+        }
     }
 }

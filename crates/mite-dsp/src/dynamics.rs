@@ -849,6 +849,19 @@ impl Compressor {
         self.latency
     }
 
+    /// Adds what `other` holds in its lookahead delay into this one's, aligned to the moment each
+    /// will play it: a band that takes another's region (a merge) plays out what that band had
+    /// delayed. Allocation-free; both must run at the same lookahead.
+    pub fn absorb_delayed(&mut self, other: &Compressor) {
+        let look = self.latency.min(other.latency);
+        for (ch, src) in self.chans.iter_mut().zip(&other.chans) {
+            let (n, m) = (ch.delay.len(), src.delay.len());
+            for j in 1..=look.min(n - 1).min(m - 1) {
+                ch.delay[(self.write + n - j) % n] += src.delay[(other.write + m - j) % m];
+            }
+        }
+    }
+
     /// The oversampling factor it runs at.
     pub fn multiple(&self) -> usize {
         self.multiple

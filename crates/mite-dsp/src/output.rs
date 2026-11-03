@@ -51,6 +51,17 @@ impl DryDelay {
         self.rings[ch & 1][(self.write + i).wrapping_sub(self.delay) & self.mask]
     }
 
+    /// Adds the last `delay` samples `other` holds into this one, aligned to when each will
+    /// read them (a merge: the band taking the region plays out what the other delayed).
+    pub fn absorb(&mut self, other: &DryDelay) {
+        let d = self.delay.min(other.delay);
+        for (dst, src) in self.rings.iter_mut().zip(&other.rings) {
+            for j in 1..=d {
+                dst[self.write.wrapping_sub(j) & self.mask] += src[other.write.wrapping_sub(j) & other.mask];
+            }
+        }
+    }
+
     pub fn advance(&mut self, frames: usize) {
         self.write = (self.write + frames) & self.mask;
     }
