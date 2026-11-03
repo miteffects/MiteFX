@@ -496,8 +496,12 @@ pub struct CompTelemetry {
     pub lift_db: [f32; 2],
     /// Each stage's gain at the end of the block (signed, dB; the channel moving most), by slot.
     pub stage_db: [f32; STAGES],
-    /// The linked detector level at the end of the block, dBFS.
+    /// The linked peak detector's highest level over the block, dBFS.
     pub detector_db: f32,
+    /// Each detector's highest level over the block (peak, RMS, loudness; the louder channel),
+    /// dBFS: what the stages' thresholds are compared with ([`MINUS_INFINITY_DB`] for a detector
+    /// no stage uses).
+    pub detector_levels_db: [f32; 3],
     /// Smart's slide of the thresholds, dB.
     pub smart_offset_db: f32,
 }
@@ -511,6 +515,7 @@ impl Default for CompTelemetry {
             lift_db: [0.0; 2],
             stage_db: [0.0; STAGES],
             detector_db: MINUS_INFINITY_DB,
+            detector_levels_db: [MINUS_INFINITY_DB; 3],
             smart_offset_db: 0.0,
         }
     }
@@ -871,6 +876,9 @@ impl Compressor {
         if n_ch == 0 || !self.prepared {
             return t;
         }
+        // Linear maxima over the block until the end (dB then).
+        t.detector_db = 0.0;
+        t.detector_levels_db = [0.0; 3];
         let len = channels.iter().map(|c| c.len()).min().unwrap_or(0);
         let fs = self.sample_rate;
         let stereo = n_ch == 2;
@@ -1013,6 +1021,9 @@ impl Compressor {
                 }
             }
             let mono = level[0][0].max(if stereo { level[1][0] } else { 0.0 });
+            for (d, v) in t.detector_levels_db.iter_mut().enumerate() {
+                *v = v.max(level[0][d]).max(if stereo { level[1][d] } else { 0.0 });
+            }
             // In dB, once per detector the stages use (peak always: it is always tracked).
             let mut level_db = [[MINUS_INFINITY_DB; 3]; 2];
             for c in 0..n_ch {
@@ -1234,7 +1245,7 @@ impl Compressor {
             }
             t.out_peak_db[0] = t.out_peak_db[0].max(ol.abs());
             t.out_peak_db[1] = t.out_peak_db[1].max(if stereo { or.abs() } else { ol.abs() });
-            t.detector_db = mono;
+            t.detector_db = t.detector_db.max(mono);
         }
         // Crest of this block, for the next block's release scale.
         self.crest_db = gain_to_db(self.fast_env) - gain_to_db(self.slow_sq.sqrt());
@@ -1242,6 +1253,9 @@ impl Compressor {
             *v = gain_to_db(*v);
         }
         t.detector_db = gain_to_db(t.detector_db);
+        for v in &mut t.detector_levels_db {
+            *v = gain_to_db(*v);
+        }
         // Each stage's gain now, from the channel it moves most.
         t.stage_db = std::array::from_fn(|k| {
             let (a, b) = (self.chans[0].env[k], self.chans[1].env[k]);

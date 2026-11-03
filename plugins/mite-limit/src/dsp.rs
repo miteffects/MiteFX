@@ -31,7 +31,8 @@ use mite_dsp::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`LimitShared::history`).
 pub mod record {
-    /// Peak in (after the gain), L and R, dBFS.
+    /// Peak in (after the gain), L and R, dBFS: the true peak while True Peak is on, so what is
+    /// drawn crossing the ceiling is what the limiter acts on.
     pub const IN: usize = 0;
     /// Peak out, L and R, dBFS (sample peak).
     pub const OUT: usize = 2;
@@ -199,6 +200,8 @@ pub struct LimitEngine {
     dip: LinearSmoother,
     active: LimitSettings,
     meter: [TruePeak; 2],
+    /// The input's true peak (after the gain), for the history.
+    in_meter: [TruePeak; 2],
     loudness: Loudness,
     tp_max: f32,
     slice_len: usize,
@@ -226,6 +229,7 @@ impl LimitEngine {
             dip: LinearSmoother::new(1.0),
             active: *s,
             meter: [TruePeak::new(4), TruePeak::new(4)],
+            in_meter: [TruePeak::new(4), TruePeak::new(4)],
             loudness: Loudness::new(f64::from(sample_rate)),
             tp_max: MINUS_INFINITY_DB,
             slice_len: 1,
@@ -271,7 +275,7 @@ impl LimitEngine {
         self.delta.reset(if s.delta { 1.0 } else { 0.0 });
         self.bypass.reset(if s.bypass { 1.0 } else { 0.0 });
         self.dip.reset(1.0);
-        for m in &mut self.meter {
+        for m in self.meter.iter_mut().chain(&mut self.in_meter) {
             m.reset();
         }
         self.loudness.reset();
@@ -346,13 +350,8 @@ impl LimitEngine {
                 self.scale_now[0][i] = c;
                 self.scale_now[1][i] = g;
                 for ch in 0..n_ch {
-                    let x = channels[ch][start + i] * g;
-                    self.acc[record::IN + ch] = self.acc[record::IN + ch].max(gain_to_db(x.abs()));
-                    self.scratch[ch][i] = x / c;
+                    self.scratch[ch][i] = channels[ch][start + i] * g / c;
                 }
-            }
-            if !stereo {
-                self.acc[record::IN + 1] = self.acc[record::IN];
             }
             self.dry.write(&channels[0][start..end], stereo.then(|| &channels[1][start..end]));
             self.scale.write(&self.scale_now[0][..n], Some(&self.scale_now[1][..n]));
@@ -404,7 +403,12 @@ impl LimitEngine {
                     // The ceiling the sample was judged against; the clamp only removes rounding.
                     let wet = (self.scratch[ch][i] * c).clamp(-c, c) * dip;
                     let dry = self.dry.read(ch, i);
-                    let y = wet * (1.0 - delta) + (dry * g * dip - wet) * delta;
+                    // The input as the limiter judged it, at the output's time (so a peak and the
+                    // gain it got land in the same record).
+                    let x = dry * g;
+                    let peak = if self.active.true_peak { self.in_meter[ch].push(x).max(x.abs()) } else { x.abs() };
+                    self.acc[record::IN + ch] = self.acc[record::IN + ch].max(gain_to_db(peak));
+                    let y = wet * (1.0 - delta) + (x * dip - wet) * delta;
                     let y = y * (1.0 - bypass) + dry * bypass;
                     channels[ch][start + i] = y;
                     out[ch] = y;
@@ -421,7 +425,7 @@ impl LimitEngine {
                 self.acc[record::CEILING] = gain_to_db(c);
             }
             if !stereo {
-                for k in [record::OUT, record::GR, record::TP] {
+                for k in [record::IN, record::OUT, record::GR, record::TP] {
                     self.acc[k + 1] = self.acc[k];
                 }
             }
@@ -532,6 +536,33 @@ mod tests {
                 // Measured 2026-11-03: worst 0.015 dB over (2×), inside the brief's 0.05 dB.
                 assert!(tp < -1.0 + 0.02, "{f}× style {style}: {tp} dBTP");
             }
+        }
+    }
+
+    #[test]
+    fn where_the_drawn_input_crosses_the_ceiling_the_limiter_takes_at_least_the_excess() {
+        // The history's honesty (user, 2026-11-03): its input is what the limiter judges.
+        for (f, tp) in [(1, true), (2, true), (4, false)] {
+            let s = LimitSettings { oversampling: f, true_peak: tp, gain_db: 9.0, ..LimitSettings::default() };
+            let mut e = LimitEngine::new(48000.0, &s);
+            let history: HistoryTap<{ record::WIDTH }> = HistoryTap::new(4096);
+            let tap = LoudnessTap::new();
+            let x = material(48000, -6.0);
+            let (mut l, mut r) = (x.clone(), x.clone());
+            for (a, b) in l.chunks_mut(256).zip(r.chunks_mut(256)) {
+                e.process(&mut [a, b], &s, &history, &tap);
+            }
+            let mut seen = 0;
+            let mut over = 0;
+            history.read_since(&mut seen, |rec| {
+                let excess = rec[record::IN].max(rec[record::IN + 1]) - rec[record::CEILING];
+                if excess > 0.0 {
+                    over += 1;
+                    let gr = rec[record::GR].min(rec[record::GR + 1]);
+                    assert!(gr <= -excess + 0.1, "{f}×: {excess:.2} dB over, GR {gr:.2}");
+                }
+            });
+            assert!(over > 20, "{f}×: the material should cross the ceiling");
         }
     }
 

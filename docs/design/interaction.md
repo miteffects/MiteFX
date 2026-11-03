@@ -471,6 +471,15 @@ A drag is one undo step. The history is Comp's (`mite_ui::widgets::history`): in
 gain dim, output lit (under Δ, what was taken away), gain reduction from the top at the levels'
 scale; the range pill (Auto, 12, 24, 36, 48 dB) never shows a range the ceiling falls off.
 
+**Honest lines (user, 2026-11-03), Limit and Comp:** each column is the true peak of its records
+(gain reduction: its deepest), joined by a monotone curve that never draws past them; with True
+Peak on, Limit's input is its true peak, at the output's time. So where the drawn input crosses
+the ceiling the limiter takes at least that much (tested per record). The input is always in
+view: its line is drawn over everything, and the scale reaches over 0 dB (in 3 dB steps, eased)
+while the input, or Comp's output, goes over; the meters share that scale. Comp also draws what
+its thresholds are compared with when that is not the input's peak (an RMS or loudness stage, or
+a filtered or external key) as a dashed line: where it crosses a threshold, that stage acts.
+
 ### Strip, meters, loudness
 
 - Styles: six icon buttons, each a drawing of its gain shape (Custom: sliders); click picks one.

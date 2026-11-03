@@ -22,6 +22,9 @@ pub mod record {
     pub const DETECTOR: usize = 12;
     /// Smart's slide of the thresholds, dB.
     pub const OFFSET: usize = 13;
+    /// The RMS and loudness detectors' highest levels, dBFS (the peak's is `DETECTOR`).
+    pub const DET_RMS: usize = 14;
+    pub const DET_LOUD: usize = 15;
     pub const WIDTH: usize = 16;
 }
 
@@ -265,13 +268,15 @@ impl CompEngine {
         }
         a[record::STAGE..record::STAGE + STAGES].copy_from_slice(&t.stage_db);
         a[record::DETECTOR] = a[record::DETECTOR].max(t.detector_db);
+        a[record::DET_RMS] = a[record::DET_RMS].max(t.detector_levels_db[1]);
+        a[record::DET_LOUD] = a[record::DET_LOUD].max(t.detector_levels_db[2]);
         a[record::OFFSET] = t.smart_offset_db;
     }
 }
 
 fn empty_record() -> [f32; record::WIDTH] {
     let mut r = [0.0; record::WIDTH];
-    for i in [record::IN, record::IN + 1, record::OUT, record::OUT + 1, record::DETECTOR] {
+    for i in [record::IN, record::IN + 1, record::OUT, record::OUT + 1, record::DETECTOR, record::DET_RMS, record::DET_LOUD] {
         r[i] = MINUS_INFINITY_DB;
     }
     r

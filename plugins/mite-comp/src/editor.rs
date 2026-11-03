@@ -54,6 +54,16 @@ const LEVEL_RANGES: &[f32] = &[24.0, 36.0, 48.0, 60.0];
 const LEVEL_RANGE_LABELS: &[&str] = &["Auto", "24 dB", "36 dB", "48 dB", "60 dB"];
 thread_local! {
     static LEVEL_RANGE: std::cell::Cell<f64> = const { std::cell::Cell::new(60.0) };
+    /// How far above 0 dB the history reaches (so a hot input or output stays in view).
+    static HEADROOM: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
+fn set_headroom(db: f32) {
+    HEADROOM.with(|h| h.set(f64::from(db)));
+}
+
+fn headroom() -> f64 {
+    HEADROOM.with(std::cell::Cell::get)
 }
 
 fn set_level_range(range: f32) {
@@ -66,7 +76,7 @@ fn level_range() -> f64 {
 
 /// GR on the history at the levels' own scale (as Pro-C's one scale): `lv_y`'s pixels per dB.
 fn gr_px_per_db() -> f64 {
-    LEVEL_SPAN_PX / level_range()
+    LEVEL_SPAN_PX / (level_range() + headroom())
 }
 /// Threshold lines end in a grip at the history's right edge.
 const GRIP_X: f64 = 738.0;
@@ -256,13 +266,15 @@ fn sq_rect() -> Rect {
 }
 
 /// History levels: 0 dB 24 px under the display's top, −60 dB 572 px lower.
+/// A level's y on the history: the top line is the headroom (0 dB unless something goes over).
 fn lv_y(db: f32) -> f64 {
-    let range = level_range();
-    DISPLAY_TOP + 24.0 + (-f64::from(db)).clamp(0.0, range) / range * LEVEL_SPAN_PX
+    let (range, head) = (level_range(), headroom());
+    DISPLAY_TOP + 24.0 + (head - f64::from(db)).clamp(0.0, range + head) / (range + head) * LEVEL_SPAN_PX
 }
 
 fn lv_db(y: f64) -> f32 {
-    (-(y - DISPLAY_TOP - 24.0) / LEVEL_SPAN_PX * level_range()) as f32
+    let (range, head) = (level_range(), headroom());
+    (head - (y - DISPLAY_TOP - 24.0) / LEVEL_SPAN_PX * (range + head)) as f32
 }
 
 /// The history's lane (shared drawing: `mite_ui::widgets::history`).
@@ -353,6 +365,8 @@ pub struct CompView {
     /// The history's level range: the picker, the range as drawn (eased), and where it goes.
     range: RangePicker,
     range_shown: f32,
+    /// The history's reach over 0 dB, as drawn.
+    headroom: f32,
     range_target: f32,
     footer: Footer,
     selected: Option<usize>,
@@ -412,6 +426,7 @@ impl CompView {
             )
             .with_prefix("−"),
             range_shown: 60.0,
+            headroom: 0.0,
             range_target: 60.0,
             session: Session::new(
                 SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() },
@@ -775,24 +790,24 @@ impl CompView {
     fn draw_history(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
         let theme = cx.theme;
         let lane = history_lane();
-        lane.draw_grid(cx, self.range_target, lv_y);
+        lane.draw_grid(cx, self.range_target, headroom() as f32, lv_y);
         let cols = lane.columns(&self.history, self.seen, self.since_fresh());
         if cols.len() < 2 {
             return;
         }
+        type Col = history::Column<{ record::WIDTH }>;
         let delta = Self::on(cx.host, DELTA.id);
         let listen = Self::on(cx.host, LISTEN.id);
-        let level = |r: &[f32; record::WIDTH], k: usize| r[k].max(r[k + 1]);
-        let line = |f: &dyn Fn(&[f32; record::WIDTH]) -> f64| history::column_line(&cols, f);
+        let level = |c: &Col, k: usize| c.high[k].max(c.high[k + 1]);
+        let line = |f: &dyn Fn(&Col) -> f64| history::column_line(&cols, f);
         let closed = |p: BezPath, y: f64| history::close_to(p, &cols, y);
-        // IN, dim.
-        let input = line(&|r| lv_y(level(r, record::IN)));
+        // IN: its peaks (dim fill now, its line last, on top of everything).
+        let input = line(&|c| lv_y(level(c, record::IN)));
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.16), None, &closed(input.clone(), HELP_TOP));
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.55), None, &input);
         // Upward gain from the bottom.
-        let up = |r: &[f32; record::WIDTH]| r[record::LIFT].max(r[record::LIFT + 1]);
-        if cols.iter().any(|(_, r)| up(r) > 0.05) {
-            let edge = line(&|r| HELP_TOP - (f64::from(up(r)) * gr_px_per_db()).min(HELP_TOP - DISPLAY_TOP));
+        let up = |c: &Col| c.high[record::LIFT].max(c.high[record::LIFT + 1]);
+        if cols.iter().any(|c| up(c) > 0.05) {
+            let edge = line(&|c| HELP_TOP - (f64::from(up(c)) * gr_px_per_db()).min(HELP_TOP - DISPLAY_TOP));
             let fill = Gradient::new_linear((0.0, HELP_TOP), (0.0, HELP_TOP - 160.0)).with_stops([theme.gain_up.multiply_alpha(0.5), theme.gain_up.multiply_alpha(0.14)]);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(edge.clone(), HELP_TOP));
             glow_stroke(cx, &edge, 1.6, theme.gain_up, theme.gain_up, 2.4);
@@ -800,30 +815,50 @@ impl CompView {
         // OUT, lit (the removed signal under delta; the detector under Listen).
         let out_color = if listen { theme.sidechain } else { theme.curve };
         let output = if delta {
-            line(&|r| {
-                let (i, o) = (mite_dsp::db_to_gain(level(r, record::IN)), mite_dsp::db_to_gain(level(r, record::OUT)));
+            line(&|c| {
+                let (i, o) = (mite_dsp::db_to_gain(level(c, record::IN)), mite_dsp::db_to_gain(level(c, record::OUT)));
                 lv_y(mite_dsp::gain_to_db((i - o).abs().max(1e-6)))
             })
         } else {
-            line(&|r| lv_y(level(r, record::OUT)))
+            line(&|c| lv_y(level(c, record::OUT)))
         };
         let a = if delta { 0.3 } else { 0.12 };
         let fill = Gradient::new_linear((0.0, DISPLAY_TOP), (0.0, HELP_TOP)).with_stops([out_color.multiply_alpha(a), out_color.multiply_alpha(0.01)]);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(output.clone(), HELP_TOP));
         glow_stroke(cx, &output, 1.8, out_color, out_color, 2.4);
-        // GR from the top: solid for L/M, dashed for R/S when the channels differ.
-        // Its true depth, whatever it is (a cap drew deep compression as a flat line).
-        let cut = |r: &[f32; record::WIDTH], c: usize| DISPLAY_TOP + (f64::from(-r[record::CUT + c]) * gr_px_per_db()).clamp(0.0, HELP_TOP - DISPLAY_TOP);
-        if !cols.iter().any(|(_, r)| r[record::CUT].min(r[record::CUT + 1]) < -0.05) {
-            return;
+        // GR from the top, at its deepest: solid for L/M, dashed for R/S when the channels differ.
+        let cut = |c: &Col, ch: usize| DISPLAY_TOP + (f64::from(-c.low[record::CUT + ch]) * gr_px_per_db()).clamp(0.0, HELP_TOP - DISPLAY_TOP);
+        if cols.iter().any(|c| c.low[record::CUT].min(c.low[record::CUT + 1]) < -0.05) {
+            let edge = line(&|c| cut(c, 0).max(cut(c, 1)));
+            history::draw_reduction(cx, &cols, &edge, DISPLAY_TOP, 0.5 * LEVEL_SPAN_PX);
+            if Self::link_split(cx.host) {
+                let second = line(&|c| cut(c, 1));
+                cx.scene.stroke(&Stroke::new(1.6).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.gain_reduction, None, &second);
+            }
         }
-        let edge = line(&|r| cut(r, 0).max(cut(r, 1)));
-        history::draw_reduction(cx, &cols, &edge, DISPLAY_TOP, 0.5 * LEVEL_SPAN_PX);
-        if Self::link_split(cx.host) {
-            let second = line(&|r| cut(r, 1));
-            cx.scene.stroke(&Stroke::new(1.6).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.gain_reduction, None, &second);
+        // What the thresholds are compared with, when it is not the input's peak: an RMS or
+        // loudness detector, or a filtered or external key. Where it touches a threshold, that
+        // stage acts.
+        for (field, glyph_dash) in self.detector_lines(cx.host, stages) {
+            let det = line(&|c| lv_y(c.high[field]));
+            cx.scene.stroke(&Stroke::new(1.4).with_dashes(0.0, glyph_dash), Affine::IDENTITY, theme.text_hi.multiply_alpha(0.75), None, &det);
         }
-        let _ = stages;
+        // The input's line on top, so it is always in view.
+        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.8), None, &input);
+    }
+
+    /// The detector levels worth drawing on the history (record field, dash pattern): those the
+    /// stages in use compare their thresholds with, unless that is just the input's peak.
+    fn detector_lines(&self, host: &dyn ParamHost, stages: &[Stage; STAGES]) -> Vec<(usize, [f64; 2])> {
+        let keyed = Self::index(host, SC_SOURCE.id) == 1 || (0..KEY_BANDS).any(|b| Self::on(host, &key_id(b, K_ON.id)));
+        let mut out = Vec::new();
+        for (d, field, dash) in [(Detector::Peak, record::DETECTOR, [2.0, 3.0]), (Detector::Rms, record::DET_RMS, [6.0, 3.0]), (Detector::Loudness, record::DET_LOUD, [10.0, 4.0])] {
+            let used = stages.iter().any(|s| s.on && s.detector == d);
+            if used && (d != Detector::Peak || keyed) {
+                out.push((field, dash));
+            }
+        }
+        out
     }
 
     /// Whether the two channels' GR can differ (stereo, link under 100 %).
@@ -1161,9 +1196,9 @@ impl CompView {
         let (top, bottom) = (METER_TOP + 4.0, METER_BOTTOM - 4.0);
         let span = bottom - top;
         // The history's scale: levels over the range, gain reduction at the same dB per pixel.
-        let range = level_range();
-        let level_y = |db: f32| bottom - ((f64::from(db) + range).clamp(0.0, range) / range * span / 4.0).round() * 4.0;
-        let gr_y = |g: f32| top + (f64::from(-g).clamp(0.0, range) / range * span).min(span);
+        let (range, head) = (level_range(), headroom());
+        let level_y = |db: f32| bottom - ((f64::from(db) + range).clamp(0.0, range + head) / (range + head) * span / 4.0).round() * 4.0;
+        let gr_y = |g: f32| top + (f64::from(-g).clamp(0.0, range + head) / (range + head) * span).min(span);
         let split = Self::link_split(cx.host);
         for (i, x) in [1199.0, 1209.0, 1225.0, 1235.0, 1251.0, 1261.0].into_iter().enumerate() {
             cx.scene.stroke(&seg, Affine::IDENTITY, theme.meter_off, None, &Line::new((x, top), (x, bottom)));
@@ -2314,6 +2349,7 @@ impl View for CompView {
 
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
         self.settle_mode(cx.host);
         let theme = cx.theme;
         let stages = Self::stages(cx.host);
@@ -2344,6 +2380,7 @@ impl View for CompView {
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
         self.session.begin(host);
         let recording = RecordingHost::new(host);
         let changed = self.handle_event(event, &recording);
@@ -2391,6 +2428,16 @@ impl View for CompView {
         self.range_target = self.range.target(auto).max(if deepest > 0.0 { fit } else { 0.0 });
         let moved = ease_range(&mut self.range_shown, self.range_target, dt);
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
+        // Headroom over 0 dB while the input or the output goes over (eased, 120 ms).
+        let head = history::headroom_db(&self.history, 1200, &[record::IN, record::IN + 1, record::OUT, record::OUT + 1]);
+        let before = self.headroom;
+        self.headroom += (head - self.headroom) * (1.0 - (-dt / 0.12).exp());
+        if (self.headroom - head).abs() < 0.01 {
+            self.headroom = head;
+        }
+        set_headroom(self.headroom);
+        let moved = moved || self.headroom != before;
         // Meters: instant attack, 20 dB/s release (GR returns at the same speed).
         if let Some(r) = self.history.back().copied() {
             let targets = [r[record::IN], r[record::IN + 1], r[record::CUT], r[record::CUT + 1], r[record::OUT], r[record::OUT + 1]];

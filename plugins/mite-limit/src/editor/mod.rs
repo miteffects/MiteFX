@@ -84,6 +84,17 @@ const OVERSAMPLE_GLYPH: &str = "M3 12 C5.5 5 8.5 5 11 12 S16.5 19 19 12 M5 20 H6
 
 thread_local! {
     static LEVEL_RANGE: std::cell::Cell<f64> = const { std::cell::Cell::new(24.0) };
+    /// How far above 0 dB the history reaches: the input after the gain goes over, and it must
+    /// stay in view (user, 2026-11-03).
+    static HEADROOM: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
+fn set_headroom(db: f32) {
+    HEADROOM.with(|h| h.set(f64::from(db)));
+}
+
+fn headroom() -> f64 {
+    HEADROOM.with(std::cell::Cell::get)
 }
 
 fn set_level_range(range: f32) {
@@ -98,15 +109,16 @@ fn history_lane() -> HistoryLane {
     HistoryLane { x0: 0.0, width: HIST_W, top: DISPLAY_TOP, bottom: HIST_BOTTOM, seconds: HIST_SECONDS, slice_ms: HISTORY_SLICE_MS }
 }
 
-/// A level's y on the history (and the meters), at the range as drawn.
+/// A level's y on the history, at the range and headroom as drawn: the top line is the headroom
+/// (0 dB unless the input goes over).
 fn lv_y(db: f32) -> f64 {
-    let range = level_range();
-    DISPLAY_TOP + 24.0 + (f64::from(-db).clamp(-2.0, range + 1.0) / range) * LEVEL_SPAN_PX
+    let (range, head) = (level_range(), headroom());
+    DISPLAY_TOP + 24.0 + (head - f64::from(db)).clamp(-1.0, range + head + 1.0) / (range + head) * LEVEL_SPAN_PX
 }
 
 /// Pixels per dB on the history: gain reduction is drawn at the levels' own scale.
 fn px_per_db() -> f64 {
-    LEVEL_SPAN_PX / level_range()
+    LEVEL_SPAN_PX / (level_range() + headroom())
 }
 
 fn draw_glyph(scene: &mut mite_ui::vello::Scene, d: &str, c: Point, size: f64, color: Color, width: f64) {
@@ -203,6 +215,9 @@ pub struct LimitView {
     range: RangePicker,
     range_shown: f32,
     range_target: f32,
+    /// The history's reach over 0 dB, as drawn, and where it goes.
+    headroom: f32,
+    headroom_target: f32,
     knobs: Vec<Knob>,
     /// Whether the knobs were made for Custom (its SLOW dial).
     knobs_custom: Option<bool>,
@@ -249,6 +264,8 @@ impl LimitView {
             range,
             range_shown: 24.0,
             range_target: 24.0,
+            headroom: 0.0,
+            headroom_target: 0.0,
             knobs: Vec::new(),
             knobs_custom: None,
             pointer: None,
@@ -283,7 +300,14 @@ impl LimitView {
     /// Lets the range settle at once (tools render a single frame).
     pub fn settle(&mut self) {
         self.range_shown = self.range_target;
+        self.headroom = self.headroom_target;
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
+    }
+
+    /// The history's reach over 0 dB, as drawn.
+    pub fn headroom(&self) -> f32 {
+        self.headroom
     }
 
     /// The ceiling's grip (tests and tools).
@@ -294,6 +318,7 @@ impl LimitView {
     /// The y of a level on the history (tests and tools).
     pub fn level_y(&self, db: f32) -> f64 {
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
         lv_y(db)
     }
 
@@ -380,33 +405,35 @@ impl LimitView {
         let theme = cx.theme;
         let lane = history_lane();
         cx.scene.push_layer(Fill::NonZero, mite_ui::peniko::Mix::Normal, 1.0, Affine::IDENTITY, &lane.rect());
-        lane.draw_grid(cx, self.range_target, lv_y);
+        lane.draw_grid(cx, self.range_target, headroom() as f32, lv_y);
         let cols = lane.columns(&self.history, self.seen, self.since_fresh());
         if cols.len() >= 2 {
+            type Col = history::Column<{ record::WIDTH }>;
             let delta = Self::on(cx.host, DELTA.id);
-            let level = |r: &[f32; record::WIDTH], k: usize| r[k].max(r[k + 1]);
-            let line = |f: &dyn Fn(&[f32; record::WIDTH]) -> f64| history::column_line(&cols, f);
-            // IN (after the gain), dim.
-            let input = line(&|r| lv_y(level(r, record::IN)));
+            let level = |c: &Col, k: usize| c.high[k].max(c.high[k + 1]);
+            let line = |f: &dyn Fn(&Col) -> f64| history::column_line(&cols, f);
+            // IN (after the gain): its peaks, dim; its line is drawn last, on top.
+            let input = line(&|c| lv_y(level(c, record::IN)));
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.16), None, &history::close_to(input.clone(), &cols, HIST_BOTTOM));
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.55), None, &input);
             // OUT, lit (what was taken away under Delta).
             let output = if delta {
-                line(&|r| {
-                    let (i, o) = (mite_dsp::db_to_gain(level(r, record::IN)), mite_dsp::db_to_gain(level(r, record::OUT)));
+                line(&|c| {
+                    let (i, o) = (mite_dsp::db_to_gain(level(c, record::IN)), mite_dsp::db_to_gain(level(c, record::OUT)));
                     lv_y(mite_dsp::gain_to_db((i - o).abs().max(1e-6)))
                 })
             } else {
-                line(&|r| lv_y(level(r, record::OUT)))
+                line(&|c| lv_y(level(c, record::OUT)))
             };
             let a = if delta { 0.3 } else { 0.12 };
             let look = history::LevelLook { fill: [theme.curve.multiply_alpha(a), theme.curve.multiply_alpha(0.01)], span: (DISPLAY_TOP, HIST_BOTTOM), edge: theme.curve, width: 1.8, glow: 2.4 };
             history::draw_level(cx, &cols, &output, HIST_BOTTOM, look);
             // GR from the top, at the levels' scale.
-            if cols.iter().any(|(_, r)| r[record::GR].min(r[record::GR + 1]) < -0.05) {
-                let edge = line(&|r| DISPLAY_TOP + (f64::from(-r[record::GR].min(r[record::GR + 1])) * px_per_db()).clamp(0.0, HIST_BOTTOM - DISPLAY_TOP));
+            if cols.iter().any(|c| c.low[record::GR].min(c.low[record::GR + 1]) < -0.05) {
+                let edge = line(&|c| DISPLAY_TOP + (f64::from(-c.low[record::GR].min(c.low[record::GR + 1])) * px_per_db()).clamp(0.0, HIST_BOTTOM - DISPLAY_TOP));
                 history::draw_reduction(cx, &cols, &edge, DISPLAY_TOP, 0.5 * LEVEL_SPAN_PX);
             }
+            // The input's line on top of everything: always in view.
+            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85), None, &input);
         }
         cx.scene.pop_layer();
         self.draw_ceiling(cx);
@@ -460,9 +487,9 @@ impl LimitView {
         let (top, bottom) = (METER_TOP + 4.0, METER_BOTTOM - 4.0);
         let span = bottom - top;
         // The history's scale: levels over the range, gain reduction at the same dB per pixel.
-        let range = level_range();
-        let level_y = |db: f32| bottom - ((f64::from(db) + range).clamp(0.0, range) / range * span / 4.0).round() * 4.0;
-        let gr_y = |g: f32| top + (f64::from(-g).clamp(0.0, range) / range * span).min(span);
+        let (range, head) = (level_range(), headroom());
+        let level_y = |db: f32| bottom - ((f64::from(db) + range).clamp(0.0, range + head) / (range + head) * span / 4.0).round() * 4.0;
+        let gr_y = |g: f32| top + (f64::from(-g).clamp(0.0, range + head) / (range + head) * span).min(span);
         let ceiling = Self::plain(cx.host, CEILING.id);
         for (i, x) in WELLS.iter().flat_map(|&w| [w + 5.0, w + 15.0]).enumerate() {
             cx.scene.stroke(&seg, Affine::IDENTITY, theme.meter_off, None, &Line::new((x, top), (x, bottom)));
@@ -608,8 +635,8 @@ impl LimitView {
             Some(Hot::Ceiling) => return Help::default().text("Ceiling ").slot(format!("{} dB", fmt_db(ceiling)), "−30.0 dB").text(" — drag it; wheel for fine steps; double-click: −1 dB, the streaming platforms' limit."),
             Some(Hot::History) => {
                 if let Some(p) = self.pointer {
-                    let range = level_range() as f32;
-                    let level = -((p.y - DISPLAY_TOP - 24.0) / LEVEL_SPAN_PX) as f32 * range;
+                    let (range, head) = (level_range() as f32, headroom() as f32);
+                    let level = head - ((p.y - DISPLAY_TOP - 24.0) / LEVEL_SPAN_PX) as f32 * (range + head);
                     let ago = (HIST_W - p.x) / HIST_W * HIST_SECONDS;
                     return Help::default()
                         .slot(format!("{} dB", fmt_db(level)), "−48.0 dB")
@@ -881,6 +908,7 @@ impl View for LimitView {
 
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
         self.sync_knobs(cx.host);
         let theme = cx.theme;
         self.draw_header(cx);
@@ -898,6 +926,7 @@ impl View for LimitView {
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         set_level_range(self.range_shown);
+        set_headroom(self.headroom);
         self.sync_knobs(host);
         self.session.begin(host);
         let recording = RecordingHost::new(host);
@@ -940,6 +969,16 @@ impl View for LimitView {
         self.range_target = self.range.target(auto).max(fit);
         let moved = ease_range(&mut self.range_shown, self.range_target, dt);
         set_level_range(self.range_shown);
+        // Headroom over 0 dB while the input (after the gain) goes over (eased, 120 ms).
+        self.headroom_target = history::headroom_db(&self.history, (HIST_SECONDS * 1000.0 / f64::from(HISTORY_SLICE_MS)) as usize, &[record::IN, record::IN + 1]);
+        let head = self.headroom_target;
+        let before = self.headroom;
+        self.headroom += (head - self.headroom) * (1.0 - (-dt / 0.12).exp());
+        if (self.headroom - head).abs() < 0.01 {
+            self.headroom = head;
+        }
+        set_headroom(self.headroom);
+        let moved = moved || self.headroom != before;
         if let Some(r) = self.history.back().copied() {
             let tp = Self::on(host, TRUE_PEAK.id);
             let out = if tp { record::TP } else { record::OUT };
