@@ -4,7 +4,7 @@
 > follows this file or changes this file first. Audience: Claude Design (visual
 > system), implementation sessions, and future contributors.
 
-**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-10-26
+**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-11-03
 
 ---
 
@@ -234,6 +234,8 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
   - **Unity-gain audition** to judge the limiting itself rather than the loudness.
   - Multiband-assisted transient protection.
   - Clipping-before-limiting stage with its own style.
+
+**Status (2026-11-03): designed in-house** (user decision, as Sat): `docs/design/limit-brief.md` is the design and build spec, delivered in slices (full roster, user decision). Loudness numbers (M/S/I/LRA/TP/PLR) are allowed in the loudness column, an exception to the no-readouts rule (user, 2026-11-03).
 
 ### 4. Mite Multiband. Rival: FabFilter Pro-MB
 
@@ -659,7 +661,7 @@ learn, instance list, surround, oversampling above 4×.
 
 Mite Comp, Mite Limit and Mite Multiband. These build the dynamics cell and the loudness engine.
 
-**Status (2026-10-25):** Mite Comp's first version is built (§6.2), with oversampling (shared, `mite_dsp::oversample`). Next: Character saturation, then Mite Limit.
+**Status (2026-10-25):** Mite Comp's first version is built (§6.2), with oversampling (shared, `mite_dsp::oversample`). Next: Character saturation, then Mite Limit. Mite Limit started 2026-11-03 (§6.3, `docs/design/limit-brief.md`).
 
 ### Phase 3: Space and colour
 
