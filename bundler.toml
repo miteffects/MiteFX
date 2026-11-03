@@ -11,5 +11,8 @@ name = "Mite Comp"
 [mite_shape]
 name = "Mite Shape"
 
+[mite_limit]
+name = "Mite Limit"
+
 [mite_sat]
 name = "Mite Sat"

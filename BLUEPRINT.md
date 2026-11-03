@@ -108,6 +108,8 @@ MiteFX/
 | Help strip, dropdown lists, icon buttons, glass panels, glow | `mite_ui::widgets::{Help, Dropdown}`, `mite_ui::paint::{icon_button, glass_panel, glow_stroke}` |
 | Footer: toggles, dials with name and value, latency, dropdown buttons | `mite_ui::widgets::Footer`, `widgets::footer::draw_dropdown_button` |
 | Per-slice history telemetry (levels, GR) | `mite_core::HistoryTap` (Comp records one per 5 ms) |
+| Drawing that history: columns, grid, level lanes, GR from the top | `mite_ui::widgets::history` (`HistoryLane`; Comp and Limit, 2026-11-03) |
+| Loudness (BS.1770-4 / R128: M, S, I, LRA) and true peak | `mite_dsp::loudness` (Limit, 2026-11-03) |
 | Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
@@ -236,6 +238,7 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
   - Clipping-before-limiting stage with its own style.
 
 **Status (2026-11-03): designed in-house** (user decision, as Sat): `docs/design/limit-brief.md` is the design and build spec, delivered in slices (full roster, user decision). Loudness numbers (M/S/I/LRA/TP/PLR) are allowed in the loudness column, an exception to the no-readouts rule (user, 2026-11-03).
+**Slice 1 built (2026-11-03):** the limiter, styles, true peak (with a guard after the down filter, which lifted peaks by up to 0.2 dB), 1×–16×, Delta, the history shared with Comp (`mite_ui::widgets::history`), meters and loudness numbers; every parameter declared (`tests/golden/mite_limit.params.txt`, state 1).
 
 ### 4. Mite Multiband. Rival: FabFilter Pro-MB
 

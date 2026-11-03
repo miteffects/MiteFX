@@ -452,3 +452,38 @@ any card's square edits its band and selects it. The layout eases from one band 
 | ↑ ↓ | Drive ±0.5 dB (Shift ±0.1) |
 | ← → | Previous / next model |
 | Esc | Closes a list or menu, cancels a pull, else lets go of solo |
+
+## Mite Limit (in-house design, 2026-11-03; docs/design/limit-brief.md)
+
+### History
+
+| Gesture | Does |
+|---|---|
+| Hover | Help strip: the level and time under the pointer, and the gain |
+| Drag the waveform up / down | Gain, at the levels' own scale, so the music follows the pointer (Shift ×0.2) |
+| Wheel | Gain, 0.5 dB a notch (Shift 0.1) |
+| Double-click | Gain back to 0 dB |
+| Drag the ceiling's grip | Ceiling, at the levels' scale (Shift ×0.2) |
+| Wheel on the grip | Ceiling, 0.1 dB a notch (Shift 0.01) |
+| Double-click the grip | Ceiling back to −1 dB |
+
+A drag is one undo step. The history is Comp's (`mite_ui::widgets::history`): input after the
+gain dim, output lit (under Δ, what was taken away), gain reduction from the top at the levels'
+scale; the range pill (Auto, 12, 24, 36, 48 dB) never shows a range the ceiling falls off.
+
+### Strip, meters, loudness
+
+- Styles: six icon buttons, each a drawing of its gain shape (Custom: sliders); click picks one.
+  Custom adds the SLOW dial.
+- Dials: LOOKAHEAD (the ramp and the latency; 0 is a clipper), ATTACK (the slow envelope's),
+  RELEASE, LINK T, LINK R.
+- Meters: IN (after the gain), GR, OUT (true peak while True Peak is on) at the history's scale;
+  the ceiling marked across OUT, which lights in danger if it is ever crossed.
+- Loudness column (numbers allowed here, user 2026-11-03): integrated, momentary and short-term
+  (with bars, −40…0 LUFS), range, highest true peak, PLR. Click: resets the integration and the
+  peak.
+
+### Footer and keys
+
+Oversampling dropdown (1×–16×; the help strip gives the whole latency at each), latency, true
+peak, Δ, bypass, GAIN, CEILING. ↑ ↓: gain ±1 dB (Shift ±0.1).

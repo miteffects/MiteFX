@@ -1,0 +1,14 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Loud and Dense",
+  "params": {
+    "gain": 10.0,
+    "ceiling": -1.0,
+    "style": 2.0,
+    "lookahead": 1.0,
+    "attack": 15.0,
+    "release": 60.0,
+    "oversampling": 3.0
+  }
+}

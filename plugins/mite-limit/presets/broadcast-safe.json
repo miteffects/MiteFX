@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Broadcast Safe",
+  "params": {
+    "gain": 4.0,
+    "ceiling": -2.0,
+    "style": 4.0,
+    "lookahead": 5.0,
+    "release": 400.0,
+    "oversampling": 2.0
+  }
+}

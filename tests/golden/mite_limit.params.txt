@@ -1,0 +1,24 @@
+gain | dB | 0 | 30 | 0 | Linear
+ceiling | dB | -30 | 0 | -1 | Linear
+style | choice | Transparent, Punch, Dense, Bus, Safe, Custom | 0
+lookahead | ms | 0 | 10 | 2 | Linear
+attack | ms | 0.1 | 100 | 30 | Log
+release | ms | 1 | 2500 | 100 | Log
+slow | % | 0 | 100 | 50 | Linear
+link_t | % | 0 | 100 | 100 | Linear
+link_r | % | 0 | 100 | 100 | Linear
+true_peak | bool | true
+oversampling | choice | 1×, 2×, 4×, 8×, 16× | 1
+clip_on | bool | false
+clip_level | dB | 0 | 12 | 3 | Linear
+clip_curve | choice | Hard, Soft, Round | 1
+protect | % | 0 | 100 | 0 | Linear
+unity | bool | false
+delta | bool | false
+bypass | bool | false
+dither | choice | Off, 24 bit, 20 bit, 16 bit | 0
+shaping | choice | Off, Light, Strong | 0
+dc_filter | bool | false
+target | choice | Spotify, Apple Music, YouTube, Tidal, Amazon Music, Deezer, EBU R128, ATSC A/85, Custom | 0
+target_custom | LUFS | -30 | -5 | -14 | Linear
+preview | bool | false

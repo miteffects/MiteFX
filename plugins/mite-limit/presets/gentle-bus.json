@@ -1,0 +1,14 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Gentle Bus",
+  "params": {
+    "gain": 3.0,
+    "ceiling": -0.3,
+    "style": 3.0,
+    "lookahead": 5.0,
+    "release": 300.0,
+    "true_peak": 0.0,
+    "oversampling": 1.0
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "fields": {
+    "mitefx_state": "1",
+    "preset": "Loud and Dense",
+    "snapshots": "{\"active\":0,\"slots\":[{\"attack\":0.7866846,\"ceiling\":0.99,\"clip_curve\":0.5,\"clip_level\":0.25,\"clip_on\":0.0,\"dc_filter\":0.0,\"dither\":0.0,\"gain\":0.31666666,\"link_r\":0.5,\"link_t\":1.0,\"lookahead\":0.125,\"oversampling\":0.75,\"protect\":0.0,\"release\":0.5439241,\"shaping\":0.0,\"slow\":0.5,\"style\":0.4,\"true_peak\":1.0},{\"gain\":0.2},null,null]}"
+  },
+  "params": {
+    "attack": {
+      "f32": 30.0
+    },
+    "bypass": {
+      "bool": false
+    },
+    "ceiling": {
+      "f32": -0.3
+    },
+    "clip_curve": {
+      "i32": 1
+    },
+    "clip_level": {
+      "f32": 3.0
+    },
+    "clip_on": {
+      "bool": false
+    },
+    "dc_filter": {
+      "bool": false
+    },
+    "delta": {
+      "bool": false
+    },
+    "dither": {
+      "i32": 0
+    },
+    "gain": {
+      "f32": 9.5
+    },
+    "link_r": {
+      "f32": 50.0
+    },
+    "link_t": {
+      "f32": 100.0
+    },
+    "lookahead": {
+      "f32": 1.25
+    },
+    "oversampling": {
+      "i32": 3
+    },
+    "preview": {
+      "bool": false
+    },
+    "protect": {
+      "f32": 0.0
+    },
+    "release": {
+      "f32": 80.0
+    },
+    "shaping": {
+      "i32": 0
+    },
+    "slow": {
+      "f32": 50.0
+    },
+    "style": {
+      "i32": 2
+    },
+    "target": {
+      "i32": 6
+    },
+    "target_custom": {
+      "f32": -14.0
+    },
+    "true_peak": {
+      "bool": true
+    },
+    "unity": {
+      "bool": false
+    }
+  }
+}

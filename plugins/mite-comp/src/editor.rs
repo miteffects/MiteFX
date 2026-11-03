@@ -21,7 +21,8 @@ use mite_ui::peniko::{Color, Fill, Gradient};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::footer::draw_dropdown_button;
-use mite_ui::widgets::{ease_range, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, RangePicker, ToggleGlyph};
+use mite_ui::widgets::history;
+use mite_ui::widgets::{ease_range, Dropdown, HistoryLane, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, RangePicker, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::record;
@@ -45,7 +46,6 @@ const HEADER_ROW: (f64, f64) = (12.0, 44.0);
 /// at 10 px/dB (to 25 dB), upward gain rises from the bottom (to 16 dB).
 const HIST_W: f64 = 776.0;
 const HIST_SECONDS: f64 = 6.0;
-const HIST_COLUMNS: usize = 300;
 /// The history's level lane: 0 dB 24 px under the display's top, the range's floor this much lower.
 const LEVEL_SPAN_PX: f64 = 572.0;
 /// The history's level range (dB below 0 shown): 24/36/48/60 or Auto, as FabFilter's. Each view
@@ -263,6 +263,11 @@ fn lv_y(db: f32) -> f64 {
 
 fn lv_db(y: f64) -> f32 {
     (-(y - DISPLAY_TOP - 24.0) / LEVEL_SPAN_PX * level_range()) as f32
+}
+
+/// The history's lane (shared drawing: `mite_ui::widgets::history`).
+fn history_lane() -> HistoryLane {
+    HistoryLane { x0: 0.0, width: HIST_W, top: DISPLAY_TOP, bottom: HELP_TOP, seconds: HIST_SECONDS, slice_ms: crate::dsp::HISTORY_SLICE_MS }
 }
 
 fn hist_rect() -> Rect {
@@ -769,85 +774,17 @@ impl CompView {
 
     fn draw_history(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
         let theme = cx.theme;
-        let grid = theme.grid_minor;
-        // Gridlines and labels every 6 dB (24 dB range, plus −3) or 12 dB, from the range it glides to.
-        let step = if self.range_target <= 24.5 { 6.0 } else { 12.0 };
-        let mut levels: Vec<f32> = (1..).map(|k| -step * k as f32).take_while(|&db| db > -self.range_target + 0.5).collect();
-        // At 24 dB, −3 as well: the top few dB are where a mix bus lives.
-        if self.range_target <= 24.5 {
-            levels.insert(0, -3.0);
-        }
-        for &db in &levels {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, grid, None, &Line::new((0.0, lv_y(db)), (HIST_W, lv_y(db))));
-        }
-        for s in 1..6 {
-            let x = s as f64 * HIST_W / 6.0;
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, grid, None, &Line::new((x, DISPLAY_TOP), (x, HELP_TOP)));
-        }
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_zero, None, &Line::new((0.0, DISPLAY_TOP + 24.0), (HIST_W, DISPLAY_TOP + 24.0)));
-        for db in std::iter::once(0.0).chain(levels.iter().copied()) {
-            let label = if db == 0.0 { "0".to_owned() } else { format!("−{:.0}", -db) };
-            cx.text.draw(cx.scene, &label, 8.0, lv_y(db) + 3.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) }, theme.text_lo, Align::Left);
-        }
-
-        // Columns of 4 records (20 ms), fixed to the records' absolute times so they never
-        // re-bucket; each the mean of its records (levels in dB), then eased across neighbours, so
-        // noise reads as a level envelope. They scroll with the clock between arrivals, so the
-        // history moves at the display's rate however the host's blocks fall.
-        const PER: usize = 4;
-        let px_per_record = HIST_W / (HIST_SECONDS * 1000.0 / f64::from(crate::dsp::HISTORY_SLICE_MS));
-        let total = self.history.len();
-        let first_abs = self.seen.wrapping_sub(total);
-        let now = self.seen as f64 + self.since_fresh();
-        let first_col = first_abs.div_ceil(PER);
-        let last_col = self.seen.div_ceil(PER);
-        let mut raw: Vec<(f64, [f32; record::WIDTH])> = Vec::with_capacity(HIST_COLUMNS + 4);
-        for col in first_col..last_col {
-            let (a, b) = (col * PER, ((col + 1) * PER).min(self.seen));
-            let x = HIST_W - (now - (a + b) as f64 / 2.0) * px_per_record;
-            if x < -20.0 {
-                continue;
-            }
-            let mut out = [0.0f32; record::WIDTH];
-            for i in a..b {
-                for (o, v) in out.iter_mut().zip(&self.history[i - first_abs]) {
-                    *o += v.max(-90.0);
-                }
-            }
-            for o in &mut out {
-                *o /= (b - a) as f32;
-            }
-            raw.push((x, out));
-        }
-        if raw.is_empty() {
-            return;
-        }
-        let cols: Vec<(f64, [f32; record::WIDTH])> = (0..raw.len())
-            .map(|i| {
-                let (a, b) = (raw[i.saturating_sub(1)].1, raw[(i + 1).min(raw.len() - 1)].1);
-                let mut r = raw[i].1;
-                for (k, v) in r.iter_mut().enumerate() {
-                    *v = 0.25 * a[k] + 0.5 * *v + 0.25 * b[k];
-                }
-                (raw[i].0, r)
-            })
-            .collect();
+        let lane = history_lane();
+        lane.draw_grid(cx, self.range_target, lv_y);
+        let cols = lane.columns(&self.history, self.seen, self.since_fresh());
         if cols.len() < 2 {
             return;
         }
         let delta = Self::on(cx.host, DELTA.id);
         let listen = Self::on(cx.host, LISTEN.id);
         let level = |r: &[f32; record::WIDTH], k: usize| r[k].max(r[k + 1]);
-        let line = |f: &dyn Fn(&[f32; record::WIDTH]) -> f64| {
-            let pts: Vec<Point> = cols.iter().map(|(x, r)| Point::new(*x, f(r))).collect();
-            smooth_path(&pts)
-        };
-        let closed = |mut p: BezPath, y: f64| {
-            p.line_to((cols[cols.len() - 1].0, y));
-            p.line_to((cols[0].0, y));
-            p.close_path();
-            p
-        };
+        let line = |f: &dyn Fn(&[f32; record::WIDTH]) -> f64| history::column_line(&cols, f);
+        let closed = |p: BezPath, y: f64| history::close_to(p, &cols, y);
         // IN, dim.
         let input = line(&|r| lv_y(level(r, record::IN)));
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.16), None, &closed(input.clone(), HELP_TOP));
@@ -881,14 +818,7 @@ impl CompView {
             return;
         }
         let edge = line(&|r| cut(r, 0).max(cut(r, 1)));
-        let mut fill_path = edge.clone();
-        fill_path.line_to((cols[cols.len() - 1].0, DISPLAY_TOP));
-        fill_path.line_to((cols[0].0, DISPLAY_TOP));
-        fill_path.close_path();
-        // Light, and fading with depth, so deep compression does not bury the levels under it.
-        let fill = Gradient::new_linear((0.0, DISPLAY_TOP), (0.0, DISPLAY_TOP + 0.5 * LEVEL_SPAN_PX)).with_stops([theme.gain_reduction.multiply_alpha(0.4), theme.gain_reduction.multiply_alpha(0.06)]);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &fill_path);
-        glow_stroke(cx, &edge, 1.8, theme.gain_reduction, theme.gain_reduction, 2.4);
+        history::draw_reduction(cx, &cols, &edge, DISPLAY_TOP, 0.5 * LEVEL_SPAN_PX);
         if Self::link_split(cx.host) {
             let second = line(&|r| cut(r, 1));
             cx.scene.stroke(&Stroke::new(1.6).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.gain_reduction, None, &second);
@@ -2377,23 +2307,6 @@ fn polyline(pts: &[Point]) -> BezPath {
 }
 
 /// A Catmull-Rom curve through `pts` (no corners between samples).
-fn smooth_path(pts: &[Point]) -> BezPath {
-    let mut p = BezPath::new();
-    if pts.is_empty() {
-        return p;
-    }
-    p.move_to(pts[0]);
-    for i in 0..pts.len().saturating_sub(1) {
-        let p0 = pts[i.saturating_sub(1)];
-        let (p1, p2) = (pts[i], pts[i + 1]);
-        let p3 = pts[(i + 2).min(pts.len() - 1)];
-        let c1 = p1 + (p2 - p0) / 6.0;
-        let c2 = p2 - (p3 - p1) / 6.0;
-        p.curve_to(c1, c2, p2);
-    }
-    p
-}
-
 impl View for CompView {
     fn logical_size(&self) -> (f64, f64) {
         (WIDTH, HEIGHT)

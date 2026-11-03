@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Streaming Master",
+  "params": {
+    "gain": 6.0,
+    "ceiling": -1.0,
+    "style": 0.0,
+    "lookahead": 2.0,
+    "release": 150.0,
+    "oversampling": 2.0
+  }
+}

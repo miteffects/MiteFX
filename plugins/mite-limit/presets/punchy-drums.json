@@ -1,0 +1,14 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Punchy Drums",
+  "params": {
+    "gain": 8.0,
+    "ceiling": -0.5,
+    "style": 1.0,
+    "lookahead": 0.5,
+    "release": 40.0,
+    "link_r": 50.0,
+    "oversampling": 2.0
+  }
+}

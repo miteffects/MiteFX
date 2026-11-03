@@ -29,6 +29,8 @@ pub enum ToggleGlyph {
     Bypass,
     /// Clip: a curve easing into a ceiling line.
     Clip,
+    /// True peak: a wave whose crest falls between two samples (dots), the crest ringed.
+    TruePeak,
 }
 
 /// A toggle: its parameter (on at ≥ 0.5), glyph, and what the help strip says about it.
@@ -203,6 +205,17 @@ pub fn draw_toggle_glyph(scene: &mut Scene, glyph: ToggleGlyph, c: Point, color:
             ceiling.move_to((c.x - 8.0, c.y - 7.0));
             ceiling.line_to((c.x + 8.0, c.y - 7.0));
             scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.5), None, &ceiling);
+        }
+        ToggleGlyph::TruePeak => {
+            let mut wave = BezPath::new();
+            wave.move_to((c.x - 8.0, c.y + 6.0));
+            wave.curve_to((c.x - 4.0, c.y + 6.0), (c.x - 3.0, c.y - 5.0), (c.x, c.y - 5.0));
+            wave.curve_to((c.x + 3.0, c.y - 5.0), (c.x + 4.0, c.y + 6.0), (c.x + 8.0, c.y + 6.0));
+            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.6), None, &wave);
+            for dx in [-3.2, 3.2] {
+                scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &vello::kurbo::Circle::new((c.x + dx, c.y - 2.4), 1.5));
+            }
+            scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, color, None, &vello::kurbo::Circle::new((c.x, c.y - 5.0), 2.6));
         }
         ToggleGlyph::Bypass => {
             let mut stem = BezPath::new();

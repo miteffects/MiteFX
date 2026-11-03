@@ -75,6 +75,13 @@ waves, clipped noise, kick-and-hat loops at +20 dB of gain. If the down filter's
 that, a final true-peak guard (the same law, 0.5 ms, on the output) catches it; its lookahead is
 part of the reported latency.
 
+**Measured (slice 1, 2026-11-03):** it does. Above 1× the down filter removes what the limiting
+put above the base Nyquist, and on bright music that lifted the peaks by up to 0.2 dB (−0.81
+dBTP against a −1 ceiling, at 2× and 4×). The guard runs whenever the engine oversamples (true
+peak on: its own 4× detector; off: sample peaks), with a 20 ms release; it adds 0.5 ms plus, with
+true peak, the detector's 0.5 ms. With it the output reads −1.000 dBTP. The engine test plays a
+bright square under a kick at every factor and style and fails without the guard (0.08 dB over).
+
 ### 1.3 Release and styles
 
 Two envelopes in dB. The **fast** one drops with `s` at once and rises at the release. The
@@ -260,9 +267,16 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
    the true-peak interpolator, 48 taps a phase, flat within 0.01 dB to 0.9 × Nyquist), the 16×
    stage (latency 79), and the gain law in `mite_dsp::limit` with its proof fuzz (160 random
    cases, settings moving mid-stream) and true peak held within 0.01 dB on tones to 0.49 fs.
-1. The limiter: core, styles, true peak, oversampling, Delta, bypass; the plugin crate with every
-   parameter; the history (shared with Comp), meters, the ceiling and gain gestures, the shape
-   panel's dials and style glyphs; the true-peak compliance tests.
+1. The limiter (done 2026-11-03): core, styles, true peak, oversampling with the guard (§1.2),
+   Delta, bypass; the plugin crate with every parameter (state 1); the history moved out of Comp
+   into `mite_ui::widgets::history` (Comp's renders equal within GPU noise), meters, the ceiling
+   and gain gestures, the strip's style glyphs and dials; the loudness column's numbers
+   (momentary, short-term, integrated, range, true peak, PLR; the targets come in slice 2). The
+   strip sits under the history (468 px tall) rather than over it. A lookahead, true-peak or
+   oversampling change dips (10 ms out, in) as Comp's does rather than crossfading two cores.
+   CPU (20 s of music, 9 dB in, true peak on): 1× 2.0 %, 2× 3.4 %, 4× 4.7 %, 8× 7.3 %, 16× 12.5 %
+   of one core (the release's per-sample dB conversions are the next thing to make cheaper).
+   Editor 120 fps at 1× and 2× DPI. clap-validator 34 passed, 0 failed.
 2. Loudness column: R128 numbers, targets, what the platform will do, preview.
 3. Gain shape probe in the shape panel, its flank gestures.
 4. Unity-gain audition (loudness-matched).
