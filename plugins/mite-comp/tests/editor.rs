@@ -303,3 +303,30 @@ fn the_multiple_stages_option_shows_the_strip_and_deleting_down_to_one_leaves_it
     assert_eq!(stages(&host).iter().filter(|st| st.on).count(), 1);
     assert!(!multi());
 }
+
+#[test]
+fn a_range_picked_by_hand_never_hides_a_deeper_threshold() {
+    // The user's case: 24 dB picked by hand and the threshold pulled under it. Every threshold must
+    // still be drawn where it is (it used to sit at the floor, so −30 and −50 looked alike).
+    let (mut view, host, shared) = setup();
+    shared.display_range.store(24.0);
+    for (threshold, range) in [(-12.0, 24.0), (-24.0, 36.0), (-35.0, 48.0), (-50.0, 60.0)] {
+        host.set_plain(&stage_id(0, S_THRESH.id), threshold);
+        view.tick(&host);
+        draw(&mut view, &host);
+        assert_eq!(view.level_range(), range, "threshold {threshold}");
+    }
+    // And the history's grip keeps going: dragged down from −20 dB, the threshold follows past −24.
+    host.set_plain(&stage_id(0, S_THRESH.id), -20.0);
+    // The displays glide to a new range (120 ms): let them settle before aiming at the grip.
+    for _ in 0..80 {
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        view.tick(&host);
+    }
+    draw(&mut view, &host);
+    let r = f64::from(view.level_range());
+    let y = 80.0 + 20.0 / r * 572.0;
+    drag(&mut view, &host, Point::new(755.0, y), Point::new(755.0, y + 15.0 / r * 572.0));
+    let after = stages(&host)[0].threshold_db;
+    assert!((after + 35.0).abs() < 0.5, "dragged to {after}");
+}

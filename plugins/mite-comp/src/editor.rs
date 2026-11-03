@@ -450,6 +450,12 @@ impl CompView {
         &self.session
     }
 
+    /// The level range the displays are heading to, dB (the history, the knee display and the
+    /// meters share it).
+    pub fn level_range(&self) -> f32 {
+        self.range_target
+    }
+
     /// Selects a stage (its panel opens), for tests and tools.
     pub fn select(&mut self, slot: Option<usize>) {
         self.selected = slot;
@@ -2465,7 +2471,11 @@ impl View for CompView {
             0.0
         };
         let auto = if deepest == 0.0 && content == 0.0 { 60.0 } else { deepest.max(content) };
-        self.range_target = self.range.target(auto);
+        // A range picked by hand is kept, but never narrower than the deepest stage needs: a
+        // threshold under the scale would be drawn at its floor, so every deeper setting looked
+        // the same. The next range that shows it is used instead (the pill shows what is drawn).
+        let fit = LEVEL_RANGES.iter().copied().find(|&v| v >= deepest).unwrap_or(LEVEL_RANGES[LEVEL_RANGES.len() - 1]);
+        self.range_target = self.range.target(auto).max(if deepest > 0.0 { fit } else { 0.0 });
         let moved = ease_range(&mut self.range_shown, self.range_target, dt);
         set_level_range(self.range_shown);
         // Meters: instant attack, 20 dB/s release (GR returns at the same speed).
