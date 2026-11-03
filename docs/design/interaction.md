@@ -541,3 +541,15 @@ closes). Tested per record: a slice whose key reaches the threshold has the gate
 Sidechain source (Internal, External), the sidechain EQ button (lit while a key band is on; it
 opens the panel: Comp's EQ well, shared), latency, Listen, Δ, bypass, MIX, OUTPUT. ↑ ↓:
 threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
+
+## Mite Multiband (in-house design, 2026-11-03; docs/design/multiband-brief.md)
+
+- Bands: the rail is Shape's and Sat's (pull a crossover in or double-click the strip to split,
+  drag, merge, the band menu). Click a card or region to edit that band.
+- Square: drag across for the threshold (0.15 dB/px), up and down for the ratio (an octave per
+  60 px); Shift fine; wheel: threshold; double-click resets. One undo step.
+- Card header: the quadrants (picking one turns the band on, the lit one again turns it off),
+  Peak / RMS / loudness, the band's key (External source) and Δ, S, M, power, remove.
+- Footer: sidechain source, the sidechain EQ (its panel over the cards: the shared `KeyEq`
+  gestures), latency, Listen, Δ, bypass, LOOKAHEAD, MIX, OUTPUT. Keys: S, M, Delete, ↑ ↓
+  threshold, Esc closes the panel or a menu.

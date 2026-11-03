@@ -59,7 +59,11 @@ fn main() -> Result<(), String> {
         }
     });
 
-    let view = MbView::new(shared);
+    let mut view = MbView::new(shared);
+    // PREVIEW_EQ opens the sidechain EQ (its spectrum runs every frame).
+    if std::env::var_os("PREVIEW_EQ").is_some() {
+        view.open_eq();
+    }
     let options = WindowOptions {
         title: "Mite Multiband — preview".into(),
         logical_size: (1280.0, 760.0),

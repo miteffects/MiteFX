@@ -64,5 +64,11 @@ sidechain source and EQ button, latency, Δ, bypass, MIX, OUTPUT. Meters IN, OUT
    the lit one again turns it off; the square: across threshold, up ratio, one undo step), the
    header's controls shifted 36 px for the longer title. 120 fps at 2× DPI (the response curve
    first read the whole host per point: 3.95 ms a scene, now 0.4 ms). clap-validator 34/0.
-2. The sidechain panel (shared `KeyEq`, the key's spectrum) and per-band external keys.
+2. (done 2026-11-03) The sidechain: the footer's source (Internal, External) and EQ button, Listen
+   (the EQ'd sidechain, split and summed); the panel over the cards (opaque, the glow masked a
+   halo wider than it), the shared `KeyEq` with six sloped bands over the sidechain's spectrum
+   (`MbShared::key_spectrum`, before its EQ); each wide card's key button (lit: the band hears
+   the sidechain; dim while the source is Internal) and band Delta (any band's: only those bands,
+   each as its output minus its input delayed alike, tested). 120 fps at 2× DPI with the panel's
+   spectrum running.
 3. Each band's honest history on its card (the selected band's levels and gain over time).

@@ -20,7 +20,9 @@ use mite_ui::peniko::{Color, Fill};
 use mite_ui::session::{HeaderLayout, Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::rail::{draw_badge, draw_glyph, glyph as rail_glyph, hatch, BandMenu, MenuAsk, Rail, RailHot, RailParams};
-use mite_ui::widgets::{Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::footer::draw_dropdown_button;
+use mite_ui::widgets::key_eq::KeySpectrum;
+use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, KeyEq, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::record;
@@ -67,6 +69,13 @@ const RESPONSE_SPAN_DB: f64 = 30.0;
 const QUAD_GLYPHS: [&str; 4] = ["M3 21 L12 12 C14.5 9.5 16.5 9.2 21 8.4", "M6 23 C8 21 9.5 16 12 12 L21 3", "M3 14.5 C6 14 9.5 13.2 12 12 L21 3", "M3 21 L12 12 C13.8 10.2 14.6 6 15 2.5"];
 const DET_GLYPHS: [&str; 3] = ["M3 18 H9 C10.5 18 11 4 12 4 C13 4 13.5 18 15 18 H21", "M3 18 C7 18 8.5 9 12 9 C15.5 9 17 18 21 18", "M4 18 V15 M8 18 V11 M12 18 V8 M16 18 V11 M20 18 V14"];
 const POWER: &str = "M12 4 V11 M7.5 6.8 A7 7 0 1 0 16.5 6.8";
+const KEY_GLYPH: &str = "M7.5 15.5 A3.5 3.5 0 1 1 7.51 15.5 M10.5 13.5 L20 7 M17 9 L19 12 M14.5 10.7 L16 13";
+const EQ_GLYPH: &str = "M4 7 H20 M4 12 H20 M4 17 H20 M8.5 5 V9 M15 10 V14 M10.5 15 V19";
+const DELTA_GLYPH: &str = "M12 4.5 L19.5 18.5 H4.5 Z";
+/// The footer's sidechain source and EQ buttons; the EQ panel over the cards (opaque).
+const SOURCE_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 156.0, FOOTER_TOP + 47.0);
+const EQ_BUTTON: Rect = Rect::new(164.0, FOOTER_TOP + 9.0, 204.0, FOOTER_TOP + 47.0);
+const EQ_PANEL: Rect = Rect::new(PLOT_X0, DISPLAY_TOP + 284.0, PLOT_X1, DISPLAY_TOP + 610.0);
 
 #[derive(Debug, Clone, Copy)]
 struct Lanes {
@@ -141,7 +150,7 @@ pub fn settings(host: &dyn ParamHost) -> MbSettings {
     let external = on(SC_SOURCE.id);
     MbSettings {
         crossovers: std::array::from_fn(|k| on(&cross_id(k, X_ON.id)).then(|| p(&cross_id(k, X_FREQ.id)))),
-        bands: std::array::from_fn(|b| MbBand { stage: MbView::stage(host, b), gain_db: p(&band_id(b, B_GAIN.id)), bypass: on(&band_id(b, B_BYPASS.id)), mute: on(&band_id(b, B_MUTE.id)), solo: on(&band_id(b, B_SOLO.id)), external: external && on(&band_id(b, B_EXTERNAL.id)) }),
+        bands: std::array::from_fn(|b| MbBand { stage: MbView::stage(host, b), gain_db: p(&band_id(b, B_GAIN.id)), bypass: on(&band_id(b, B_BYPASS.id)), mute: on(&band_id(b, B_MUTE.id)), solo: on(&band_id(b, B_SOLO.id)), external: external && on(&band_id(b, B_EXTERNAL.id)), delta: on(&band_id(b, B_DELTA.id)) }),
         lookahead_ms: p(LOOKAHEAD.id),
         link: p(LINK.id) / 100.0,
         key_eq: std::array::from_fn(|b| mite_ui::widgets::key_eq::band_with(host, b, true)),
@@ -149,6 +158,7 @@ pub fn settings(host: &dyn ParamHost) -> MbSettings {
         out_db: p(OUT_GAIN.id),
         delta: on(DELTA.id),
         bypass: on(BYPASS.id),
+        listen: external && on(LISTEN.id),
     }
 }
 
@@ -169,6 +179,12 @@ enum Hot {
     Remove(usize),
     Card(usize),
     Rail(RailHot),
+    /// The band's external key and its Delta.
+    Ext(usize),
+    BandDelta(usize),
+    Source,
+    EqButton,
+    EqPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,13 +208,15 @@ struct Card {
     solo: Option<Rect>,
     mute: Option<Rect>,
     remove: Option<Rect>,
+    ext: Option<Rect>,
+    delta: Option<Rect>,
     dials: Vec<(Point, f64)>,
 }
 
 impl Card {
-    fn buttons(&self) -> [(Option<Rect>, Hot); 4] {
+    fn buttons(&self) -> [(Option<Rect>, Hot); 6] {
         let b = self.band;
-        [(self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b))]
+        [(self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b)), (self.ext, Hot::Ext(b)), (self.delta, Hot::BandDelta(b))]
     }
 }
 
@@ -224,6 +242,10 @@ pub struct MbView {
     /// Each band's input peak (linear) and gain change (dB), eased.
     peak: [f32; BANDS],
     gain: [f32; BANDS],
+    source_menu: Option<Dropdown>,
+    key_eq: KeyEq,
+    key_spectrum: KeySpectrum,
+    eq_open: bool,
 }
 
 impl MbView {
@@ -232,6 +254,7 @@ impl MbView {
             FOOTER_TOP,
             (WIDTH, HEIGHT),
             vec![
+                FooterToggle { id: LISTEN.id, glyph: ToggleGlyph::Listen, words: "Listen — hear the sidechain as the external bands' detectors hear it (after its EQ)" },
                 FooterToggle { id: DELTA.id, glyph: ToggleGlyph::Delta, words: "Delta — hear only what the bands' dynamics change" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input, latency kept" },
             ],
@@ -269,6 +292,14 @@ impl MbView {
             spectrum: spectrum::Spectrum::new(),
             peak: [0.0; BANDS],
             gain: [0.0; BANDS],
+            source_menu: None,
+            key_eq: {
+                let mut k = KeyEq::new(Rect::new(EQ_PANEL.x0 + 16.0, EQ_PANEL.y0 + 44.0, EQ_PANEL.x1 - 16.0, EQ_PANEL.y1 - 14.0), mite_dsp::multiband::KEY_BANDS).with_slopes();
+                k.menu_bounds = (DISPLAY_TOP, FOOTER_TOP);
+                k
+            },
+            key_spectrum: KeySpectrum::new(),
+            eq_open: false,
             shared,
         }
     }
@@ -319,6 +350,43 @@ impl MbView {
 
     pub fn rail_x(&self, f: f64) -> f64 {
         self.rail.x(f)
+    }
+
+    pub fn source_button(&self) -> Rect {
+        SOURCE_BUTTON
+    }
+
+    pub fn source_rows(&self) -> Vec<Rect> {
+        self.source_menu.as_ref().map(Dropdown::item_rects).unwrap_or_default()
+    }
+
+    pub fn eq_button(&self) -> Rect {
+        EQ_BUTTON
+    }
+
+    pub fn eq_area(&self) -> Option<Rect> {
+        self.eq_open.then_some(self.key_eq.area)
+    }
+
+    pub fn eq_node(&self, host: &dyn ParamHost, b: usize) -> Point {
+        mite_ui::widgets::key_eq::node(self.key_eq.area, &mite_ui::widgets::key_eq::band_with(host, b, true))
+    }
+
+    pub fn open_eq(&mut self) {
+        self.eq_open = true;
+    }
+
+    pub fn settle_spectrum(&mut self) {
+        let fs = f64::from(self.shared.sample_rate.load());
+        self.key_spectrum.settle(&self.shared.key_spectrum, fs);
+    }
+
+    pub fn band_ext(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).and_then(|c| c.ext)
+    }
+
+    pub fn band_delta(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).and_then(|c| c.delta)
     }
 
     pub fn footer_toggle(&self, id: &str) -> Option<Rect> {
@@ -427,7 +495,9 @@ impl MbView {
                             dials.push((Point::new(ax0 + col * (1.5 + cx), square.y0 + 56.0 + row * 112.0), 52.0));
                         }
                     }
-                    Card { band, kind: if single { CardKind::Single } else { CardKind::Wide }, rect, square, bar, quads, dets, power: Some(button(if single { 0.0 } else { 1.0 })), solo: (!single).then(|| button(3.0)), mute: (!single).then(|| button(2.0)), remove: (!single).then(|| button(0.0)), dials }
+                    // Right to left: remove, power, mute, solo, then the band's Delta and key.
+                    let (power, delta, ext) = if single { (button(0.0), button(1.0), button(2.0)) } else { (button(1.0), button(4.0), button(5.0)) };
+                    Card { band, kind: if single { CardKind::Single } else { CardKind::Wide }, rect, square, bar, quads, dets, power: Some(power), solo: (!single).then(|| button(3.0)), mute: (!single).then(|| button(2.0)), remove: (!single).then(|| button(0.0)), ext: Some(ext), delta: Some(delta), dials }
                 } else {
                     let button = |k: f64| Rect::new(rect.x1 - 8.0 - 26.0 * (k + 1.0) - 3.0 * k, rect.y0 + 10.0, rect.x1 - 8.0 - 26.0 * k - 3.0 * k, rect.y0 + 36.0);
                     let side = (w - 30.0).min(rect.height() - 140.0);
@@ -435,7 +505,7 @@ impl MbView {
                     let bar = Rect::new(square.x1 + 5.0, square.y0, square.x1 + 13.0, square.y1);
                     let top = square.y1 + 36.0;
                     let dials = if w >= 216.0 { vec![(Point::new(rect.x0 + 30.0, top), 40.0), (Point::new(rect.x0 + 30.0 + 104.0, top), 40.0)] } else { vec![(Point::new(rect.x0 + 30.0, top), 38.0), (Point::new(rect.x0 + 30.0, top + 52.0), 38.0)] };
-                    Card { band, kind: CardKind::Narrow, rect, square, bar, quads: Vec::new(), dets: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
+                    Card { band, kind: CardKind::Narrow, rect, square, bar, quads: Vec::new(), dets: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, ext: None, delta: None, dials }
                 }
             })
             .collect()
@@ -568,6 +638,18 @@ impl MbView {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), muted, theme.text_hi);
                 draw_glyph(cx.scene, rail_glyph::MUTE, r.center(), r.height() * 0.56, ink, 1.7);
             }
+            let external = Self::on(cx.host, SC_SOURCE.id);
+            if let Some(r) = card.ext {
+                // Lit while this band is keyed from the sidechain; dim while the source is internal.
+                let on = Self::on(cx.host, &band_id(b, B_EXTERNAL.id));
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), on, theme.sidechain);
+                draw_svg(cx.scene, KEY_GLYPH, r.center(), r.height() * 0.6, if external || !on { ink } else { ink.multiply_alpha(0.45) }, 1.7);
+            }
+            if let Some(r) = card.delta {
+                let on = Self::on(cx.host, &band_id(b, B_DELTA.id));
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), on, theme.accent);
+                draw_svg(cx.scene, DELTA_GLYPH, r.center(), r.height() * 0.55, ink, 1.6);
+            }
             if let Some(r) = card.remove {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), false, theme.text_hi);
                 draw_glyph(cx.scene, rail_glyph::CROSS, r.center(), r.height() * 0.56, ink, 1.8);
@@ -664,10 +746,32 @@ impl MbView {
     }
 
     fn draw_footer(&mut self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
         self.footer.draw_frame(cx);
+        let external = Self::on(cx.host, SC_SOURCE.id);
+        draw_dropdown_button(cx, SOURCE_BUTTON, if external { "External" } else { "Internal" }, self.source_menu.is_some(), self.hot == Some(Hot::Source), |scene, at| draw_svg(scene, KEY_GLYPH, at + (8.0, 6.0), 20.0, theme.sidechain, 1.7));
+        let eq_on = (0..mite_dsp::multiband::KEY_BANDS).any(|b| Self::on(cx.host, &key_id(b, K_ON.id)));
+        let ink = icon_button(cx.scene, theme, EQ_BUTTON, theme.panel_control, self.hot == Some(Hot::EqButton), self.eq_open || eq_on, theme.sidechain);
+        draw_svg(cx.scene, EQ_GLYPH, EQ_BUTTON.center(), 22.0, ink, 1.6);
         let sample_rate = f64::from(self.shared.sample_rate.load()).max(1.0);
-        self.footer.draw_latency(cx, 16.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
+        self.footer.draw_latency(cx, 220.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
         self.footer.draw_controls(cx);
+        if let Some(list) = &self.source_menu {
+            list.draw(cx, theme.accent, |_, _, _, _| {});
+        }
+    }
+
+    /// The sidechain EQ over the cards (opaque), with the key's spectrum under its curve.
+    fn draw_eq_panel(&self, cx: &mut DrawCx<'_>) {
+        if !self.eq_open {
+            return;
+        }
+        let theme = cx.theme;
+        mite_ui::paint::raised(cx.scene, RoundedRect::from_rect(EQ_PANEL, 12.0), theme.window, theme.panel_control_border, theme.shadows);
+        draw_svg(cx.scene, KEY_GLYPH, Point::new(EQ_PANEL.x0 + 28.0, EQ_PANEL.y0 + 22.0), 20.0, theme.sidechain, 1.7);
+        let words = if Self::on(cx.host, SC_SOURCE.id) { "Sidechain" } else { "Sidechain — the source is Internal: pick External for the bands' key buttons to hear it" };
+        cx.text.draw(cx.scene, words, EQ_PANEL.x0 + 46.0, EQ_PANEL.y0 + 15.0, TextStyle::BODY.weighted(700.0), theme.text_hi, Align::Left);
+        self.key_eq.draw_with(cx, Some(&self.key_spectrum));
     }
 
     fn draw_states(&self, cx: &mut DrawCx<'_>, spectrum: Rect) {
@@ -689,6 +793,16 @@ impl MbView {
             let s = Self::stage(host, band);
             return Help::default().text("Threshold ").slot(format!("{:.1} dB", s.threshold_db), "−60.0 dB").text("  ratio ").slot(format!("{:.1}:1", s.ratio), "100.0:1").text(" — across: threshold, up and down: ratio. Shift is fine.");
         }
+        if self.key_eq.menu_open() {
+            if let Some(h) = self.key_eq.help(host) {
+                return h;
+            }
+        }
+        if let Some(list) = &self.source_menu {
+            if let Some(i) = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))) {
+                return Help::default().text(if i == 0 { "Internal — every band hears itself" } else { "External — bands with their key lit hear the sidechain (route a track to the plugin's second input)" });
+            }
+        }
         if let Some(h) = self.rail.help(host) {
             return h;
         }
@@ -703,6 +817,14 @@ impl MbView {
             Some(Hot::Solo(_)) => return Help::default().text("Solo — hear only this band (S)"),
             Some(Hot::Mute(_)) => return Help::default().text("Mute — take this band out of the sum (M)"),
             Some(Hot::Remove(b)) => return Help::default().text(format!("Remove band {} — its region joins the band below (Delete)", number(b))),
+            Some(Hot::Ext(b)) => {
+                let words = if !Self::on(host, SC_SOURCE.id) { " (the sidechain source is Internal: pick External in the footer)" } else { "" };
+                return Help::default().text(format!("External key — band {} hears the sidechain, EQ'd and split like the audio, instead of itself{words}", number(b)));
+            }
+            Some(Hot::BandDelta(b)) => return Help::default().text(format!("Band Delta — hear only what band {}'s dynamics change", number(b))),
+            Some(Hot::Source) => return Help::default().text("Sidechain — Internal: every band hears itself. External: bands with their key lit hear the sidechain input."),
+            Some(Hot::EqButton) => return Help::default().text(if self.eq_open { "Sidechain EQ — click to close" } else { "Sidechain EQ — shape the sidechain the external bands hear, over its spectrum" }),
+            Some(Hot::EqPanel) => return self.key_eq.help(host).unwrap_or_default(),
             Some(Hot::Rail(RailHot::Region(b))) | Some(Hot::Card(b)) if layout.n > 0 => {
                 return Help::default().slot(format!("Band {}", number(b)), "Band 6").text(" · ").slot(self.rail.range_text(host, &layout, b), "20.0 kHz – 20.0 kHz").text(" — click to edit it; double-click the strip to split; right-click for more");
             }
@@ -765,10 +887,19 @@ impl MbView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.key_eq.busy() || self.key_eq.menu_open() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
+        if self.eq_open && EQ_PANEL.contains(p) {
+            return Some(Hot::EqPanel);
+        }
+        if SOURCE_BUTTON.contains(p) {
+            return Some(Hot::Source);
+        }
+        if EQ_BUTTON.contains(p) {
+            return Some(Hot::EqButton);
+        }
         if let Some(h) = self.rail.hit(host, p) {
             return Some(Hot::Rail(h));
         }
@@ -820,6 +951,10 @@ impl MbView {
             }
             Key::Escape => {
                 if self.menu.take().is_some() {
+                    return true;
+                }
+                if self.eq_open {
+                    self.eq_open = false;
                     return true;
                 }
                 self.rail.cancel() || self.rail.clear_solo(host)
@@ -895,6 +1030,26 @@ impl MbView {
                 self.rail.selected = b;
                 true
             }
+            Some(Hot::Ext(b)) => {
+                let id = band_id(b, B_EXTERNAL.id);
+                Self::set(host, &id, if Self::on(host, &id) { 0.0 } else { 1.0 });
+                true
+            }
+            Some(Hot::BandDelta(b)) => {
+                let id = band_id(b, B_DELTA.id);
+                Self::set(host, &id, if Self::on(host, &id) { 0.0 } else { 1.0 });
+                true
+            }
+            Some(Hot::Source) => {
+                let current = usize::from(Self::on(host, SC_SOURCE.id));
+                self.source_menu = Some(Dropdown::new(SOURCE_BUTTON, SC_SOURCE.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(170.0));
+                true
+            }
+            Some(Hot::EqButton) => {
+                self.eq_open = !self.eq_open;
+                true
+            }
+            Some(Hot::EqPanel) => true,
             None => false,
         }
     }
@@ -905,6 +1060,35 @@ impl MbView {
         }
         if self.menu.is_some() && !self.session.menu_open() {
             return self.menu_event(event, host);
+        }
+        if let Some(list) = &mut self.source_menu {
+            if let UiEvent::PointerMove { pos, .. } = *event {
+                self.pointer = Some(pos);
+            }
+            match list.event(event) {
+                DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) => {
+                    self.source_menu = None;
+                    Self::set(host, SC_SOURCE.id, i as f32);
+                }
+                DropdownEvent::Closed => self.source_menu = None,
+            }
+            return true;
+        }
+        if self.eq_open {
+            let in_panel = |p: Point| EQ_PANEL.contains(p);
+            let ours = match *event {
+                UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } => in_panel(pos),
+                _ => true,
+            };
+            if (ours || self.key_eq.menu_open()) && self.key_eq.event(event, host) {
+                return true;
+            }
+            if let UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } = *event {
+                if in_panel(pos) {
+                    return true;
+                }
+            }
         }
         if let Some(answer) = self.session.event(event, host) {
             return answer;
@@ -1047,8 +1231,16 @@ impl View for MbView {
         self.rail.draw_under(cx, &layout, &breath);
         self.rail.draw_over(cx, &layout);
         let cards = self.cards(&layout);
+        if self.eq_open {
+            // Wider than the panel by a halo's reach: the cards' glowing frames end at its edge.
+            cx.begin_glow_hole(RoundedRect::from_rect(EQ_PANEL.inflate(10.0, 10.0), 20.0));
+        }
         self.rail.draw_funnels(cx, &layout, &cards.iter().map(|c| c.rect).collect::<Vec<_>>(), l.rail.y1, l.cy);
         self.draw_cards(cx, &layout, &cards);
+        if self.eq_open {
+            cx.end_glow_hole();
+        }
+        self.draw_eq_panel(cx);
         self.draw_meters(cx);
         self.draw_states(cx, l.spectrum);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
@@ -1056,6 +1248,7 @@ impl View for MbView {
         if let Some(menu) = &self.menu {
             menu.draw(cx, (theme.text_hi, rail_glyph::CROSS));
         }
+        self.key_eq.draw_menu(cx);
         self.session.draw_menu(cx);
     }
 
@@ -1116,7 +1309,7 @@ impl View for MbView {
             }
             moved |= (self.peak[b] - before.0).abs() > 1e-4 || (self.gain[b] - before.1).abs() > 1e-3;
         }
-        let spectrum = self.spectrum.update(&self.shared, dt);
+        let spectrum = self.spectrum.update(&self.shared, dt) | (self.eq_open && self.key_spectrum.update(&self.shared.key_spectrum, f64::from(self.shared.sample_rate.load()), dt));
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
         fresh || flowing || moved || grew || spectrum || self.busy() || self.meters.iter().any(|&m| m > -149.0)
     }

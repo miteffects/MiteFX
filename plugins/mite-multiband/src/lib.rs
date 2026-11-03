@@ -23,6 +23,8 @@ pub struct MbShared {
     /// The input and the output (mono), for the spectrum.
     pub spectrum: SpectrumTap,
     pub post: SpectrumTap,
+    /// The sidechain before its EQ (mono), for its spectrum under the EQ.
+    pub key_spectrum: SpectrumTap,
     pub sample_rate: AtomicF32,
     pub latency: AtomicF32,
     pub snapshots: Arc<Snapshots>,
@@ -35,7 +37,7 @@ impl MbShared {
     }
 
     pub fn with_stores(snapshots: Arc<Snapshots>, preset: Arc<CurrentPreset>) -> Self {
-        Self { history: HistoryTap::new(HISTORY_RECORDS), spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), post: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), sample_rate: AtomicF32::new(48_000.0), latency: AtomicF32::new(0.0), snapshots, preset }
+        Self { history: HistoryTap::new(HISTORY_RECORDS), spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), post: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), key_spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), sample_rate: AtomicF32::new(48_000.0), latency: AtomicF32::new(0.0), snapshots, preset }
     }
 }
 
@@ -128,7 +130,7 @@ impl Plugin for MiteMultiband {
             }
         }
         let key = (key_channels > 0).then_some(&key[..key_channels]);
-        self.engine.process(buffer.as_slice(), key, &settings, &self.shared.history, Some([&self.shared.spectrum, &self.shared.post]));
+        self.engine.process_keyed(buffer.as_slice(), key, &settings, &self.shared.history, Some([&self.shared.spectrum, &self.shared.post]), Some(&self.shared.key_spectrum));
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {
             self.reported_latency = latency;

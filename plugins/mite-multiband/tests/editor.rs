@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mite_multiband::editor::{memory_host, MbView};
-use mite_multiband::params::{band_id, cross_id, B_BYPASS, B_ON, B_QUAD, B_RATIO, B_THRESH, BYPASS, DELTA, X_ON};
+use mite_multiband::params::{band_id, cross_id, key_id, B_BYPASS, B_DELTA, B_EXTERNAL, B_ON, B_QUAD, B_RATIO, B_THRESH, BYPASS, DELTA, K_ON, LISTEN, SC_SOURCE, X_ON};
 use mite_multiband::MbShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -90,4 +90,32 @@ fn quadrants_power_and_footer_toggles() {
         click(&mut view, &host, at);
         assert_eq!(plain(&host, id), 0.0, "{id} off");
     }
+}
+
+#[test]
+fn the_sidechain_source_eq_panel_and_a_bands_key_and_delta() {
+    let (mut view, host) = setup();
+    let at = view.source_button().center();
+    click(&mut view, &host, at);
+    let rows = view.source_rows();
+    assert_eq!(rows.len(), 2);
+    click(&mut view, &host, rows[1].center());
+    assert_eq!(plain(&host, SC_SOURCE.id), 1.0);
+    let key = view.band_ext(&host, 0).expect("drawn");
+    click(&mut view, &host, key.center());
+    assert_eq!(plain(&host, &band_id(0, B_EXTERNAL.id)), 1.0);
+    let delta = view.band_delta(&host, 0).expect("drawn");
+    click(&mut view, &host, delta.center());
+    assert_eq!(plain(&host, &band_id(0, B_DELTA.id)), 1.0);
+    let listen = view.footer_toggle(LISTEN.id).expect("drawn").center();
+    click(&mut view, &host, listen);
+    assert_eq!(plain(&host, LISTEN.id), 1.0);
+    // The EQ panel: a click in the well makes a band; Esc closes.
+    let at = view.eq_button().center();
+    click(&mut view, &host, at);
+    let area = view.eq_area().expect("open");
+    click(&mut view, &host, area.center());
+    assert_eq!(plain(&host, &key_id(0, K_ON.id)), 1.0);
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
+    assert!(view.eq_area().is_none());
 }

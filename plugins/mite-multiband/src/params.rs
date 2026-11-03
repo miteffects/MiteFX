@@ -270,6 +270,7 @@ impl BandParams {
             mute: self.mute.value(),
             solo: self.solo.value(),
             external: self.external.value(),
+            delta: self.delta.value(),
         }
     }
 }
@@ -329,6 +330,7 @@ impl MbParams {
             out_db: self.out_gain.value(),
             delta: self.delta.value(),
             bypass: self.bypass.value(),
+            listen: external && self.listen.value(),
         }
     }
 }

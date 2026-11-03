@@ -2,7 +2,8 @@
 //!
 //!     cargo run -p mite_multiband --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default (three bands), single, six, solo, delta. SNAPSHOT_SELECT=2 picks a band.
+//! SNAPSHOT_VARIANT: default (three bands), single, six, solo, delta, eq (the sidechain EQ open,
+//! bands keyed from it). SNAPSHOT_SELECT=2 picks a band.
 
 #[path = "common/music.rs"]
 mod music;
@@ -45,14 +46,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("delta") {
         host.set_plain(DELTA.id, 1.0);
     }
+    if v("eq") {
+        host.set_plain(SC_SOURCE.id, 1.0);
+        host.set_plain(&band_id(0, B_EXTERNAL.id), 1.0);
+        host.set_plain(&band_id(1, B_EXTERNAL.id), 1.0);
+        host.set_plain(&key_id(0, K_ON.id), 1.0);
+        host.set_plain(&key_id(1, K_ON.id), 1.0);
+        host.set_plain(&key_id(1, K_GAIN.id), 6.0);
+    }
     let shared = Arc::new(MbShared::new());
     let sample_rate = 48_000.0;
     shared.sample_rate.store(sample_rate);
     let s = settings(&host);
     let mut engine = MbEngine::new(sample_rate, &s);
     let [mut l, mut r] = music::music(6.0, sample_rate);
-    for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-        engine.process(&mut [a, b], None, &s, &shared.history, Some([&shared.spectrum, &shared.post]));
+    // The music keys itself through the sidechain input too (as if routed there).
+    let key = music::music(6.0, sample_rate);
+    for (i, (a, b)) in l.chunks_mut(480).zip(r.chunks_mut(480)).enumerate() {
+        let k: [&[f32]; 2] = [&key[0][i * 480..i * 480 + a.len()], &key[1][i * 480..i * 480 + a.len()]];
+        engine.process_keyed(&mut [a, b], Some(&k), &s, &shared.history, Some([&shared.spectrum, &shared.post]), Some(&shared.key_spectrum));
     }
     shared.latency.store(engine.latency() as f32);
     let mut view = MbView::new(shared.clone());
@@ -60,6 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         view.select(b);
     }
     view.settle(&host);
+    if v("eq") {
+        view.open_eq();
+        view.settle_spectrum();
+    }
     // Let the meters, peaks and spectrum ease in as they would live.
     for _ in 0..30 {
         view.tick(&host);

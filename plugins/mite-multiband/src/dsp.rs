@@ -53,8 +53,13 @@ impl MbEngine {
         self.mb.latency()
     }
 
-    /// Processes one host block in place; `spectrum` takes the input and the output (mono).
+    /// Processes one host block in place; `spectrum` takes the input and the output (mono),
+    /// `key_spectrum` the sidechain before its EQ (mono).
     pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &MbSettings, history: &HistoryTap<{ record::WIDTH }>, spectrum: Option<[&SpectrumTap; 2]>) {
+        self.process_keyed(channels, key, s, history, spectrum, None);
+    }
+
+    pub fn process_keyed(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &MbSettings, history: &HistoryTap<{ record::WIDTH }>, spectrum: Option<[&SpectrumTap; 2]>, key_spectrum: Option<&SpectrumTap>) {
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
             return;
@@ -71,6 +76,12 @@ impl MbEngine {
                 pre.push(self.mono[..n].iter().copied());
             }
             let key_chunk: Option<[&[f32]; 2]> = key.filter(|k| !k.is_empty() && k.iter().all(|c| c.len() >= end)).map(|k| [&k[0][start..end], &k[k.len().min(2) - 1][start..end]]);
+            if let Some(tap) = key_spectrum {
+                match key_chunk {
+                    Some(k) => tap.push(k[0].iter().zip(k[1]).map(|(a, b)| 0.5 * (a + b))),
+                    None => tap.push(std::iter::repeat_n(0.0, n)),
+                }
+            }
             let t = {
                 let (first, rest) = channels.split_at_mut(1);
                 let a = &mut first[0][start..end];
