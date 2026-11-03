@@ -54,8 +54,16 @@ sidechain source and EQ button, latency, Δ, bypass, MIX, OUTPUT. Meters IN, OUT
 
 ## 4. Slices
 
-1. `mite_dsp::multiband` (split, per-band dynamics, sum, mix through the allpass, sidechain split)
+1. (done 2026-11-03) `mite_dsp::multiband` (split, per-band dynamics, sum, mix through the allpass, sidechain split)
    with its tests; the plugin with every parameter; the editor: spectrum with the dynamic
    response, rail, cards, footer, meters.
 2. The sidechain panel (shared `KeyEq`, the key's spectrum) and per-band external keys.
 3. Each band's honest history on its card (the selected band's levels and gain over time).
+
+   Built: every parameter (the sidechain EQ's lines Gate's, tested), the engine (records of each
+   band's input peak and gain change, the input and output spectra), the editor (the dynamic
+   response from `Layout::weights` and the bands' eased gains; one band's card across the
+   display, several: the selected one wide, the others narrow; quadrant buttons turn a band on,
+   the lit one again turns it off; the square: across threshold, up ratio, one undo step), the
+   header's controls shifted 36 px for the longer title. 120 fps at 2× DPI (the response curve
+   first read the whole host per point: 3.95 ms a scene, now 0.4 ms). clap-validator 34/0.

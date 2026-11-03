@@ -189,6 +189,7 @@ impl Multiband {
     }
 
     /// Clears the state and snaps every glide to `s`. No allocation.
+    #[allow(clippy::needless_range_loop)] // crossover slots index three arrays
     pub fn reset(&mut self, s: &MbSettings) {
         self.layout = Layout::new(&s.crossovers);
         self.split.reset();

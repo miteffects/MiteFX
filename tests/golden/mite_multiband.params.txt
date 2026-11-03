@@ -1,0 +1,144 @@
+lookahead | ms | 0 | 20 | 0 | Linear
+link | % | 0 | 100 | 100 | Linear
+mix | % | 0 | 100 | 100 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+delta | bool | false
+bypass | bool | false
+sc_source | choice | Internal, External | 0
+listen | bool | false
+k1_on | bool | false
+k1_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 3
+k1_freq | Hz | 20 | 20000 | 100 | Log
+k1_gain | dB | -24 | 24 | 0 | Linear
+k1_q |  | 0.1 | 10 | 0.70710677 | Log
+k1_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k2_on | bool | false
+k2_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+k2_freq | Hz | 20 | 20000 | 1000 | Log
+k2_gain | dB | -24 | 24 | 0 | Linear
+k2_q |  | 0.1 | 10 | 0.70710677 | Log
+k2_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k3_on | bool | false
+k3_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 2
+k3_freq | Hz | 20 | 20000 | 6000 | Log
+k3_gain | dB | -24 | 24 | 0 | Linear
+k3_q |  | 0.1 | 10 | 0.70710677 | Log
+k3_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k4_on | bool | false
+k4_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 1
+k4_freq | Hz | 20 | 20000 | 250 | Log
+k4_gain | dB | -24 | 24 | 0 | Linear
+k4_q |  | 0.1 | 10 | 0.70710677 | Log
+k4_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k5_on | bool | false
+k5_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+k5_freq | Hz | 20 | 20000 | 3000 | Log
+k5_gain | dB | -24 | 24 | 0 | Linear
+k5_q |  | 0.1 | 10 | 0.70710677 | Log
+k5_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k6_on | bool | false
+k6_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 4
+k6_freq | Hz | 20 | 20000 | 12000 | Log
+k6_gain | dB | -24 | 24 | 0 | Linear
+k6_q |  | 0.1 | 10 | 0.70710677 | Log
+k6_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+x1_on | bool | false
+x1_freq | Hz | 20 | 20000 | 120 | Log
+x2_on | bool | false
+x2_freq | Hz | 20 | 20000 | 500 | Log
+x3_on | bool | false
+x3_freq | Hz | 20 | 20000 | 2000 | Log
+x4_on | bool | false
+x4_freq | Hz | 20 | 20000 | 6000 | Log
+x5_on | bool | false
+x5_freq | Hz | 20 | 20000 | 12000 | Log
+b1_on | bool | true
+b1_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+b1_thresh | dB | -60 | 0 | -20 | Linear
+b1_ratio | :1 | 1 | 100 | 2 | Log
+b1_knee | dB | 0 | 24 | 6 | Linear
+b1_range | dB | 0 | 60 | 24 | Linear
+b1_attack | ms | 0.05 | 250 | 10 | Log
+b1_release | ms | 5 | 2500 | 120 | Log
+b1_det | choice | Peak, RMS, Loudness | 1
+b1_gain | dB | -24 | 24 | 0 | Linear
+b1_bypass | bool | false
+b1_mute | bool | false
+b1_solo | bool | false
+b1_delta | bool | false
+b1_external | bool | false
+b2_on | bool | true
+b2_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+b2_thresh | dB | -60 | 0 | -20 | Linear
+b2_ratio | :1 | 1 | 100 | 2 | Log
+b2_knee | dB | 0 | 24 | 6 | Linear
+b2_range | dB | 0 | 60 | 24 | Linear
+b2_attack | ms | 0.05 | 250 | 10 | Log
+b2_release | ms | 5 | 2500 | 120 | Log
+b2_det | choice | Peak, RMS, Loudness | 1
+b2_gain | dB | -24 | 24 | 0 | Linear
+b2_bypass | bool | false
+b2_mute | bool | false
+b2_solo | bool | false
+b2_delta | bool | false
+b2_external | bool | false
+b3_on | bool | true
+b3_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+b3_thresh | dB | -60 | 0 | -20 | Linear
+b3_ratio | :1 | 1 | 100 | 2 | Log
+b3_knee | dB | 0 | 24 | 6 | Linear
+b3_range | dB | 0 | 60 | 24 | Linear
+b3_attack | ms | 0.05 | 250 | 10 | Log
+b3_release | ms | 5 | 2500 | 120 | Log
+b3_det | choice | Peak, RMS, Loudness | 1
+b3_gain | dB | -24 | 24 | 0 | Linear
+b3_bypass | bool | false
+b3_mute | bool | false
+b3_solo | bool | false
+b3_delta | bool | false
+b3_external | bool | false
+b4_on | bool | true
+b4_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+b4_thresh | dB | -60 | 0 | -20 | Linear
+b4_ratio | :1 | 1 | 100 | 2 | Log
+b4_knee | dB | 0 | 24 | 6 | Linear
+b4_range | dB | 0 | 60 | 24 | Linear
+b4_attack | ms | 0.05 | 250 | 10 | Log
+b4_release | ms | 5 | 2500 | 120 | Log
+b4_det | choice | Peak, RMS, Loudness | 1
+b4_gain | dB | -24 | 24 | 0 | Linear
+b4_bypass | bool | false
+b4_mute | bool | false
+b4_solo | bool | false
+b4_delta | bool | false
+b4_external | bool | false
+b5_on | bool | true
+b5_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+b5_thresh | dB | -60 | 0 | -20 | Linear
+b5_ratio | :1 | 1 | 100 | 2 | Log
+b5_knee | dB | 0 | 24 | 6 | Linear
+b5_range | dB | 0 | 60 | 24 | Linear
+b5_attack | ms | 0.05 | 250 | 10 | Log
+b5_release | ms | 5 | 2500 | 120 | Log
+b5_det | choice | Peak, RMS, Loudness | 1
+b5_gain | dB | -24 | 24 | 0 | Linear
+b5_bypass | bool | false
+b5_mute | bool | false
+b5_solo | bool | false
+b5_delta | bool | false
+b5_external | bool | false
+b6_on | bool | true
+b6_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
+b6_thresh | dB | -60 | 0 | -20 | Linear
+b6_ratio | :1 | 1 | 100 | 2 | Log
+b6_knee | dB | 0 | 24 | 6 | Linear
+b6_range | dB | 0 | 60 | 24 | Linear
+b6_attack | ms | 0.05 | 250 | 10 | Log
+b6_release | ms | 5 | 2500 | 120 | Log
+b6_det | choice | Peak, RMS, Loudness | 1
+b6_gain | dB | -24 | 24 | 0 | Linear
+b6_bypass | bool | false
+b6_mute | bool | false
+b6_solo | bool | false
+b6_delta | bool | false
+b6_external | bool | false

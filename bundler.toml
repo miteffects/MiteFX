@@ -17,5 +17,8 @@ name = "Mite Limit"
 [mite_gate]
 name = "Mite Gate"
 
+[mite_multiband]
+name = "Mite Multiband"
+
 [mite_sat]
 name = "Mite Sat"

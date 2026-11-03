@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Multiband",
+  "version": 1,
+  "name": "Tame the Lows",
+  "params": {
+    "x1_on": 1.0, "x1_freq": 180.0,
+    "b1_thresh": -28.0, "b1_ratio": 4.0, "b1_attack": 20.0, "b1_release": 160.0,
+    "b2_on": 0.0
+  }
+}

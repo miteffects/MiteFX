@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Multiband",
+  "version": 1,
+  "name": "Mix Glue",
+  "params": {
+    "x1_on": 1.0, "x1_freq": 150.0, "x2_on": 1.0, "x2_freq": 2500.0,
+    "b1_thresh": -24.0, "b1_ratio": 2.0, "b1_attack": 30.0, "b1_release": 200.0,
+    "b2_thresh": -22.0, "b2_ratio": 1.8, "b2_attack": 20.0, "b2_release": 150.0,
+    "b3_thresh": -26.0, "b3_ratio": 1.6, "b3_attack": 10.0, "b3_release": 120.0
+  }
+}

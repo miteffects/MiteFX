@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Multiband",
+  "version": 1,
+  "name": "Drum Bus Punch",
+  "params": {
+    "x1_on": 1.0, "x1_freq": 120.0, "x3_on": 1.0, "x3_freq": 4000.0,
+    "b1_thresh": -20.0, "b1_ratio": 3.0, "b1_attack": 25.0, "b1_release": 120.0,
+    "b2_quad": 2.0, "b2_thresh": -36.0, "b2_ratio": 1.5, "b2_range": 6.0,
+    "b4_thresh": -24.0, "b4_ratio": 2.5, "b4_attack": 5.0, "b4_release": 60.0
+  }
+}

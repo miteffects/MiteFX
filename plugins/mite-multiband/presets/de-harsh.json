@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Multiband",
+  "version": 1,
+  "name": "De-Harsh",
+  "params": {
+    "x3_on": 1.0, "x3_freq": 2500.0, "x4_on": 1.0, "x4_freq": 7000.0,
+    "b1_on": 0.0,
+    "b4_thresh": -30.0, "b4_ratio": 3.0, "b4_attack": 2.0, "b4_release": 80.0, "b4_range": 9.0,
+    "b5_on": 0.0
+  }
+}
