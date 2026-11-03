@@ -46,8 +46,8 @@ const HEADER_ROW: (f64, f64) = (12.0, 44.0);
 const HIST_W: f64 = 776.0;
 const HIST_SECONDS: f64 = 6.0;
 const HIST_COLUMNS: usize = 300;
-/// GR px per dB at the full 60 dB level range (it zooms with the range).
-const GR_PX_AT_60: f64 = 10.0;
+/// The history's level lane: 0 dB 24 px under the display's top, the range's floor this much lower.
+const LEVEL_SPAN_PX: f64 = 572.0;
 /// The history's level range (dB below 0 shown): 24/36/48/60 or Auto, as FabFilter's. Each view
 /// sets the range it shows before drawing or handling events.
 const LEVEL_RANGES: &[f32] = &[24.0, 36.0, 48.0, 60.0];
@@ -64,8 +64,9 @@ fn level_range() -> f64 {
     LEVEL_RANGE.with(std::cell::Cell::get)
 }
 
+/// GR on the history at the levels' own scale (as Pro-C's one scale): `lv_y`'s pixels per dB.
 fn gr_px_per_db() -> f64 {
-    GR_PX_AT_60 * 60.0 / level_range()
+    LEVEL_SPAN_PX / level_range()
 }
 /// Threshold lines end in a grip at the history's right edge.
 const GRIP_X: f64 = 738.0;
@@ -257,11 +258,11 @@ fn sq_rect() -> Rect {
 /// History levels: 0 dB 24 px under the display's top, −60 dB 572 px lower.
 fn lv_y(db: f32) -> f64 {
     let range = level_range();
-    DISPLAY_TOP + 24.0 + (-f64::from(db)).clamp(0.0, range) / range * 572.0
+    DISPLAY_TOP + 24.0 + (-f64::from(db)).clamp(0.0, range) / range * LEVEL_SPAN_PX
 }
 
 fn lv_db(y: f64) -> f32 {
-    (-(y - DISPLAY_TOP - 24.0) / 572.0 * level_range()) as f32
+    (-(y - DISPLAY_TOP - 24.0) / LEVEL_SPAN_PX * level_range()) as f32
 }
 
 fn hist_rect() -> Rect {
@@ -848,7 +849,7 @@ impl CompView {
         // Upward gain from the bottom.
         let up = |r: &[f32; record::WIDTH]| r[record::LIFT].max(r[record::LIFT + 1]);
         if cols.iter().any(|(_, r)| up(r) > 0.05) {
-            let edge = line(&|r| HELP_TOP - (f64::from(up(r)) * gr_px_per_db()).min(160.0));
+            let edge = line(&|r| HELP_TOP - (f64::from(up(r)) * gr_px_per_db()).min(HELP_TOP - DISPLAY_TOP));
             let fill = Gradient::new_linear((0.0, HELP_TOP), (0.0, HELP_TOP - 160.0)).with_stops([theme.gain_up.multiply_alpha(0.5), theme.gain_up.multiply_alpha(0.14)]);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(edge.clone(), HELP_TOP));
             glow_stroke(cx, &edge, 1.6, theme.gain_up, theme.gain_up, 2.4);
@@ -868,7 +869,8 @@ impl CompView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &closed(output.clone(), HELP_TOP));
         glow_stroke(cx, &output, 1.8, out_color, out_color, 2.4);
         // GR from the top: solid for L/M, dashed for R/S when the channels differ.
-        let cut = |r: &[f32; record::WIDTH], c: usize| DISPLAY_TOP + (f64::from(-r[record::CUT + c]) * gr_px_per_db()).clamp(0.0, 250.0);
+        // Its true depth, whatever it is (a cap drew deep compression as a flat line).
+        let cut = |r: &[f32; record::WIDTH], c: usize| DISPLAY_TOP + (f64::from(-r[record::CUT + c]) * gr_px_per_db()).clamp(0.0, HELP_TOP - DISPLAY_TOP);
         if !cols.iter().any(|(_, r)| r[record::CUT].min(r[record::CUT + 1]) < -0.05) {
             return;
         }
@@ -877,7 +879,8 @@ impl CompView {
         fill_path.line_to((cols[cols.len() - 1].0, DISPLAY_TOP));
         fill_path.line_to((cols[0].0, DISPLAY_TOP));
         fill_path.close_path();
-        let fill = Gradient::new_linear((0.0, DISPLAY_TOP), (0.0, DISPLAY_TOP + 250.0)).with_stops([theme.gain_reduction.multiply_alpha(0.55), theme.gain_reduction.multiply_alpha(0.18)]);
+        // Light, and fading with depth, so deep compression does not bury the levels under it.
+        let fill = Gradient::new_linear((0.0, DISPLAY_TOP), (0.0, DISPLAY_TOP + 0.5 * LEVEL_SPAN_PX)).with_stops([theme.gain_reduction.multiply_alpha(0.4), theme.gain_reduction.multiply_alpha(0.06)]);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &fill_path);
         glow_stroke(cx, &edge, 1.8, theme.gain_reduction, theme.gain_reduction, 2.4);
         if Self::link_split(cx.host) {

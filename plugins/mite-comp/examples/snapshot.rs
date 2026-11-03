@@ -5,7 +5,7 @@
 //!
 //! SNAPSHOT_VARIANT picks the state, as the design's `variant` prop: default, stages, auto-release,
 //! stage-selected, create, character, custom, smart, sidechain, listen, stereo, lookahead, delta,
-//! empty, presets, menu.
+//! empty, presets, menu. SNAPSHOT_THRESHOLD=-30 moves the default stage's threshold.
 
 use std::sync::Arc;
 
@@ -80,6 +80,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stages[..4].copy_from_slice(&[LEVELLER, GATE, COMP, LIMIT]);
     } else if !v("empty") {
         stages[0] = COMP;
+        // SNAPSHOT_THRESHOLD moves the one stage's threshold (dB).
+        if let Some(t) = std::env::var("SNAPSHOT_THRESHOLD").ok().and_then(|t| t.parse().ok()) {
+            stages[0].threshold_db = t;
+        }
     }
     for (slot, s) in stages.iter().enumerate() {
         set_stage(&host, slot, s);
