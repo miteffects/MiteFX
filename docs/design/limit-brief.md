@@ -30,7 +30,7 @@ the oversampler's passband error (above 1×; tested as with Sat).
 ### 1.1 The gain law (from Nova, kept for its proof)
 
 Per channel, at the engine rate (the base rate times the oversampling factor), with `p[n]` the
-peak the detector sees, `c` the ceiling, `L` the lookahead and `A₁ + A₂ − 1 ≤ L`:
+peak the detector sees, `c` the ceiling, `L` the lookahead and `A₁ + A₂ − 1 = L`:
 
 ```
 g[n] = min(1, c / p[n])                 the gain each sample needs
@@ -40,12 +40,17 @@ r[n] = release(s)[n], with r[n] ≤ s[n]  styles shape the way up, never above s
 y[n] = x[n − L + 1] · r[n]
 ```
 
-Every term inside the two averages at time `n` is an `m[j]` with `j ≥ n − (A₁ + A₂ − 2) ≥
-n − L + 1`, so its window contains the delayed sample, so `s[n] ≤ g` of that sample and `|y| ≤ c`.
+Every term inside the two averages at time `n` is an `m[j]` with `j ≥ n − L + 1`, so its window
+contains the delayed sample, so `s[n] ≤ g` of that sample and `|y| ≤ c`.
 The release may only lower the gain further (clamped to `s`), so whatever a style does, the
 ceiling holds. One boxcar (Nova) ramps in a straight line with a corner at each end; two give a
-quadratic S, which the suite's no-corners rule asks for. The attack is the ramp (`A₁ + A₂ − 1`),
-the lookahead is the delay; a ramp shorter than the lookahead holds flat before the peak.
+quadratic S, which the suite's no-corners rule asks for. **The ramp spans the whole lookahead**
+(Nova's "attack is the lookahead"; 2026-11-03, measured in slice 0: a shorter ramp only reaches
+its depth early and holds flat until the peak, so a separate ramp length buys nothing). The
+ATTACK control is the slow envelope's attack (§1.3), as Pro-L 2's attack is.
+
+- **Exact arithmetic:** gains are integers in units of 2⁻²⁴, rounded down, so the boxcars are
+  exact sums with no drift and the proof holds bit for bit (`|y| ≤ 1 + 1e-6` in the fuzz).
 
 - **Lookahead 0** is allowed and honest: `L = 1`, `s = g`, a clipper. The editor says so.
 - **Proof as a test:** a seeded fuzz over signals, ceilings, lookaheads, attacks, styles,
@@ -72,10 +77,12 @@ part of the reported latency.
 
 ### 1.3 Release and styles
 
-`release` blends a fast and a slow envelope that rise towards `s` and are clamped to it (Nova's
-law); program dependence slows the rise with depth. A style is a row of numbers (as Comp's
-Characters): attack scale, release scale, slow-envelope share, program dependence, the slow
-envelope's time ratio, and the clipper's knee when the clipper is on.
+Two envelopes in dB. The **fast** one drops with `s` at once and rises at the release. The
+**slow** one follows `s` down at the ATTACK time (sustained reduction builds it, a lone hit hardly
+does) and rises at the release × its ratio. The gain is `min(fast, share · slow)`, never above
+`s`. Program dependence: sustained reduction (the slow envelope) slows the fast release. A style
+is a row of numbers (as Comp's Characters): attack scale, release scale, slow share, slow ratio,
+program dependence (`mite_dsp::limit::STYLES`).
 
 Styles (frozen order, append only; glyphs in the editor, names in the help strip):
 
@@ -181,9 +188,9 @@ The suite's frame: header 56, display 620, help strip 28, footer 56.
   the engine's own code, as Sat's harmonics), drawn against time: the S-shaped attack before the
   burst, the hold, the release after it. Drag its left flank sideways: attack; its right flank:
   release; the lookahead is the dashed line where the burst starts. Never a corner (two boxcars).
-- Dials: LOOKAHEAD (0–10 ms), ATTACK (0.1–10 ms; the part beyond the lookahead is drawn dim and
-  not used), RELEASE (1 ms–2.5 s, common values given travel), LINK T and LINK R (0–100 %),
-  and SLOW (the slow envelope's share) on Custom only.
+- Dials: LOOKAHEAD (0–10 ms; the ramp), ATTACK (0.1–100 ms; the slow envelope's), RELEASE
+  (1 ms–2.5 s, common values given travel), LINK T and LINK R (0–100 %), and SLOW (the slow
+  envelope's share) on Custom only.
 
 ### 3.3 Loudness column (numbers allowed here)
 - Momentary, short-term, integrated (gated), LRA, true peak (max), PLR. A click resets. Bars for
@@ -220,7 +227,7 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
 ## 4. Parameters (frozen with the first release; `tests/golden/mite_limit.params.txt`)
 
 - Core: `gain` (0…+30 dB, 0), `ceiling` (−30…0 dB, −1.0), `style` (0…5, Transparent),
-  `lookahead` (0…10 ms, 2 ms), `attack` (0.1…10 ms, 2 ms), `release` (1…2500 ms, 100 ms),
+  `lookahead` (0…10 ms, 2 ms), `attack` (0.1…100 ms, 30 ms), `release` (1…2500 ms, 100 ms),
   `slow` (0…100 %, Custom only), `link_t` (100 %), `link_r` (100 %), `true_peak` (on),
   `oversampling` (1×/2×/4×/8×/16×, 2×).
 - Clipper: `clip_on` (off), `clip_level` (0…+12 dB above the ceiling, +3), `clip_curve` (Hard,
@@ -248,8 +255,11 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
 
 ## 6. Slices
 
-0. Groundwork: `mite_dsp::loudness` (with the EBU test cases), the 16× stage, the gain law in
-   `mite_dsp::limit` with its proof fuzz test.
+0. Groundwork (done 2026-11-03): `mite_dsp::loudness` (K weighting equal to BS.1770's table at
+   48 kHz; EBU Tech 3341 cases 1–5 and 9 and Tech 3342 cases 1–4 pass, generated in the tests;
+   the true-peak interpolator, 48 taps a phase, flat within 0.01 dB to 0.9 × Nyquist), the 16×
+   stage (latency 79), and the gain law in `mite_dsp::limit` with its proof fuzz (160 random
+   cases, settings moving mid-stream) and true peak held within 0.01 dB on tones to 0.49 fs.
 1. The limiter: core, styles, true peak, oversampling, Delta, bypass; the plugin crate with every
    parameter; the history (shared with Comp), meters, the ceiling and gain gestures, the shape
    panel's dials and style glyphs; the true-peak compliance tests.

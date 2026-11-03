@@ -1,22 +1,22 @@
-//! Oversampling by 2, 4 or 8: cascaded polyphase half-band FIRs, linear phase, so the round trip is
+//! Oversampling by 2, 4, 8 or 16: cascaded polyphase half-band FIRs, linear phase, so the round trip is
 //! a pure delay of a whole number of samples at the base rate (the plugin reports it, and the dry
 //! path stays aligned for mix and bypass). Shared by every plugin that needs it (BLUEPRINT §4).
 //!
 //! Each 2× stage is a Kaiser-windowed half-band: everything below 0.9 × the base Nyquist passes
 //! (flat within 0.001 dB), and what would fold back into that band is at least 100 dB down. The
-//! first stage carries the steep transition; the second (2× → 4×) and third (4× → 8×) only have
-//! to clear the stage before's images, so they are short.
+//! first stage carries the steep transition; the second (2× → 4×), third (4× → 8×) and fourth
+//! (8× → 16×) only have to clear the stage before's images, so they are short.
 //!
 //! A half-band's taps are zero at every even offset from the centre but the centre itself, so
 //! each polyphase branch is either a pure delay or a symmetric FIR over the odd offsets: `K` tap
 //! pairs per two high-rate samples. Allocation-free after construction.
 
 /// The largest factor (the engines size their buffers for it).
-pub const MAX_FACTOR: usize = 8;
+pub const MAX_FACTOR: usize = 16;
 /// Tap pairs of each stage.
-const PAIRS: [usize; 3] = [35, 7, 5];
+const PAIRS: [usize; 4] = [35, 7, 5, 5];
 /// Kaiser β of each stage (about 105 dB of stopband).
-const BETA: [f64; 3] = [10.5, 10.5, 10.5];
+const BETA: [f64; 4] = [10.5, 10.5, 10.5, 10.5];
 
 /// The modified Bessel function I₀ (for the Kaiser window).
 fn bessel_i0(x: f64) -> f64 {
@@ -191,10 +191,10 @@ impl Stage {
 /// [`Oversampler::latency`] base-rate samples.
 pub struct Oversampler {
     factor: usize,
-    /// Per channel, the 2× stage, the 4× one and the 8× one.
-    stages: [[Stage; 3]; 2],
+    /// Per channel, the 2× stage, the 4× one, the 8× one and the 16× one.
+    stages: [[Stage; 4]; 2],
     /// Per channel, the half-sample pad that makes the latency whole: one sample at the 2× rate
-    /// at 4×, one at the 4× rate at 8×.
+    /// at 4×, one at the 4× rate at 8×, one at the 8× rate at 16×.
     pad: [History; 2],
 }
 
@@ -202,18 +202,19 @@ impl Oversampler {
     /// Allocates; `factor` can change later without allocating.
     pub fn new(factor: usize) -> Self {
         let stage = |i: usize| Stage::new(PAIRS[i], BETA[i]);
-        let mut o = Self { factor: 1, stages: [[stage(0), stage(1), stage(2)], [stage(0), stage(1), stage(2)]], pad: [History::new(1), History::new(1)] };
+        let mut o = Self { factor: 1, stages: [[stage(0), stage(1), stage(2), stage(3)], [stage(0), stage(1), stage(2), stage(3)]], pad: [History::new(1), History::new(1)] };
         o.set_factor(factor);
         o
     }
 
-    /// 1, 2, 4 or 8 (anything else is taken as the nearest below). Clears the state.
+    /// 1, 2, 4, 8 or 16 (anything else is taken as the nearest below). Clears the state.
     pub fn set_factor(&mut self, factor: usize) {
         self.factor = match factor {
             0 | 1 => 1,
             2 | 3 => 2,
             4..=7 => 4,
-            _ => 8,
+            8..=15 => 8,
+            _ => 16,
         };
         self.reset();
     }
@@ -250,19 +251,23 @@ impl Oversampler {
     /// The round trip's delay at `factor`, base-rate samples: each stage's interpolator and
     /// decimator delay its centre tap, `2K − 1` samples at its high rate each; the second
     /// stage's `2K − 1` at the 2× rate is padded to `2K`; at 8× the second and third stages'
-    /// `2K₂ − 1 + (2K₃ − 1)/2` at the 2× rate are padded by one sample at the 4× rate.
+    /// `2K₂ − 1 + (2K₃ − 1)/2` at the 2× rate are padded by one sample at the 4× rate; at 16×
+    /// the fourth stage's `2K₄ − 1` at the 8× rate is padded by one sample there, so the third
+    /// stage sees a whole number of 4× samples, and the third's own `2K₃ − 1` plus that makes a
+    /// whole number at the 2× rate.
     pub fn latency_for(factor: usize) -> usize {
         match factor {
             0 | 1 => 0,
             2 | 3 => 2 * PAIRS[0] - 1,
             4..=7 => 2 * PAIRS[0] - 1 + PAIRS[1],
-            _ => 2 * PAIRS[0] - 1 + (4 * PAIRS[1] + 2 * PAIRS[2]) / 4,
+            8..=15 => 2 * PAIRS[0] - 1 + (4 * PAIRS[1] + 2 * PAIRS[2]) / 4,
+            _ => 2 * PAIRS[0] - 1 + (2 * PAIRS[1] - 1 + (2 * PAIRS[2] - 1 + PAIRS[3]) / 2) / 2,
         }
     }
 
     /// `input` (base rate) of channel `ch` into `out` (`factor` × as long).
     pub fn up(&mut self, ch: usize, input: &[f32], out: &mut [f32]) {
-        let [first, second, third] = &mut self.stages[ch];
+        let [first, second, third, fourth] = &mut self.stages[ch];
         match self.factor {
             1 => out[..input.len()].copy_from_slice(input),
             2 => {
@@ -277,7 +282,7 @@ impl Oversampler {
                     o[2..].copy_from_slice(&second.interpolate(b));
                 }
             }
-            _ => {
+            8 => {
                 for (x, o) in input.iter().zip(out.chunks_exact_mut(8)) {
                     let [a, b] = first.interpolate(*x);
                     let [p, q] = second.interpolate(a);
@@ -287,12 +292,24 @@ impl Oversampler {
                     }
                 }
             }
+            _ => {
+                for (x, o) in input.iter().zip(out.chunks_exact_mut(16)) {
+                    let [a, b] = first.interpolate(*x);
+                    let [p, q] = second.interpolate(a);
+                    let [r, s] = second.interpolate(b);
+                    for (j, v) in [p, q, r, s].into_iter().enumerate() {
+                        let [u, w] = third.interpolate(v);
+                        o[4 * j..4 * j + 2].copy_from_slice(&fourth.interpolate(u));
+                        o[4 * j + 2..4 * j + 4].copy_from_slice(&fourth.interpolate(w));
+                    }
+                }
+            }
         }
     }
 
     /// `input` (`factor` × the base rate) of channel `ch` into `out` (base rate).
     pub fn down(&mut self, ch: usize, input: &[f32], out: &mut [f32]) {
-        let [first, second, third] = &mut self.stages[ch];
+        let [first, second, third, fourth] = &mut self.stages[ch];
         let pad = &mut self.pad[ch];
         match self.factor {
             1 => {
@@ -314,7 +331,7 @@ impl Oversampler {
                     *o = first.decimate([held, a]);
                 }
             }
-            _ => {
+            8 => {
                 for (o, x) in out.iter_mut().zip(input.chunks_exact(8)) {
                     let c = [third.decimate([x[0], x[1]]), third.decimate([x[2], x[3]]), third.decimate([x[4], x[5]]), third.decimate([x[6], x[7]])];
                     // One sample of delay at the 4× rate.
@@ -322,6 +339,21 @@ impl Oversampler {
                     pad.push(c[3]);
                     let a = second.decimate([held, c[0]]);
                     let b = second.decimate([c[1], c[2]]);
+                    *o = first.decimate([a, b]);
+                }
+            }
+            _ => {
+                for (o, x) in out.iter_mut().zip(input.chunks_exact(16)) {
+                    let mut d = [0.0f32; 9];
+                    // One sample of delay at the 8× rate.
+                    d[0] = pad.recent()[0];
+                    for (j, v) in d[1..].iter_mut().enumerate() {
+                        *v = fourth.decimate([x[2 * j], x[2 * j + 1]]);
+                    }
+                    pad.push(d[8]);
+                    let c = [third.decimate([d[0], d[1]]), third.decimate([d[2], d[3]]), third.decimate([d[4], d[5]]), third.decimate([d[6], d[7]])];
+                    let a = second.decimate([c[0], c[1]]);
+                    let b = second.decimate([c[2], c[3]]);
                     *o = first.decimate([a, b]);
                 }
             }
@@ -356,7 +388,7 @@ mod tests {
 
     #[test]
     fn the_round_trip_is_a_pure_delay_in_the_passband() {
-        for factor in [2, 4, 8] {
+        for factor in [2, 4, 8, 16] {
             for f in [0.001, 0.05, 0.2, 0.35, 0.405] {
                 let (gain, err) = round_trip(factor, f);
                 assert!(gain.abs() < 0.001, "{factor}× at {f}: {gain} dB");
@@ -372,12 +404,12 @@ mod tests {
     fn what_folds_back_is_more_than_100_db_down() {
         // A tone at the high rate above 1.1 × the base Nyquist (as a compressor's sidebands land),
         // decimated: whatever folds into the base band must be gone.
-        for factor in [2, 4, 8] {
+        for factor in [2, 4, 8, 16] {
             let mut o = Oversampler::new(factor);
             let n = 8192;
             let mut worst = f64::MIN;
             // Multiples of the base Nyquist, up to the high rate's Nyquist.
-            for f_nyq in [1.12, 1.3, 1.6, 1.95, 2.5, 3.0, 3.6, 3.95, 4.5, 5.5, 6.4, 7.1, 7.9] {
+            for f_nyq in [1.12, 1.3, 1.6, 1.95, 2.5, 3.0, 3.6, 3.95, 4.5, 5.5, 6.4, 7.1, 7.9, 8.6, 10.2, 12.5, 14.4, 15.9] {
                 if f_nyq >= factor as f64 {
                     continue;
                 }
@@ -395,7 +427,7 @@ mod tests {
 
     #[test]
     fn images_of_the_interpolation_are_more_than_100_db_down() {
-        for factor in [2, 4, 8] {
+        for factor in [2, 4, 8, 16] {
             let mut o = Oversampler::new(factor);
             let n = 8192;
             let f = 0.3; // of the base rate: 0.6 of the base Nyquist
@@ -406,7 +438,8 @@ mod tests {
             let images: Vec<f64> = match factor {
                 2 => vec![1.0 - f],
                 4 => vec![1.0 - f, 1.0 + f, 2.0 - f],
-                _ => vec![1.0 - f, 1.0 + f, 2.0 - f, 2.0 + f, 3.0 - f, 3.0 + f, 4.0 - f],
+                8 => vec![1.0 - f, 1.0 + f, 2.0 - f, 2.0 + f, 3.0 - f, 3.0 + f, 4.0 - f],
+                _ => (1..8).flat_map(|k| [k as f64 - f, k as f64 + f]).chain([8.0 - f]).collect(),
             };
             for img in images {
                 let w = std::f64::consts::TAU * img / factor as f64;
@@ -430,6 +463,7 @@ mod tests {
         assert_eq!(Oversampler::latency_for(2), 69);
         assert_eq!(Oversampler::latency_for(4), 76);
         assert_eq!(Oversampler::latency_for(8), 78);
+        assert_eq!(Oversampler::latency_for(16), 79);
         let mut o = Oversampler::new(2);
         o.set_factor(4);
         assert_eq!((o.factor(), o.latency()), (4, 76));
