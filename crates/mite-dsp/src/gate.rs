@@ -476,7 +476,7 @@ mod tests {
         let mut g = Gate::new(FS);
         g.reset(&s);
         let mut gains = Vec::new();
-        let mut x = vec![0.0f32; 48];
+        let mut x = [0.0f32; 48];
         let mut y: Vec<f32> = tone(960, -10.0);
         for chunk in x.chunks_mut(48) {
             g.process(&mut [chunk], None, &s);

@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Gate",
+  "version": 1,
+  "name": "Vocal Cleanup",
+  "params": {
+    "mode": 1.0,
+    "threshold": -45.0,
+    "range": -18.0,
+    "ratio": 2.0,
+    "hysteresis": 6.0,
+    "attack": 2.0,
+    "hold": 60.0,
+    "release": 250.0,
+    "detector": 1.0
+  }
+}

@@ -31,6 +31,8 @@ pub enum ToggleGlyph {
     Clip,
     /// True peak: a wave whose crest falls between two samples (dots), the crest ringed.
     TruePeak,
+    /// Listen (hear the detector's key): headphones.
+    Listen,
 }
 
 /// A toggle: its parameter (on at ≥ 0.5), glyph, and what the help strip says about it.
@@ -221,6 +223,12 @@ pub fn draw_toggle_glyph(scene: &mut Scene, glyph: ToggleGlyph, c: Point, color:
                 scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &vello::kurbo::Circle::new((c.x + dx, c.y - 2.4), 1.5));
             }
             scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, color, None, &vello::kurbo::Circle::new((c.x, c.y - 5.0), 2.6));
+        }
+        ToggleGlyph::Listen => {
+            if let Ok(mut p) = BezPath::from_svg("M4 14 V12 A8 8 0 0 1 20 12 V14 M4 14 H7 V20 H4 Z M20 14 H17 V20 H20 Z") {
+                p.apply_affine(Affine::translate((c.x - 9.6, c.y - 9.6)) * Affine::scale(0.8));
+                scene.stroke(&round, Affine::IDENTITY, color, None, &p);
+            }
         }
         ToggleGlyph::Bypass => {
             let mut stem = BezPath::new();

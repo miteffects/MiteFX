@@ -1,0 +1,14 @@
+{
+  "plugin": "Mite Gate",
+  "version": 1,
+  "name": "Tight Drums",
+  "params": {
+    "threshold": -30.0,
+    "range": -80.0,
+    "hysteresis": 6.0,
+    "attack": 0.2,
+    "hold": 40.0,
+    "release": 80.0,
+    "lookahead": 1.0
+  }
+}

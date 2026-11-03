@@ -105,9 +105,14 @@ the hysteresis band between the two thresholds is shaded in the accent.
 
 ## 5. Slices
 
-1. The gate: `mite_dsp::gate` (detector, modes, hysteresis, hold, lookahead, the two-stage
+1. (done 2026-11-03) The gate: `mite_dsp::gate` (detector, modes, hysteresis, hold, lookahead, the two-stage
    motion), the plugin with every parameter, external sidechain routing and the key EQ in the
    engine; the editor: history with the threshold and hysteresis grips, the transfer square,
    strip, meters, footer.
 2. The sidechain panel shared with Comp (`mite_ui`), Comp pixel-identical.
 3. MIDI trigger output.
+
+   Built: every parameter (state 1, the key bands Comp's ids and ranges, tested), the engine
+   (mix, Delta, bypass against the delayed dry; a dip on a lookahead change), the editor as
+   above; 120 fps at 1× and 2× DPI. The sidechain EQ's bands work in the engine and in presets;
+   their panel comes in slice 2.

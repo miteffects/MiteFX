@@ -1,0 +1,14 @@
+{
+  "plugin": "Mite Gate",
+  "version": 1,
+  "name": "Sidechain Duck",
+  "params": {
+    "mode": 2.0,
+    "threshold": -30.0,
+    "range": -9.0,
+    "attack": 3.0,
+    "hold": 20.0,
+    "release": 200.0,
+    "sc_source": 1.0
+  }
+}

@@ -1,0 +1,37 @@
+mode | choice | Gate, Expander, Ducker | 0
+threshold | dB | -80 | 0 | -40 | Linear
+range | dB | -80 | 0 | -80 | Linear
+ratio | :1 | 1 | 10 | 4 | Log
+hysteresis | dB | 0 | 24 | 4 | Linear
+attack | ms | 0.01 | 100 | 0.5 | Log
+hold | ms | 0 | 1000 | 30 | Linear
+release | ms | 1 | 2500 | 100 | Log
+lookahead | ms | 0 | 10 | 0 | Linear
+detector | choice | Peak, RMS | 0
+link | % | 0 | 100 | 100 | Linear
+sc_source | choice | Internal, External | 0
+listen | bool | false
+k1_on | bool | false
+k1_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 3
+k1_freq | Hz | 20 | 20000 | 100 | Log
+k1_gain | dB | -24 | 24 | 0 | Linear
+k1_q |  | 0.1 | 10 | 0.70710677 | Log
+k2_on | bool | false
+k2_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+k2_freq | Hz | 20 | 20000 | 1000 | Log
+k2_gain | dB | -24 | 24 | 0 | Linear
+k2_q |  | 0.1 | 10 | 0.70710677 | Log
+k3_on | bool | false
+k3_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 2
+k3_freq | Hz | 20 | 20000 | 6000 | Log
+k3_gain | dB | -24 | 24 | 0 | Linear
+k3_q |  | 0.1 | 10 | 0.70710677 | Log
+mix | % | 0 | 100 | 100 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+delta | bool | false
+bypass | bool | false
+midi_on | bool | false
+midi_note |  | 0 | 127 | 36 | Linear
+midi_channel |  | 1 | 16 | 1 | Linear
+midi_velocity | choice | Fixed, Level | 0
+midi_vel_fixed |  | 1 | 127 | 100 | Linear

@@ -14,5 +14,8 @@ name = "Mite Shape"
 [mite_limit]
 name = "Mite Limit"
 
+[mite_gate]
+name = "Mite Gate"
+
 [mite_sat]
 name = "Mite Sat"

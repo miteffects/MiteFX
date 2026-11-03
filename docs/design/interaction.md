@@ -509,3 +509,34 @@ a filtered or external key) as a dashed line: where it crosses a threshold, that
 
 Oversampling dropdown (1×–16×; the help strip gives the whole latency at each), latency, true
 peak, Δ, bypass, GAIN, CEILING. ↑ ↓: gain ±1 dB (Shift ±0.1).
+
+## Mite Gate (in-house design, 2026-11-03; docs/design/gate-brief.md)
+
+### History
+
+| Gesture | Does |
+|---|---|
+| Drag the threshold's grip (solid line) | Threshold, at the levels' scale (Shift ×0.2) |
+| Drag the close threshold's grip (dashed line) | Hysteresis: the close threshold is threshold − hysteresis |
+| Wheel on a grip | Its value; double-click resets it |
+
+The history is the shared one (honest peaks, the input on top, headroom over 0 dB); the band
+between the two lines is shaded; the key is drawn dashed when the detector is RMS or the key is
+filtered or external (where it crosses the solid line the gate opens, under the dashed one it
+closes). Tested per record: a slice whose key reaches the threshold has the gate open.
+
+### Transfer square and strip
+
+- The square (the key's level across, the output up, over the history's range): the mode's
+  curve from `mite_dsp::gate::transfer_db`; Gate and Ducker draw both branches of the loop with
+  dashed jumps where the state changes, the hysteresis band shaded; curves run off the edges
+  (clipped, never flattened onto them). The live dot sits at the key's level on the branch the
+  gate is on. Drag the node on the diagonal sideways: threshold. Drag anywhere else up or down:
+  range. Wheel and double-click as on the history.
+- Modes (each glyph a drawing of its curve): Gate, Expander, Ducker. Detector: Peak, RMS.
+- Dials: RANGE, RATIO (Expander only), HYSTERESIS, LINK; ATTACK, HOLD, RELEASE, LOOKAHEAD.
+
+### Footer and keys
+
+Sidechain source (Internal, External), latency, Listen, Δ, bypass, MIX, OUTPUT. ↑ ↓: threshold
+±1 dB (Shift ±0.1).
