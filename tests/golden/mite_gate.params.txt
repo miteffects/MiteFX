@@ -35,3 +35,24 @@ midi_note |  | 0 | 127 | 36 | Linear
 midi_channel |  | 1 | 16 | 1 | Linear
 midi_velocity | choice | Fixed, Level | 0
 midi_vel_fixed |  | 1 | 127 | 100 | Linear
+k1_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k2_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k3_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k4_on | bool | false
+k4_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 1
+k4_freq | Hz | 20 | 20000 | 250 | Log
+k4_gain | dB | -24 | 24 | 0 | Linear
+k4_q |  | 0.1 | 10 | 0.70710677 | Log
+k4_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k5_on | bool | false
+k5_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+k5_freq | Hz | 20 | 20000 | 3000 | Log
+k5_gain | dB | -24 | 24 | 0 | Linear
+k5_q |  | 0.1 | 10 | 0.70710677 | Log
+k5_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+k6_on | bool | false
+k6_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 4
+k6_freq | Hz | 20 | 20000 | 12000 | Log
+k6_gain | dB | -24 | 24 | 0 | Linear
+k6_q |  | 0.1 | 10 | 0.70710677 | Log
+k6_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3

@@ -81,6 +81,21 @@ impl DrawCx<'_> {
         &mut self.fx.glow
     }
 
+    /// Masks the glow layer out of `hole` until [`Self::end_glow_hole`]: for what a panel will
+    /// cover. The glow layer is composited over the whole scene, so a glowing line under an
+    /// opaque panel would otherwise shine through it as a blurred haze (user, 2026-11-03).
+    pub fn begin_glow_hole(&mut self, hole: vello::kurbo::RoundedRect) {
+        let mut mask = vello::kurbo::BezPath::new();
+        let (w, h) = self.size;
+        mask.extend(vello::kurbo::Shape::path_elements(&vello::kurbo::Rect::new(-10.0, -10.0, w + 10.0, h + 10.0), 0.1));
+        mask.extend(vello::kurbo::Shape::path_elements(&hole, 0.1));
+        self.fx.glow.push_clip_layer(vello::peniko::Fill::EvenOdd, vello::kurbo::Affine::IDENTITY, &mask);
+    }
+
+    pub fn end_glow_hole(&mut self) {
+        self.fx.glow.pop_layer();
+    }
+
     /// Call right before drawing a glass panel: everything drawn so far is blurred (`blur` is
     /// the σ in logical px, `blur.*` in tokens.json) into `shape`, and drawing goes on above it.
     /// Returns `false` when the theme has no blur (high contrast): draw the panel opaque.

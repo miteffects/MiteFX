@@ -2316,12 +2316,20 @@ impl View for CompView {
         let stages = Self::stages(cx.host);
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
+        // Nothing under a docked panel glows through it.
+        let hole = self.panel.map(|p| RoundedRect::from_rect(Self::panel_rect(p), 12.0));
+        if let Some(h) = hole {
+            cx.begin_glow_hole(h);
+        }
         cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &hist_rect());
         self.draw_history(cx, &stages);
         cx.scene.pop_layer();
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((HIST_W + 0.5, DISPLAY_TOP), (HIST_W + 0.5, HELP_TOP)));
         self.range.draw(cx, self.range_shown);
         self.draw_thresholds(cx, &stages);
+        if hole.is_some() {
+            cx.end_glow_hole();
+        }
         self.draw_square(cx, &stages);
         if self.single(cx.host) {
             self.draw_compact(cx, &stages);

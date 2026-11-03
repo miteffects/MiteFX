@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
-use mite_core::{AtomicF32, HistoryTap};
+use mite_core::{AtomicF32, HistoryTap, SpectrumTap};
 use nih_plug::prelude::*;
 
 pub mod dsp;
@@ -20,6 +20,8 @@ use params::GateParams;
 /// Audio → UI telemetry. Lock-free and allocation-free on the audio side.
 pub struct GateShared {
     pub history: HistoryTap<{ record::WIDTH }>,
+    /// The key (before the sidechain EQ, mono), for its spectrum under the EQ.
+    pub key_spectrum: SpectrumTap,
     pub sample_rate: AtomicF32,
     pub latency: AtomicF32,
     pub snapshots: Arc<Snapshots>,
@@ -33,7 +35,7 @@ impl GateShared {
     }
 
     pub fn with_stores(snapshots: Arc<Snapshots>, preset: Arc<CurrentPreset>, display_range: Arc<AtomicF32>) -> Self {
-        Self { history: HistoryTap::new(HISTORY_RECORDS), sample_rate: AtomicF32::new(48_000.0), latency: AtomicF32::new(0.0), snapshots, preset, display_range }
+        Self { history: HistoryTap::new(HISTORY_RECORDS), key_spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), sample_rate: AtomicF32::new(48_000.0), latency: AtomicF32::new(0.0), snapshots, preset, display_range }
     }
 }
 
@@ -42,6 +44,9 @@ impl Default for GateShared {
         Self::new()
     }
 }
+
+/// Version 2 appended parameters whose defaults sound as version 1 did: nothing to change.
+fn v1_to_v2(_state: &mut PluginState) {}
 
 pub struct MiteGate {
     params: Arc<GateParams>,
@@ -90,7 +95,7 @@ impl Plugin for MiteGate {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -127,7 +132,7 @@ impl Plugin for MiteGate {
             }
         }
         let key = (key_channels > 0).then_some(&key[..key_channels]);
-        self.engine.process(buffer.as_slice(), key, &settings, &output, &self.shared.history);
+        self.engine.process(buffer.as_slice(), key, &settings, &output, &self.shared.history, Some(&self.shared.key_spectrum));
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {
             self.reported_latency = latency;

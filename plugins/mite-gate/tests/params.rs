@@ -23,7 +23,8 @@ fn monitoring_stays_out_of_presets_and_the_key_bands_are_comps() {
         assert!(!sound.iter().any(|i| i == id), "{id}");
     }
     let comp = include_str!("../../../tests/golden/mite_comp.params.txt");
-    for line in manifest().lines().filter(|l| l.starts_with('k')) {
+    // Comp's three bands (Gate adds slopes and three more bands in state 2).
+    for line in manifest().lines().filter(|l| ["k1_", "k2_", "k3_"].iter().any(|k| l.starts_with(k)) && !l.contains("_slope")) {
         assert!(comp.lines().any(|c| c == line), "{line} differs from Comp's");
     }
 }

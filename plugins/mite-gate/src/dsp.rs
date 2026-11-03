@@ -3,7 +3,7 @@
 //! per 5 ms slice, whatever the host's block size. A lookahead change dips (fades out, switches,
 //! fades back in) and the new latency is reported.
 
-use mite_core::HistoryTap;
+use mite_core::{HistoryTap, SpectrumTap};
 use mite_dsp::gate::{Gate, GateEvent, GateSettings, MAX_EVENTS, MAX_LOOKAHEAD_MS};
 use mite_dsp::output::DryDelay;
 use mite_dsp::{db_to_gain, LinearSmoother, MINUS_INFINITY_DB};
@@ -129,7 +129,8 @@ impl GateEngine {
     }
 
     #[allow(clippy::needless_range_loop)] // channels indexed with the dry path
-    pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &GateSettings, out: &Output, history: &HistoryTap<{ record::WIDTH }>) {
+    /// `spectrum` takes the key before the sidechain EQ (mono), for the editor's spectrum.
+    pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &GateSettings, out: &Output, history: &HistoryTap<{ record::WIDTH }>, spectrum: Option<&SpectrumTap>) {
         let n_ch = channels.len().min(2);
         self.event_count = 0;
         if n_ch == 0 {
@@ -157,6 +158,19 @@ impl GateEngine {
             self.dry.write(&channels[0][start..end], (n_ch == 2).then(|| &channels[1][start..end]));
             let active = self.active(s);
             let key_chunk: Option<[&[f32]; 2]> = key.filter(|k| !k.is_empty() && k.iter().all(|c| c.len() >= end)).map(|k| [&k[0][start..end], &k[k.len().min(2) - 1][start..end]]);
+            if let Some(tap) = spectrum {
+                // What keys the gate, before its EQ: the sidechain or the input, as one channel.
+                let (a, b): (&[f32], &[f32]) = match (s.external_key, key_chunk.as_ref()) {
+                    (true, Some(k)) => (k[0], k[1]),
+                    (true, None) => (&[], &[]),
+                    (false, _) => (&channels[0][start..end], &channels[n_ch - 1][start..end]),
+                };
+                if a.is_empty() {
+                    tap.push(std::iter::repeat_n(0.0, n));
+                } else {
+                    tap.push(a.iter().zip(b).map(|(x, y)| 0.5 * (x + y)));
+                }
+            }
             let t = {
                 let (first, rest) = channels.split_at_mut(1);
                 let a = &mut first[0][start..end];
@@ -231,7 +245,7 @@ mod tests {
     fn run(e: &mut GateEngine, s: &GateSettings, out: &Output, l: &mut [f32], r: &mut [f32], block: usize) {
         let history = HistoryTap::new(64);
         for (a, b) in l.chunks_mut(block).zip(r.chunks_mut(block)) {
-            e.process(&mut [a, b], None, s, out, &history);
+            e.process(&mut [a, b], None, s, out, &history, None);
         }
     }
 
@@ -283,7 +297,7 @@ mod tests {
         }
         let mut r = x.clone();
         for (a, b) in x.chunks_mut(256).zip(r.chunks_mut(256)) {
-            e.process(&mut [a, b], None, &s, &out, &history);
+            e.process(&mut [a, b], None, &s, &out, &history, None);
         }
         let (mut seen, mut over) = (0, 0);
         history.read_since(&mut seen, |rec| {

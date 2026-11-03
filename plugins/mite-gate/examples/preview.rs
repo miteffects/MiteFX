@@ -4,7 +4,8 @@
 //!
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_gate --example preview
 //!
-//! The drum loop with a quiet bleed under it, so there is something to gate.
+//! The drum loop with a quiet bleed under it, so there is something to gate. PREVIEW_EQ opens
+//! the sidechain EQ.
 
 #[path = "common/music.rs"]
 mod music;
@@ -47,7 +48,7 @@ fn main() -> Result<(), String> {
                 r[i] = r0[(pos + i) % r0.len()];
             }
             pos = (pos + 512) % l0.len();
-            engine.process(&mut [&mut l, &mut r], None, &s, &out, &audio.history);
+            engine.process(&mut [&mut l, &mut r], None, &s, &out, &audio.history, Some(&audio.key_spectrum));
             audio.latency.store(engine.latency() as f32);
             blocks += 1;
             let due = start + Duration::from_secs_f64(blocks as f64 * 512.0 / 48_000.0);
@@ -57,7 +58,11 @@ fn main() -> Result<(), String> {
         }
     });
 
-    let view = GateView::new(shared);
+    let mut view = GateView::new(shared);
+    // PREVIEW_EQ opens the sidechain EQ (its spectrum runs every frame).
+    if std::env::var_os("PREVIEW_EQ").is_some() {
+        view.open_eq();
+    }
     let options = WindowOptions {
         title: "Mite Gate — preview".into(),
         logical_size: (1280.0, 760.0),

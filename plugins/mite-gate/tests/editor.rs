@@ -161,3 +161,40 @@ fn the_sidechain_eq_opens_and_its_nodes_are_the_bands() {
     view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
     assert!(view.eq_area().is_none());
 }
+
+#[test]
+fn a_click_makes_a_band_and_right_click_gives_every_shape() {
+    use mite_gate::params::{key_id, K_FREQ, K_ON, K_Q, K_SLOPE, K_TYPE};
+    let (mut view, host) = setup();
+    view.open_eq();
+    draw(&mut view, &host);
+    let area = view.eq_area().expect("open");
+    // An empty spot at 500 Hz, +6 dB: the first band that is off (band 1) becomes a bell there.
+    let x = area.x0 + area.width() * (500.0f64 / 20.0).ln() / 1000f64.ln();
+    let at = Point::new(x, area.center().y - 6.0 * (area.height() / 2.0 - 12.0) / 18.0);
+    click(&mut view, &host, at);
+    assert_eq!(plain(&host, &key_id(0, K_ON.id)), 1.0);
+    assert_eq!(plain(&host, &key_id(0, K_TYPE.id)), 0.0, "a bell");
+    assert!((plain(&host, &key_id(0, K_FREQ.id)) - 500.0).abs() < 5.0);
+    // Wheel on it: Q.
+    let node = view.eq_node(&host, 0);
+    let q = plain(&host, &key_id(0, K_Q.id));
+    view.event(&UiEvent::Wheel { pos: node, lines: 6.0, mods: MODS }, &host);
+    assert!((plain(&host, &key_id(0, K_Q.id)) / q - 2.0).abs() < 0.02, "an octave of Q per 6 notches");
+    // Right-click: every shape; pick Low Cut; then the wheel steps its slope.
+    view.event(&UiEvent::PointerDown { pos: node, button: MouseButton::Right, mods: MODS }, &host);
+    draw(&mut view, &host);
+    let rows = view.eq_menu_rows();
+    assert_eq!(rows.len(), 11, "ten shapes and Remove");
+    click(&mut view, &host, rows[3].center());
+    assert_eq!(plain(&host, &key_id(0, K_TYPE.id)), 3.0);
+    let node = view.eq_node(&host, 0);
+    view.event(&UiEvent::Wheel { pos: node, lines: 1.0, mods: MODS }, &host);
+    assert_eq!(plain(&host, &key_id(0, K_SLOPE.id)), 4.0, "24 → 30 dB/oct");
+    // Right-click: Remove.
+    view.event(&UiEvent::PointerDown { pos: node, button: MouseButton::Right, mods: MODS }, &host);
+    draw(&mut view, &host);
+    let rows = view.eq_menu_rows();
+    click(&mut view, &host, rows[10].center());
+    assert_eq!(plain(&host, &key_id(0, K_ON.id)), 0.0);
+}

@@ -14,7 +14,13 @@ use nih_plug::prelude::*;
 use crate::dsp::Output;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 2 (2026-11-03): three more key bands and every band's slope (`k1…k3_slope`, `k4…k6_*`),
+///   appended; a version 1 state has its three bands at the default slope (24 dB/oct, what they
+///   played) and the new ones off, so it sounds as before: nothing to migrate.
+pub const STATE_VERSION: u32 = 2;
+/// The bands version 1 had.
+pub const V1_KEY_BANDS: usize = 3;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -46,17 +52,26 @@ pub const K_TYPE: ChoiceSpec = ChoiceSpec { id: "type", name: "Type", choices: &
 pub const K_FREQ: ParamSpec = spec("freq", "Frequency", "Hz", 20.0, 20_000.0, 1000.0, ParamScale::Log, 0, (1.0 / 6.0, 1.0 / 48.0), ParamDisplay::Frequency);
 pub const K_GAIN: ParamSpec = spec("gain", "Gain", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const K_Q: ParamSpec = spec("q", "Q", "", 0.1, 10.0, std::f32::consts::FRAC_1_SQRT_2, ParamScale::Log, 2, (1.0 / 6.0, 1.0 / 24.0), ParamDisplay::Number);
-/// The key bands' first types and frequencies: a low cut, a bell, a high shelf (as Comp's).
-const KEY_DEFAULTS: [(usize, f32); KEY_BANDS] = [(3, 100.0), (0, 1000.0), (2, 6000.0)];
+/// A cut's steepness: the EQ's IIR slopes (`mite_dsp::eq::SLOPES_DB`), 24 dB/oct by default.
+pub const K_SLOPE: ChoiceSpec = ChoiceSpec { id: "slope", name: "Slope", choices: &["6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "30 dB/oct", "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct"], default: mite_dsp::eq::DEFAULT_SLOPE };
+/// The key bands' first types and frequencies: a low cut, a bell, a high shelf (as Comp's), then
+/// a low shelf, a bell and a high cut.
+const KEY_DEFAULTS: [(usize, f32); KEY_BANDS] = [(3, 100.0), (0, 1000.0), (2, 6000.0), (1, 250.0), (0, 3000.0), (4, 12000.0)];
 static KEY_TYPES: [ChoiceSpec; KEY_BANDS] = [
     ChoiceSpec { default: KEY_DEFAULTS[0].0, ..K_TYPE },
     ChoiceSpec { default: KEY_DEFAULTS[1].0, ..K_TYPE },
     ChoiceSpec { default: KEY_DEFAULTS[2].0, ..K_TYPE },
+    ChoiceSpec { default: KEY_DEFAULTS[3].0, ..K_TYPE },
+    ChoiceSpec { default: KEY_DEFAULTS[4].0, ..K_TYPE },
+    ChoiceSpec { default: KEY_DEFAULTS[5].0, ..K_TYPE },
 ];
 static KEY_FREQS: [ParamSpec; KEY_BANDS] = [
     ParamSpec { default: KEY_DEFAULTS[0].1, ..K_FREQ },
     ParamSpec { default: KEY_DEFAULTS[1].1, ..K_FREQ },
     ParamSpec { default: KEY_DEFAULTS[2].1, ..K_FREQ },
+    ParamSpec { default: KEY_DEFAULTS[3].1, ..K_FREQ },
+    ParamSpec { default: KEY_DEFAULTS[4].1, ..K_FREQ },
+    ParamSpec { default: KEY_DEFAULTS[5].1, ..K_FREQ },
 ];
 
 // ---- Output -------------------------------------------------------------------------------------
@@ -92,7 +107,7 @@ pub fn manifest() -> String {
     lines.push(LINK.manifest_line());
     lines.push(SC_SOURCE.manifest_line());
     lines.push(LISTEN.manifest_line());
-    for k in 0..KEY_BANDS {
+    for k in 0..V1_KEY_BANDS {
         let prefix = |line: String| format!("k{}_{line}", k + 1);
         lines.push(prefix(K_ON.manifest_line()));
         lines.push(prefix(KEY_TYPES[k].manifest_line()));
@@ -107,6 +122,19 @@ pub fn manifest() -> String {
     lines.extend([MIDI_NOTE, MIDI_CHANNEL].iter().map(ParamSpec::manifest_line));
     lines.push(MIDI_VELOCITY.manifest_line());
     lines.push(MIDI_VEL_FIXED.manifest_line());
+    // State 2: every band's slope, then the new bands.
+    for k in 0..V1_KEY_BANDS {
+        lines.push(format!("k{}_{}", k + 1, K_SLOPE.manifest_line()));
+    }
+    for k in V1_KEY_BANDS..KEY_BANDS {
+        let prefix = |line: String| format!("k{}_{line}", k + 1);
+        lines.push(prefix(K_ON.manifest_line()));
+        lines.push(prefix(KEY_TYPES[k].manifest_line()));
+        lines.push(prefix(KEY_FREQS[k].manifest_line()));
+        lines.push(prefix(K_GAIN.manifest_line()));
+        lines.push(prefix(K_Q.manifest_line()));
+        lines.push(prefix(K_SLOPE.manifest_line()));
+    }
     lines.join("\n") + "\n"
 }
 
@@ -147,6 +175,7 @@ pub struct KeyParams {
     pub freq: FloatParam,
     pub gain: FloatParam,
     pub q: FloatParam,
+    pub slope: IntParam,
 }
 
 impl KeyParams {
@@ -158,6 +187,7 @@ impl KeyParams {
             freq: float_param_named(&KEY_FREQS[band], name("Frequency")),
             gain: float_param_named(&K_GAIN, name("Gain")),
             q: float_param_named(&K_Q, name("Q")),
+            slope: choice_param(&K_SLOPE, name("Slope")),
         }
     }
 
@@ -168,6 +198,7 @@ impl KeyParams {
             freq: f64::from(self.freq.value()),
             gain_db: f64::from(self.gain.value()),
             q: f64::from(self.q.value()),
+            slope: self.slope.value().max(0) as usize,
             ..BandSettings::default()
         }
     }
@@ -297,7 +328,7 @@ unsafe impl Params for GateParams {
             p(SC_SOURCE.id, self.sc_source.as_ptr(), "Sidechain"),
             p(LISTEN.id, self.listen.as_ptr(), "Sidechain"),
         ];
-        for (i, k) in self.keys.iter().enumerate() {
+        for (i, k) in self.keys.iter().enumerate().take(V1_KEY_BANDS) {
             map.push((key_id(i, K_ON.id), k.on.as_ptr(), "Sidechain".to_owned()));
             map.push((key_id(i, K_TYPE.id), k.kind.as_ptr(), "Sidechain".to_owned()));
             map.push((key_id(i, K_FREQ.id), k.freq.as_ptr(), "Sidechain".to_owned()));
@@ -315,6 +346,15 @@ unsafe impl Params for GateParams {
             p(MIDI_VELOCITY.id, self.midi_velocity.as_ptr(), "MIDI"),
             p(MIDI_VEL_FIXED.id, self.midi_vel_fixed.as_ptr(), "MIDI"),
         ]);
+        // State 2.
+        for (i, k) in self.keys.iter().enumerate().take(V1_KEY_BANDS) {
+            map.push((key_id(i, K_SLOPE.id), k.slope.as_ptr(), "Sidechain".to_owned()));
+        }
+        for (i, k) in self.keys.iter().enumerate().skip(V1_KEY_BANDS) {
+            for (id, ptr) in [(K_ON.id, k.on.as_ptr()), (K_TYPE.id, k.kind.as_ptr()), (K_FREQ.id, k.freq.as_ptr()), (K_GAIN.id, k.gain.as_ptr()), (K_Q.id, k.q.as_ptr()), (K_SLOPE.id, k.slope.as_ptr())] {
+                map.push((key_id(i, id), ptr, "Sidechain".to_owned()));
+            }
+        }
         map
     }
 }

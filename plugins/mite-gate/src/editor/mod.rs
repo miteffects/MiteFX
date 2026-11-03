@@ -14,7 +14,7 @@ use std::time::Instant;
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::gate::{transfer_db, Detector, GateSettings, Mode, KEY_BANDS};
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
-use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel};
+use mite_ui::paint::{glow_stroke, icon_button, panel, raised};
 use mite_ui::peniko::{Color, Fill};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
@@ -50,15 +50,16 @@ const GRIP_SIZE: (f64, f64) = (34.0, 22.0);
 /// The transfer square: the key's level across, the output up, over the history's range.
 const SQ_X: f64 = 796.0;
 const SQ_Y: f64 = DISPLAY_TOP + 16.0;
-const SQ: f64 = 384.0;
+const SQ: f64 = 336.0;
 const NODE_HIT: f64 = 16.0;
 
 /// The strip under the square.
-const STRIP_TOP: f64 = SQ_Y + SQ + 16.0;
-const BUTTON: f64 = 40.0;
-const DIAL_D: f64 = 40.0;
-const DIAL_ROWS: [f64; 2] = [STRIP_TOP + 92.0, STRIP_TOP + 160.0];
-const DIAL_XS: [f64; 4] = [SQ_X + 48.0, SQ_X + 144.0, SQ_X + 240.0, SQ_X + 336.0];
+/// Buttons and dials sized for the hand (user, 2026-11-03: "buttons are too small").
+const STRIP_TOP: f64 = SQ_Y + SQ + 14.0;
+const BUTTON: f64 = 52.0;
+const DIAL_D: f64 = 52.0;
+const DIAL_ROWS: [f64; 2] = [STRIP_TOP + 104.0, STRIP_TOP + 190.0];
+const DIAL_XS: [f64; 4] = [SQ_X + 42.0, SQ_X + 125.0, SQ_X + 208.0, SQ_X + 292.0];
 
 const WELLS: [f64; 3] = [1194.0, 1220.0, 1246.0];
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
@@ -199,6 +200,7 @@ pub fn settings(host: &dyn ParamHost) -> GateSettings {
             freq: f64::from(key(b, K_FREQ.id)),
             gain_db: f64::from(key(b, K_GAIN.id)),
             q: f64::from(key(b, K_Q.id)),
+            slope: key(b, K_SLOPE.id).round().max(0.0) as usize,
             ..mite_dsp::eq::BandSettings::default()
         }),
         listen: p(LISTEN.id) >= 0.5,
@@ -250,6 +252,7 @@ pub struct GateView {
     source_menu: Option<Dropdown>,
     /// The sidechain EQ (its panel open or not).
     key_eq: KeyEq,
+    key_spectrum: mite_ui::widgets::key_eq::KeySpectrum,
     eq_open: bool,
     history: VecDeque<[f32; record::WIDTH]>,
     seen: usize,
@@ -263,8 +266,9 @@ const SOURCE_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 156.0, FOOTER_TOP 
 /// The sidechain EQ's button (beside the source) and its panel, docked over the history's
 /// bottom as Comp's.
 const EQ_BUTTON: Rect = Rect::new(164.0, FOOTER_TOP + 9.0, 204.0, FOOTER_TOP + 47.0);
-/// It stops short of the grips' column, so both thresholds stay in reach.
-const EQ_PANEL: Rect = Rect::new(12.0, DISPLAY_TOP + 418.0, GRIP_X - 10.0, DISPLAY_TOP + 610.0);
+/// It stops short of the grips' column, so both thresholds stay in reach. Opaque: a glass panel
+/// blurred the threshold lines behind it into a green haze (user, 2026-11-03).
+const EQ_PANEL: Rect = Rect::new(12.0, DISPLAY_TOP + 300.0, GRIP_X - 10.0, DISPLAY_TOP + 610.0);
 /// The sidechain EQ's sliders glyph.
 const EQ_GLYPH: &str = "M4 7 H20 M4 12 H20 M4 17 H20 M8.5 5 V9 M15 10 V14 M10.5 15 V19";
 
@@ -297,7 +301,12 @@ impl GateView {
             hot: None,
             drag: None,
             source_menu: None,
-            key_eq: KeyEq::new(Rect::new(EQ_PANEL.x0 + 16.0, EQ_PANEL.y0 + 44.0, EQ_PANEL.x1 - 16.0, EQ_PANEL.y1 - 14.0), KEY_BANDS),
+            key_eq: {
+                let mut k = KeyEq::new(Rect::new(EQ_PANEL.x0 + 16.0, EQ_PANEL.y0 + 44.0, EQ_PANEL.x1 - 16.0, EQ_PANEL.y1 - 14.0), KEY_BANDS).with_slopes();
+                k.menu_bounds = (DISPLAY_TOP, FOOTER_TOP);
+                k
+            },
+            key_spectrum: mite_ui::widgets::key_eq::KeySpectrum::new(),
             eq_open: false,
             history: VecDeque::with_capacity(HISTORY_RECORDS),
             seen: 0,
@@ -381,11 +390,22 @@ impl GateView {
 
     /// Where key band `b`'s node is drawn (tests and tools).
     pub fn eq_node(&self, host: &dyn ParamHost, b: usize) -> Point {
-        mite_ui::widgets::key_eq::node(self.key_eq.area, &mite_ui::widgets::key_eq::band(host, b))
+        mite_ui::widgets::key_eq::node(self.key_eq.area, &mite_ui::widgets::key_eq::band_with(host, b, true))
+    }
+
+    /// The shape menu's rows while it is open (tests and tools).
+    pub fn eq_menu_rows(&self) -> Vec<Rect> {
+        self.key_eq.menu_rows()
     }
 
     pub fn open_eq(&mut self) {
         self.eq_open = true;
+    }
+
+    /// Reads the key's spectrum at once (tools render a single frame).
+    pub fn settle_spectrum(&mut self) {
+        let fs = f64::from(self.shared.sample_rate.load());
+        self.key_spectrum.settle(&self.shared.key_spectrum, fs);
     }
 
     pub fn footer_toggle(&self, id: &str) -> Option<Rect> {
@@ -430,13 +450,13 @@ impl GateView {
     }
 
     fn mode_rect(i: usize) -> Rect {
-        let x = SQ_X + i as f64 * (BUTTON + 8.0);
-        Rect::new(x, STRIP_TOP, x + BUTTON, STRIP_TOP + BUTTON)
+        let x = SQ_X + i as f64 * (BUTTON + 10.0);
+        Rect::new(x, STRIP_TOP, x + BUTTON, STRIP_TOP + 44.0)
     }
 
     fn detector_rect(i: usize) -> Rect {
-        let x = SQ_X + SQ - (2 - i) as f64 * (BUTTON + 8.0) + 8.0;
-        Rect::new(x, STRIP_TOP, x + BUTTON, STRIP_TOP + BUTTON)
+        let x = SQ_X + SQ - (2 - i) as f64 * (BUTTON + 10.0) + 10.0;
+        Rect::new(x, STRIP_TOP, x + BUTTON, STRIP_TOP + 44.0)
     }
 
     fn since_fresh(&self) -> f64 {
@@ -591,13 +611,13 @@ impl GateView {
         for (i, g) in MODE_GLYPHS.iter().enumerate() {
             let r = Self::mode_rect(i);
             let ink = icon_button(cx.scene, theme, r, theme.panel_control, self.hot == Some(Hot::Mode(i)), Mode::ALL[i] == mode, theme.accent);
-            draw_glyph(cx.scene, g, r.center(), 24.0, ink, 1.6);
+            draw_glyph(cx.scene, g, r.center(), 28.0, ink, 1.7);
         }
         let det = Self::plain(cx.host, DETECTOR.id).round() as usize;
         for (i, g) in DETECTOR_GLYPHS.iter().enumerate() {
             let r = Self::detector_rect(i);
             let ink = icon_button(cx.scene, theme, r, theme.panel_control, self.hot == Some(Hot::Detector(i)), i == det, theme.accent);
-            draw_glyph(cx.scene, g, r.center(), 22.0, ink, 1.6);
+            draw_glyph(cx.scene, g, r.center(), 26.0, ink, 1.7);
         }
         for k in &self.knobs {
             k.draw(cx);
@@ -663,10 +683,10 @@ impl GateView {
             return;
         }
         let theme = cx.theme;
-        glass_panel(cx, RoundedRect::from_rect(EQ_PANEL, 12.0), 18.0);
+        raised(cx.scene, RoundedRect::from_rect(EQ_PANEL, 12.0), theme.window, theme.panel_control_border, theme.shadows);
         draw_glyph(cx.scene, KEY_GLYPH, Point::new(EQ_PANEL.x0 + 28.0, EQ_PANEL.y0 + 22.0), 20.0, theme.sidechain, 1.7);
         cx.text.draw(cx.scene, "Sidechain", EQ_PANEL.x0 + 46.0, EQ_PANEL.y0 + 15.0, TextStyle::BODY.weighted(700.0), theme.text_hi, Align::Left);
-        self.key_eq.draw(cx);
+        self.key_eq.draw_with(cx, Some(&self.key_spectrum));
     }
 
     fn draw_states(&self, cx: &mut DrawCx<'_>) {
@@ -698,6 +718,11 @@ impl GateView {
             Some(Drag::Range { .. }) => return Help::default().text("Range ").slot(format!("{} dB", fmt_db(range)), "−80.0 dB").text(" — how far it turns the audio down."),
             None => {}
         }
+        if self.key_eq.menu_open() {
+            if let Some(h) = self.key_eq.help(host) {
+                return h;
+            }
+        }
         if let Some(list) = &self.source_menu {
             if let Some(i) = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))) {
                 return Help::default().text(if i == 0 { "Internal — the input itself keys the gate" } else { "External — the sidechain input keys the gate (route a track to the plugin's second input)" });
@@ -711,7 +736,7 @@ impl GateView {
             Some(Hot::Detector(i)) => return Help::default().text(if i == 0 { "Peak — instant attack, 10 ms release: catches every hit" } else { "RMS — the power over 10 ms: steadier on sustained sounds" }),
             Some(Hot::Source) => return Help::default().text("Sidechain — what keys the gate: the input, or the plugin's sidechain input."),
             Some(Hot::EqButton) => return Help::default().text(if self.eq_open { "Sidechain EQ — click to close" } else { "Sidechain EQ — shape what the detector hears (a low cut keeps a kick's bleed out of a snare's gate)" }),
-            Some(Hot::EqPanel) => return Help::default().text("Sidechain EQ — drag a node for its frequency and gain (dragging turns its band on); double-click a node to turn its band on or off."),
+            Some(Hot::EqPanel) => return self.key_eq.help(host).unwrap_or_default(),
             None => {}
         }
         if self.range.menu_open() {
@@ -769,7 +794,7 @@ impl GateView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.key_eq.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.key_eq.busy() || self.key_eq.menu_open() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
@@ -852,7 +877,7 @@ impl GateView {
                 self.eq_open = !self.eq_open;
                 true
             }
-            Some(Hot::EqPanel) => self.key_eq.press(host, pos),
+            Some(Hot::EqPanel) => true,
             Some(Hot::Source) => {
                 let current = usize::from(Self::on(host, SC_SOURCE.id));
                 self.source_menu = Some(Dropdown::new(SOURCE_BUTTON, SC_SOURCE.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(170.0));
@@ -889,6 +914,22 @@ impl GateView {
             }
             return true;
         }
+        if self.eq_open {
+            let in_panel = |p: Point| EQ_PANEL.contains(p);
+            let ours = match *event {
+                UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } => in_panel(pos),
+                _ => true,
+            };
+            if (ours || self.key_eq.menu_open()) && self.key_eq.event(event, host) {
+                return true;
+            }
+            // The rest of the panel is the panel's own: nothing under it reacts.
+            if let UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } = *event {
+                if in_panel(pos) {
+                    return true;
+                }
+            }
+        }
         if let Some(answer) = self.session.event(event, host) {
             return answer;
         }
@@ -906,9 +947,6 @@ impl GateView {
         match *event {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
-                if self.key_eq.drag_to(host, pos) {
-                    return true;
-                }
                 let k = if mods.fine() { 0.2 } else { 1.0 };
                 match self.drag {
                     Some(Drag::Threshold { start, threshold, square }) => {
@@ -939,17 +977,11 @@ impl GateView {
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => self.press(host, pos),
             UiEvent::PointerUp { button: MouseButton::Left, .. } => {
-                if self.key_eq.release(host) {
-                    return true;
-                }
                 let was = self.drag.is_some();
                 self.end_drag(host);
                 was
             }
             UiEvent::DoubleClick { pos, .. } => {
-                if self.eq_open && self.key_eq.double_click(host, pos) {
-                    return true;
-                }
                 let id = match self.hot_at(host, pos) {
                     Some(Hot::Threshold) | Some(Hot::Node) => Some((THRESHOLD.id, THRESHOLD.default)),
                     Some(Hot::Close) => Some((HYSTERESIS.id, HYSTERESIS.default)),
@@ -1035,7 +1067,14 @@ impl View for GateView {
         let theme = cx.theme;
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
+        // Nothing under the EQ panel glows through it.
+        if self.eq_open {
+            cx.begin_glow_hole(RoundedRect::from_rect(EQ_PANEL, 12.0));
+        }
         self.draw_history(cx);
+        if self.eq_open {
+            cx.end_glow_hole();
+        }
         self.draw_square(cx);
         self.draw_strip(cx);
         self.draw_meters(cx);
@@ -1044,6 +1083,7 @@ impl View for GateView {
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
         self.draw_footer(cx);
         self.range.draw_menu(cx);
+        self.key_eq.draw_menu(cx);
         self.session.draw_menu(cx);
     }
 
@@ -1104,7 +1144,8 @@ impl View for GateView {
                 *m = if i == 2 || i == 3 { if t < *m { t } else { (*m + fall).min(t) } } else if t > *m { t } else { (*m - fall).max(t) };
             }
         }
+        let spectrum = self.eq_open && self.key_spectrum.update(&self.shared.key_spectrum, f64::from(self.shared.sample_rate.load()), f64::from(dt));
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || moved || busy || self.headroom != before || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > SILENT + 1.0 })
+        fresh || flowing || spectrum || moved || busy || self.headroom != before || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > SILENT + 1.0 })
     }
 }

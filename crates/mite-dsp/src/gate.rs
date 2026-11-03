@@ -21,8 +21,8 @@ use crate::eq::{design, BandSettings, Sections, MAX_SECTIONS};
 use crate::filter::Tdf2;
 use crate::{db_to_gain, gain_to_db, MINUS_INFINITY_DB};
 
-/// Key EQ bands (as Comp's).
-pub const KEY_BANDS: usize = 3;
+/// Key EQ bands: Comp's three, then three more (state 2, 2026-11-03: a custom sidechain EQ).
+pub const KEY_BANDS: usize = 6;
 /// The longest lookahead, ms (the delay lines are sized for it).
 pub const MAX_LOOKAHEAD_MS: f32 = 10.0;
 /// The detectors' windows: the peak's release and the RMS's time, ms.

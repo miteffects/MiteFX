@@ -2,6 +2,7 @@
 
 pub mod brand;
 pub mod dropdown;
+pub mod eq_icons;
 pub mod footer;
 pub mod help;
 pub mod history;

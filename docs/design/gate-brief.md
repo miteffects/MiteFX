@@ -122,3 +122,19 @@ the hysteresis band between the two thresholds is shaded in the accent.
    (mix, Delta, bypass against the delayed dry; a dip on a lookahead change), the editor as
    above; 120 fps at 1× and 2× DPI. The sidechain EQ's bands work in the engine and in presets;
    their panel comes in slice 2.
+
+**Round 2 (user, 2026-11-03):** "green line in the background blurred … not acceptable"; "in
+sidechain i cant see … where the signal is mostly dense"; "make it flexible so that user can
+make custom eq … all shapes"; "buttons are too small".
+- The haze was the glow layer: it is composited over the whole scene, so the threshold line's
+  glow (and the waveform's) shone through the panel. `DrawCx::begin_glow_hole` masks the glow
+  under a panel; Gate's EQ panel is opaque now, and Comp's panels get the same mask.
+- The key's spectrum (before the EQ, mono; `GateShared::key_spectrum`, `key_eq::KeySpectrum`)
+  under the EQ curve, in the sidechain colour.
+- The well is an editor (`KeyEq::event`): click an empty spot to make a band (the first that is
+  off, a bell); drag; wheel: Q, or a cut's slope; right-click: every EQ type with its icon, or
+  Remove; double-click: on/off. Six bands with slopes (state 2: `k1…k3_slope`, `k4…k6_*`,
+  appended; a version 1 state keeps its 24 dB/oct and sounds as before). The type and slope
+  icons moved from Mite EQ to `mite_ui::widgets::eq_icons`.
+- The panel is taller (310 px); the square 336 px, the mode and detector buttons 52 × 44, the
+  dials 52 px.

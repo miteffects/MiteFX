@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         *b += n;
     }
     for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-        engine.process(&mut [a, b], None, &s, &out, &shared.history);
+        engine.process(&mut [a, b], None, &s, &out, &shared.history, Some(&shared.key_spectrum));
     }
     shared.latency.store(engine.latency() as f32);
     if let Some(r) = std::env::var("SNAPSHOT_RANGE").ok().and_then(|v| v.parse::<f32>().ok()) {
@@ -86,7 +86,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(&key_id(0, K_ON.id), 1.0);
         host.set_plain(&key_id(1, K_ON.id), 1.0);
         host.set_plain(&key_id(1, K_GAIN.id), 6.0);
+        host.set_plain(&key_id(5, K_ON.id), 1.0);
+        host.set_plain(&key_id(5, K_SLOPE.id), 6.0);
         view.open_eq();
+        view.settle_spectrum();
     }
     if v("source") {
         let at = view.source_button().center();
