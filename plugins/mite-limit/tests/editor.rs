@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_limit::editor::{memory_host, LimitView};
-use mite_limit::params::{ATTACK, CEILING, GAIN, LOOKAHEAD, OVERSAMPLING, PREVIEW, RELEASE, SLOW, STYLE, TARGET, TARGET_CUSTOM};
+use mite_limit::params::{ATTACK, BYPASS, DELTA, TRUE_PEAK, CEILING, GAIN, LOOKAHEAD, OVERSAMPLING, PREVIEW, RELEASE, SLOW, STYLE, TARGET, TARGET_CUSTOM};
 use mite_limit::LimitShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -199,4 +199,18 @@ fn the_gain_shape_is_the_limiters_and_its_parts_are_handles() {
     assert!(plain(&host, ATTACK.id) < 15.0);
     view.event(&UiEvent::DoubleClick { pos: burst, mods: MODS }, &host);
     assert_eq!(plain(&host, ATTACK.id), 30.0);
+}
+
+#[test]
+fn the_footer_toggles_switch_on_and_back_off() {
+    // User report (2026-11-03): bypass turned on but would not turn off.
+    let (mut view, host, _) = setup();
+    for (id, default) in [(BYPASS.id, 0.0), (DELTA.id, 0.0), (TRUE_PEAK.id, 1.0)] {
+        let at = view.footer_toggle(id).expect("drawn").center();
+        click(&mut view, &host, at);
+        assert_eq!(plain(&host, id), 1.0 - default, "{id} first click");
+        view.tick(&host);
+        click(&mut view, &host, at);
+        assert_eq!(plain(&host, id), default, "{id} second click");
+    }
 }

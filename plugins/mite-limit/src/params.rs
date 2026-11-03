@@ -168,7 +168,10 @@ impl Default for LimitParams {
             protect: float_param(&PROTECT),
             unity: flag(&UNITY),
             delta: flag(&DELTA),
-            bypass: flag(&BYPASS).make_bypass(),
+            // Not the host's bypass (`make_bypass`): REAPER stops processing a bypassed plugin, so
+            // a change from the editor never reached it and bypass could not be turned off (user,
+            // 2026-11-03). An ordinary parameter keeps processing, so every change lands.
+            bypass: flag(&BYPASS),
             dither: named(&DITHER),
             shaping: named(&SHAPING),
             dc_filter: flag(&DC_FILTER),

@@ -147,6 +147,11 @@ impl Footer {
         false
     }
 
+    /// Where the toggle for `id` was last drawn (tests and tools).
+    pub fn toggle_rect(&self, id: &str) -> Option<Rect> {
+        self.toggles.iter().position(|t| t.id == id).map(|i| self.toggle_hits[i])
+    }
+
     /// A dial is being dragged.
     pub fn busy(&self) -> bool {
         self.dials.iter().any(|(k, _)| k.is_dragging())

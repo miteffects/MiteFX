@@ -495,7 +495,10 @@ impl Default for EqParams {
             mix: float_param(&MIX),
             auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
             delta: bool_param(&DELTA, DELTA.name.to_owned()),
-            bypass: bool_param(&BYPASS, BYPASS.name.to_owned()).make_bypass(),
+            // Not the host's bypass (`make_bypass`): REAPER stops processing a bypassed plugin, so
+            // a change from the editor never reached it and bypass could not be turned off (user,
+            // 2026-11-03). An ordinary parameter keeps processing, so every change lands.
+            bypass: bool_param(&BYPASS, BYPASS.name.to_owned()),
             snapshots: std::sync::Arc::new(mite_core::snapshots::Snapshots::new()),
             preset: std::sync::Arc::new(mite_core::presets::CurrentPreset::default()),
             display_range: std::sync::Arc::new(mite_core::AtomicF32::new(0.0)),

@@ -383,6 +383,11 @@ impl LimitView {
         self.shape.update(&Self::core(host, None), Self::plain(host, LOOKAHEAD.id), ghost);
     }
 
+    /// A footer toggle's button (tests and tools).
+    pub fn footer_toggle(&self, id: &str) -> Option<Rect> {
+        self.footer.toggle_rect(id)
+    }
+
     pub fn loudness_rect(&self) -> Rect {
         Rect::new(LOUD_X0 - 8.0, DISPLAY_TOP + 8.0, LOUD_X1 + 8.0, TARGET_Y - 6.0)
     }

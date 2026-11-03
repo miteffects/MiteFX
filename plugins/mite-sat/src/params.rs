@@ -405,7 +405,10 @@ impl Default for SatParams {
             out_pan: float_param(&OUT_PAN),
             out_gain: float_param(&OUT_GAIN),
             delta: flag(&DELTA),
-            bypass: flag(&BYPASS).make_bypass(),
+            // Not the host's bypass (`make_bypass`): REAPER stops processing a bypassed plugin, so
+            // a change from the editor never reached it and bypass could not be turned off (user,
+            // 2026-11-03). An ordinary parameter keeps processing, so every change lands.
+            bypass: flag(&BYPASS),
             crossovers: std::array::from_fn(CrossParams::new),
             bands: std::array::from_fn(BandParams::new),
             lfos: std::array::from_fn(LfoParams::new),
