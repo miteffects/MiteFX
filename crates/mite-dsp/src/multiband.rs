@@ -91,11 +91,14 @@ pub struct MbTelemetry {
     pub band_in_db: [f32; BANDS],
     /// Each band's gain change at its most (signed, dB: cut ≤ 0 or lift ≥ 0, whichever is larger).
     pub band_gain_db: [f32; BANDS],
+    /// Each band's detector level at its highest (the detector its stage uses), dBFS: what its
+    /// threshold is compared with.
+    pub band_det_db: [f32; BANDS],
 }
 
 impl Default for MbTelemetry {
     fn default() -> Self {
-        Self { in_peak_db: [MINUS_INFINITY_DB; 2], out_peak_db: [MINUS_INFINITY_DB; 2], band_in_db: [MINUS_INFINITY_DB; BANDS], band_gain_db: [0.0; BANDS] }
+        Self { in_peak_db: [MINUS_INFINITY_DB; 2], out_peak_db: [MINUS_INFINITY_DB; 2], band_in_db: [MINUS_INFINITY_DB; BANDS], band_gain_db: [0.0; BANDS], band_det_db: [MINUS_INFINITY_DB; BANDS] }
     }
 }
 
@@ -379,6 +382,7 @@ impl Multiband {
                 let [ka, kb] = &self.key[slot];
                 let keys: [&[f32]; 2] = [&ka[..n], &kb[..n]];
                 let tel = self.comps[slot].process(&mut parts[..n_ch], cs.external_key.then_some(&keys[..n_ch]), &cs);
+                t.band_det_db[slot] = t.band_det_db[slot].max(tel.detector_levels_db[s.bands[slot].stage.detector as usize]);
                 for c in 0..n_ch {
                     let (cut, lift) = (tel.cut_db[c], tel.lift_db[c]);
                     let g = if -cut >= lift { cut } else { lift };

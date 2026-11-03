@@ -25,7 +25,8 @@ use mite_ui::widgets::key_eq::KeySpectrum;
 use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, KeyEq, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
-use crate::dsp::record;
+use crate::dsp::{record, HISTORY_RECORDS, HISTORY_SLICE_MS};
+use mite_ui::widgets::history::{self, HistoryLane};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::MbShared;
@@ -61,6 +62,11 @@ const SQ_RANGE: f32 = 60.0;
 /// Dragging the square: threshold per px across, ratio's octaves per px up.
 const THRESH_PER_PX: f32 = 0.15;
 const RATIO_OCT_PER_PX: f32 = 1.0 / 60.0;
+/// The band history: its levels' range (dB under 0) and its time across.
+const HIST_RANGE: f32 = 48.0;
+const HIST_SECONDS: f64 = 6.0;
+/// The gain bar's reach either way, dB (a couple of dB must read clearly: user, 2026-11-03).
+const BAR_DB: f64 = 12.0;
 /// The dynamic response on the spectrum: 0 dB this far down the plot, and dB per its height.
 const RESPONSE_ZERO: f64 = 0.32;
 const RESPONSE_SPAN_DB: f64 = 30.0;
@@ -166,11 +172,24 @@ pub fn settings(host: &dyn ParamHost) -> MbSettings {
 enum Drag {
     /// On a band's square: threshold across, ratio up and down.
     Square { band: usize, start: Point, thresh: f32, ratio: f32 },
+    /// The threshold line on a band's history: up and down, at the history's scale.
+    Thresh { band: usize, start: Point, thresh: f32 },
+}
+
+/// A level's y on a band history `r`.
+fn hist_y(r: Rect, db: f32) -> f64 {
+    r.y0 + 8.0 + (f64::from(-db).clamp(0.0, f64::from(HIST_RANGE)) / f64::from(HIST_RANGE)) * (r.height() - 16.0)
+}
+
+fn hist_px_per_db(r: Rect) -> f64 {
+    (r.height() - 16.0) / f64::from(HIST_RANGE)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
     Square(usize),
+    /// A band's history (its threshold line when `true`).
+    Hist(usize, bool),
     Quad(usize, usize),
     Det(usize, usize),
     Power(usize),
@@ -200,8 +219,9 @@ struct Card {
     kind: CardKind,
     rect: Rect,
     square: Rect,
-    /// The band's gain change bar, beside the square.
+    /// The band's gain change bar, beside the square, and its history (wide cards).
     bar: Rect,
+    hist: Option<Rect>,
     quads: Vec<Rect>,
     dets: Vec<Rect>,
     power: Option<Rect>,
@@ -283,7 +303,7 @@ impl MbView {
             clipboard: None,
             knobs: Vec::new(),
             knob_key: None,
-            history: VecDeque::with_capacity(64),
+            history: VecDeque::with_capacity(HISTORY_RECORDS),
             seen: 0,
             meters: [-150.0; 4],
             last_fresh: Instant::now(),
@@ -330,6 +350,15 @@ impl MbView {
     /// Band `b`'s transfer square and quadrant buttons (tests and tools).
     pub fn band_square(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
         self.card(host, b).map(|c| c.square)
+    }
+
+    /// Band `b`'s history (wide cards) and a level's y on it (tests and tools).
+    pub fn band_history(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).and_then(|c| c.hist)
+    }
+
+    pub fn history_y(&self, r: Rect, db: f32) -> f64 {
+        hist_y(r, db)
     }
 
     pub fn quad_button(&self, host: &dyn ParamHost, b: usize, q: usize) -> Option<Rect> {
@@ -473,31 +502,21 @@ impl MbView {
                 x += w + CARD_GAP;
                 if wide {
                     let button = |k: f64| Rect::new(rect.x1 - 10.0 - 34.0 * (k + 1.0) - 6.0 * k, rect.y0 + 10.0, rect.x1 - 10.0 - 34.0 * k - 6.0 * k, rect.y0 + 44.0);
-                    let side = rect.height() - 64.0;
+                    // The square and the band's history side by side, the dials in a row under them.
+                    let side = rect.height() - 54.0 - 104.0;
                     let square = Rect::new(rect.x0 + 12.0, rect.y0 + 54.0, rect.x0 + 12.0 + side, rect.y0 + 54.0 + side);
-                    let bar = Rect::new(square.x1 + 8.0, square.y0, square.x1 + 20.0, square.y1);
+                    let bar = Rect::new(square.x1 + 6.0, square.y0, square.x1 + 18.0, square.y1);
+                    let hist = Rect::new(bar.x1 + 10.0, square.y0, rect.x1 - 12.0, square.y1);
                     let left = rect.x0 + 40.0;
                     let quads = (0..4).map(|i| Rect::new(left + i as f64 * 42.0, rect.y0 + 10.0, left + i as f64 * 42.0 + 36.0, rect.y0 + 44.0)).collect();
                     let dleft = left + 4.0 * 42.0 + 16.0;
                     let dets = (0..3).map(|i| Rect::new(dleft + i as f64 * 42.0, rect.y0 + 10.0, dleft + i as f64 * 42.0 + 36.0, rect.y0 + 44.0)).collect();
-                    // THRESHOLD large on the left, the other six in two rows of three.
-                    let (ax0, ax1) = (bar.x1 + 16.0, rect.x1 - 12.0);
-                    let cols = if single { 7.0 } else { 4.0 };
-                    let col = (ax1 - ax0) / cols;
-                    let mut dials = vec![(Point::new(ax0 + col * 0.5, square.center().y), if single { 96.0 } else { 76.0 })];
-                    if single {
-                        for k in 0..6 {
-                            dials.push((Point::new(ax0 + col * (1.5 + k as f64), square.center().y), 60.0));
-                        }
-                    } else {
-                        for k in 0..6 {
-                            let (cx, row) = ((k % 3) as f64, (k / 3) as f64);
-                            dials.push((Point::new(ax0 + col * (1.5 + cx), square.y0 + 56.0 + row * 112.0), 52.0));
-                        }
-                    }
+                    let row = square.y1 + 44.0;
+                    let step = (rect.width() - 24.0) / 7.0;
+                    let dials = (0..7).map(|k| (Point::new(rect.x0 + 12.0 + step * (k as f64 + 0.5), row), if k == 0 { 52.0 } else { 44.0 })).collect();
                     // Right to left: remove, power, mute, solo, then the band's Delta and key.
                     let (power, delta, ext) = if single { (button(0.0), button(1.0), button(2.0)) } else { (button(1.0), button(4.0), button(5.0)) };
-                    Card { band, kind: if single { CardKind::Single } else { CardKind::Wide }, rect, square, bar, quads, dets, power: Some(power), solo: (!single).then(|| button(3.0)), mute: (!single).then(|| button(2.0)), remove: (!single).then(|| button(0.0)), ext: Some(ext), delta: Some(delta), dials }
+                    Card { band, kind: if single { CardKind::Single } else { CardKind::Wide }, rect, square, bar, hist: Some(hist), quads, dets, power: Some(power), solo: (!single).then(|| button(3.0)), mute: (!single).then(|| button(2.0)), remove: (!single).then(|| button(0.0)), ext: Some(ext), delta: Some(delta), dials }
                 } else {
                     let button = |k: f64| Rect::new(rect.x1 - 8.0 - 26.0 * (k + 1.0) - 3.0 * k, rect.y0 + 10.0, rect.x1 - 8.0 - 26.0 * k - 3.0 * k, rect.y0 + 36.0);
                     let side = (w - 30.0).min(rect.height() - 140.0);
@@ -505,7 +524,7 @@ impl MbView {
                     let bar = Rect::new(square.x1 + 5.0, square.y0, square.x1 + 13.0, square.y1);
                     let top = square.y1 + 36.0;
                     let dials = if w >= 216.0 { vec![(Point::new(rect.x0 + 30.0, top), 40.0), (Point::new(rect.x0 + 30.0 + 104.0, top), 40.0)] } else { vec![(Point::new(rect.x0 + 30.0, top), 38.0), (Point::new(rect.x0 + 30.0, top + 52.0), 38.0)] };
-                    Card { band, kind: CardKind::Narrow, rect, square, bar, quads: Vec::new(), dets: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, ext: None, delta: None, dials }
+                    Card { band, kind: CardKind::Narrow, rect, square, bar, hist: None, quads: Vec::new(), dets: Vec::new(), power: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, ext: None, delta: None, dials }
                 }
             })
             .collect()
@@ -620,11 +639,6 @@ impl MbView {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), stage.detector as usize == d, theme.accent);
                 draw_svg(cx.scene, DET_GLYPHS[d], r.center(), 22.0, ink, 1.6);
             }
-            if card.kind != CardKind::Narrow {
-                let text = if layout.n > 0 { self.rail.range_text(cx.host, layout, b) } else { "20 Hz – 20 kHz".to_owned() };
-                // Over the dials, clear of the header's buttons.
-                cx.text.draw(cx.scene, &text, card.rect.x1 - 14.0, card.square.y0 + 2.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0).weighted(600.0) }, theme.text_mid, Align::Right);
-            }
             if let Some(r) = card.power {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), !bypassed, theme.accent);
                 draw_svg(cx.scene, POWER, r.center(), r.height() * 0.5, ink, 1.8);
@@ -656,6 +670,12 @@ impl MbView {
             }
             let lit = if bypassed || !stage.on { 0.45 } else { 1.0 } * alpha;
             self.draw_square(cx, card, &stage, lit);
+            if let Some(h) = card.hist {
+                self.draw_band_history(cx, h, b, &stage, lit);
+                // The band's range, in the history's corner.
+                let text = if layout.n > 0 { self.rail.range_text(cx.host, layout, b) } else { "20 Hz – 20 kHz".to_owned() };
+                cx.text.draw(cx.scene, &text, h.x1 - 10.0, h.y0 + 6.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(11.0).weighted(600.0) }, theme.text_mid, Align::Right);
+            }
         }
         for k in &self.knobs {
             k.draw(cx);
@@ -709,14 +729,56 @@ impl MbView {
         let bar = card.bar;
         panel(cx.scene, RoundedRect::from_rect(bar, 3.0), theme.meter_well, theme.well_border);
         let mid = bar.center().y;
-        let g = f64::from(self.gain[b]).clamp(-24.0, 24.0);
+        let g = f64::from(self.gain[b]).clamp(-BAR_DB, BAR_DB);
         if g.abs() > 0.05 {
-            let y = mid - g / 24.0 * (bar.height() / 2.0 - 2.0);
+            let y = mid - g / BAR_DB * (bar.height() / 2.0 - 2.0);
             let fill = Rect::new(bar.x0 + 2.0, mid.min(y), bar.x1 - 2.0, mid.max(y));
             let color = if g < 0.0 { theme.gain_reduction } else { theme.gain_up };
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(lit), None, &RoundedRect::from_rect(fill, 2.0));
         }
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_zero, None, &Line::new((bar.x0, mid), (bar.x1, mid)));
+    }
+
+    /// The band's history (the shared lane, honest peaks): its input dim, the gain change from
+    /// the top (a lift from the bottom) at the levels' own scale, its detector dashed when that is
+    /// not its peak, and the threshold as a line to drag.
+    fn draw_band_history(&self, cx: &mut DrawCx<'_>, r: Rect, b: usize, stage: &Stage, lit: f32) {
+        let theme = cx.theme;
+        panel(cx.scene, RoundedRect::from_rect(r, 8.0), theme.well, theme.well_border);
+        let lane = HistoryLane { x0: r.x0, width: r.width(), top: r.y0, bottom: r.y1, seconds: HIST_SECONDS, slice_ms: HISTORY_SLICE_MS };
+        let y = |db: f32| hist_y(r, db);
+        cx.begin_clip(&RoundedRect::from_rect(r, 8.0));
+        lane.draw_grid(cx, HIST_RANGE, 0.0, y);
+        let cols = lane.columns(&self.history, self.seen, self.since_fresh());
+        if cols.len() >= 2 {
+            type Col = history::Column<{ record::WIDTH }>;
+            let line = |f: &dyn Fn(&Col) -> f64| history::column_line(&cols, f);
+            let input = line(&|c| y(c.high[record::BAND_IN + b]));
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.16 * lit), None, &history::close_to(input.clone(), &cols, r.y1));
+            let k = hist_px_per_db(r);
+            if cols.iter().any(|c| c.low[record::BAND_GAIN + b] < -0.05) {
+                let edge = line(&|c| r.y0 + (f64::from(-c.low[record::BAND_GAIN + b].min(0.0)) * k).min(r.height()));
+                history::draw_reduction(cx, &cols, &edge, r.y0, 0.5 * r.height());
+            }
+            if cols.iter().any(|c| c.high[record::BAND_GAIN + b] > 0.05) {
+                let edge = line(&|c| r.y1 - (f64::from(c.high[record::BAND_GAIN + b].max(0.0)) * k).min(r.height()));
+                glow_stroke(cx, &edge, 1.6, theme.gain_up.multiply_alpha(lit), theme.gain_up, 2.4);
+            }
+            if stage.detector != Detector::Peak {
+                let det = line(&|c| y(c.high[record::BAND_DET + b]));
+                cx.scene.stroke(&Stroke::new(1.3).with_dashes(0.0, [6.0, 3.0]), Affine::IDENTITY, theme.text_hi.multiply_alpha(0.7 * lit), None, &det);
+            }
+            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85 * lit), None, &input);
+        }
+        // The threshold, on the band's own level.
+        let hot = matches!(self.hot, Some(Hot::Hist(hb, true)) if hb == b) || matches!(self.drag, Some(Drag::Thresh { band, .. }) if band == b);
+        let ty = y(stage.threshold_db);
+        glow_stroke(cx, &Line::new((r.x0, ty), (r.x1, ty)), if hot { 2.0 } else { 1.4 }, theme.accent.multiply_alpha(lit), theme.accent, if hot { 4.0 } else { 2.0 });
+        cx.end_clip();
+    }
+
+    fn since_fresh(&self) -> f64 {
+        (self.last_fresh.elapsed().as_secs_f64() * 1000.0 / f64::from(HISTORY_SLICE_MS)).min(4.0)
     }
 
     fn draw_meters(&self, cx: &mut DrawCx<'_>) {
@@ -789,6 +851,10 @@ impl MbView {
     fn help_text(&self, host: &dyn ParamHost) -> Help {
         let layout = Self::layout(host);
         let number = |b: usize| layout.position(b).map_or(1, |p| p + 1);
+        if let Some(Drag::Thresh { band, .. }) = self.drag {
+            let t = Self::plain(host, &band_id(band, B_THRESH.id));
+            return Help::default().text("Threshold ").slot(format!("{t:.1} dB"), "−60.0 dB").text(" — where the band's level (dashed: its detector) crosses this line, its dynamics act. Shift is fine.");
+        }
         if let Some(Drag::Square { band, .. }) = self.drag {
             let s = Self::stage(host, band);
             return Help::default().text("Threshold ").slot(format!("{:.1} dB", s.threshold_db), "−60.0 dB").text("  ratio ").slot(format!("{:.1}:1", s.ratio), "100.0:1").text(" — across: threshold, up and down: ratio. Shift is fine.");
@@ -810,6 +876,11 @@ impl MbView {
             Some(Hot::Square(b)) => {
                 let s = Self::stage(host, b);
                 return Help::default().text("Threshold ").slot(format!("{:.1} dB", s.threshold_db), "−60.0 dB").text("  ratio ").slot(format!("{:.1}:1", s.ratio), "100.0:1").text(" — drag across for the threshold, up and down for the ratio; wheel: threshold; double-click resets.");
+            }
+            Some(Hot::Hist(b, line)) => {
+                let s = Self::stage(host, b);
+                let what = if s.detector == Detector::Peak { "the band's peaks" } else { "the band's detector (dashed)" };
+                return Help::default().text("Band history · threshold ").slot(format!("{:.1} dB", s.threshold_db), "−60.0 dB").text(format!(" — where {what} cross the line, it acts; the gain change hangs from the top at the same scale. {}", if line { "Drag the line." } else { "Drag the mint line for the threshold." }));
             }
             Some(Hot::Quad(_, q)) => return Help::default().text(format!("{} — {}", Quadrant::NAMES[q], quad_words(q))),
             Some(Hot::Det(_, d)) => return Help::default().text(format!("{} — {}", Detector::NAMES[d], det_words(d))),
@@ -909,6 +980,10 @@ impl MbView {
             }
             if card.square.contains(p) {
                 return Some(Hot::Square(card.band));
+            }
+            if let Some(h) = card.hist.filter(|h| h.contains(p)) {
+                let on_line = (p.y - hist_y(h, Self::plain(host, &band_id(card.band, B_THRESH.id)))).abs() < 8.0;
+                return Some(Hot::Hist(card.band, on_line));
             }
             if let Some(q) = card.quads.iter().position(|r| r.contains(p)) {
                 return Some(Hot::Quad(card.band, q));
@@ -1026,8 +1101,13 @@ impl MbView {
                 self.rail.remove_band(host, b);
                 true
             }
-            Some(Hot::Card(b)) => {
+            Some(Hot::Card(b)) | Some(Hot::Hist(b, false)) => {
                 self.rail.selected = b;
+                true
+            }
+            Some(Hot::Hist(b, true)) => {
+                host.begin_gesture(&band_id(b, B_THRESH.id));
+                self.drag = Some(Drag::Thresh { band: b, start: pos, thresh: Self::plain(host, &band_id(b, B_THRESH.id)) });
                 true
             }
             Some(Hot::Ext(b)) => {
@@ -1107,6 +1187,13 @@ impl MbView {
                 if self.rail.drag_to(host, pos, mods) {
                     return true;
                 }
+                if let Some(Drag::Thresh { band, start, thresh }) = self.drag {
+                    let k = if mods.fine() { 0.2 } else { 1.0 };
+                    let r = self.card(host, band).and_then(|c| c.hist).unwrap_or(Rect::new(0.0, 0.0, 1.0, 100.0));
+                    let d = ((start.y - pos.y) / hist_px_per_db(r)) as f32;
+                    Self::set_raw(host, &band_id(band, B_THRESH.id), B_THRESH.snap((thresh + d * k).clamp(B_THRESH.min, B_THRESH.max)));
+                    return true;
+                }
                 if let Some(Drag::Square { band, start, thresh, ratio }) = self.drag {
                     let k = if mods.fine() { 0.2 } else { 1.0 };
                     let (dx, dy) = ((pos.x - start.x) as f32, (start.y - pos.y) as f32);
@@ -1141,6 +1228,10 @@ impl MbView {
                         for id in [B_THRESH.id, B_RATIO.id] {
                             host.end_gesture(&band_id(band, id));
                         }
+                        true
+                    }
+                    Some(Drag::Thresh { band, .. }) => {
+                        host.end_gesture(&band_id(band, B_THRESH.id));
                         true
                     }
                     None => false,
@@ -1271,7 +1362,7 @@ impl View for MbView {
         let mut fresh = false;
         let history = &mut self.history;
         self.shared.history.read_since(&mut self.seen, |r| {
-            if history.len() == 64 {
+            if history.len() == HISTORY_RECORDS {
                 history.pop_front();
             }
             history.push_back(*r);
@@ -1311,7 +1402,7 @@ impl View for MbView {
         }
         let spectrum = self.spectrum.update(&self.shared, dt) | (self.eq_open && self.key_spectrum.update(&self.shared.key_spectrum, f64::from(self.shared.sample_rate.load()), dt));
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || moved || grew || spectrum || self.busy() || self.meters.iter().any(|&m| m > -149.0)
+        fresh || flowing || moved || grew || spectrum || self.busy() || self.drag.is_some() || self.meters.iter().any(|&m| m > -149.0)
     }
 }
 

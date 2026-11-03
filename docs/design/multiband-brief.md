@@ -71,4 +71,11 @@ sidechain source and EQ button, latency, Δ, bypass, MIX, OUTPUT. Meters IN, OUT
    the sidechain; dim while the source is Internal) and band Delta (any band's: only those bands,
    each as its output minus its input delayed alike, tested). 120 fps at 2× DPI with the panel's
    spectrum running.
-3. Each band's honest history on its card (the selected band's levels and gain over time).
+3. (done 2026-11-03) Each wide card's band history (the shared lane, honest peaks, 6 s, −48…0 dB):
+   the band's input peaks, its gain change from the top (a lift from the bottom) at the same
+   scale, its detector dashed when it is not Peak (`MbTelemetry::band_det_db`), and the threshold
+   as a line to drag. The card: square and history side by side, the seven dials in a row under
+   them. User report the same day: a 0–150 Hz band "has no indication of compression": measured,
+   the engine compressed it (−1.9 dB at those settings), but the gain bar spanned ±24 dB, so a
+   couple of dB was a sliver; it spans ±12 dB now, and the history shows the reduction at the
+   levels' scale.

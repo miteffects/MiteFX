@@ -15,7 +15,9 @@ pub mod record {
     /// Each band slot's input peak (dBFS) and gain change (signed dB).
     pub const BAND_IN: usize = 4;
     pub const BAND_GAIN: usize = BAND_IN + BANDS;
-    pub const WIDTH: usize = BAND_GAIN + BANDS;
+    /// Each band slot's detector level (dBFS): what its threshold is compared with.
+    pub const BAND_DET: usize = BAND_GAIN + BANDS;
+    pub const WIDTH: usize = BAND_DET + BANDS;
 }
 
 pub const HISTORY_SLICE_MS: f32 = 5.0;
@@ -102,6 +104,7 @@ impl MbEngine {
             }
             for b in 0..BANDS {
                 a[record::BAND_IN + b] = a[record::BAND_IN + b].max(t.band_in_db[b]);
+                a[record::BAND_DET + b] = a[record::BAND_DET + b].max(t.band_det_db[b]);
                 let g = t.band_gain_db[b];
                 if g.abs() > a[record::BAND_GAIN + b].abs() {
                     a[record::BAND_GAIN + b] = g;
@@ -125,6 +128,7 @@ fn empty_record() -> [f32; record::WIDTH] {
     }
     for b in 0..BANDS {
         r[record::BAND_IN + b] = MINUS_INFINITY_DB;
+        r[record::BAND_DET + b] = MINUS_INFINITY_DB;
     }
     r
 }

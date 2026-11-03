@@ -119,3 +119,14 @@ fn the_sidechain_source_eq_panel_and_a_bands_key_and_delta() {
     view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
     assert!(view.eq_area().is_none());
 }
+
+#[test]
+fn the_threshold_line_on_a_bands_history_is_a_handle() {
+    let (mut view, host) = setup();
+    let h = view.band_history(&host, 0).expect("a wide card has a history");
+    let y = view.history_y(h, -20.0);
+    let from = Point::new(h.center().x, y);
+    let to = Point::new(h.center().x, view.history_y(h, -32.0));
+    drag(&mut view, &host, from, to);
+    assert!((plain(&host, &band_id(0, B_THRESH.id)) + 32.0).abs() < 0.2, "{}", plain(&host, &band_id(0, B_THRESH.id)));
+}
