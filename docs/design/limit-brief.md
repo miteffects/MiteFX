@@ -297,6 +297,9 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
    only within half the shallower one (exact elsewhere, 0 at rest, never shallower than either,
    so the proof holds). A 4-norm was tried first and dropped: it took up to 0.66 dB more than
    needed under sustained limiting (Dense).
+**Slices 0–3 are the baseline (user, 2026-11-03): 4–8 are deferred**; their parameters stay at
+neutral defaults and the editor does not show them.
+
 4. Unity-gain audition (loudness-matched).
 5. Clipper stage, its line and grip.
 6. Transient protection.

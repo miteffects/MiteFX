@@ -239,6 +239,7 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
 
 **Status (2026-11-03): designed in-house** (user decision, as Sat): `docs/design/limit-brief.md` is the design and build spec, delivered in slices (full roster, user decision). Loudness numbers (M/S/I/LRA/TP/PLR) are allowed in the loudness column, an exception to the no-readouts rule (user, 2026-11-03).
 **Slice 1 built (2026-11-03):** the limiter, styles, true peak (with a guard after the down filter, which lifted peaks by up to 0.2 dB), 1×–16×, Delta, the history shared with Comp (`mite_ui::widgets::history`), meters and loudness numbers; every parameter declared (`tests/golden/mite_limit.params.txt`, state 1).
+**Baseline accepted (user, 2026-11-03):** slices 0–3 (core, loudness targets and preview, the gain shape); unity gain, the clipper, transient protection, dither/DC and the report are deferred. Next plugin: Mite Gate.
 
 ### 4. Mite Multiband. Rival: FabFilter Pro-MB
 
