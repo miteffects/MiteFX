@@ -96,6 +96,19 @@ impl DrawCx<'_> {
         self.fx.glow.pop_layer();
     }
 
+    /// Clips both the scene and the glow layer to `shape` until [`Self::end_clip`]. A clip on
+    /// the scene alone leaves glows uncut: a curve running off a plot glowed on across the
+    /// controls next to it (user, 2026-11-03).
+    pub fn begin_clip(&mut self, shape: &impl vello::kurbo::Shape) {
+        self.scene.push_clip_layer(vello::peniko::Fill::NonZero, vello::kurbo::Affine::IDENTITY, shape);
+        self.fx.glow.push_clip_layer(vello::peniko::Fill::NonZero, vello::kurbo::Affine::IDENTITY, shape);
+    }
+
+    pub fn end_clip(&mut self) {
+        self.fx.glow.pop_layer();
+        self.scene.pop_layer();
+    }
+
     /// Call right before drawing a glass panel: everything drawn so far is blurred (`blur` is
     /// the σ in logical px, `blur.*` in tokens.json) into `shape`, and drawing goes on above it.
     /// Returns `false` when the theme has no blur (high contrast): draw the panel opaque.

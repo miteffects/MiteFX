@@ -133,7 +133,7 @@ pub fn draw(cx: &mut DrawCx<'_>, r: Rect, curve: &Curve, ghost: Option<Model>, b
     let theme = cx.theme;
     let frame = RoundedRect::from_rect(r, 10.0);
     panel(cx.scene, frame, theme.well, theme.well_border);
-    cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &frame);
+    cx.begin_clip(&frame);
     let grid = |cx: &mut DrawCx<'_>, a: Point, b: Point, strong: bool| {
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if strong { theme.grid_major } else { theme.grid_minor }, None, &Line::new(a, b));
     };
@@ -178,5 +178,5 @@ pub fn draw(cx: &mut DrawCx<'_>, r: Rect, curve: &Curve, ghost: Option<Model>, b
             }
         }
     }
-    cx.scene.pop_layer();
+    cx.end_clip();
 }

@@ -233,9 +233,9 @@ impl KeyEq {
         for (i, &q) in pts.iter().enumerate() {
             if i == 0 { curve.move_to(q) } else { curve.line_to(q) }
         }
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(area, 8.0));
+        cx.begin_clip(&RoundedRect::from_rect(area, 8.0));
         glow_stroke(cx, &curve, 2.0, theme.curve, theme.curve, 4.0);
-        cx.scene.pop_layer();
+        cx.end_clip();
         for (b, band) in bands.iter().enumerate() {
             let p = node(area, band);
             let color = theme.band_ramp[0];

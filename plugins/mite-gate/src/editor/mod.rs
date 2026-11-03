@@ -477,7 +477,7 @@ impl GateView {
     fn draw_history(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let lane = history_lane();
-        cx.scene.push_layer(Fill::NonZero, mite_ui::peniko::Mix::Normal, 1.0, Affine::IDENTITY, &lane.rect());
+        cx.begin_clip(&lane.rect());
         lane.draw_grid(cx, self.range_target, self.headroom, lv_y);
         // The hysteresis band, between the close threshold and the threshold.
         let (t, close) = (Self::plain(cx.host, THRESHOLD.id), Self::close(cx.host));
@@ -513,7 +513,7 @@ impl GateView {
             }
             cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85), None, &input);
         }
-        cx.scene.pop_layer();
+        cx.end_clip();
         self.draw_thresholds(cx);
         self.range.draw(cx, self.range_shown);
     }
@@ -559,7 +559,8 @@ impl GateView {
         if s.mode != Mode::Expander {
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.09), None, &Rect::new(sq_x(close), r.y0, sq_x(t), r.y1));
         }
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(r, 10.0));
+        // Scene and glow both: the curves run off the square's edges.
+        cx.begin_clip(&RoundedRect::from_rect(r, 10.0));
         let curve = |from: f32, to: f32, open: bool| -> BezPath {
             let mut p = BezPath::new();
             let n = 160;
@@ -597,7 +598,7 @@ impl GateView {
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_strong, None, &Circle::new(p, 5.0));
             cx.glow().fill(Fill::NonZero, Affine::IDENTITY, theme.text_strong.multiply_alpha(0.5), None, &Circle::new(p, 7.0));
         }
-        cx.scene.pop_layer();
+        cx.end_clip();
         // The threshold node.
         let hot = matches!(self.hot, Some(Hot::Node)) || matches!(self.drag, Some(Drag::Threshold { square: true, .. }));
         let node = Point::new(sq_x(t), sq_y(t));

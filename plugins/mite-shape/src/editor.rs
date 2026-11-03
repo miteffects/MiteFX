@@ -644,7 +644,7 @@ impl ShapeView {
     fn draw_scope(&self, cx: &mut DrawCx<'_>, r: Rect, b: &BandShape, big: bool, handles: bool) {
         let theme = cx.theme;
         panel(cx.scene, RoundedRect::from_rect(r, 8.0), theme.well, theme.well_border);
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(r, 8.0));
+        cx.begin_clip(&RoundedRect::from_rect(r, 8.0));
         let la = Self::lookahead_ms(cx.host);
         let pts = simulate_hit(b, la, 2000.0, 0.0, SCOPE_MS);
         let t = f64::from(b.transient_ms);
@@ -709,7 +709,7 @@ impl ShapeView {
         }
         let gain = polyline(&pts.iter().map(|p| Point::new(sx(p.t_ms), gy(p.gain_db))).collect::<Vec<_>>());
         glow_stroke(cx, &gain, if big { 2.2 } else { 1.6 }, theme.curve, theme.curve, 3.0);
-        cx.scene.pop_layer();
+        cx.end_clip();
         if big {
             let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) };
             for (ms, s) in [(1.0, "1"), (10.0, "10"), (50.0, "50"), (200.0, "200 ms")] {
@@ -825,7 +825,7 @@ impl ShapeView {
             p
         };
         // The level lane, clipped to itself.
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, DISPLAY_TOP, HIST_W, l.sep));
+        cx.begin_clip(&Rect::new(0.0, DISPLAY_TOP, HIST_W, l.sep));
         let input = line(&|r| lv_y(level(r, record::IN)));
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.16), None, &closed(input.clone(), l.lv1));
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.55), None, &input);
@@ -854,7 +854,7 @@ impl ShapeView {
             taken.close_path();
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.gain_reduction.multiply_alpha(0.55), None, &taken);
         }
-        cx.scene.pop_layer();
+        cx.end_clip();
         if Self::on(cx.host, CLIP.id) {
             let ceiling = f64::from(Self::plain(cx.host, CLIP_CEILING.id));
             let y = lv_y(ceiling);
@@ -869,7 +869,7 @@ impl ShapeView {
         }
 
         // The gain lane: the shown band's gain, attack part solid, sustain part light.
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, l.sep, HIST_W, l.h1));
+        cx.begin_clip(&Rect::new(0.0, l.sep, HIST_W, l.h1));
         let shown = self.shown(cx.host, layout);
         let muted = !self.rail.audible(cx.host, layout, shown);
         let gain = |r: &[f32; record::WIDTH], b: usize| f64::from(r[record::GAIN_A + b]);
@@ -904,7 +904,7 @@ impl ShapeView {
                 cx.scene.stroke(&Stroke::new(1.4).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.text_hi.multiply_alpha(0.85), None, &second);
             }
         }
-        cx.scene.pop_layer();
+        cx.end_clip();
         // A tick for every hit, as tall as it was sharp.
         let mut ticks = BezPath::new();
         for (x, r) in &cols {
@@ -934,14 +934,14 @@ impl ShapeView {
             fill.line_to((pts[pts.len() - 1].x, ry + rh));
             fill.line_to((pts[0].x, ry + rh));
             fill.close_path();
-            cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &rail);
+            cx.begin_clip(&rail);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(if multi { 0.2 } else { 0.12 }), None, &fill);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.6), None, &curve);
             if multi && self.post.iter().any(|&v| v > SPEC_BOTTOM_DB) {
                 let out: Vec<Point> = (0..SPECTRUM_POINTS).map(|i| Point::new(pts[i].x, spec_y(self.post[i]))).collect();
                 glow_stroke(cx, &smooth_path(&out), 1.6, theme.curve, theme.curve, 2.4);
             }
-            cx.scene.pop_layer();
+            cx.end_clip();
         }
         self.rail.draw_over(cx, layout);
     }
@@ -1145,7 +1145,7 @@ impl ShapeView {
                     let gy = |g: f64| a.y0 + 70.0 - g * 3.2;
                     cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((a.x0, gy(0.0)), (a.x1, gy(0.0))));
                     let spec_y = |db: f32| a.y0 + 80.0 + f64::from(-db - 12.0) / 60.0 * 96.0;
-                    cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(a, 8.0));
+                    cx.begin_clip(&RoundedRect::from_rect(a, 8.0));
                     if self.spectrum.iter().any(|&v| v > SPEC_BOTTOM_DB) {
                         let pts: Vec<Point> = (0..SPECTRUM_POINTS).map(|i| Point::new(Self::filter_x(a, spectrum_point_freq(i)), spec_y(self.spectrum[i]).min(a.y1))).collect();
                         let heard: Vec<Point> = (0..SPECTRUM_POINTS)
@@ -1166,7 +1166,7 @@ impl ShapeView {
                         })
                         .collect();
                     glow_stroke(cx, &polyline(&curve), 2.0, theme.curve, theme.curve, 4.0);
-                    cx.scene.pop_layer();
+                    cx.end_clip();
                     for hp in [true, false] {
                         let c = Self::filter_node(cx.host, hp);
                         glow_fill(cx, &Circle::new(c, 7.0), theme.accent, 5.0);
@@ -1870,13 +1870,13 @@ impl View for ShapeView {
         let l = lanes(self.grow);
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, DISPLAY_TOP, HIST_W, HELP_TOP));
+        cx.begin_clip(&Rect::new(0.0, DISPLAY_TOP, HIST_W, HELP_TOP));
         self.draw_history(cx, &layout, &l);
         self.draw_rail(cx, &layout, &l);
         let cards = self.cards(&layout, &l);
         self.rail.draw_funnels(cx, &layout, &cards.iter().map(|c| c.rect).collect::<Vec<_>>(), l.fy, l.cy);
         self.draw_cards(cx, &layout, &cards);
-        cx.scene.pop_layer();
+        cx.end_clip();
         self.draw_meters(cx);
         self.draw_states(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));

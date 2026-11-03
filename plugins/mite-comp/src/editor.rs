@@ -963,7 +963,7 @@ impl CompView {
             p.close_path();
             p
         };
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(r, 10.0));
+        cx.begin_clip(&RoundedRect::from_rect(r, 10.0));
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.gain_reduction.multiply_alpha(0.20), None, &shade(&shape, true));
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.gain_up.multiply_alpha(0.22), None, &shade(&shape, false));
         if creating.is_some() {
@@ -977,7 +977,7 @@ impl CompView {
         }
         let curve = polyline(&points(stages, offset));
         glow_stroke(cx, &curve, 2.4, theme.curve, theme.curve, 5.0);
-        cx.scene.pop_layer();
+        cx.end_clip();
 
         // Threshold diamonds where each stage starts, on the curve the stages below it make; then
         // the nodes.
@@ -2321,9 +2321,9 @@ impl View for CompView {
         if let Some(h) = hole {
             cx.begin_glow_hole(h);
         }
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &hist_rect());
+        cx.begin_clip(&hist_rect());
         self.draw_history(cx, &stages);
-        cx.scene.pop_layer();
+        cx.end_clip();
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((HIST_W + 0.5, DISPLAY_TOP), (HIST_W + 0.5, HELP_TOP)));
         self.range.draw(cx, self.range_shown);
         self.draw_thresholds(cx, &stages);

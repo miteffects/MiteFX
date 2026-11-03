@@ -3476,13 +3476,13 @@ impl View for EqView {
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
         self.draw_grid(cx);
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &Rect::new(0.0, DISPLAY_TOP, PLOT_W, HELP_TOP));
+        cx.begin_clip(&Rect::new(0.0, DISPLAY_TOP, PLOT_W, HELP_TOP));
         self.draw_spectrum(cx);
         self.draw_masking(cx);
         self.draw_curves(cx, &bands);
         self.draw_match(cx);
         self.draw_grab(cx);
-        cx.scene.pop_layer();
+        cx.end_clip();
         self.draw_nodes(cx, &bands);
         self.meter.draw(cx);
         let r = self.meter.rect;

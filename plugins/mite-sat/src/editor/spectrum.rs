@@ -114,7 +114,7 @@ impl Spectrum {
         let inside: Vec<usize> = (0..SPECTRUM_POINTS).filter(|&i| (20.0..=20_000.0).contains(&spectrum_point_freq(i))).collect();
         let xs: Vec<f64> = inside.iter().map(|&i| freq_x(spectrum_point_freq(i))).collect();
         let at = |v: &[f32]| -> Vec<Point> { xs.iter().zip(&inside).map(|(&x, &i)| Point::new(x, y(v[i]))).collect() };
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &area);
+        cx.begin_clip(&area);
         // The input: a quiet filled shape.
         let pre_pts = at(pre);
         let pre_curve = smooth_path(&pre_pts);
@@ -139,6 +139,6 @@ impl Spectrum {
         if post.iter().any(|&v| v > BOTTOM_DB) {
             glow_stroke(cx, &smooth_path(&at(post)), 1.6, theme.curve, theme.curve, 2.4);
         }
-        cx.scene.pop_layer();
+        cx.end_clip();
     }
 }

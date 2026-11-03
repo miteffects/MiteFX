@@ -515,7 +515,7 @@ impl LimitView {
     fn draw_history(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let lane = history_lane();
-        cx.scene.push_layer(Fill::NonZero, mite_ui::peniko::Mix::Normal, 1.0, Affine::IDENTITY, &lane.rect());
+        cx.begin_clip(&lane.rect());
         lane.draw_grid(cx, self.range_target, headroom() as f32, lv_y);
         let cols = lane.columns(&self.history, self.seen, self.since_fresh());
         if cols.len() >= 2 {
@@ -546,7 +546,7 @@ impl LimitView {
             // The input's line on top of everything: always in view.
             cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85), None, &input);
         }
-        cx.scene.pop_layer();
+        cx.end_clip();
         self.draw_ceiling(cx);
         self.range.draw(cx, self.range_shown);
     }
