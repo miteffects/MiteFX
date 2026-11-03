@@ -77,10 +77,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("targets") {
         view.open_targets(&host);
     }
+    view.update_shape(&host);
     if let Ok(p) = std::env::var("SNAPSHOT_HOVER") {
         if let Some((x, y)) = p.split_once(',') {
             let pos = Point::new(x.trim().parse()?, y.trim().parse()?);
             view.event(&UiEvent::PointerMove { pos, mods }, &host);
+            view.update_shape(&host);
         }
     }
     let image = render_view(&mut view, &host, &theme_obj, scale)?;

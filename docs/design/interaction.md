@@ -484,6 +484,11 @@ a filtered or external key) as a dashed line: where it crosses a threshold, that
 
 - Styles: six icon buttons, each a drawing of its gain shape (Custom: sliders); click picks one.
   Custom adds the SLOW dial.
+- Gain shape (between the styles and the dials): the gain the limiter applies to a burst 6 dB
+  over the ceiling, from its own code. Hover a part to light it; drag the ramp sideways for the
+  lookahead (left: longer, 0.02 ms/px), the burst for the attack, the tail for the release
+  (right: longer, ×e per 120 px); Shift fine; wheel steps; double-click resets. Hovering a style
+  draws its shape as a dashed ghost.
 - Dials: LOOKAHEAD (the ramp and the latency; 0 is a clipper), ATTACK (the slow envelope's),
   RELEASE, LINK T, LINK R.
 - Meters: IN (after the gain), GR, OUT (true peak while True Peak is on) at the history's scale;

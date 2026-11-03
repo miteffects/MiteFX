@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_limit::editor::{memory_host, LimitView};
-use mite_limit::params::{CEILING, GAIN, OVERSAMPLING, PREVIEW, SLOW, STYLE, TARGET, TARGET_CUSTOM};
+use mite_limit::params::{ATTACK, CEILING, GAIN, LOOKAHEAD, OVERSAMPLING, PREVIEW, RELEASE, SLOW, STYLE, TARGET, TARGET_CUSTOM};
 use mite_limit::LimitShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -168,4 +168,35 @@ fn the_preview_button_switches_the_platform_preview() {
     assert_eq!(plain(&host, PREVIEW.id), 1.0);
     click(&mut view, &host, at);
     assert_eq!(plain(&host, PREVIEW.id), 0.0);
+}
+
+#[test]
+fn the_gain_shape_is_the_limiters_and_its_parts_are_handles() {
+    let (mut view, host, _) = setup();
+    view.update_shape(&host);
+    // The probe burst is 6 dB over: the shape holds −6 dB through it, rests at 0 before the ramp.
+    assert!((view.shape_gain_at(20.0) + 6.0).abs() < 0.05);
+    assert!(view.shape_gain_at(-5.0).abs() < 1e-3);
+    let y = view.shape_rect().center().y;
+    // The ramp: drag left for a longer lookahead (one undo step).
+    let ramp = Point::new(view.shape_x(-1.0), y);
+    drag(&mut view, &host, ramp, ramp - (50.0, 0.0), MODS);
+    assert!((plain(&host, LOOKAHEAD.id) - 3.0).abs() < 0.02, "{}", plain(&host, LOOKAHEAD.id));
+    undo(&mut view, &host);
+    assert_eq!(plain(&host, LOOKAHEAD.id), 2.0);
+    // The tail: drag right for a slower release; the shape follows.
+    view.update_shape(&host);
+    let before = view.shape_gain_at(150.0);
+    let tail = Point::new(view.shape_x(300.0), y);
+    drag(&mut view, &host, tail, tail + (120.0, 0.0), MODS);
+    let release = plain(&host, RELEASE.id);
+    assert!((release - 100.0 * std::f32::consts::E).abs() < 3.0, "{release}");
+    view.update_shape(&host);
+    assert!(view.shape_gain_at(150.0) < before - 0.5, "a slower release holds the gain down longer");
+    // The burst: attack; double-click resets.
+    let burst = Point::new(view.shape_x(25.0), y);
+    drag(&mut view, &host, burst, burst - (120.0, 0.0), MODS);
+    assert!(plain(&host, ATTACK.id) < 15.0);
+    view.event(&UiEvent::DoubleClick { pos: burst, mods: MODS }, &host);
+    assert_eq!(plain(&host, ATTACK.id), 30.0);
 }

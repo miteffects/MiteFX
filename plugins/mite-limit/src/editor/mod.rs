@@ -7,6 +7,8 @@
 //! the dials. On the right the meters (IN, GR, OUT) and the loudness column, the one place the
 //! suite shows numbers (user, 2026-11-03). Everything drawn comes from the engine's records.
 
+mod shape;
+
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -57,6 +59,12 @@ const STRIP_TOP: f64 = HIST_BOTTOM + 8.0;
 const STYLE_BUTTON: f64 = 40.0;
 const STYLE_X: f64 = 24.0;
 const DIAL_Y: f64 = STRIP_TOP + 70.0;
+/// The gain shape, between the styles and the dials.
+const SHAPE_RECT: Rect = Rect::new(176.0, STRIP_TOP + 16.0, 476.0, HELP_TOP - 14.0);
+/// Dragging the shape: lookahead ms per px (left: a longer ramp), and the attack's and release's
+/// factor per px (right: longer).
+const SHAPE_LOOKAHEAD_PER_PX: f32 = 0.02;
+const SHAPE_LOG_PER_PX: f32 = 1.0 / 120.0;
 const DIAL_D: f64 = 54.0;
 
 /// The meter column and the loudness column.
@@ -206,6 +214,8 @@ enum Drag {
     Ceiling { start: Point, ceiling: f32 },
     /// The waveform: gain, at the levels' scale (the input follows the pointer).
     Gain { start: Point, gain: f32 },
+    /// A part of the gain shape: its parameter, from its value at the start.
+    Shape { part: shape::Part, start: Point, value: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -213,6 +223,7 @@ enum Hot {
     Ceiling,
     History,
     Style(usize),
+    Shape(shape::Part),
     Loudness,
     Target,
     Preview,
@@ -240,6 +251,8 @@ pub struct LimitView {
     os_hit: Rect,
     /// Custom's target dial (shown on Custom only).
     custom_knob: Knob,
+    /// The gain shape the probe measured, and a hovered style's as a ghost.
+    shape: shape::Shape,
     history: VecDeque<[f32; record::WIDTH]>,
     seen: usize,
     /// IN L/R, GR L/R, OUT L/R as drawn.
@@ -288,6 +301,7 @@ impl LimitView {
             os_menu: None,
             target_menu: None,
             os_hit: Rect::ZERO,
+            shape: shape::Shape::default(),
             custom_knob: Knob::new(TARGET_CUSTOM, "TARGET", KnobKind::Unipolar, Point::new((LOUD_X0 + LOUD_X1) / 2.0, TARGET_Y + 138.0), 44.0),
             history: VecDeque::with_capacity(HISTORY_RECORDS),
             seen: 0,
@@ -349,6 +363,26 @@ impl LimitView {
     }
 
     /// The loudness numbers (a click resets them).
+    /// The gain shape's area, the x of a time on it (ms from the probe burst) and the gain it
+    /// shows there (tests and tools).
+    pub fn shape_rect(&self) -> Rect {
+        SHAPE_RECT
+    }
+
+    pub fn shape_x(&self, t_ms: f64) -> f64 {
+        shape::t_x(SHAPE_RECT, t_ms)
+    }
+
+    pub fn shape_gain_at(&self, t_ms: f32) -> f32 {
+        self.shape.gain_at(t_ms)
+    }
+
+    /// Recomputes the gain shape for the host's settings (tools render a single frame).
+    pub fn update_shape(&mut self, host: &dyn ParamHost) {
+        let ghost = self.ghost_style(host);
+        self.shape.update(&Self::core(host, None), Self::plain(host, LOOKAHEAD.id), ghost);
+    }
+
     pub fn loudness_rect(&self) -> Rect {
         Rect::new(LOUD_X0 - 8.0, DISPLAY_TOP + 8.0, LOUD_X1 + 8.0, TARGET_Y - 6.0)
     }
@@ -402,6 +436,28 @@ impl LimitView {
 
     fn style(host: &dyn ParamHost) -> usize {
         (Self::plain(host, STYLE.id).round().max(0.0) as usize).min(STYLE_NAMES.len() - 1)
+    }
+
+    /// The limiter's free settings as the host has them (`style` replaces the style: a ghost).
+    fn core(host: &dyn ParamHost, style: Option<usize>) -> mite_dsp::limit::Settings {
+        let s = settings(host);
+        mite_dsp::limit::Settings { attack_ms: s.attack_ms, release_ms: s.release_ms, style: style.unwrap_or(s.style), slow: s.slow, link_transients: s.link_transients, link_release: s.link_release }
+    }
+
+    /// A style being hovered that is not the current one: its shape is drawn as a ghost.
+    fn ghost_style(&self, host: &dyn ParamHost) -> Option<mite_dsp::limit::Settings> {
+        match self.hot {
+            Some(Hot::Style(i)) if i != Self::style(host) => Some(Self::core(host, Some(i))),
+            _ => None,
+        }
+    }
+
+    fn shape_spec(part: shape::Part) -> ParamSpec {
+        match part {
+            shape::Part::Ramp => LOOKAHEAD,
+            shape::Part::Burst => ATTACK,
+            shape::Part::Tail => RELEASE,
+        }
     }
 
     fn target(host: &dyn ParamHost) -> usize {
@@ -522,6 +578,11 @@ impl LimitView {
             let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, i == current, theme.accent);
             draw_glyph(cx.scene, glyph, r.center(), 24.0, ink, 1.6);
         }
+        let hot = match (self.drag, self.hot) {
+            (Some(Drag::Shape { part, .. }), _) | (None, Some(Hot::Shape(part))) => Some(part),
+            _ => None,
+        };
+        shape::draw(cx, SHAPE_RECT, &self.shape, hot);
         for k in &self.knobs {
             k.draw(cx);
         }
@@ -696,6 +757,7 @@ impl LimitView {
         let gain = Self::plain(host, GAIN.id);
         match self.drag {
             Some(Drag::Ceiling { .. }) => return Help::default().text("Ceiling ").slot(format!("{} dB", fmt_db(ceiling)), "−30.0 dB").text(" — nothing comes out above this line. Shift is fine."),
+            Some(Drag::Shape { part, .. }) => return Self::shape_help(host, part),
             Some(Drag::Gain { .. }) => return Help::default().text("Gain ").slot(format!("+{gain:.1} dB"), "+30.0 dB").text(" — the music follows the pointer; what rises over the ceiling is limited. Shift is fine."),
             None => {}
         }
@@ -740,6 +802,7 @@ impl LimitView {
                 }
             }
             Some(Hot::Style(i)) => return Help::default().text(format!("{} — {}", STYLE_NAMES[i], style_words(i))),
+            Some(Hot::Shape(part)) => return Self::shape_help(host, part),
             Some(Hot::Target) => return Help::default().text("Loudness target — the platform or delivery spec to master for; the bars mark its level, and PLATFORM GAIN is what it will do to this master."),
             Some(Hot::Preview) => {
                 let p = platform(Self::target(host), Self::plain(host, TARGET_CUSTOM.id));
@@ -777,6 +840,17 @@ impl LimitView {
         }
     }
 
+    fn shape_help(host: &dyn ParamHost, part: shape::Part) -> Help {
+        let spec = Self::shape_spec(part);
+        let v = Self::plain(host, spec.id);
+        let words = match part {
+            shape::Part::Ramp => " — the gain starts down this long before a peak (drag left for longer; it is the latency)",
+            shape::Part::Burst => " — how fast sustained limiting builds the slow hold after it (drag sideways)",
+            shape::Part::Tail => " — how fast the gain comes back after a peak (drag right for slower)",
+        };
+        Help::default().text(format!("{} ", spec.name)).slot(spec.format(v), spec.format(spec.max)).text(words)
+    }
+
     // ---- events -----------------------------------------------------------------------------
 
     /// Makes the strip's dials (SLOW only on Custom).
@@ -799,7 +873,7 @@ impl LimitView {
             .into_iter()
             .enumerate()
             .map(|(i, (spec, label, kind, curve))| {
-                let knob = Knob::new(spec, label, kind, Point::new(240.0 + i as f64 * 112.0, DIAL_Y), DIAL_D);
+                let knob = Knob::new(spec, label, kind, Point::new(526.0 + i as f64 * 80.0, DIAL_Y), DIAL_D);
                 match curve {
                     Some(c) => knob.with_curve(c),
                     None => knob,
@@ -819,6 +893,9 @@ impl LimitView {
         }
         if let Some(i) = (0..STYLE_GLYPHS.len()).find(|&i| Self::style_rect(i).contains(p)) {
             return Some(Hot::Style(i));
+        }
+        if let Some(part) = shape::part_at(SHAPE_RECT, p) {
+            return Some(Hot::Shape(part));
         }
         if self.os_hit.contains(p) {
             return Some(Hot::Oversampling);
@@ -866,6 +943,12 @@ impl LimitView {
             }
             Some(Hot::Style(i)) => {
                 Self::set(host, STYLE.id, i as f32);
+                true
+            }
+            Some(Hot::Shape(part)) => {
+                let id = Self::shape_spec(part).id;
+                host.begin_gesture(id);
+                self.drag = Some(Drag::Shape { part, start: pos, value: Self::plain(host, id) });
                 true
             }
             Some(Hot::Loudness) => {
@@ -947,6 +1030,16 @@ impl LimitView {
                         Self::set_raw(host, CEILING.id, CEILING.snap(db.clamp(CEILING.min, CEILING.max)));
                         return true;
                     }
+                    Some(Drag::Shape { part, start, value }) => {
+                        let spec = Self::shape_spec(part);
+                        let dx = (pos.x - start.x) as f32 * k;
+                        let v = match part {
+                            shape::Part::Ramp => value - dx * SHAPE_LOOKAHEAD_PER_PX,
+                            _ => value * (dx * SHAPE_LOG_PER_PX).exp(),
+                        };
+                        Self::set_raw(host, spec.id, spec.snap(v.clamp(spec.min, spec.max)));
+                        return true;
+                    }
                     Some(Drag::Gain { start, gain }) => {
                         let db = gain + ((start.y - pos.y) / px_per_db()) as f32 * k;
                         Self::set_raw(host, GAIN.id, GAIN.snap(db.clamp(GAIN.min, GAIN.max)));
@@ -972,6 +1065,10 @@ impl LimitView {
                     host.end_gesture(GAIN.id);
                     true
                 }
+                Some(Drag::Shape { part, .. }) => {
+                    host.end_gesture(Self::shape_spec(part).id);
+                    true
+                }
                 None => false,
             },
             UiEvent::DoubleClick { pos, .. } => match self.hot_at(host, pos) {
@@ -985,6 +1082,12 @@ impl LimitView {
                     Self::set(host, GAIN.id, GAIN.default);
                     true
                 }
+                Some(Hot::Shape(part)) => {
+                    self.end_drag(host);
+                    let spec = Self::shape_spec(part);
+                    Self::set(host, spec.id, spec.default);
+                    true
+                }
                 _ => false,
             },
             UiEvent::Wheel { pos, lines, mods } => match self.hot_at(host, pos) {
@@ -994,6 +1097,11 @@ impl LimitView {
                 }
                 Some(Hot::History) => {
                     Self::set(host, GAIN.id, GAIN.wheel(Self::plain(host, GAIN.id), lines, mods.fine()));
+                    true
+                }
+                Some(Hot::Shape(part)) => {
+                    let spec = Self::shape_spec(part);
+                    Self::set(host, spec.id, spec.wheel(Self::plain(host, spec.id), lines, mods.fine()));
                     true
                 }
                 _ => false,
@@ -1006,6 +1114,7 @@ impl LimitView {
         match self.drag.take() {
             Some(Drag::Ceiling { .. }) => host.end_gesture(CEILING.id),
             Some(Drag::Gain { .. }) => host.end_gesture(GAIN.id),
+            Some(Drag::Shape { part, .. }) => host.end_gesture(Self::shape_spec(part).id),
             None => {}
         }
     }
@@ -1131,7 +1240,9 @@ impl View for LimitView {
                 *m = if i == 2 || i == 3 { if t < *m { t } else { (*m + fall).min(t) } } else if t > *m { t } else { (*m - fall).max(t) };
             }
         }
+        let ghost = self.ghost_style(host);
+        let reshaped = self.shape.update(&Self::core(host, None), Self::plain(host, LOOKAHEAD.id), ghost);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || moved || busy || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > SILENT + 1.0 })
+        fresh || flowing || moved || busy || reshaped || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > SILENT + 1.0 })
     }
 }

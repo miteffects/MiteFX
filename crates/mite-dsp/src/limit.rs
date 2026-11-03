@@ -9,6 +9,7 @@
 //! m[n] = min(g[n … n+L−1])             sliding minimum over the lookahead (audio delayed L−1)
 //! s[n] = box_A₂(box_A₁(m))[n]           two boxcars, A₁ + A₂ − 1 = L: an S-shaped ramp
 //! r[n] = release(s)[n] ≤ s[n]           the styles shape the way back up, never above s
+//!                                       (fast and slow envelopes joined by a smooth max: no corner)
 //! y[n] = x[n − L + 1] · r[n]
 //! ```
 //!
@@ -188,7 +189,14 @@ impl Release {
         }
         let k = if s_db < self.slow { c.slow_down } else { c.slow_up * scale };
         self.slow = (self.slow + (s_db - self.slow) * k).min(0.0);
-        self.fast.min(c.slow * self.slow)
+        // The deeper of the two reductions, without a corner where they cross: a smooth maximum
+        // that rounds only within half the shallower depth of the crossing (exact elsewhere, 0 at
+        // rest), and is never shallower than either, so the gain stays at or under `fast` and so
+        // under the guaranteed one.
+        let (a, b) = (-self.fast, -(c.slow * self.slow));
+        let (deep, gap, w) = (a.max(b), (a - b).abs(), 0.5 * a.min(b));
+        let round = if gap < w { (w - gap) * (w - gap) / (4.0 * w) } else { 0.0 };
+        -(deep + round)
     }
 
     fn at_rest(&self) -> bool {
@@ -401,6 +409,39 @@ impl Limiter {
     }
 }
 
+/// The gain shape probe's burst: how far over the ceiling, and how long, ms.
+pub const PROBE_OVER_DB: f32 = 6.0;
+pub const PROBE_BURST_MS: f32 = 50.0;
+/// How long after the burst the probe runs, ms.
+pub const PROBE_TAIL_MS: f32 = 3000.0;
+
+/// The gain the limiter applies (dB, against time in ms from the burst's start) to a probe:
+/// a level 6 dB under the ceiling, then [`PROBE_OVER_DB`] over it for [`PROBE_BURST_MS`], then
+/// under again: the ramp before the burst, the hold through it, the release after. The same code
+/// as the audio, at `rate` (the editor's picture of the gain shape; allocates).
+pub fn probe(settings: &Settings, lookahead_ms: f32, rate: f32) -> Vec<(f32, f32)> {
+    let look = (lookahead_ms.max(0.0) * 0.001 * rate).round() as usize + 1;
+    let mut lim = Limiter::new(rate, look, 1);
+    lim.configure(look, false, *settings);
+    let ms = |n: usize| n as f32 * 1000.0 / rate;
+    let pre = look + (0.002 * rate) as usize;
+    let burst = (PROBE_BURST_MS * 0.001 * rate) as usize;
+    let tail = (PROBE_TAIL_MS * 0.001 * rate) as usize;
+    let (quiet, loud) = (crate::db_to_gain(-6.0), crate::db_to_gain(PROBE_OVER_DB));
+    // Settle on the quiet level first, then the burst; the output's time is the input's plus the
+    // latency, so the gain is reported at the input's time (burst start = 0).
+    let total = pre + burst + tail + lim.latency();
+    let mut out = Vec::with_capacity(total);
+    for n in 0..total {
+        let x = if n >= pre && n < pre + burst { loud } else { quiet };
+        let (_, g) = lim.process([x, x], false);
+        if let Some(input_n) = n.checked_sub(lim.latency()) {
+            out.push((ms(input_n) - ms(pre), crate::gain_to_db(g[0])));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,5 +623,26 @@ mod tests {
             let tp = crate::gain_to_db(tp);
             assert!(tp < 0.01, "{f} of the rate: {tp} dBTP");
         }
+    }
+
+    #[test]
+    fn the_probe_ramps_over_the_lookahead_holds_the_burst_and_comes_back() {
+        let rate = 48000.0;
+        let s = Settings { release_ms: 50.0, ..Settings::default() };
+        let shape = probe(&s, 2.0, rate);
+        let at = |t: f32| shape.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map_or(0.0, |p| p.1);
+        // Untouched before the lookahead, down by the excess on the burst, back after it.
+        assert!(at(-2.2).abs() < 1e-3, "{}", at(-2.2));
+        assert!(at(-1.0) < -0.5 && at(-1.0) > -5.5, "{}", at(-1.0));
+        assert!((at(0.0) + PROBE_OVER_DB).abs() < 0.05, "{}", at(0.0));
+        assert!((at(40.0) + PROBE_OVER_DB).abs() < 0.05);
+        assert!(at(PROBE_BURST_MS + 2000.0) > -0.2, "{}", at(PROBE_BURST_MS + 2000.0));
+        // A longer release comes back later.
+        let slow = probe(&Settings { release_ms: 400.0, ..s }, 2.0, rate);
+        let slow_at = |t: f32| slow.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map_or(0.0, |p| p.1);
+        assert!(slow_at(PROBE_BURST_MS + 100.0) < at(PROBE_BURST_MS + 100.0) - 1.0);
+        // No lookahead: no ramp, the gain drops on the burst itself.
+        let none = probe(&s, 0.0, rate);
+        assert!(none.iter().filter(|p| p.0 < 0.0).all(|p| p.1.abs() < 1e-3));
     }
 }

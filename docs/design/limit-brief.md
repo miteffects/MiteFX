@@ -86,8 +86,8 @@ bright square under a kick at every factor and style and fails without the guard
 
 Two envelopes in dB. The **fast** one drops with `s` at once and rises at the release. The
 **slow** one follows `s` down at the ATTACK time (sustained reduction builds it, a lone hit hardly
-does) and rises at the release × its ratio. The gain is `min(fast, share · slow)`, never above
-`s`. Program dependence: sustained reduction (the slow envelope) slows the fast release. A style
+does) and rises at the release × its ratio. The gain is the deeper of `fast` and `share · slow`,
+joined by a smooth maximum so there is no corner where they cross (slice 3), never above `s`. Program dependence: sustained reduction (the slow envelope) slows the fast release. A style
 is a row of numbers (as Comp's Characters): attack scale, release scale, slow share, slow ratio,
 program dependence (`mite_dsp::limit::STYLES`).
 
@@ -285,7 +285,18 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
    the preview, which plays that gain (300 ms glide). The column measures the master before the
    preview; the meters and the history show what is heard, and a speaker marks the history while
    it is on. Tested: a master 5 LU over Spotify is heard at −14 LUFS ±0.5.
-3. Gain shape probe in the shape panel, its flank gestures.
+3. Gain shape (done 2026-11-03): `mite_dsp::limit::probe` runs the limiter's own code (at 12 kHz,
+   the shape in ms unchanged; 1.3 ms a change, thinned to 500 points once) over a level 6 dB
+   under the ceiling, a 50 ms burst 6 dB over, and 3 s after. Drawn between the styles and the
+   dials on a fixed asinh time axis (4 ms knee: about linear near the burst, logarithmic in the
+   tail; no kinks, never rescaled while dragging): the burst shaded, its edges dashed, the gain
+   in the GR colour. Drag the ramp sideways for the lookahead, the burst for the attack, the
+   tail for the release (one undo step each; wheel; double-click resets); hovering a style
+   draws its shape as a dashed ghost. It showed a corner in the release where the fast and slow
+   envelopes cross (`min`): they are now joined by a smooth maximum of their depths that rounds
+   only within half the shallower one (exact elsewhere, 0 at rest, never shallower than either,
+   so the proof holds). A 4-norm was tried first and dropped: it took up to 0.66 dB more than
+   needed under sustained limiting (Dense).
 4. Unity-gain audition (loudness-matched).
 5. Clipper stage, its line and grip.
 6. Transient protection.
