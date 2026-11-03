@@ -3,7 +3,8 @@
 //!
 //!     cargo run -p mite_gate --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, expander, ducker, rms, delta, listen, source (the list open).
+//! SNAPSHOT_VARIANT: default, expander, ducker, rms, delta, listen, source (the list open), eq
+//! (the sidechain EQ open, two bands on).
 //! SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_RANGE=48 picks the level range.
 
 #[path = "common/music.rs"]
@@ -81,6 +82,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let theme_obj = Theme::load(theme, ACCENT);
     render_view(&mut view, &host, &theme_obj, 1.0)?;
     let mods = Modifiers::default();
+    if v("eq") {
+        host.set_plain(&key_id(0, K_ON.id), 1.0);
+        host.set_plain(&key_id(1, K_ON.id), 1.0);
+        host.set_plain(&key_id(1, K_GAIN.id), 6.0);
+        view.open_eq();
+    }
     if v("source") {
         let at = view.source_button().center();
         view.event(&UiEvent::PointerDown { pos: at, button: mite_ui::MouseButton::Left, mods }, &host);

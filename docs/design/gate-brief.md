@@ -109,7 +109,13 @@ the hysteresis band between the two thresholds is shaded in the accent.
    motion), the plugin with every parameter, external sidechain routing and the key EQ in the
    engine; the editor: history with the threshold and hysteresis grips, the transfer square,
    strip, meters, footer.
-2. The sidechain panel shared with Comp (`mite_ui`), Comp pixel-identical.
+2. (done 2026-11-03) The sidechain EQ shared with Comp: `mite_ui::widgets::key_eq` (`KeyEq`:
+   the well, the summed response from `analog_response_db`, a node per band; drag a node for its
+   frequency and gain, turning it on, as one undo step; double-click switches the band). Comp
+   draws through it (its panel equal within GPU noise). Past ±16 dB the curve now bends smoothly
+   (tanh) towards a level just beyond the well's edge: the old hard clamp at ±20 dB drew a flat
+   floor with a corner under a low cut. In Gate the EQ button beside the sidechain source opens
+   the panel over the history's bottom, short of the grips' column; Esc closes it.
 3. MIDI trigger output.
 
    Built: every parameter (state 1, the key bands Comp's ids and ranges, tested), the engine

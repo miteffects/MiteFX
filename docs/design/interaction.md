@@ -538,5 +538,6 @@ closes). Tested per record: a slice whose key reaches the threshold has the gate
 
 ### Footer and keys
 
-Sidechain source (Internal, External), latency, Listen, Δ, bypass, MIX, OUTPUT. ↑ ↓: threshold
-±1 dB (Shift ±0.1).
+Sidechain source (Internal, External), the sidechain EQ button (lit while a key band is on; it
+opens the panel: Comp's EQ well, shared), latency, Listen, Δ, bypass, MIX, OUTPUT. ↑ ↓:
+threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.

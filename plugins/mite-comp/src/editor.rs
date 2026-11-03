@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::dynamics::{curve_db, level_before, level_thresholds, order, partial_curve_db, simulate_stage, Detector, AUTO_SLOW_FACTOR, Quadrant, Smart, Stage, CHARACTERS, CUSTOM, INF_RATIO, KEY_BANDS, RATIO_MAX, STAGES, STYLES};
-use mite_dsp::eq::{analog_response_db, BandSettings, BandType};
+use mite_dsp::eq::BandSettings;
 use mite_dsp::oversample::Oversampler;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel};
@@ -1518,57 +1518,18 @@ impl CompView {
         let ink = icon_button(cx.scene, theme, listen, theme.panel_control, hot(listen), on, theme.sidechain);
         draw_glyph(cx.scene, glyph::LISTEN, listen.center(), 22.0, ink, 1.7);
         hits.listen = Some(listen);
-        // The detector EQ: its curve over 20 Hz…20 kHz, ±18 dB, and a node per band.
+        // The detector EQ: its curve and a node per band (shared with Gate).
         let area = Rect::new(rect.x0 + 202.0, rect.y0 + 14.0, rect.x1 - 16.0 - 36.0 - 16.0, rect.y1 - 14.0);
-        panel(cx.scene, RoundedRect::from_rect(area, 8.0), theme.well, theme.well_border);
-        let fx = |f: f64| area.x0 + area.width() * (f / 20.0).ln() / 1000f64.ln();
-        let gy = |g: f64| area.center().y - g * (area.height() / 2.0 - 12.0) / 18.0;
-        for f in [100.0, 1000.0, 10_000.0] {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((fx(f), area.y0), (fx(f), area.y1)));
-        }
-        for g in [-12.0, -6.0, 6.0, 12.0] {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((area.x0, gy(g)), (area.x1, gy(g))));
-        }
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_zero, None, &Line::new((area.x0, gy(0.0)), (area.x1, gy(0.0))));
-        cx.text.draw(cx.scene, "SIDECHAIN EQ", area.x0 + 10.0, area.y0 + 8.0, TextStyle::LABEL.sized(10.0), theme.text_lo, Align::Left);
-        let bands: Vec<BandSettings> = (0..KEY_BANDS).map(|b| Self::key_band(cx.host, b)).collect();
-        let pts: Vec<Point> = (0..=160)
-            .map(|i| {
-                let f = 20.0 * 1000f64.powf(i as f64 / 160.0);
-                let g: f64 = bands.iter().filter(|b| b.enabled).map(|b| analog_response_db(b, f)).sum();
-                Point::new(fx(f), gy(g.clamp(-20.0, 20.0)))
-            })
-            .collect();
-        cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &RoundedRect::from_rect(area, 8.0));
-        glow_stroke(cx, &polyline(&pts), 2.0, theme.curve, theme.curve, 4.0);
-        cx.scene.pop_layer();
-        for (b, band) in bands.iter().enumerate() {
-            let p = Self::key_node(area, band);
-            let color = theme.band_ramp[0];
-            let alpha = if band.enabled { 1.0 } else { 0.35 };
-            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(alpha), None, &Circle::new(p, 7.0));
-            glow_stroke(cx, &Circle::new(p, 6.0), 2.0, color.multiply_alpha(alpha), color, if band.enabled { 4.0 } else { 1.0 });
-            cx.text.draw(cx.scene, &(b + 1).to_string(), p.x, p.y - 5.5, TextStyle::LABEL.sized(8.0).weighted(800.0), theme.display, Align::Center);
-        }
+        mite_ui::widgets::KeyEq::new(area, KEY_BANDS).draw(cx);
         hits.key_area = Some(area);
     }
 
     fn key_band(host: &dyn ParamHost, b: usize) -> BandSettings {
-        let id = |p: &str| key_id(b, p);
-        BandSettings {
-            enabled: Self::on(host, &id(K_ON.id)),
-            kind: BandType::from_index(Self::index(host, &id(K_TYPE.id))),
-            freq: f64::from(Self::plain(host, &id(K_FREQ.id))),
-            gain_db: f64::from(Self::plain(host, &id(K_GAIN.id))),
-            q: f64::from(Self::plain(host, &id(K_Q.id))),
-            ..BandSettings::default()
-        }
+        mite_ui::widgets::key_eq::band(host, b)
     }
 
     fn key_node(area: Rect, band: &BandSettings) -> Point {
-        let x = area.x0 + area.width() * (band.freq / 20.0).ln() / 1000f64.ln();
-        let g = if band.kind.has_gain() { band.gain_db } else { 0.0 };
-        Point::new(x, area.center().y - g * (area.height() / 2.0 - 12.0) / 18.0)
+        mite_ui::widgets::key_eq::node(area, band)
     }
 
     fn draw_footer(&mut self, cx: &mut DrawCx<'_>) {

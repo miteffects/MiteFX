@@ -133,3 +133,31 @@ fn wheel_and_keys_move_the_threshold() {
     view.event(&UiEvent::KeyDown { key: Key::Up, mods: MODS }, &host);
     assert_eq!(plain(&host, THRESHOLD.id), -38.0);
 }
+
+#[test]
+fn the_sidechain_eq_opens_and_its_nodes_are_the_bands() {
+    use mite_gate::params::{key_id, K_FREQ, K_GAIN, K_ON};
+    let (mut view, host) = setup();
+    assert!(view.eq_area().is_none());
+    let at = view.eq_button().center();
+    click(&mut view, &host, at);
+    let area = view.eq_area().expect("the panel opens");
+    // Dragging band 2's node (a bell) turns it on and sets frequency and gain, as one step.
+    let node = view.eq_node(&host, 1);
+    assert!(area.contains(node));
+    let to = Point::new(area.x0 + area.width() * (2000.0f64 / 20.0).ln() / 1000f64.ln(), area.center().y - 6.0 * (area.height() / 2.0 - 12.0) / 18.0);
+    drag(&mut view, &host, node, to, MODS);
+    assert_eq!(plain(&host, &key_id(1, K_ON.id)), 1.0);
+    assert!((plain(&host, &key_id(1, K_FREQ.id)) - 2000.0).abs() < 20.0, "{}", plain(&host, &key_id(1, K_FREQ.id)));
+    assert!((plain(&host, &key_id(1, K_GAIN.id)) - 6.0).abs() < 0.1);
+    undo(&mut view, &host);
+    assert_eq!(plain(&host, &key_id(1, K_ON.id)), 0.0, "one undo takes it all back");
+    // Double-click a node: its band on, again: off.
+    let node = view.eq_node(&host, 0);
+    view.event(&UiEvent::DoubleClick { pos: node, mods: MODS }, &host);
+    assert_eq!(plain(&host, &key_id(0, K_ON.id)), 1.0);
+    view.event(&UiEvent::DoubleClick { pos: node, mods: MODS }, &host);
+    assert_eq!(plain(&host, &key_id(0, K_ON.id)), 0.0);
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
+    assert!(view.eq_area().is_none());
+}
