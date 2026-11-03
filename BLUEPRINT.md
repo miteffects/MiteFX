@@ -299,6 +299,8 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
   - Transient-triggered gating using the Shape detector.
   - Spectral gate mode for denoise.
 
+**Status (2026-11-03): designed in-house** (user decision): `docs/design/gate-brief.md`. Scope: Pro-G parity baseline (gate, expander, ducker; hysteresis, hold, lookahead; sidechain with Comp's EQ; MIDI trigger); main view in Comp's frame (history plus transfer square). Transient trigger and spectral denoise later. DSP in `mite_dsp::gate`.
+
 ### 10. Mite Shape. Rival: none from FabFilter (SPL Transient Designer, Kilohearts)
 
 Nova Shaper ported:
