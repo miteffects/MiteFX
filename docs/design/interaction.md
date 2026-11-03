@@ -492,6 +492,14 @@ a filtered or external key) as a dashed line: where it crosses a threshold, that
   (with bars, −40…0 LUFS), range, highest true peak, PLR. Click: resets the integration and the
   peak.
 
+### Target
+
+- The target list (under the numbers): Spotify, Apple Music, YouTube, Tidal, Amazon Music, Deezer,
+  EBU R128, ATSC A/85, Custom; hovering a row gives its level, its true-peak limit and whether it
+  turns quieter masters up. Custom brings a TARGET dial (−30…−5 LUFS) under the row.
+- The speaker button: the platform preview, a monitoring switch; while on, a speaker marks the
+  history and the help strip says so.
+
 ### Footer and keys
 
 Oversampling dropdown (1×–16×; the help strip gives the whole latency at each), latency, true

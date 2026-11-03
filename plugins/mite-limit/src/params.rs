@@ -198,6 +198,9 @@ impl LimitParams {
             oversampling: factor(self.oversampling.value()),
             delta: self.delta.value(),
             bypass: self.bypass.value(),
+            target: self.target.value().max(0) as usize,
+            target_custom: self.target_custom.value(),
+            preview: self.preview.value(),
         }
     }
 }

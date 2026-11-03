@@ -277,7 +277,14 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
    CPU (20 s of music, 9 dB in, true peak on): 1× 2.0 %, 2× 3.4 %, 4× 4.7 %, 8× 7.3 %, 16× 12.5 %
    of one core (the release's per-sample dB conversions are the next thing to make cheaper).
    Editor 120 fps at 1× and 2× DPI. clap-validator 34 passed, 0 failed.
-2. Loudness column: R128 numbers, targets, what the platform will do, preview.
+2. Loudness column (done 2026-11-03): the target list (`dsp::PLATFORMS`, in `params::TARGETS`'
+   order: level, true-peak limit, whether it turns quieter masters up, tolerance), its level
+   marked on the M and S bars, the integrated value in warn while over the target, true peak in
+   danger over the target's limit, PLATFORM GAIN (`dsp::platform_gain_db`: down to the target;
+   up only where the platform turns masters up, and no further than its true-peak limit), and
+   the preview, which plays that gain (300 ms glide). The column measures the master before the
+   preview; the meters and the history show what is heard, and a speaker marks the history while
+   it is on. Tested: a master 5 LU over Spotify is heard at −14 LUFS ±0.5.
 3. Gain shape probe in the shape panel, its flank gestures.
 4. Unity-gain audition (loudness-matched).
 5. Clipper stage, its line and grip.

@@ -3,7 +3,8 @@
 //!
 //!     cargo run -p mite_limit --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, hot (pushed 12 dB), delta, custom, oversampling, quiet (no gain).
+//! SNAPSHOT_VARIANT: default, hot (pushed 12 dB), delta, custom, oversampling, quiet (no gain),
+//! targets (the list open), preview (as Spotify plays it), custom-target, broadcast (EBU R128).
 //! SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_RANGE=24 picks the level range.
 
 #[path = "common/music.rs"]
@@ -40,6 +41,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("custom") {
         host.set_plain(STYLE.id, 5.0);
     }
+    if v("preview") {
+        host.set_plain(PREVIEW.id, 1.0);
+    }
+    if v("custom-target") {
+        host.set_plain(TARGET.id, 8.0);
+        host.set_plain(TARGET_CUSTOM.id, -10.0);
+    }
+    if v("broadcast") {
+        host.set_plain(TARGET.id, 6.0);
+    }
     let shared = Arc::new(LimitShared::new());
     let sample_rate = 48_000.0;
     shared.sample_rate.store(sample_rate);
@@ -62,6 +73,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mods = Modifiers::default();
     if v("oversampling") {
         view.open_oversampling(&host);
+    }
+    if v("targets") {
+        view.open_targets(&host);
     }
     if let Ok(p) = std::env::var("SNAPSHOT_HOVER") {
         if let Some((x, y)) = p.split_once(',') {

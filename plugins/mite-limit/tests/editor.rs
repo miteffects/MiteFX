@@ -1,12 +1,13 @@
 //! The Limit editor driven through events, against a stand-in host: the ceiling's grip, dragging
 //! the waveform for gain (one undo step each), the wheel, double-click resets, picking a style
-//! (Custom brings its SLOW dial), the oversampling list, the loudness reset and the keys.
+//! (Custom brings its SLOW dial), the oversampling list, the loudness reset and the keys; the
+//! loudness target list, Custom's target dial and the platform preview.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_limit::editor::{memory_host, LimitView};
-use mite_limit::params::{CEILING, GAIN, OVERSAMPLING, SLOW, STYLE};
+use mite_limit::params::{CEILING, GAIN, OVERSAMPLING, PREVIEW, SLOW, STYLE, TARGET, TARGET_CUSTOM};
 use mite_limit::LimitShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -136,4 +137,35 @@ fn arrow_keys_nudge_the_gain() {
     view.event(&UiEvent::KeyDown { key: Key::Up, mods: MODS }, &host);
     view.event(&UiEvent::KeyDown { key: Key::Up, mods: Modifiers { shift: true, ..MODS } }, &host);
     assert!((plain(&host, GAIN.id) - 1.1).abs() < 1e-4);
+}
+
+#[test]
+fn a_target_is_picked_from_its_list_and_custom_brings_its_dial() {
+    let (mut view, host, _) = setup();
+    assert!(view.custom_dial(&host).is_none());
+    let at = view.target_button().center();
+    click(&mut view, &host, at);
+    let rows = view.target_rows();
+    assert_eq!(rows.len(), 9);
+    click(&mut view, &host, rows[6].center());
+    assert_eq!(plain(&host, TARGET.id), 6.0, "EBU R128");
+    assert!(view.target_rows().is_empty(), "the list closes");
+    let at = view.target_button().center();
+    click(&mut view, &host, at);
+    let rows = view.target_rows();
+    click(&mut view, &host, rows[8].center());
+    let dial = view.custom_dial(&host).expect("Custom shows its dial");
+    view.event(&UiEvent::PointerMove { pos: dial, mods: MODS }, &host);
+    view.event(&UiEvent::Wheel { pos: dial, lines: 2.0, mods: MODS }, &host);
+    assert!((plain(&host, TARGET_CUSTOM.id) + 13.0).abs() < 0.01, "{}", plain(&host, TARGET_CUSTOM.id));
+}
+
+#[test]
+fn the_preview_button_switches_the_platform_preview() {
+    let (mut view, host, _) = setup();
+    let at = view.preview_button().center();
+    click(&mut view, &host, at);
+    assert_eq!(plain(&host, PREVIEW.id), 1.0);
+    click(&mut view, &host, at);
+    assert_eq!(plain(&host, PREVIEW.id), 0.0);
 }

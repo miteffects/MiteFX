@@ -24,7 +24,7 @@ use mite_ui::widgets::history::{self, HistoryLane};
 use mite_ui::widgets::{ease_range, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, RangePicker, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
-use crate::dsp::{record, FACTORS, HISTORY_RECORDS, HISTORY_SLICE_MS};
+use crate::dsp::{platform, record, FACTORS, HISTORY_RECORDS, HISTORY_SLICE_MS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::LimitShared;
@@ -80,6 +80,12 @@ const STYLE_GLYPHS: [&str; 6] = [
     "M12 3.5 L18.5 6.2 V11 C18.5 15.6 15.6 19 12 20.5 C8.4 19 5.5 15.6 5.5 11 V6.2 Z M8.5 11.5 L11 14 L15.5 9",
     "M6 4 V20 M12 4 V20 M18 4 V20 M4 8 H8 M10 15 H14 M16 10 H20",
 ];
+/// The platform preview: a speaker.
+const PREVIEW_GLYPH: &str = "M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z M15.5 9 C17 10.5 17 13.5 15.5 15 M18 6.5 C21 9.5 21 14.5 18 17.5";
+/// The loudness column's target row: the platform list, the preview button, Custom's dial.
+const TARGET_Y: f64 = DISPLAY_TOP + 392.0;
+const TARGET_BUTTON: Rect = Rect::new(LOUD_X0, TARGET_Y + 16.0, LOUD_X1 - 46.0, TARGET_Y + 54.0);
+const PREVIEW_BUTTON: Rect = Rect::new(LOUD_X1 - 38.0, TARGET_Y + 16.0, LOUD_X1, TARGET_Y + 54.0);
 const OVERSAMPLE_GLYPH: &str = "M3 12 C5.5 5 8.5 5 11 12 S16.5 19 19 12 M5 20 H6 M9 20 H10 M13 20 H14 M17 20 H18";
 
 thread_local! {
@@ -113,7 +119,7 @@ fn history_lane() -> HistoryLane {
 /// (0 dB unless the input goes over).
 fn lv_y(db: f32) -> f64 {
     let (range, head) = (level_range(), headroom());
-    DISPLAY_TOP + 24.0 + (head - f64::from(db)).clamp(-1.0, range + head + 1.0) / (range + head) * LEVEL_SPAN_PX
+    DISPLAY_TOP + 24.0 + (head - f64::from(db)).clamp(0.0, range + head) / (range + head) * LEVEL_SPAN_PX
 }
 
 /// Pixels per dB on the history: gain reduction is drawn at the levels' own scale.
@@ -188,6 +194,9 @@ pub fn settings(host: &dyn ParamHost) -> crate::dsp::LimitSettings {
         oversampling: factor(p(OVERSAMPLING.id).round() as i32),
         delta: p(DELTA.id) >= 0.5,
         bypass: p(BYPASS.id) >= 0.5,
+        target: p(TARGET.id).round().max(0.0) as usize,
+        target_custom: p(TARGET_CUSTOM.id),
+        preview: p(PREVIEW.id) >= 0.5,
     }
 }
 
@@ -205,6 +214,8 @@ enum Hot {
     History,
     Style(usize),
     Loudness,
+    Target,
+    Preview,
     Oversampling,
 }
 
@@ -225,7 +236,10 @@ pub struct LimitView {
     hot: Option<Hot>,
     drag: Option<Drag>,
     os_menu: Option<Dropdown>,
+    target_menu: Option<Dropdown>,
     os_hit: Rect,
+    /// Custom's target dial (shown on Custom only).
+    custom_knob: Knob,
     history: VecDeque<[f32; record::WIDTH]>,
     seen: usize,
     /// IN L/R, GR L/R, OUT L/R as drawn.
@@ -272,7 +286,9 @@ impl LimitView {
             hot: None,
             drag: None,
             os_menu: None,
+            target_menu: None,
             os_hit: Rect::ZERO,
+            custom_knob: Knob::new(TARGET_CUSTOM, "TARGET", KnobKind::Unipolar, Point::new((LOUD_X0 + LOUD_X1) / 2.0, TARGET_Y + 138.0), 44.0),
             history: VecDeque::with_capacity(HISTORY_RECORDS),
             seen: 0,
             meters: [SILENT, SILENT, 0.0, 0.0, SILENT, SILENT],
@@ -332,8 +348,30 @@ impl LimitView {
         self.knobs.iter().find(|k| k.id == id).map(|k| k.center)
     }
 
+    /// The loudness numbers (a click resets them).
     pub fn loudness_rect(&self) -> Rect {
-        Rect::new(LOUD_X0 - 8.0, DISPLAY_TOP + 8.0, LOUD_X1 + 8.0, HELP_TOP - 8.0)
+        Rect::new(LOUD_X0 - 8.0, DISPLAY_TOP + 8.0, LOUD_X1 + 8.0, TARGET_Y - 6.0)
+    }
+
+    pub fn target_button(&self) -> Rect {
+        TARGET_BUTTON
+    }
+
+    pub fn preview_button(&self) -> Rect {
+        PREVIEW_BUTTON
+    }
+
+    pub fn open_targets(&mut self, host: &dyn ParamHost) {
+        self.target_menu = Some(Self::target_list(host));
+    }
+
+    pub fn target_rows(&self) -> Vec<Rect> {
+        self.target_menu.as_ref().map(Dropdown::item_rects).unwrap_or_default()
+    }
+
+    /// Whether Custom's dial is in use (tests and tools).
+    pub fn custom_dial(&self, host: &dyn ParamHost) -> Option<Point> {
+        Self::custom(host).then_some(self.custom_knob.center)
     }
 
     pub fn open_oversampling(&mut self, host: &dyn ParamHost) {
@@ -364,6 +402,18 @@ impl LimitView {
 
     fn style(host: &dyn ParamHost) -> usize {
         (Self::plain(host, STYLE.id).round().max(0.0) as usize).min(STYLE_NAMES.len() - 1)
+    }
+
+    fn target(host: &dyn ParamHost) -> usize {
+        (Self::plain(host, TARGET.id).round().max(0.0) as usize).min(TARGETS.len() - 1)
+    }
+
+    fn custom(host: &dyn ParamHost) -> bool {
+        Self::target(host) == TARGETS.len() - 1
+    }
+
+    fn target_list(host: &dyn ParamHost) -> Dropdown {
+        Dropdown::new(TARGET_BUTTON, &TARGETS, Self::target(host), (DISPLAY_TOP, FOOTER_TOP)).with_min_width(LOUD_X1 - LOUD_X0)
     }
 
     fn os_list(host: &dyn ParamHost) -> Dropdown {
@@ -520,6 +570,8 @@ impl LimitView {
         let theme = cx.theme;
         let tap = &self.shared.loudness;
         let (m, s, i, lra, tp) = (tap.momentary.load(), tap.short_term.load(), tap.integrated.load(), tap.range.load(), tap.true_peak_max.load());
+        let target = platform(Self::target(cx.host), Self::plain(cx.host, TARGET_CUSTOM.id));
+        let measured = i > SILENCE_LUFS + 1.0;
         let hot = self.hot == Some(Hot::Loudness);
         let label = TextStyle::LABEL.sized(9.0);
         let number = |size: f32| TextStyle { tabular: true, ..TextStyle::BODY.sized(size).weighted(700.0) };
@@ -529,7 +581,9 @@ impl LimitView {
         cx.text.draw(cx.scene, "INTEGRATED", LOUD_X0, y, label, theme.text_lo, Align::Left);
         cx.text.draw(cx.scene, "LUFS", LOUD_X1, y, label, theme.text_lo, Align::Right);
         y += 14.0;
-        cx.text.draw(cx.scene, &fmt_db(i), LOUD_X1, y, number(30.0), ink, Align::Right);
+        // Over the target (the platform will turn it down) in warn.
+        let over = measured && i > target.lufs + target.tolerance;
+        cx.text.draw(cx.scene, &fmt_db(i), LOUD_X1, y, number(30.0), if over { theme.warn } else { ink }, Align::Right);
         y += 58.0;
         // Momentary and short-term: a value and a bar (−40…0 LUFS).
         for (name, v) in [("MOMENTARY", m), ("SHORT-TERM", s)] {
@@ -543,6 +597,9 @@ impl LimitView {
                 let fill = Gradient::new_linear((bar.x0, 0.0), (bar.x1, 0.0)).with_stops([theme.curve.multiply_alpha(0.35), theme.curve]);
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &fill, None, &RoundedRect::from_rect(lit, 2.0));
             }
+            // The target, marked.
+            let tx = bar.x0 + bar.width() * ((f64::from(target.lufs) + 40.0) / 40.0).clamp(0.0, 1.0);
+            cx.scene.stroke(&Stroke::new(2.0).with_caps(Cap::Round), Affine::IDENTITY, theme.accent, None, &Line::new((tx, bar.y0 - 3.0), (tx, bar.y1 + 3.0)));
             y += 50.0;
         }
         y += 10.0;
@@ -551,7 +608,7 @@ impl LimitView {
         let ceiling = Self::plain(cx.host, CEILING.id);
         for (name, unit, v, color) in [
             ("RANGE", "LU", if lra > 0.0 || i > SILENCE_LUFS + 1.0 { format!("{lra:.1}") } else { "—".to_owned() }, ink),
-            ("TRUE PEAK", "dBTP", fmt_db(tp), if tp > ceiling + 0.05 { theme.danger } else { ink }),
+            ("TRUE PEAK", "dBTP", fmt_db(tp), if tp > ceiling + 0.05 || target.true_peak.is_some_and(|l| tp > l + 0.05) { theme.danger } else { ink }),
             ("PLR", "dB", if plr > SILENCE_LUFS { format!("{plr:.1}") } else { "—".to_owned() }, ink),
         ] {
             cx.text.draw(cx.scene, name, LOUD_X0, y, label, theme.text_lo, Align::Left);
@@ -562,6 +619,25 @@ impl LimitView {
         if hot {
             let r = RoundedRect::from_rect(self.loudness_rect(), 8.0);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.5), None, &r);
+        }
+
+        // The target: which platform, what it will do, and the preview.
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((LOUD_X0, TARGET_Y - 2.5), (LOUD_X1, TARGET_Y - 2.5)));
+        cx.text.draw(cx.scene, "TARGET", LOUD_X0, TARGET_Y + 2.0, label, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, &format!("{} LUFS", fmt_db(target.lufs)), LOUD_X1, TARGET_Y + 2.0, label, theme.text_lo, Align::Right);
+        let hot_t = self.hot == Some(Hot::Target);
+        draw_dropdown_button(cx, TARGET_BUTTON, target.name, self.target_menu.is_some(), hot_t, |_, _| {});
+        let preview = Self::on(cx.host, PREVIEW.id);
+        let ink_p = icon_button(cx.scene, theme, PREVIEW_BUTTON, theme.panel_control, self.hot == Some(Hot::Preview), preview, theme.accent);
+        draw_glyph(cx.scene, PREVIEW_GLYPH, PREVIEW_BUTTON.center(), 22.0, ink_p, 1.6);
+        let gain = tap.platform_gain.load();
+        let y = TARGET_Y + 70.0;
+        cx.text.draw(cx.scene, "PLATFORM GAIN", LOUD_X0, y, label, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, "dB", LOUD_X1, y + 18.0, label, theme.text_lo, Align::Right);
+        let shown = if measured { if gain.abs() < 0.05 { "0.0".to_owned() } else { fmt_db(gain) } } else { "—".to_owned() };
+        cx.text.draw(cx.scene, &shown, LOUD_X1 - 34.0, y + 13.0, number(15.0), ink, Align::Right);
+        if Self::custom(cx.host) {
+            self.custom_knob.draw(cx);
         }
     }
 
@@ -603,6 +679,14 @@ impl LimitView {
             glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
             mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Delta, r.center(), theme.accent);
         }
+        if Self::on(cx.host, PREVIEW.id) {
+            // Heard as the platform plays it: say so where the output is drawn.
+            let x = if Self::on(cx.host, DELTA.id) { HIST_W - 100.0 } else { HIST_W - 56.0 };
+            let r = RoundedRect::from_rect(Rect::new(x, DISPLAY_TOP + 10.0, x + 36.0, DISPLAY_TOP + 46.0), 10.0);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.18), None, &r);
+            glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
+            draw_glyph(cx.scene, PREVIEW_GLYPH, r.center(), 20.0, theme.accent, 1.6);
+        }
     }
 
     // ---- help -------------------------------------------------------------------------------
@@ -614,6 +698,14 @@ impl LimitView {
             Some(Drag::Ceiling { .. }) => return Help::default().text("Ceiling ").slot(format!("{} dB", fmt_db(ceiling)), "−30.0 dB").text(" — nothing comes out above this line. Shift is fine."),
             Some(Drag::Gain { .. }) => return Help::default().text("Gain ").slot(format!("+{gain:.1} dB"), "+30.0 dB").text(" — the music follows the pointer; what rises over the ceiling is limited. Shift is fine."),
             None => {}
+        }
+        if let Some(list) = &self.target_menu {
+            if let Some(k) = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))) {
+                let p = platform(k, Self::plain(host, TARGET_CUSTOM.id));
+                let tp = p.true_peak.map_or("no true-peak limit".to_owned(), |l| format!("true peak at most {} dBTP", fmt_db(l)));
+                let how = if p.turns_up { "turns louder masters down and quieter ones up (as far as their peaks allow)" } else { "turns louder masters down, leaves quieter ones" };
+                return Help::default().text(format!("{} — {} LUFS integrated, {tp}; {how}", p.name, fmt_db(p.lufs)));
+            }
         }
         if let Some(list) = &self.os_menu {
             let fs = f64::from(self.shared.sample_rate.load()).max(1.0);
@@ -648,6 +740,13 @@ impl LimitView {
                 }
             }
             Some(Hot::Style(i)) => return Help::default().text(format!("{} — {}", STYLE_NAMES[i], style_words(i))),
+            Some(Hot::Target) => return Help::default().text("Loudness target — the platform or delivery spec to master for; the bars mark its level, and PLATFORM GAIN is what it will do to this master."),
+            Some(Hot::Preview) => {
+                let p = platform(Self::target(host), Self::plain(host, TARGET_CUSTOM.id));
+                let g = self.shared.loudness.platform_gain.load();
+                let what = if g < -0.05 { format!("plays it {:.1} dB quieter", -g) } else if g > 0.05 { format!("plays it {g:.1} dB louder") } else { "plays it as it is".to_owned() };
+                return Help::default().text(format!("Preview — hear it as {} plays it: it {what}. A monitoring switch: turn it off before you render.", p.name));
+            }
             Some(Hot::Loudness) => return Help::default().text("Loudness of the output, as EBU R128 measures it: momentary (400 ms), short-term (3 s), integrated since the last reset, its range, the highest true peak, and peak to loudness. Click to reset."),
             Some(Hot::Oversampling) => return Help::default().text("Oversampling — how many times faster the limiter runs, so its fast gain changes do not fold back into the audible band."),
             None => {}
@@ -659,8 +758,17 @@ impl LimitView {
             let v = Self::plain(host, &k.id);
             return Help::default().text(format!("{} ", k.spec.name)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(knob_words(k.spec.id));
         }
+        if Self::custom(host) && self.pointer.is_some_and(|p| self.custom_knob.bounds().contains(p)) {
+            let v = Self::plain(host, TARGET_CUSTOM.id);
+            return Help::default().text("Custom target ").slot(format!("{} LUFS", fmt_db(v)), "−30.0 LUFS").text(" — the integrated loudness to master for; louder is turned down to it.");
+        }
         if let Some(h) = self.session.help() {
             return h;
+        }
+        if Self::on(host, PREVIEW.id) {
+            let p = platform(Self::target(host), Self::plain(host, TARGET_CUSTOM.id));
+            let g = self.shared.loudness.platform_gain.load();
+            return Help::default().text(format!("Preview: heard as {} plays it ", p.name)).slot(format!("{} dB", fmt_db(g)), "−30.0 dB").text(" — the meters show what you hear, the loudness column reads the master. Turn it off before you render.");
         }
         if gain == 0.0 {
             Help::default().text("Drag the waveform up (or turn GAIN) to push the music into the ceiling. The silver line is the ceiling: drag its grip.")
@@ -702,7 +810,7 @@ impl LimitView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.knobs.iter().any(Knob::is_dragging) || self.custom_knob.is_dragging() || self.footer.busy()
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
@@ -714,6 +822,12 @@ impl LimitView {
         }
         if self.os_hit.contains(p) {
             return Some(Hot::Oversampling);
+        }
+        if TARGET_BUTTON.contains(p) {
+            return Some(Hot::Target);
+        }
+        if PREVIEW_BUTTON.contains(p) {
+            return Some(Hot::Preview);
         }
         if self.loudness_rect().contains(p) {
             return Some(Hot::Loudness);
@@ -762,6 +876,14 @@ impl LimitView {
                 self.os_menu = Some(Self::os_list(host));
                 true
             }
+            Some(Hot::Target) => {
+                self.target_menu = Some(Self::target_list(host));
+                true
+            }
+            Some(Hot::Preview) => {
+                Self::set(host, PREVIEW.id, if Self::on(host, PREVIEW.id) { 0.0 } else { 1.0 });
+                true
+            }
             None => false,
         }
     }
@@ -784,8 +906,25 @@ impl LimitView {
             }
             return true;
         }
+        if let Some(list) = &mut self.target_menu {
+            if let UiEvent::PointerMove { pos, .. } = *event {
+                self.pointer = Some(pos);
+            }
+            match list.event(event) {
+                DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) => {
+                    self.target_menu = None;
+                    Self::set(host, TARGET.id, i as f32);
+                }
+                DropdownEvent::Closed => self.target_menu = None,
+            }
+            return true;
+        }
         if let Some(answer) = self.session.event(event, host) {
             return answer;
+        }
+        if Self::custom(host) && self.custom_knob.event(event, host) {
+            return true;
         }
         if self.range.event(event, self.range_shown) {
             return true;
@@ -920,6 +1059,9 @@ impl View for LimitView {
         self.draw_states(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
         self.draw_footer(cx);
+        if let Some(list) = &self.target_menu {
+            list.draw(cx, theme.accent, |_, _, _, _| {});
+        }
         self.range.draw_menu(cx);
         self.session.draw_menu(cx);
     }
@@ -957,7 +1099,8 @@ impl View for LimitView {
         // The level range: Auto fits the music (its quiet tenth, silence aside), never so narrow
         // that the ceiling falls off it; a picked range is kept. It glides.
         let ceiling = -Self::plain(host, CEILING.id) + 3.0;
-        let mut levels: Vec<f32> = self.history.iter().rev().take(1200).map(|r| r[record::IN].max(r[record::IN + 1])).filter(|&l| l > -80.0).collect();
+        // The quieter of what goes in and what comes out (the preview can play it lower).
+        let mut levels: Vec<f32> = self.history.iter().rev().take(1200).map(|r| r[record::IN].max(r[record::IN + 1]).min(r[record::OUT].max(r[record::OUT + 1]))).filter(|&l| l > -80.0).collect();
         let content = if levels.len() > 50 {
             levels.sort_by(f32::total_cmp);
             -levels[levels.len() / 10] + 3.0

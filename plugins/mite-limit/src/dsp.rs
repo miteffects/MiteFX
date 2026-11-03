@@ -59,8 +59,62 @@ const GLIDE_MS: f32 = 20.0;
 /// The guard's lookahead, ms, and release.
 const GUARD_MS: f32 = 0.5;
 const GUARD_RELEASE_MS: f32 = 20.0;
+/// The platform preview's glide, ms (the integrated loudness it follows moves slowly).
+const PREVIEW_MS: f32 = 300.0;
 /// The oversampling factors, in the parameter's order.
 pub const FACTORS: [usize; 5] = [1, 2, 4, 8, 16];
+
+/// A loudness target: a streaming platform's normalisation or a broadcast delivery spec
+/// (brief §3.3; values as published in 2026, reviewed yearly).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Platform {
+    pub name: &'static str,
+    /// The integrated loudness it plays at, LUFS.
+    pub lufs: f32,
+    /// The highest true peak it accepts, dBTP.
+    pub true_peak: Option<f32>,
+    /// Whether it turns a quieter master up (only as far as its true-peak limit allows).
+    pub turns_up: bool,
+    /// How far off its target counts as on it, LU.
+    pub tolerance: f32,
+}
+
+/// The targets, in `params::TARGETS`' frozen order (the last, Custom, takes the custom dial).
+pub const PLATFORMS: [Platform; 9] = [
+    Platform { name: "Spotify", lufs: -14.0, true_peak: Some(-1.0), turns_up: true, tolerance: 1.0 },
+    Platform { name: "Apple Music", lufs: -16.0, true_peak: Some(-1.0), turns_up: true, tolerance: 1.0 },
+    Platform { name: "YouTube", lufs: -14.0, true_peak: None, turns_up: false, tolerance: 1.0 },
+    Platform { name: "Tidal", lufs: -14.0, true_peak: None, turns_up: false, tolerance: 1.0 },
+    Platform { name: "Amazon Music", lufs: -14.0, true_peak: Some(-2.0), turns_up: false, tolerance: 1.0 },
+    Platform { name: "Deezer", lufs: -15.0, true_peak: None, turns_up: false, tolerance: 1.0 },
+    Platform { name: "EBU R128", lufs: -23.0, true_peak: Some(-1.0), turns_up: true, tolerance: 0.5 },
+    Platform { name: "ATSC A/85", lufs: -24.0, true_peak: Some(-2.0), turns_up: true, tolerance: 2.0 },
+    Platform { name: "Custom", lufs: -14.0, true_peak: Some(-1.0), turns_up: false, tolerance: 1.0 },
+];
+
+/// The target `index` with the custom dial's level for Custom.
+pub fn platform(index: usize, custom_lufs: f32) -> Platform {
+    let p = PLATFORMS[index.min(PLATFORMS.len() - 1)];
+    if index >= PLATFORMS.len() - 1 { Platform { lufs: custom_lufs, ..p } } else { p }
+}
+
+/// The gain the platform would play a master at, dB: down to its target when louder; up to it
+/// when quieter only if it turns masters up, and then no further than its true-peak limit
+/// allows. 0 while nothing has been measured.
+pub fn platform_gain_db(p: &Platform, integrated: f32, true_peak: f32) -> f32 {
+    if integrated <= SILENCE_LUFS + 1.0 {
+        return 0.0;
+    }
+    let want = p.lufs - integrated;
+    if want <= 0.0 {
+        return want;
+    }
+    if !p.turns_up {
+        return 0.0;
+    }
+    let room = p.true_peak.map_or(want, |limit| (limit - true_peak).max(0.0));
+    want.min(room)
+}
 
 /// What the parameters set.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -80,6 +134,10 @@ pub struct LimitSettings {
     pub oversampling: usize,
     pub delta: bool,
     pub bypass: bool,
+    /// The loudness target (`PLATFORMS`), Custom's level, and the platform preview (monitoring).
+    pub target: usize,
+    pub target_custom: f32,
+    pub preview: bool,
 }
 
 impl Default for LimitSettings {
@@ -98,6 +156,9 @@ impl Default for LimitSettings {
             oversampling: 2,
             delta: false,
             bypass: false,
+            target: 0,
+            target_custom: -14.0,
+            preview: false,
         }
     }
 }
@@ -153,6 +214,8 @@ pub struct LoudnessTap {
     pub range: AtomicF32,
     /// The highest true peak out since the last reset, dBTP.
     pub true_peak_max: AtomicF32,
+    /// The gain the chosen platform would play this master at, dB (what the preview plays).
+    pub platform_gain: AtomicF32,
     /// Set by the editor: restart the integrated loudness, the range and the peak.
     pub reset: AtomicBool,
 }
@@ -165,6 +228,7 @@ impl LoudnessTap {
             integrated: AtomicF32::new(SILENCE_LUFS),
             range: AtomicF32::new(0.0),
             true_peak_max: AtomicF32::new(MINUS_INFINITY_DB),
+            platform_gain: AtomicF32::new(0.0),
             reset: AtomicBool::new(false),
         }
     }
@@ -196,6 +260,8 @@ pub struct LimitEngine {
     ceiling: LinearSmoother,
     delta: LinearSmoother,
     bypass: LinearSmoother,
+    /// The platform preview's gain (1 while off).
+    preview: LinearSmoother,
     /// The structure switch: fades out, reconfigures, fades back in.
     dip: LinearSmoother,
     active: LimitSettings,
@@ -204,6 +270,8 @@ pub struct LimitEngine {
     in_meter: [TruePeak; 2],
     loudness: Loudness,
     tp_max: f32,
+    /// The master's true peak over the slice so far (linear).
+    slice_tp: f32,
     slice_len: usize,
     slice_pos: usize,
     acc: [f32; record::WIDTH],
@@ -226,12 +294,14 @@ impl LimitEngine {
             ceiling: LinearSmoother::new(1.0),
             delta: LinearSmoother::new(0.0),
             bypass: LinearSmoother::new(0.0),
+            preview: LinearSmoother::new(1.0),
             dip: LinearSmoother::new(1.0),
             active: *s,
             meter: [TruePeak::new(4), TruePeak::new(4)],
             in_meter: [TruePeak::new(4), TruePeak::new(4)],
             loudness: Loudness::new(f64::from(sample_rate)),
             tp_max: MINUS_INFINITY_DB,
+            slice_tp: 0.0,
             slice_len: 1,
             slice_pos: 0,
             acc: empty_record(),
@@ -261,6 +331,7 @@ impl LimitEngine {
         for sm in [&mut self.gain, &mut self.ceiling] {
             sm.set_ramp(sample_rate, GLIDE_MS);
         }
+        self.preview.set_ramp(sample_rate, PREVIEW_MS);
         self.reset(s);
     }
 
@@ -274,12 +345,14 @@ impl LimitEngine {
         self.ceiling.reset(db_to_gain(s.ceiling_db));
         self.delta.reset(if s.delta { 1.0 } else { 0.0 });
         self.bypass.reset(if s.bypass { 1.0 } else { 0.0 });
+        self.preview.reset(1.0);
         self.dip.reset(1.0);
         for m in self.meter.iter_mut().chain(&mut self.in_meter) {
             m.reset();
         }
         self.loudness.reset();
         self.tp_max = MINUS_INFINITY_DB;
+        self.slice_tp = 0.0;
         self.slice_pos = 0;
         self.acc = empty_record();
     }
@@ -324,7 +397,11 @@ impl LimitEngine {
         if tap.reset.swap(false, Ordering::Relaxed) {
             self.loudness.reset_integration();
             self.tp_max = MINUS_INFINITY_DB;
+            self.slice_tp = 0.0;
         }
+        // What the platform does, from the master as measured so far (before the preview).
+        let platform_db = platform_gain_db(&platform(s.target, s.target_custom), self.loudness.integrated(), self.tp_max);
+        self.preview.set_target(if s.preview { db_to_gain(platform_db) } else { 1.0 });
 
         let mut start = 0;
         while start < len {
@@ -396,7 +473,7 @@ impl LimitEngine {
             }
 
             for i in 0..n {
-                let (delta, bypass, dip) = (self.delta.next_value(), self.bypass.next_value(), self.dip.next_value());
+                let (delta, bypass, dip, preview) = (self.delta.next_value(), self.bypass.next_value(), self.dip.next_value(), self.preview.next_value());
                 let (c, g) = (self.scale.read(0, i), self.scale.read(1, i));
                 let mut out = [0.0f32; 2];
                 for ch in 0..n_ch {
@@ -410,13 +487,17 @@ impl LimitEngine {
                     self.acc[record::IN + ch] = self.acc[record::IN + ch].max(gain_to_db(peak));
                     let y = wet * (1.0 - delta) + (x * dip - wet) * delta;
                     let y = y * (1.0 - bypass) + dry * bypass;
-                    channels[ch][start + i] = y;
+                    // The master is measured before the preview; the meters show what is heard.
                     out[ch] = y;
+                    let y = y * preview;
+                    channels[ch][start + i] = y;
                     let a = &mut self.acc;
                     a[record::OUT + ch] = a[record::OUT + ch].max(gain_to_db(y.abs()));
                     a[record::GR + ch] = a[record::GR + ch].min(gain_to_db(self.reduction[ch][i]));
-                    let tp = self.meter[ch].push(y);
-                    a[record::TP + ch] = a[record::TP + ch].max(gain_to_db(tp));
+                    // The master's true peak (for the column); the record shows it as heard.
+                    let tp = self.meter[ch].push(out[ch]);
+                    self.slice_tp = self.slice_tp.max(tp);
+                    a[record::TP + ch] = a[record::TP + ch].max(gain_to_db(tp * preview));
                 }
                 if !stereo {
                     out[1] = out[0];
@@ -433,7 +514,8 @@ impl LimitEngine {
             self.scale.advance(n);
             self.slice_pos += n;
             if self.slice_pos >= self.slice_len {
-                self.tp_max = self.tp_max.max(self.acc[record::TP]).max(self.acc[record::TP + 1]);
+                self.tp_max = self.tp_max.max(gain_to_db(self.slice_tp));
+                self.slice_tp = 0.0;
                 history.push(&self.acc);
                 self.acc = empty_record();
                 self.slice_pos = 0;
@@ -445,6 +527,7 @@ impl LimitEngine {
         tap.integrated.store(self.loudness.integrated());
         tap.range.store(self.loudness.range());
         tap.true_peak_max.store(self.tp_max);
+        tap.platform_gain.store(platform_db);
     }
 }
 
@@ -564,6 +647,47 @@ mod tests {
             });
             assert!(over > 20, "{f}×: the material should cross the ceiling");
         }
+    }
+
+    #[test]
+    fn what_each_platform_does() {
+        let spotify = platform(0, -14.0);
+        // Louder: down to the target, either way.
+        assert!((platform_gain_db(&spotify, -8.0, -1.0) + 6.0).abs() < 1e-6);
+        assert!((platform_gain_db(&PLATFORMS[2], -8.0, -1.0) + 6.0).abs() < 1e-6);
+        // Quieter: YouTube leaves it; Spotify turns it up, but only to its −1 dBTP.
+        assert_eq!(platform_gain_db(&PLATFORMS[2], -20.0, -6.0), 0.0);
+        assert!((platform_gain_db(&spotify, -20.0, -4.0) - 3.0).abs() < 1e-6);
+        assert!((platform_gain_db(&spotify, -20.0, -10.0) - 6.0).abs() < 1e-6);
+        // Custom takes the dial; nothing measured yet, nothing done.
+        assert!((platform_gain_db(&platform(8, -9.0), -8.0, -1.0) + 1.0).abs() < 1e-6);
+        assert_eq!(platform_gain_db(&spotify, SILENCE_LUFS, MINUS_INFINITY_DB), 0.0);
+        assert_eq!(PLATFORMS.len(), crate::params::TARGETS.len());
+        for (p, name) in PLATFORMS.iter().zip(crate::params::TARGETS) {
+            assert_eq!(p.name, name);
+        }
+    }
+
+    #[test]
+    fn the_preview_plays_the_master_as_the_platform_will() {
+        // A loud master (pushed 12 dB) previewed as Spotify comes out at about −14 LUFS, while
+        // the column still reads the master's own loudness.
+        let s = LimitSettings { gain_db: 12.0, oversampling: 1, preview: true, ..LimitSettings::default() };
+        let mut e = LimitEngine::new(48000.0, &s);
+        let history: HistoryTap<{ record::WIDTH }> = HistoryTap::new(8192);
+        let tap = LoudnessTap::new();
+        let x = material(48000 * 12, -6.0);
+        let (mut l, mut r) = (x.clone(), x.clone());
+        for (a, b) in l.chunks_mut(512).zip(r.chunks_mut(512)) {
+            e.process(&mut [a, b], &s, &history, &tap);
+        }
+        let master = tap.integrated.load();
+        assert!(master > -12.0, "the master is loud: {master}");
+        assert!((tap.platform_gain.load() - (-14.0 - master)).abs() < 0.01);
+        let mut heard = Loudness::new(48000.0);
+        let tail = 48000 * 8;
+        heard.process(&l[tail..], Some(&r[tail..]));
+        assert!((heard.integrated() + 14.0).abs() < 0.5, "heard at {}", heard.integrated());
     }
 
     #[test]
