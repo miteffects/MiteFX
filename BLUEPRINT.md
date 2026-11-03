@@ -251,6 +251,8 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
   - Per-band transient and sustain targeting.
   - Bands draggable directly on the spectrum, like EQ bands.
 
+**Status (2026-11-03): designed in-house** (user decision): `docs/design/multiband-brief.md`. Accent mint. Scope: Pro-MB baseline plus sidechain (six bands on the shared crossover and rail, Comp's dynamics per band, solo, mute, bypass, Delta, external sidechain with the shared sidechain EQ). DSP in `mite_dsp::multiband`.
+
 ### 5. Mite Verb. Rival: FabFilter Pro-R 2
 
 - Hybrid algorithmic engine: input diffusion → early reflections → modulated FDN (16 lines, time-varying).

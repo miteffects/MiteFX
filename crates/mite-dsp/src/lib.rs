@@ -22,6 +22,7 @@ pub mod output;
 pub mod sat;
 pub mod meter;
 pub mod min_phase;
+pub mod multiband;
 pub mod shape;
 pub mod spectral;
 pub mod smooth;
