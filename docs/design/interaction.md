@@ -209,6 +209,12 @@ Each stage has a horizontal line across the history at its threshold. The line i
 
 GR and upward gain are never drawn on the same baseline.
 
+## Single compressor (default, 2026-11-03)
+
+- A fresh Comp is one compressor: stage 1 on, no stage strip. Under the knee display: the quadrant icons, the detector dropdown and auto release in a row, then THRESHOLD, RATIO, KNEE and ATTACK, RELEASE, RANGE. The knee's node and diamond and the history's grip edit it; pulling the line makes no other stage; Delete keeps it.
+- The header's first button (a curve with several knees) is **multiple stages**: on, the strip and the floating stage panel are back and pulling the line makes stages. It stays on while two or more stages exist (dimmed, the help strip says why); deleting down to one turns it off.
+- The knee display and the meters share the history's scale (as Pro-C's): the range picker zooms all three.
+
 ## Stage panel
 
 **Placement**

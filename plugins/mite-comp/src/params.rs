@@ -13,6 +13,9 @@ use mite_dsp::eq::{BandSettings, BandType};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
+/// The session field that keeps the editor's multiple stages option (written only while on).
+pub const MULTI_STAGE_KEY: &str = "multi_stage";
+
 /// The state format version (`mite_plugin::state`). Bump it, with a migration step in
 /// `MiteComp::filter_state` and a new golden state file, when a release changes what a state
 /// means.
@@ -92,6 +95,14 @@ pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: f
 // ---- Stages -------------------------------------------------------------------------------
 
 pub const S_ON: BoolSpec = BoolSpec { id: "on", name: "On", default: false };
+/// Stage 1 is on by default (2026-11-03): a fresh Comp compresses, at −18 dB and 4:1, as most
+/// compressors load. Saved states keep their own value; only a fresh instance and Init change.
+pub const S1_ON: BoolSpec = BoolSpec { default: true, ..S_ON };
+
+/// The on switch's spec for stage `slot`.
+pub fn on_spec(slot: usize) -> BoolSpec {
+    if slot == 0 { S1_ON } else { S_ON }
+}
 pub const S_QUAD: ChoiceSpec = ChoiceSpec { id: "quad", name: "Quadrant", choices: &Quadrant::NAMES, default: 0 };
 pub const S_THRESH: ParamSpec = spec("thresh", "Threshold", "dB", -60.0, 0.0, -18.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const S_RATIO: ParamSpec = spec("ratio", "Ratio", ":1", 1.0, RATIO_MAX, 4.0, ParamScale::Log, 1, (1.0 / 6.0, 1.0 / 24.0), ParamDisplay::Ratio);
@@ -146,7 +157,7 @@ pub fn manifest() -> String {
     lines.push(BYPASS.manifest_line());
     for s in 0..STAGES {
         let prefix = |line: String| format!("s{}_{line}", s + 1);
-        lines.push(prefix(S_ON.manifest_line()));
+        lines.push(prefix(on_spec(s).manifest_line()));
         lines.push(prefix(S_QUAD.manifest_line()));
         for spec in [S_THRESH, S_RATIO, S_KNEE, S_ATTACK, S_RELEASE, S_RANGE] {
             lines.push(prefix(spec.manifest_line()));
@@ -194,7 +205,7 @@ impl StageParams {
     fn new(stage: usize) -> Self {
         let name = |what: &str| format!("Stage {} {what}", stage + 1);
         Self {
-            on: bool_param(&S_ON, name("On")),
+            on: bool_param(if stage == 0 { &S1_ON } else { &S_ON }, name("On")),
             quad: choice_param(&S_QUAD, name("Quadrant")),
             thresh: float_param_named(&S_THRESH, name("Threshold")),
             ratio: float_param_named(&S_RATIO, name("Ratio")),
@@ -291,6 +302,8 @@ pub struct CompParams {
     pub preset: std::sync::Arc<CurrentPreset>,
     /// The history's level range picked by hand (0: Auto), saved with the state.
     pub display_range: std::sync::Arc<mite_core::AtomicF32>,
+    /// The editor's multiple stages option (a session field, `multi_stage`, only while on).
+    pub multi_stage: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for CompParams {
@@ -329,6 +342,7 @@ impl Default for CompParams {
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
             display_range: std::sync::Arc::new(mite_core::AtomicF32::new(0.0)),
+            multi_stage: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -383,12 +397,16 @@ unsafe impl Params for CompParams {
         let live = mite_plugin::state::live_values(self, &sound_ids());
         let mut fields = mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live);
         mite_plugin::state::add_display_range(&mut fields, self.display_range.load());
+        if self.multi_stage.load(std::sync::atomic::Ordering::Relaxed) {
+            fields.insert(MULTI_STAGE_KEY.to_owned(), "1".to_owned());
+        }
         fields
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
         mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
         self.display_range.store(mite_plugin::state::display_range(serialized));
+        self.multi_stage.store(serialized.get(MULTI_STAGE_KEY).is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {

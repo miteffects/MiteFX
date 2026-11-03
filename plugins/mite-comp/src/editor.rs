@@ -228,17 +228,26 @@ fn pull_ratio(d: f64) -> f32 {
     if slope >= 0.995 { RATIO_MAX } else { (1.0 / (1.0 - slope)) as f32 }
 }
 
+/// The square's range, dB: the history's (one scale for the history, the square and the meters,
+/// as Pro-C's).
+fn sq_range() -> f32 {
+    level_range() as f32
+}
+
 fn sq_x(db: f32) -> f64 {
-    SQ_X + f64::from(db.clamp(-60.0, 0.0) + 60.0) / 60.0 * SQ
+    let r = sq_range();
+    SQ_X + f64::from(db.clamp(-r, 0.0) + r) / f64::from(r) * SQ
 }
 
 fn sq_y(db: f32) -> f64 {
-    SQ_Y + f64::from(-db.clamp(-60.0, 0.0)) / 60.0 * SQ
+    let r = sq_range();
+    SQ_Y + f64::from(-db.clamp(-r, 0.0)) / f64::from(r) * SQ
 }
 
 /// A point in the square as (input dB, output dB).
 fn sq_db(p: Point) -> (f32, f32) {
-    (((p.x - SQ_X) / SQ * 60.0 - 60.0) as f32, (-(p.y - SQ_Y) / SQ * 60.0) as f32)
+    let r = f64::from(sq_range());
+    (((p.x - SQ_X) / SQ * r - r) as f32, (-(p.y - SQ_Y) / SQ * r) as f32)
 }
 
 fn sq_rect() -> Rect {
@@ -347,6 +356,14 @@ pub struct CompView {
     panel: Option<Panel>,
     panel_knobs: Vec<Knob>,
     knobs_for: Option<Panel>,
+    /// Single mode's stage controls under the square (one stage, no strip): their dials, the
+    /// slot they were made for, and the rectangles of the rest.
+    compact_knobs: Vec<Knob>,
+    compact_for: Option<usize>,
+    compact_hits: PanelHits,
+    /// The header's multiple stages switch, and how many stages were on when last looked.
+    stages_hit: Rect,
+    last_count: usize,
     hits: PanelHits,
     menu: Option<Menu>,
     head_hits: [Rect; 3],
@@ -403,6 +420,11 @@ impl CompView {
             panel: None,
             panel_knobs: Vec::new(),
             knobs_for: None,
+            compact_knobs: Vec::new(),
+            compact_for: None,
+            compact_hits: PanelHits::default(),
+            stages_hit: Rect::ZERO,
+            last_count: 0,
             hits: PanelHits::default(),
             menu: None,
             head_hits: [Rect::ZERO; 3],
@@ -607,6 +629,47 @@ impl CompView {
         (0..STAGES).find(|&i| !Self::on(host, &stage_id(i, S_ON.id)))
     }
 
+    /// How many stages are on.
+    fn count_on(host: &dyn ParamHost) -> usize {
+        (0..STAGES).filter(|&i| Self::on(host, &stage_id(i, S_ON.id))).count()
+    }
+
+    /// One compressor: the multiple stages option is off and at most one stage is on. The strip
+    /// gives way to that stage's controls, pulling the line edits it rather than making another,
+    /// and Delete keeps it. Deleting down to one stage comes back here by itself.
+    fn single(&self, host: &dyn ParamHost) -> bool {
+        !self.shared.multi_stage.load(std::sync::atomic::Ordering::Relaxed) && Self::count_on(host) <= 1
+    }
+
+    /// Where a new stage would go: the first free slot, except in single mode with a stage on.
+    fn creatable(&self, host: &dyn ParamHost) -> Option<usize> {
+        if self.single(host) && Self::count_on(host) >= 1 {
+            return None;
+        }
+        Self::free_slot(host)
+    }
+
+    /// In single mode the one stage is always the selection, and has no floating panel. Deleting
+    /// down to one stage turns the multiple stages option off.
+    fn settle_mode(&mut self, host: &dyn ParamHost) {
+        // Deleting down to one stage goes back to a single compressor.
+        let count = Self::count_on(host);
+        if self.last_count > 1 && count <= 1 {
+            self.shared.multi_stage.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.last_count = count;
+        if !self.single(host) {
+            return;
+        }
+        let slot = (0..STAGES).find(|&i| Self::on(host, &stage_id(i, S_ON.id)));
+        self.selected = slot;
+        if matches!(self.panel, Some(Panel::Stage(_))) {
+            self.panel = None;
+            self.panel_knobs.clear();
+            self.knobs_for = None;
+        }
+    }
+
     /// The stage a pull from `start` (input level `input_db`) to `now` would make.
     fn pulled_stage(host: &dyn ParamHost, input_db: f32, start: Point, now: Point) -> Option<Stage> {
         let stages = Self::stages(host);
@@ -674,8 +737,18 @@ impl CompView {
         let (y0, y1) = HEADER_ROW;
         let listen = Self::on(cx.host, LISTEN.id);
         let stereo_glyph = if Self::index(cx.host, STEREO.id) == 1 { glyph::MS } else { glyph::LINK };
+        // Multiple stages: lit while on; held on (and dimmed) while two or more stages exist.
+        {
+            let r = Rect::new(HEAD_BUTTONS_X, y0, HEAD_BUTTONS_X + HEAD_BUTTON_W, y1);
+            let on = !self.single(cx.host);
+            let locked = Self::count_on(cx.host) > 1;
+            let hot = self.pointer.is_some_and(|p| r.contains(p)) && !locked;
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot, on, theme.accent);
+            draw_stages_glyph(cx.scene, r.center(), if locked { ink.multiply_alpha(0.6) } else { ink });
+            self.stages_hit = r;
+        }
         for (i, (d, panel)) in [(glyph::KEY, Panel::Sidechain), (stereo_glyph, Panel::Stereo), (glyph::SLIDERS, Panel::Detector)].into_iter().enumerate() {
-            let x = HEAD_BUTTONS_X + i as f64 * (HEAD_BUTTON_W + 6.0);
+            let x = HEAD_BUTTONS_X + (i + 1) as f64 * (HEAD_BUTTON_W + 6.0);
             let r = Rect::new(x, y0, x + HEAD_BUTTON_W, y1);
             let on = self.panel == Some(panel);
             let hot = self.pointer.is_some_and(|p| r.contains(p));
@@ -876,14 +949,18 @@ impl CompView {
         let offset = self.offset();
         let r = sq_rect();
         panel(cx.scene, RoundedRect::from_rect(r, 10.0), theme.well, theme.well_border);
-        for db in [-48.0, -36.0, -24.0, -12.0] {
+        // The history's scale and gridlines (every 6 dB up to 24 dB, else 12).
+        let range = sq_range();
+        let step = if self.range_target <= 24.5 { 6.0 } else { 12.0 };
+        for db in (1..).map(|k| -step * k as f32).take_while(|&db| db > -range + 0.5) {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_major, None, &Line::new((sq_x(db), r.y0), (sq_x(db), r.y1)));
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_major, None, &Line::new((r.x0, sq_y(db)), (r.x1, sq_y(db))));
         }
-        let diag = Line::new((sq_x(-60.0), sq_y(-60.0)), (sq_x(0.0), sq_y(0.0)));
+        let diag = Line::new((sq_x(-range), sq_y(-range)), (sq_x(0.0), sq_y(0.0)));
         cx.scene.stroke(&Stroke::new(1.2).with_dashes(0.0, [3.0, 4.0]), Affine::IDENTITY, theme.grid_zero, None, &diag);
         let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) };
-        for (x, y, t) in [(r.x0 + 22.0, r.y1 - 16.0, "−60"), (r.x1 - 18.0, r.y1 - 16.0, "0"), (r.x0 + 6.0, r.y0 + 6.0, "OUT"), (r.x1 - 30.0, r.y1 + 6.0, "IN")] {
+        let low = format!("−{:.0}", self.range_target);
+        for (x, y, t) in [(r.x0 + 22.0, r.y1 - 16.0, low.as_str()), (r.x1 - 18.0, r.y1 - 16.0, "0"), (r.x0 + 6.0, r.y0 + 6.0, "OUT"), (r.x1 - 30.0, r.y1 + 6.0, "IN")] {
             cx.text.draw(cx.scene, t, x, y, label, theme.text_lo, Align::Left);
         }
 
@@ -893,11 +970,11 @@ impl CompView {
             Some(Drag::Create { start, input_db, now }) => Self::pulled_stage(cx.host, input_db, start, now),
             _ => None,
         };
-        let refused = creating.is_some() && Self::free_slot(cx.host).is_none();
-        if let (Some(s), Some(slot)) = (creating, Self::free_slot(cx.host)) {
+        let refused = creating.is_some() && self.creatable(cx.host).is_none();
+        if let (Some(s), Some(slot)) = (creating, self.creatable(cx.host)) {
             shape[slot] = s;
         }
-        let xs: Vec<f32> = (0..=240).map(|i| -60.0 + i as f32 * 0.25).collect();
+        let xs: Vec<f32> = (0..=240).map(|i| -range + i as f32 * range / 240.0).collect();
         let points = |st: &[Stage; STAGES], off: f32| -> Vec<Point> { xs.iter().map(|&x| Point::new(sq_x(x), sq_y(curve_db(st, x, off)))).collect() };
         let shade = |st: &[Stage; STAGES], lower: bool| {
             let mut p = BezPath::new();
@@ -908,7 +985,7 @@ impl CompView {
                 if i == 0 { p.move_to(pt) } else { p.line_to(pt) }
             }
             p.line_to((sq_x(0.0), sq_y(0.0)));
-            p.line_to((sq_x(-60.0), sq_y(-60.0)));
+            p.line_to((sq_x(-range), sq_y(-range)));
             p.close_path();
             p
         };
@@ -970,7 +1047,7 @@ impl CompView {
                 cx.text.draw(cx.scene, "S", p.x + 12.0, p.y - 16.0, TextStyle::LABEL.sized(9.0).weighted(800.0), theme.needle, Align::Center);
             }
         }
-        if let (Some(_), Some(slot), Some(Drag::Create { .. })) = (creating, Self::free_slot(cx.host), self.drag) {
+        if let (Some(_), Some(slot), Some(Drag::Create { .. })) = (creating, self.creatable(cx.host), self.drag) {
             // The node of the stage being made.
             let p = Self::node_pos(&shape, slot, offset);
             let color = if refused { theme.text_disabled } else { theme.accent };
@@ -982,13 +1059,13 @@ impl CompView {
         if let Some(last) = self.history.back().filter(|r| det(r) > -80.0) {
             let n = self.history.len();
             let trail: Vec<Point> = self.history.range(n.saturating_sub(40)..n).step_by(3).map(|r| {
-                let x = det(r).clamp(-60.0, 0.0);
+                let x = det(r).clamp(-range, 0.0);
                 Point::new(sq_x(x), sq_y(curve_db(stages, x, r[record::OFFSET])))
             }).collect();
             if trail.len() > 1 {
                 cx.scene.stroke(&Stroke::new(2.0).with_caps(Cap::Round).with_dashes(0.0, [1.0, 5.0]), Affine::IDENTITY, theme.accent.multiply_alpha(0.28), None, &polyline(&trail));
             }
-            let x = det(last).clamp(-60.0, 0.0);
+            let x = det(last).clamp(-range, 0.0);
             let p = Point::new(sq_x(x), sq_y(curve_db(stages, x, offset)));
             mite_ui::paint::glow_fill(cx, &Circle::new(p, 6.0), theme.needle, 4.0);
             cx.scene.stroke(&Stroke::new(3.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.25), None, &Circle::new(p, 7.5));
@@ -1028,6 +1105,71 @@ impl CompView {
     fn card_at(stages: &[Stage; STAGES], p: Point) -> Option<usize> {
         let k = (0..STAGES).find(|&k| Self::strip_rect(k).contains(p))?;
         Self::ranked(stages).get(k).copied()
+    }
+
+    /// Single mode's stage controls: where the strip is otherwise.
+    fn compact_rect() -> Rect {
+        Rect::new(SQ_X, STRIP_TOP, SQ_X + SQ, STRIP_TOP + STRIP_H)
+    }
+
+    /// Single mode: the one stage's controls under the square, as a classic compressor's.
+    /// Quadrant, detector and auto release in a row, then THRESHOLD, RATIO, KNEE and ATTACK,
+    /// RELEASE, RANGE.
+    fn draw_compact(&mut self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
+        let theme = cx.theme;
+        let area = Self::compact_rect();
+        let mut hits = PanelHits { rect: area, ..PanelHits::default() };
+        let Some(slot) = self.selected else {
+            // No stage yet: pulling the line makes one.
+            cx.scene.stroke(&Stroke::new(1.0).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.grid_major.multiply_alpha(0.7), None, &RoundedRect::from_rect(area, 10.0));
+            self.compact_hits = hits;
+            self.compact_knobs.clear();
+            self.compact_for = None;
+            return;
+        };
+        let s = stages[slot];
+        let hot = |r: Rect| self.pointer.is_some_and(|q| r.contains(q));
+        let (y0, y1) = (area.y0, area.y0 + 32.0);
+        for (i, q) in [Quadrant::Compress, Quadrant::Expand, Quadrant::UpCompress, Quadrant::UpExpand].into_iter().enumerate() {
+            let x = area.x0 + i as f64 * 46.0;
+            let r = Rect::new(x, y0, x + 40.0, y1);
+            let color = if q.is_upward() { theme.gain_up } else { theme.accent };
+            let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), s.quadrant == q, color);
+            draw_glyph(cx.scene, glyph::DIAGONAL, r.center(), 18.0, theme.grid_zero, 1.0);
+            draw_glyph(cx.scene, glyph::quadrant(q), r.center(), 18.0, ink, 1.8);
+            hits.quadrants.push(r);
+        }
+        let det = Rect::new(area.x0 + 190.0, y0, area.x0 + 306.0, y1);
+        let open = matches!(self.menu, Some(Menu { kind: MenuKind::StageDetector(_), .. }));
+        let d = s.detector as usize;
+        draw_dropdown_button(cx, det, Detector::NAMES[d], open, hot(det), |scene, at| draw_glyph(scene, glyph::DETECTORS[d], at + (8.0, 4.0), 18.0, theme.accent, 1.8));
+        hits.detector = Some(det);
+        let auto = Rect::new(area.x1 - 64.0, y0, area.x1 - 20.0, y1);
+        let ink = icon_button(cx.scene, theme, auto, theme.panel_control, hot(auto), s.auto_release, theme.accent);
+        mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Auto, auto.center(), ink);
+        hits.auto_release = Some(auto);
+        if self.compact_for != Some(slot) && !self.compact_knobs.iter().any(Knob::is_dragging) {
+            let col = area.width() / 3.0;
+            let at = |i: usize| Point::new(area.x0 + col * ((i % 3) as f64 + 0.5), area.y0 + 70.0 + 76.0 * (i / 3) as f64);
+            let knob = |spec: ParamSpec, label: &'static str, i: usize| Knob::new(spec, label, KnobKind::Unipolar, at(i), 46.0).with_id(stage_id(slot, spec.id));
+            self.compact_knobs = vec![
+                knob(S_THRESH, "THRESHOLD", 0),
+                knob(S_RATIO, "RATIO", 1),
+                knob(S_KNEE, "KNEE", 2),
+                knob(S_ATTACK, "ATTACK", 3).with_curve(ATTACK_DIAL),
+                knob(S_RELEASE, "RELEASE", 4).with_curve(RELEASE_DIAL),
+                knob(S_RANGE, "RANGE", 5),
+            ];
+            self.compact_for = Some(slot);
+        }
+        let release = stage_id(slot, S_RELEASE.id);
+        for k in self.compact_knobs.iter_mut() {
+            k.percent = k.id == release && s.auto_release;
+        }
+        for k in &self.compact_knobs {
+            k.draw(cx);
+        }
+        self.compact_hits = hits;
     }
 
     fn draw_strip(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
@@ -1079,8 +1221,10 @@ impl CompView {
         let seg = Stroke::new(8.0).with_dashes(0.0, [2.0, 2.0]);
         let (top, bottom) = (METER_TOP + 4.0, METER_BOTTOM - 4.0);
         let span = bottom - top;
-        let level_y = |db: f32| bottom - (f64::from(db.clamp(-60.0, 0.0) + 60.0) / 60.0 * span / 4.0).round() * 4.0;
-        let gr_y = |g: f32| top + (f64::from((-g).clamp(0.0, 40.0)) * 14.0).min(span);
+        // The history's scale: levels over the range, gain reduction at the same dB per pixel.
+        let range = level_range();
+        let level_y = |db: f32| bottom - ((f64::from(db) + range).clamp(0.0, range) / range * span / 4.0).round() * 4.0;
+        let gr_y = |g: f32| top + (f64::from(-g).clamp(0.0, range) / range * span).min(span);
         let split = Self::link_split(cx.host);
         for (i, x) in [1199.0, 1209.0, 1225.0, 1235.0, 1251.0, 1261.0].into_iter().enumerate() {
             cx.scene.stroke(&seg, Affine::IDENTITY, theme.meter_off, None, &Line::new((x, top), (x, bottom)));
@@ -1494,7 +1638,7 @@ impl CompView {
         let db = |v: f32| format!("{}{:.1} dB", if v < -0.05 { "−" } else if v > 0.05 { "+" } else { "" }, v.abs());
         let ratio = |r: f32| S_RATIO.format(r);
         if let Some(Drag::Create { start, input_db, now }) = self.drag {
-            if Self::free_slot(host).is_none() {
+            if self.creatable(host).is_none() {
                 return Help::default().text("Four stages is the limit.");
             }
             if let Some(s) = Self::pulled_stage(host, input_db, start, now) {
@@ -1581,7 +1725,26 @@ impl CompView {
         let last = self.history.back();
         let now = |k: usize| last.map_or(-150.0, |r| r[k].max(r[k + 1]));
         let gr = last.map_or(0.0, |r| r[record::CUT].min(r[record::CUT + 1]));
-        if let Some(slot) = Self::card_at(&stages, p) {
+        if self.stages_hit.contains(p) {
+            return Help::default().text(if Self::count_on(host) > 1 {
+                "Multiple stages — on while there are several; delete down to one to go back to a single compressor"
+            } else if self.single(host) {
+                "Multiple stages — off: one compressor. Click to show the stage strip and pull the line for more stages"
+            } else {
+                "Multiple stages — on. Click to go back to a single compressor"
+            });
+        }
+        if self.single(host) {
+            if let Some(k) = self.compact_knobs.iter().find(|k| k.bounds().contains(p)) {
+                let (value, unit) = k.value_text(host);
+                let words = if k.percent { " — relative under auto release: right is slower; drag; double-click resets" } else { " — drag; double-click resets" };
+                return Help::default().text(format!("{} · ", k.label)).slot(format!("{value} {unit}"), k.spec.format(k.spec.max)).text(words);
+            }
+            if self.compact_hits.auto_release.is_some_and(|r| r.contains(p)) {
+                return Help::default().text("Auto release — a short peak lets go at RELEASE, sustained compression recovers slowly, without pumping. Click to switch");
+            }
+        }
+        if let Some(slot) = Self::card_at(&stages, p).filter(|_| !self.single(host)) {
             let s = stages[slot];
             return Help::default()
                 .slot(format!("Stage {}", Self::number(&stages, slot)), "Stage 4")
@@ -1631,7 +1794,11 @@ impl CompView {
             .slot(db(gr), "−60.0 dB")
             .text(" · OUT ")
             .slot(db(now(record::OUT)), "−60.0 dB")
-            .text(" — pull the curve below the line to compress, above it to lift; drag a threshold grip on the history")
+            .text(if self.single(host) && Self::count_on(host) == 1 {
+                " — drag the knee for threshold and ratio, or the threshold grip on the history"
+            } else {
+                " — pull the curve below the line to compress, above it to lift; drag a threshold grip on the history"
+            })
     }
 
     // ---- events -----------------------------------------------------------------------------
@@ -1703,7 +1870,7 @@ impl CompView {
 
     /// Whether a gesture is under way (a drag becomes one undo step when it ends).
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.panel_knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.panel_knobs.iter().chain(&self.compact_knobs).any(Knob::is_dragging) || self.footer.busy()
     }
 
     fn after_session(&mut self, host: &dyn ParamHost) {
@@ -1742,7 +1909,7 @@ impl CompView {
                 }
                 false
             }
-            Key::Delete | Key::Backspace => match self.selected {
+            Key::Delete | Key::Backspace => match self.selected.filter(|_| !self.single(host)) {
                 Some(slot) => {
                     self.delete_stage(host, slot);
                     true
@@ -1794,7 +1961,7 @@ impl CompView {
                     true
                 }
                 ('n', _) => {
-                    if let Some(slot) = Self::free_slot(host) {
+                    if let Some(slot) = self.creatable(host) {
                         let (knee_db, attack_ms, release_ms, range_db, detector) = quadrant_defaults(Quadrant::Compress);
                         Self::write_stage(host, slot, &Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -18.0, ratio: 4.0, knee_db, range_db, attack_ms, release_ms, auto_release: false, detector });
                         self.select(Some(slot));
@@ -1826,6 +1993,13 @@ impl CompView {
         for k in &mut self.panel_knobs {
             if k.event(event, host) {
                 return true;
+            }
+        }
+        if self.single(host) {
+            for k in &mut self.compact_knobs {
+                if k.event(event, host) {
+                    return true;
+                }
             }
         }
         let stages = Self::stages(host);
@@ -1871,6 +2045,14 @@ impl CompView {
     fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers, stages: &[Stage; STAGES]) -> bool {
         // Header buttons.
         if pos.y < HEADER {
+            if self.stages_hit.contains(pos) {
+                // Held on while two or more stages exist (delete down to one to leave).
+                if Self::count_on(host) <= 1 {
+                    let flag = &self.shared.multi_stage;
+                    flag.store(!flag.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
+                }
+                return true;
+            }
             for (i, p) in [Panel::Sidechain, Panel::Stereo, Panel::Detector].into_iter().enumerate() {
                 if self.head_hits[i].contains(pos) {
                     self.panel = if self.panel == Some(p) { None } else { Some(p) };
@@ -1958,8 +2140,26 @@ impl CompView {
             return true;
         }
         let _ = mods;
-        // A stage's card in the strip selects it (as its node does).
-        if let Some(slot) = Self::card_at(stages, pos) {
+        if self.single(host) {
+            if let Some(slot) = self.selected.filter(|_| Self::compact_rect().contains(pos)) {
+                let hits = self.compact_hits.clone();
+                if let Some(i) = hits.quadrants.iter().position(|r| r.contains(pos)) {
+                    Self::set(host, &stage_id(slot, S_QUAD.id), i as f32);
+                } else if let Some(r) = hits.detector.filter(|r| r.contains(pos)) {
+                    self.toggle_menu(MenuKind::StageDetector(slot), r, host);
+                } else if hits.auto_release.is_some_and(|r| r.contains(pos)) {
+                    let id = stage_id(slot, S_AUTO_REL.id);
+                    Self::set(host, &id, if Self::on(host, &id) { 0.0 } else { 1.0 });
+                }
+                return true;
+            }
+            // The one stage is edited by its node, diamond and grip; pulling the line makes no
+            // other.
+            if Self::count_on(host) >= 1 && matches!(self.hot_at(host, pos), Some(Hot::Line) | Some(Hot::Square)) {
+                return true;
+            }
+        } else if let Some(slot) = Self::card_at(stages, pos) {
+            // A stage's card in the strip selects it (as its node does).
             self.select(Some(slot));
             return true;
         }
@@ -2097,7 +2297,7 @@ impl CompView {
             }
             Drag::Create { start, input_db, now } => match Self::pulled_stage(host, input_db, start, now) {
                 Some(s) => {
-                    if let Some(slot) = Self::free_slot(host) {
+                    if let Some(slot) = self.creatable(host) {
                         Self::write_stage(host, slot, &s);
                         self.select(Some(slot));
                     }
@@ -2140,7 +2340,7 @@ impl CompView {
             }
             Some(Hot::Line) | Some(Hot::Square) => {
                 self.drag = None;
-                if let Some(slot) = Self::free_slot(host) {
+                if let Some(slot) = self.creatable(host) {
                     let (input_db, _) = sq_db(pos);
                     let (knee_db, attack_ms, release_ms, range_db, detector) = quadrant_defaults(Quadrant::Compress);
                     Self::write_stage(host, slot, &Stage { on: true, quadrant: Quadrant::Compress, threshold_db: input_db.clamp(-60.0, 0.0), ratio: 4.0, knee_db, range_db, attack_ms, release_ms, auto_release: false, detector });
@@ -2192,6 +2392,7 @@ impl View for CompView {
 
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
         set_level_range(self.range_shown);
+        self.settle_mode(cx.host);
         let theme = cx.theme;
         let stages = Self::stages(cx.host);
         self.draw_header(cx);
@@ -2203,7 +2404,12 @@ impl View for CompView {
         self.range.draw(cx, self.range_shown);
         self.draw_thresholds(cx, &stages);
         self.draw_square(cx, &stages);
-        self.draw_strip(cx, &stages);
+        if self.single(cx.host) {
+            self.draw_compact(cx, &stages);
+        } else {
+            self.compact_hits = PanelHits::default();
+            self.draw_strip(cx, &stages);
+        }
         self.draw_meters(cx);
         self.draw_states(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
@@ -2219,6 +2425,7 @@ impl View for CompView {
         self.session.begin(host);
         let recording = RecordingHost::new(host);
         let changed = self.handle_event(event, &recording);
+        self.settle_mode(&recording);
         let busy = self.busy();
         self.session.end(host, recording.wrote(), busy);
         self.after_session(host);
@@ -2272,6 +2479,16 @@ impl View for CompView {
     }
 }
 
+/// The multiple stages switch's glyph: a transfer curve with several knees.
+fn draw_stages_glyph(scene: &mut mite_ui::vello::Scene, c: Point, ink: Color) {
+    let pts = [(-9.0, 8.0), (-4.0, 3.0), (0.0, 1.0), (4.0, -4.0), (9.0, -6.0)];
+    let path = polyline(&pts.iter().map(|&(x, y)| Point::new(c.x + x, c.y + y)).collect::<Vec<_>>());
+    scene.stroke(&Stroke::new(1.8).with_caps(Cap::Round).with_join(mite_ui::kurbo::Join::Round), Affine::IDENTITY, ink, None, &path);
+    for &(x, y) in &pts[1..4] {
+        scene.fill(Fill::NonZero, Affine::IDENTITY, ink, None, &Circle::new(Point::new(c.x + x, c.y + y), 1.8));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2295,3 +2512,4 @@ mod tests {
         }
     }
 }
+

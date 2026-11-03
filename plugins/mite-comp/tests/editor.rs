@@ -32,6 +32,15 @@ fn setup() -> (CompView, MemoryParamHost, Arc<CompShared>) {
     (view, host, shared)
 }
 
+/// With the multiple stages option on and no stage yet (the stage gestures' tests).
+fn setup_multi() -> (CompView, MemoryParamHost, Arc<CompShared>) {
+    let (mut view, host, shared) = setup();
+    shared.multi_stage.store(true, std::sync::atomic::Ordering::Relaxed);
+    host.set_plain(&stage_id(0, S_ON.id), 0.0);
+    draw(&mut view, &host);
+    (view, host, shared)
+}
+
 /// Lays the view out (hit areas are set while drawing).
 fn draw(view: &mut CompView, host: &MemoryParamHost) {
     let theme = Theme::load(ThemeKind::Dark, mite_comp::editor::ACCENT);
@@ -62,7 +71,7 @@ fn stages(host: &MemoryParamHost) -> [Stage; STAGES] {
 
 #[test]
 fn pulling_the_line_down_makes_a_compressor_and_up_lifts() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     // Down from −20 dB on the diagonal: a compressor at −20.
     drag(&mut view, &host, sq(-20.0, -20.0), sq(-20.0, -20.0) + (0.0, 60.0));
     let s = stages(&host);
@@ -79,7 +88,7 @@ fn pulling_the_line_down_makes_a_compressor_and_up_lifts() {
 
 #[test]
 fn editing_a_higher_stage_never_moves_a_lower_one() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     for db in [-44.0, -20.0] {
         let at = sq(db, curve_db(&stages(&host), db, 0.0));
         drag(&mut view, &host, at, at + (0.0, 50.0));
@@ -115,7 +124,7 @@ fn partial(s: &[Stage; STAGES], slot: usize) -> f32 {
 
 #[test]
 fn a_short_press_makes_nothing_and_a_fifth_stage_is_refused() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     drag(&mut view, &host, sq(-30.0, -30.0), sq(-30.0, -30.0) + (0.0, 3.0));
     assert!(!stages(&host).iter().any(|s| s.on));
     // Each pull starts away from the nodes already made (they sit 12 dB above their thresholds).
@@ -128,7 +137,7 @@ fn a_short_press_makes_nothing_and_a_fifth_stage_is_refused() {
 
 #[test]
 fn one_undo_takes_a_pulled_stage_away() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     drag(&mut view, &host, sq(-24.0, -24.0), sq(-24.0, -24.0) + (0.0, 60.0));
     assert!(stages(&host)[0].on);
     view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
@@ -137,7 +146,7 @@ fn one_undo_takes_a_pulled_stage_away() {
 
 #[test]
 fn the_threshold_grip_on_the_history_moves_the_threshold() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     drag(&mut view, &host, sq(-24.0, -24.0), sq(-24.0, -24.0) + (0.0, 60.0));
     let before = stages(&host)[0].threshold_db;
     // The grip sits at the history's right edge, at the threshold's level (−60…0 dB over 572 px
@@ -150,7 +159,7 @@ fn the_threshold_grip_on_the_history_moves_the_threshold() {
 
 #[test]
 fn double_clicking_a_node_makes_it_inert_then_removes_it() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     drag(&mut view, &host, sq(-30.0, -30.0), sq(-30.0, -30.0) + (0.0, 60.0));
     let s = stages(&host);
     let node_x = s[0].threshold_db + 12.0;
@@ -166,7 +175,7 @@ fn double_clicking_a_node_makes_it_inert_then_removes_it() {
 
 #[test]
 fn clicking_a_stage_card_selects_that_stage() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     drag(&mut view, &host, sq(-40.0, -40.0), sq(-40.0, -40.0) + (0.0, 60.0));
     drag(&mut view, &host, sq(-15.0, -15.0) + (0.0, 8.0), sq(-15.0, -15.0) + (0.0, 70.0));
     let s = stages(&host);
@@ -229,7 +238,7 @@ fn every_state_renders() {
 
 #[test]
 fn the_stage_panel_switches_auto_release() {
-    let (mut view, host, _) = setup();
+    let (mut view, host, _) = setup_multi();
     drag(&mut view, &host, sq(-20.0, -20.0), sq(-20.0, -20.0) + (0.0, 60.0));
     assert!(stages(&host)[0].on);
     view.select(Some(0));
@@ -243,4 +252,54 @@ fn the_stage_panel_switches_auto_release() {
         draw(&mut view, &host);
         assert_eq!(plain(&host, &stage_id(0, S_AUTO_REL.id)), want);
     }
+}
+
+fn click(view: &mut CompView, host: &MemoryParamHost, at: Point) {
+    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, host);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: MODS }, host);
+    view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: MODS }, host);
+    draw(view, host);
+}
+
+/// The header's multiple stages switch (x 760…800).
+const STAGES_SWITCH: Point = Point::new(780.0, 28.0);
+
+#[test]
+fn a_fresh_comp_is_one_compressor_that_compresses() {
+    let (mut view, host, shared) = setup();
+    let s = stages(&host);
+    assert!(s[0].on && s[1..].iter().all(|st| !st.on), "stage 1 on by default");
+    assert!(s[0].quadrant == Quadrant::Compress && plain(&host, &stage_id(0, S_RATIO.id)) > 1.0);
+    // Pulling the line edits nothing new; Delete keeps the stage.
+    drag(&mut view, &host, sq(-40.0, -40.0), sq(-40.0, -40.0) + (0.0, 60.0));
+    assert_eq!(stages(&host).iter().filter(|st| st.on).count(), 1);
+    view.event(&UiEvent::KeyDown { key: Key::Delete, mods: MODS }, &host);
+    assert!(stages(&host)[0].on);
+    // The compact controls under the square: Expand (the second quadrant icon) and auto release.
+    click(&mut view, &host, Point::new(796.0 + 46.0 + 20.0, 56.0 + 420.0 + 16.0));
+    assert_eq!(plain(&host, &stage_id(0, S_QUAD.id)), 1.0);
+    click(&mut view, &host, Point::new(796.0 + 384.0 - 42.0, 56.0 + 420.0 + 16.0));
+    assert_eq!(plain(&host, &stage_id(0, S_AUTO_REL.id)), 1.0);
+    assert!(!shared.multi_stage.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+#[test]
+fn the_multiple_stages_option_shows_the_strip_and_deleting_down_to_one_leaves_it() {
+    let (mut view, host, shared) = setup();
+    let multi = || shared.multi_stage.load(std::sync::atomic::Ordering::Relaxed);
+    click(&mut view, &host, STAGES_SWITCH);
+    assert!(multi());
+    click(&mut view, &host, STAGES_SWITCH);
+    assert!(!multi(), "with one stage it switches back off");
+    click(&mut view, &host, STAGES_SWITCH);
+    // Now pulling the line makes a second stage, and the switch holds while there are two.
+    drag(&mut view, &host, sq(-40.0, -40.0), sq(-40.0, -40.0) + (0.0, 60.0));
+    assert_eq!(stages(&host).iter().filter(|st| st.on).count(), 2);
+    click(&mut view, &host, STAGES_SWITCH);
+    assert!(multi(), "held on while two stages exist");
+    // Deleting one (selected: the one just made) goes back to a single compressor.
+    view.event(&UiEvent::KeyDown { key: Key::Delete, mods: MODS }, &host);
+    draw(&mut view, &host);
+    assert_eq!(stages(&host).iter().filter(|st| st.on).count(), 1);
+    assert!(!multi());
 }

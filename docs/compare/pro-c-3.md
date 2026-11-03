@@ -19,7 +19,7 @@ names in brackets) and the plugin itself. Ours comes from the code as of the dat
 | Auto threshold | yes (level-independent) [Dynamics controls] | **Smart Vocal / Master**: the thresholds slide to hold a target reduction |
 | Adaptive release | auto release [Time controls] | **auto release per stage** (a slow second envelope built by sustained compression, 2026-11-03), and Smart Adaptive (crest factor) |
 | Topology | per style (Classic and Vari-Mu feedback) | feed-forward or feedback, any Character |
-| Makeup, mix | wet gain with M/S pan, auto gain, dry gain, mix 0–200 % [Time controls, Input and output options] | makeup, auto makeup, mix 0–100 %, **delta** |
+| Makeup, mix | wet gain with M/S pan, auto gain, dry gain, mix 0–200 % [Time controls, Input and output options] | makeup, auto makeup (loudness-matched: predicted at the music's level, trimmed to what it measures), mix 0–100 %, **delta** |
 | Input level / pan | yes | **no** |
 | Stereo | link 0–100 %, then mid or side only; Mid, Side, M>S, S>M modes [Side chain section] | L/R or M/S with a continuous link |
 | Side chain input | internal, external, **host tempo pulse, MIDI notes** [Side chain section] | internal, external |

@@ -34,6 +34,9 @@ pub struct CompShared {
     pub preset: Arc<CurrentPreset>,
     /// The history's level range picked by hand (0: Auto; the parameters' store).
     pub display_range: Arc<AtomicF32>,
+    /// The editor shows every stage (the strip, pulling the line makes more); off, it is one
+    /// compressor (the parameters' store, saved with the session).
+    pub multi_stage: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CompShared {
@@ -50,6 +53,7 @@ impl CompShared {
             snapshots,
             preset,
             display_range: Arc::new(AtomicF32::new(0.0)),
+            multi_stage: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -87,6 +91,7 @@ impl Default for MiteComp {
         let engine = CompEngine::new(48_000.0, &params.settings(None));
         let mut shared = CompShared::with_stores(params.snapshots.clone(), params.preset.clone());
         shared.display_range = params.display_range.clone();
+        shared.multi_stage = params.multi_stage.clone();
         let shared = Arc::new(shared);
         Self { params, engine, shared, reported_latency: 0 }
     }

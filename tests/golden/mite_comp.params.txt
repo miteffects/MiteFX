@@ -39,7 +39,7 @@ out_pan | % | -100 | 100 | 0 | Linear
 out_gain | dB | -24 | 24 | 0 | Linear
 delta | bool | false
 bypass | bool | false
-s1_on | bool | false
+s1_on | bool | true
 s1_quad | choice | Compress, Expand, Upward compress, Upward expand | 0
 s1_thresh | dB | -60 | 0 | -18 | Linear
 s1_ratio | :1 | 1 | 100 | 4 | Log

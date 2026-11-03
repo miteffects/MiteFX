@@ -29,8 +29,9 @@ fn ids_follow_the_scheme() {
 }
 
 #[test]
-fn the_default_state_has_no_stages() {
-    // Init: the curve on the diagonal, so the plugin passes audio unchanged.
+fn the_default_state_is_one_compressor() {
+    // A fresh Comp compresses (2026-11-03), as most compressors load: stage 1 only.
     let p = CompParams::default();
-    assert!(p.stages.iter().all(|s| !s.on.value()));
+    assert!(p.stages[0].on.value());
+    assert!(p.stages[1..].iter().all(|s| !s.on.value()));
 }

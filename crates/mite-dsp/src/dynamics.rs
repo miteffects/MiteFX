@@ -59,6 +59,19 @@ pub const AUTO_SLOW_FACTOR: f32 = 5.0;
 const AUTO_SLOW_MS: (f32, f32) = (300.0, 5000.0);
 /// Auto makeup cancels the curve's gain at this input level, dBFS.
 pub const AUTO_MAKEUP_REF_DB: f32 = -12.0;
+/// Auto makeup matches loudness in and out (2026-11-03: it cancelled the curve at
+/// [`AUTO_MAKEUP_REF_DB`], louder than the music, which mostly sits well below it). It predicts
+/// the curve's gain at the music's level (instant as settings move) and trims that to what it
+/// measures, over the whole signal: a compressor does not lift the gaps (unlike saturation), so
+/// matching only the hits would leave the result louder. The meters hold in silence (the 20 ms
+/// level under [`AUTO_FLOOR_DB`]).
+const AUTO_LEVEL_MS: f32 = 400.0;
+const AUTO_TRIM_MS: f32 = 3000.0;
+const AUTO_SHORT_MS: f32 = 20.0;
+const AUTO_FLOOR_DB: f32 = -70.0;
+const AUTO_TRIM_LIMIT_DB: f32 = 9.0;
+/// Auto makeup is worked out again every this many samples (whatever the block size).
+const AUTO_EVERY: u32 = 64;
 /// Smart: crest factor that leaves the release alone, dB; programme below this level is silence.
 const CREST_REF_DB: f32 = 10.0;
 const PROGRAM_GATE_DB: f32 = -50.0;
@@ -464,10 +477,10 @@ impl CompSettings {
         (self.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * sample_rate).round() as usize
     }
 
-    /// The makeup in force, dB: the set makeup plus, with auto makeup, what cancels the curve's
-    /// gain at [`AUTO_MAKEUP_REF_DB`] (with Smart's slide `offset_db`).
-    pub fn makeup_total_db(&self, offset_db: f32) -> f32 {
-        let auto = if self.auto_makeup { AUTO_MAKEUP_REF_DB - curve_db(&self.stages, AUTO_MAKEUP_REF_DB, offset_db) } else { 0.0 };
+    /// The makeup in force, dB: the set makeup plus `auto_db` (what auto makeup measured, when
+    /// it is on).
+    pub fn makeup_total_db(&self, auto_db: f32) -> f32 {
+        let auto = if self.auto_makeup { auto_db } else { 0.0 };
         (self.makeup_db + auto).clamp(-24.0, 48.0)
     }
 }
@@ -702,6 +715,16 @@ pub struct Compressor {
     sib_avg: f32,
     sib_guard: f32,
     offset_db: f32,
+    /// Auto makeup: the music's mean square, the trim meters going in and coming out (before
+    /// makeup), the gate's short level, the trim and the auto gain in force (dB), and the
+    /// countdown to the next update.
+    auto_level: f32,
+    auto_in: f32,
+    auto_out: f32,
+    auto_short: f32,
+    auto_trim: f32,
+    auto_db: f32,
+    auto_count: u32,
     /// The stages' thresholds and knees in the level they work on, while nothing glides.
     levels: [(f32, f32); STAGES],
     levels_valid: bool,
@@ -737,6 +760,13 @@ impl Compressor {
             sib_avg: 0.0,
             sib_guard: 0.0,
             offset_db: 0.0,
+            auto_level: 0.0,
+            auto_in: 0.0,
+            auto_out: 0.0,
+            auto_short: 0.0,
+            auto_trim: 0.0,
+            auto_db: 0.0,
+            auto_count: 0,
             levels: [(0.0, 0.0); STAGES],
             levels_valid: false,
             prepared: false,
@@ -802,6 +832,8 @@ impl Compressor {
         self.sib_avg = 0.0;
         self.sib_guard = 0.0;
         self.offset_db = 0.0;
+        (self.auto_level, self.auto_in, self.auto_out, self.auto_short) = (0.0, 0.0, 0.0, 0.0);
+        (self.auto_trim, self.auto_db, self.auto_count) = (0.0, 0.0, 0);
         self.levels_valid = false;
         self.makeup.reset(s.makeup_total_db(0.0));
     }
@@ -890,7 +922,12 @@ impl Compressor {
         let sib_rel = 1.0 - coef(80.0, fs);
         let sib_depth = if s.smart == Smart::Vocal { s.sibilance.clamp(0.0, 1.0) } else { 0.0 };
         let program_gate = db_to_gain(PROGRAM_GATE_DB);
-        self.makeup.set_target(s.makeup_total_db(self.offset_db));
+        self.makeup.set_target(s.makeup_total_db(self.auto_db));
+        let auto_level_k = 1.0 - coef(AUTO_LEVEL_MS, fs);
+        let auto_trim_k = 1.0 - coef(AUTO_TRIM_MS, fs);
+        let auto_short_k = 1.0 - coef(AUTO_SHORT_MS, fs);
+        let auto_floor = db_to_gain(AUTO_FLOOR_DB);
+        let auto_step = 1.0 - coef(AUTO_TRIM_MS, fs / AUTO_EVERY as f32);
 
         let uses = |d: Detector| s.stages.iter().any(|st| st.on && st.detector == d);
         let (use_peak, use_rms, use_loud) = (uses(Detector::Peak), uses(Detector::Rms), uses(Detector::Loudness));
@@ -1162,6 +1199,34 @@ impl Compressor {
                 out[c] = if s.listen { det[c] } else { wet * makeup };
             }
             self.write = (self.write + 1) % delay_len;
+            // Auto makeup's meters: the power going in and coming out before makeup (not in silence).
+            let power = |v: [f32; 2]| if ms { v[0] * v[0] + v[1] * v[1] } else { (v[0] * v[0] + v[1] * v[1]) / n_ch as f32 };
+            let p_in = power(audio);
+            let p_out = if makeup > 0.0 { power([out[0] / makeup, out[1] / makeup]) } else { 0.0 };
+            self.auto_short += (p_in - self.auto_short) * auto_short_k;
+            if self.auto_short > auto_floor && !s.listen {
+                self.auto_level += (p_in - self.auto_level) * auto_level_k;
+                self.auto_in += (p_in - self.auto_in) * auto_trim_k;
+                self.auto_out += (p_out - self.auto_out) * auto_trim_k;
+            }
+            self.auto_count += 1;
+            if self.auto_count >= AUTO_EVERY {
+                self.auto_count = 0;
+                if s.auto_makeup && self.auto_level > 0.0 {
+                    // The curve's gain at the music's level, then the trim towards what is measured.
+                    let level = 10.0 * self.auto_level.log10();
+                    let predicted = level - curve_db(&s.stages, level, self.offset_db);
+                    if self.auto_in > 0.0 && self.auto_out > 0.0 {
+                        let measured = 10.0 * (self.auto_in / self.auto_out).log10();
+                        let want = (measured - predicted).clamp(-AUTO_TRIM_LIMIT_DB, AUTO_TRIM_LIMIT_DB);
+                        self.auto_trim += (want - self.auto_trim) * auto_step;
+                    }
+                    self.auto_db = (predicted + self.auto_trim).clamp(-24.0, 24.0);
+                } else if !s.auto_makeup {
+                    (self.auto_db, self.auto_trim) = (0.0, 0.0);
+                }
+                self.makeup.set_target(s.makeup_total_db(self.auto_db));
+            }
             let (ol, or) = if ms { (out[0] + out[1], out[0] - out[1]) } else { (out[0], out[1]) };
             channels[0][i] = ol;
             if stereo {
@@ -1494,12 +1559,58 @@ mod tests {
         assert!(worst < 0.1, "largest gain step {worst} dB per sample");
     }
 
+    /// Stereo material for auto makeup: hits every half second (a 60 Hz thump decaying over 80 ms
+    /// at `peak_db`) over noise 30 dB under them, or steady noise at `peak_db − 12`.
+    fn material(n: usize, peak_db: f32, hits: bool) -> Vec<f32> {
+        let mut rng = Lcg(7);
+        let a = db_to_gain(peak_db);
+        (0..n)
+            .map(|i| {
+                let noise = (rng.next() - 0.5) * 2.0;
+                if hits {
+                    let t = (i % (FS as usize / 2)) as f32 / FS;
+                    a * (-t / 0.08).exp() * (std::f32::consts::TAU * 60.0 * t).sin() + noise * a * 0.03
+                } else {
+                    noise * a * 0.25 * 3f32.sqrt()
+                }
+            })
+            .collect()
+    }
+
+    fn run_blocks(s: &CompSettings, x: &[f32], block: usize) -> Vec<f32> {
+        let mut c = Compressor::new(FS);
+        c.prepare(FS, s);
+        let mut y = x.to_vec();
+        for b in y.chunks_mut(block) {
+            c.process(&mut [b], None, s);
+        }
+        y
+    }
+
     #[test]
-    fn auto_makeup_cancels_the_curve_at_the_reference_level() {
-        let st = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -24.0, 4.0) };
-        let s = CompSettings { auto_makeup: true, ..settings(&[st]) };
-        let g = steady_gain(&s, AUTO_MAKEUP_REF_DB, 0.3);
-        assert!(g.abs() < 0.05, "{g}");
+    fn auto_makeup_matches_the_loudness_going_in() {
+        let rms = |v: &[f32]| (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+        let n = 10 * FS as usize;
+        let tail = 6 * FS as usize..;
+        for (threshold, ratio) in [(-24.0, 4.0), (-30.0, 8.0), (-12.0, 2.0)] {
+            for (hits, peak) in [(true, -6.0), (true, -20.0), (false, -6.0)] {
+                let st = Stage { attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms, ..stage(Quadrant::Compress, threshold, ratio) };
+                let s = CompSettings { auto_makeup: true, ..settings(&[st]) };
+                let x = material(n, peak, hits);
+                let y = run_blocks(&s, &x, 512);
+                let db = 20.0 * (rms(&y[tail.clone()]) / rms(&x[tail.clone()])).log10();
+                assert!(db.abs() < 0.5, "{threshold} dB {ratio}:1, hits {hits} at {peak}: {db:.2} dB");
+            }
+        }
+        // The set makeup adds on top; and the block size never changes the result.
+        let st = stage(Quadrant::Compress, -24.0, 4.0);
+        let x = material(4 * FS as usize, -6.0, true);
+        let s = CompSettings { auto_makeup: true, makeup_db: 3.0, ..settings(&[st]) };
+        let a = run_blocks(&s, &x, 512);
+        assert_eq!(a, run_blocks(&s, &x, 37));
+        let b = run_blocks(&CompSettings { makeup_db: 0.0, ..s }, &x, 512);
+        let d = 20.0 * (rms(&a[3 * FS as usize..]) / rms(&b[3 * FS as usize..])).log10();
+        assert!((d - 3.0).abs() < 0.05, "{d}");
     }
 
     #[test]
