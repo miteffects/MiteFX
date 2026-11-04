@@ -1,0 +1,11 @@
+threshold | dB | -60 | 0 | -15 | Linear
+detection | choice | Relative, Absolute | 0
+range | dB | 0 | 24 | 12 | Linear
+release | ms | 10 | 500 | 60 | Log
+lo | Hz | 1000 | 16000 | 5000 | Log
+hi | Hz | 2000 | 20000 | 12000 | Log
+reduce | choice | Shelf, Band, Wide | 0
+lookahead | bool | true
+listen | bool | false
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false

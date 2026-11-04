@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite DeEss",
+  "version": 1,
+  "name": "Cymbal Tamer",
+  "params": {
+    "detection": 1.0,
+    "threshold": -30.0,
+    "lo": 7000.0,
+    "hi": 16000.0,
+    "range": 8.0,
+    "release": 120.0
+  }
+}

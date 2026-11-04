@@ -115,6 +115,7 @@ MiteFX/
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
 | Pitch detection (McLeod pitch method, sub-cent), notes and cents against a reference | `mite_dsp::pitch` (`PitchDetector`, `note_of`, `note_hz`; Tuner, 2026-11-04) |
 | Doubling: per-note timing, detune, level and tone from an onset detector, switched before each note arrives; chorus; placement | `mite_dsp::doubler` (`Doubler`; Double, 2026-11-04) |
+| De-essing: relative (band against the whole) or absolute detection, dynamic shelf / three-bell band / wide reduction exactly the identity at rest, lookahead, smart release | `mite_dsp::deess` (`DeEsser`, `response_db`; DeEss, 2026-11-05) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
 | Crossover rail: band regions, grips, ghost grips to pull a band in, merging onto a neighbour or off an end, badges with S/M tags, funnels to the cards, the band menu (solo, mute, copy, paste, reset, merge, remove), split/merge/remove/solo on the host's parameters, its help | `mite_ui::widgets::rail` (`Rail<B>`, `RailParams`, `BandMenu`; Shape and Sat, 2026-10-26) |
@@ -310,6 +311,15 @@ taps and six bands; 120 fps. Next: the modulation matrix, then the smear stage a
 - Single-vocal and allround detection.
 - Lookahead.
 - **Beyond:** spectral mode (soothe-like, attenuates only the offending bins) and a detection heat-map display.
+
+**Status (2026-11-05): slice 1 built** (`docs/design/deess-brief.md`; accent deep sky). Relative
+detection (the default: a sibilant is the 5–12 kHz band loud against the voice, so loud and quiet
+lines are de-essed alike) or absolute; reduction by a dynamic shelf, a three-bell band (the air
+above it kept) or wide; exactly the identity when nothing is reduced (bit for bit); 3 ms
+lookahead (latency reported); smart release (a vowel after a sibilant comes back in a fifth of the
+time); Listen. Editor: the spectrum with the draggable trigger band and the reduction's response,
+the history with the voice, the band, the threshold riding on the voice and the reduction, a big
+reduction meter. 0.5–1.1 % of a core, 120 fps. Next: the spectral mode and the heat-map.
 
 ### 9. Mite Gate. Rival: FabFilter Pro-G
 

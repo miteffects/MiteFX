@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite DeEss",
+  "version": 1,
+  "name": "Low Voice",
+  "params": {
+    "lo": 3800.0,
+    "hi": 9000.0,
+    "threshold": -15.0
+  }
+}

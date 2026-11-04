@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite DeEss",
+  "version": 1,
+  "name": "Strong Vocal",
+  "params": {
+    "threshold": -20.0,
+    "range": 16.0,
+    "release": 50.0
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite DeEss",
+  "version": 1,
+  "name": "Gentle Vocal",
+  "params": {
+    "threshold": -12.0,
+    "range": 6.0,
+    "release": 80.0
+  }
+}

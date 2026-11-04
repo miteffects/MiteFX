@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite DeEss",
+  "version": 1,
+  "name": "Bright Voice",
+  "params": {
+    "lo": 6500.0,
+    "hi": 14000.0,
+    "threshold": -16.0
+  }
+}

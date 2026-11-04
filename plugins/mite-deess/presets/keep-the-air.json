@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite DeEss",
+  "version": 1,
+  "name": "Keep the Air",
+  "params": {
+    "reduce": 1.0,
+    "threshold": -16.0,
+    "range": 14.0
+  }
+}

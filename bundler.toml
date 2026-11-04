@@ -34,3 +34,6 @@ name = "Mite Tuner"
 
 [mite_double]
 name = "Mite Double"
+
+[mite_deess]
+name = "Mite DeEss"

@@ -1,0 +1,42 @@
+{
+  "fields": {
+    "mitefx_state": "1",
+    "preset": "Keep the Air",
+    "snapshots": "{\"active\":0,\"slots\":[{\"detection\":0.0,\"hi\":0.82112575,\"lo\":0.6491453,\"lookahead\":0.0,\"out_gain\":0.5,\"range\":0.375,\"reduce\":0.5,\"release\":0.46880332,\"threshold\":0.7},{\"range\":0.25},null,null]}"
+  },
+  "params": {
+    "bypass": {
+      "bool": false
+    },
+    "detection": {
+      "i32": 0
+    },
+    "hi": {
+      "f32": 14000.0
+    },
+    "listen": {
+      "bool": false
+    },
+    "lo": {
+      "f32": 6500.0
+    },
+    "lookahead": {
+      "bool": false
+    },
+    "out_gain": {
+      "f32": 0.0
+    },
+    "range": {
+      "f32": 9.0
+    },
+    "reduce": {
+      "i32": 1
+    },
+    "release": {
+      "f32": 60.0
+    },
+    "threshold": {
+      "f32": -18.0
+    }
+  }
+}

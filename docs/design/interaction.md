@@ -610,3 +610,12 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
   stays). A dashed ghost is a double not playing: click it in.
 - **Pills** (DOUBLES): 1 / 2 / 3, and NEW TAKE EVERY NOTE ↔ EVERY FEW SECONDS. MONO BASS (by the
   mono meter): click on/off, wheel its frequency (also the MONO dial in TONE).
+
+## Mite DeEss (in-house design, 2026-11-05; docs/design/deess-brief.md)
+
+- **Trigger band** on the spectrum: drag an edge's handle (or the edge line); drag the band by its
+  top (TRIGGER) to move both edges by one ratio; an edge never comes within 1.2× of the other;
+  double-click a handle: back to its default. Shift is fine (×0.2). One undo step a drag.
+- **Threshold** grip at the history's right end: up and down at the history's dB scale (in
+  RELATIVE it sits on the voice now); wheel; double-click: back.
+- **Pills:** RELATIVE / ABSOLUTE, LOOKAHEAD (on/off), SHELF / BAND / WIDE.
