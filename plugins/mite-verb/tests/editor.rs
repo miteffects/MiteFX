@@ -86,13 +86,19 @@ fn no_band_is_on_by_default() {
 }
 
 #[test]
-fn the_base_grip_puts_the_curve_through_the_pointer() {
+fn decay_is_a_dial_and_the_curve_has_no_grip_until_a_band_is_made() {
     let (mut view, host) = setup();
-    let grip = view.node(&host, Node::Base);
-    let to = Point::new(grip.x, view.decay_y(5.0));
-    drag(&mut view, &host, grip, to);
-    assert!((plain(&host, DECAY.id) / 5.0 - 1.0).abs() < 0.02, "{}", plain(&host, DECAY.id));
-    assert!((view.node(&host, Node::Base).y - to.y).abs() < 2.0);
+    // Nothing on the flat curve to grab: a press there is not a drag.
+    let at = Point::new(600.0, view.decay_y(2.0));
+    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+    view.event(&UiEvent::PointerMove { pos: Point::new(600.0, view.decay_y(5.0)), mods: MODS }, &host);
+    view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+    assert!((plain(&host, DECAY.id) - DECAY.default).abs() < 1e-4);
+    // The DECAY dial sets it.
+    let dial = view.dial(DECAY.id).expect("decay dial");
+    drag(&mut view, &host, dial, Point::new(dial.x, dial.y - 60.0));
+    assert!(plain(&host, DECAY.id) > DECAY.default * 1.5, "{}", plain(&host, DECAY.id));
     undo(&mut view, &host);
     assert!((plain(&host, DECAY.id) - DECAY.default).abs() < 1e-4);
 }
@@ -195,9 +201,11 @@ fn the_tone_layer_makes_eq_bands_of_every_shape() {
     // Its menu offers every EQ shape: Notch.
     pick_shape(&mut view, &host, p, 5);
     assert_eq!(plain(&host, "e2_type"), 5.0);
-    // Grabbing a decay grip goes back to the decay layer.
-    let base = view.node(&host, Node::Base);
-    drag(&mut view, &host, base, base);
+    // Grabbing a decay band goes back to the decay layer.
+    host.set_plain("d1_on", 1.0);
+    draw(&mut view, &host);
+    let band = view.node(&host, Node::Decay(0));
+    drag(&mut view, &host, band, band);
     assert_eq!(view.layer(), Layer::Decay);
 }
 
@@ -207,12 +215,12 @@ fn the_dials_sit_in_their_groups() {
     let groups = view.dial_groups();
     let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
     assert_eq!(names, ["SPACE", "MOD", "EARLY", "DUCK"]);
-    let member = [("SPACE", &["size", "predelay", "diffusion", "width"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("DUCK", &["duck", "duck_release"])];
+    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("DUCK", &["duck", "duck_release"])];
     for (name, members) in member {
         let rect = groups.iter().find(|g| g.0 == name).expect("group").1;
         for id in members {
             let c = view.dial(id).expect("dial");
-            assert!(rect.inset(-22.0).contains(c), "{id} outside {name}");
+            assert!(rect.contains(c), "{id} outside {name}");
         }
     }
     for (i, a) in groups.iter().enumerate() {

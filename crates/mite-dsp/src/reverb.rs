@@ -389,6 +389,37 @@ pub fn decay_curve(s: &ReverbSettings, freqs: &[f64], fs: f64, out: &mut [f64]) 
     out.iter_mut().for_each(|v| *v /= LINES as f64);
 }
 
+/// The decay EQ's T60 curve, cheaply: one line of the lines' mean loop length, designed once
+/// (with the same loop-gain check). Every line's band sections scale with its length (a band's
+/// dB a pass is proportional to it), so each line gives nearly the same T60(f) and the mean line
+/// stands for them all: within a few % of [`decay_curve`] (tested), at a fraction of the cost.
+/// What the editor draws and drags against, every frame.
+#[derive(Debug, Clone, Copy)]
+pub struct DecayModel {
+    len: f64,
+    fs: f64,
+    a: Absorption,
+}
+
+impl DecayModel {
+    pub fn new(s: &ReverbSettings, fs: f64) -> Self {
+        let topo = Topology::new();
+        let len = (0..LINES).map(|i| f64::from(topo.line_len(i, s.size, fs as f32))).sum::<f64>() / LINES as f64;
+        Self { len, fs, a: design_absorption(len, s, fs, 0.0) }
+    }
+
+    /// T60 at `freq`, s.
+    pub fn at(&self, freq: f64) -> f64 {
+        let w = std::f64::consts::TAU * (freq / self.fs).clamp(0.0, 0.5);
+        let per_pass_db = 20.0 * self.a.magnitude(w).log10();
+        if per_pass_db < -1e-9 {
+            -60.0 * self.len / self.fs / per_pass_db
+        } else {
+            1e6
+        }
+    }
+}
+
 /// A delay line with a power-of-two buffer.
 #[derive(Debug, Clone)]
 struct Delay {
@@ -1130,6 +1161,22 @@ mod tests {
         b.bands[2] = DecayBand::bell(1500.0, 0.5, 1.0);
         let at = decay_at(&b, 1500.0, fs);
         assert!((at / (mid * 0.5) - 1.0).abs() < 0.02, "{at} against {}", mid * 0.5);
+    }
+
+    #[test]
+    fn the_decay_model_follows_the_lines_mean() {
+        let fs = 48000.0;
+        let mut s = ReverbSettings { decay_s: 2.5, ..ReverbSettings::default() }.with_shelves((200.0, 1.8), (4000.0, 0.3));
+        s.bands[2] = DecayBand::bell(800.0, 0.4, 3.0);
+        s.bands[3] = DecayBand { shape: DecayShape::Tilt, ..DecayBand::bell(2000.0, 1.5, 1.0) };
+        for size in [0.0, 0.5, 1.0] {
+            s.size = size;
+            let m = DecayModel::new(&s, fs);
+            for f in [30.0, 200.0, 800.0, 2000.0, 6000.0, 18000.0] {
+                let (exact, model) = (decay_at(&s, f, fs), m.at(f));
+                assert!((model / exact - 1.0).abs() < 0.03, "size {size}, {f} Hz: {model} against {exact}");
+            }
+        }
     }
 
     #[test]

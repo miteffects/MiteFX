@@ -110,8 +110,11 @@ bands on.
   EQ (the bands' summed analog response in the suite's curve colour, ±24 dB about the middle).
   Two glyph pills top left (a falling tail, a bell) pick which one is edited: it is drawn lit
   with its grid labels (seconds or dB), the other dim; grabbing one of the other's bands picks it.
-  The BASE grip sits on the decay curve where no band moves it (nearest 1 kHz): up and down sets
-  DECAY so the curve passes through the pointer. Frozen: the curve rises off the top (it is
+  No grip until a band is made (user: "it doesnt have to have that middle default volume band"):
+  DECAY is a dial in SPACE. The curve, the grips and the drag's solving use `DecayModel` (one line
+  of the mean loop length, designed once per change; within 3 % of the 32-line mean, tested): the
+  exact mean cost 16 ms a drag event and froze the UI (user: "ui freezes when i change decay eq");
+  now about 0.5 ms an event and 0.6 ms a draw (`examples/drag_bench`). Frozen: the curve rises off the top (it is
   infinite) and the plot says so with the snowflake pill.
 - **Bands** (eight per EQ, none by default): double-click the plot for a bell through the
   pointer (decay: the curve passes through it; tone: its gain); right-click the plot for a band of
@@ -123,7 +126,7 @@ bands on.
   decaying. The duck threshold as a line with a grip (where the input crosses it, ducking
   starts) and the ducking from the top at the levels' scale.
 - **Dials** (bottom right) grouped by what they do, each group a named panel (user: "group knobs
-  per feature, right now everything is clustered"): SPACE (SIZE, PREDELAY, DIFFUSION, WIDTH), MOD
+  per feature, right now everything is clustered"): SPACE (SIZE, DECAY, DIFFUSION, WIDTH, PREDELAY), MOD
   (DEPTH, RATE), EARLY (LEVEL, SIZE, SEND), DUCK (DEPTH, RELEASE; the threshold is on the
   history).
 - **Meters** IN and OUT. **Footer:** Freeze, Bypass, latency, MIX, OUTPUT.

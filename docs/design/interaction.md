@@ -559,8 +559,7 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
 - **Layers.** One plot, two EQs: the decay EQ (how long each frequency rings) and the tone EQ (the
   reverb's own EQ). The two glyph pills top left pick which one the pointer edits; the other is
   drawn dim and grabbing one of its bands picks it. Neither has a band by default.
-- **Base grip** (on the decay curve where no band acts): up and down scales DECAY so the curve
-  passes through the pointer. Wheel steps; double-click resets.
+- **DECAY** is a dial (SPACE); the decay curve has no grip of its own, only its bands'.
 - **Bands** (eight per EQ). Double-click the plot: a bell there (decay: the curve through the
   pointer; tone: its gain at the pointer). Right-click the plot: a menu of every shape (decay:
   bell, low shelf, high shelf, tilt; tone: Mite EQ's ten) makes that band there. Right-click a

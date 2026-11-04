@@ -1,11 +1,13 @@
 //! The Mite Verb editor (docs/design/verb-brief.md §2), in 1280×760 design units.
 //!
 //! The plot on top holds both of the reverb's EQs over the input's and the reverb's spectra:
-//! the decay EQ (how long each frequency rings, `mite_dsp::reverb::decay_curve`, on a log
+//! the decay EQ (how long each frequency rings, `mite_dsp::reverb::DecayModel`, on a log
 //! seconds scale) and the tone EQ (the reverb's level per frequency, ±24 dB about the middle).
 //! Neither has a band until one is made (user, 2026-11-04: "fully flexible eq like eq plugin …
 //! dont make default bands"). The two glyph pills top left pick which one the pointer edits; the
-//! other stays drawn, dim, and grabbing one of its bands picks it. Under the plot the history
+//! other stays drawn, dim, and grabbing one of its bands picks it. The decay curve is drawn and
+//! dragged against `DecayModel` (one mean line, designed once per change: a drag costs well under
+//! a millisecond; the exact 32-line mean froze the UI). Under the plot the history
 //! (the input dim, the reverb lit; the ducking threshold to drag), then the dials grouped by what
 //! they do (SPACE, MOD, EARLY, DUCK); the meters on the right.
 
@@ -17,7 +19,7 @@ use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{analog_response_db, BandSettings, BandType, SLOPES_DB};
-use mite_dsp::reverb::{decay_at, decay_curve, DecayShape, ReverbSettings, DECAY_BANDS, TONE_BANDS};
+use mite_dsp::reverb::{DecayModel, DecayShape, ReverbSettings, DECAY_BANDS, TONE_BANDS};
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel};
 use mite_ui::peniko::{Color, Fill};
@@ -67,7 +69,7 @@ const PILL_Y: f64 = PLOT.y0 + 8.0;
 /// The history under the plot.
 const HIST_TOP: f64 = PLOT.y1 + 8.0;
 const HIST_BOTTOM: f64 = HELP_TOP - 4.0;
-const HIST_W: f64 = 776.0;
+const HIST_W: f64 = 740.0;
 const HIST_SECONDS: f64 = 6.0;
 const HIST_RANGE: f64 = 60.0;
 const DUCK_GRIP_X: f64 = HIST_W - 38.0;
@@ -75,7 +77,7 @@ const DUCK_GRIP: (f64, f64) = (34.0, 20.0);
 
 /// The dials beside the history, grouped: two rows, a wide and a narrow panel in each.
 const DIAL_D: f64 = 44.0;
-const GROUP_COLS: [(f64, f64); 2] = [(788.0, 1040.0), (1050.0, 1172.0)];
+const GROUP_COLS: [(f64, f64); 2] = [(752.0, 1062.0), (1070.0, 1172.0)];
 const GROUP_ROWS: [(f64, f64); 2] = [(HIST_TOP, HIST_TOP + 104.0), (HIST_BOTTOM - 104.0, HIST_BOTTOM)];
 /// A dial's centre below its panel's top.
 const DIAL_DY: f64 = 54.0;
@@ -204,8 +206,6 @@ pub enum Layer {
 /// A grip on the plot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Node {
-    /// DECAY, on the decay curve where no band moves it.
-    Base,
     /// A decay band (from 0), while it is on.
     Decay(usize),
     /// A tone band (from 0), while it is on.
@@ -216,16 +216,15 @@ impl Node {
     fn layer(self) -> Layer {
         match self {
             Node::Tone(_) => Layer::Tone,
-            _ => Layer::Decay,
+            Node::Decay(_) => Layer::Decay,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
-    /// A grip: where it was grabbed and where it sat; the Base grip's frequency (held while it
-    /// moves) and a band's multiplier when grabbed.
-    Node { node: Node, start: Point, at: Point, freq: f64, mult: f32 },
+    /// A grip: where it was grabbed and where it sat, and a decay band's multiplier then.
+    Node { node: Node, start: Point, at: Point, mult: f32 },
     /// The ducking threshold on the history.
     Duck { start: Point, thresh: f32 },
 }
@@ -264,6 +263,8 @@ pub struct VerbView {
     /// The decay curve and the tone curve as last worked out, and what for.
     curve: Vec<f64>,
     curve_for: Option<(ReverbSettings, f32)>,
+    /// The decay model for the settings it was made from (grips ask it many times an event).
+    model: std::cell::RefCell<Option<(ReverbSettings, DecayModel)>>,
     tone: Vec<f64>,
     tone_for: Option<[BandSettings; TONE_BANDS]>,
     pointer: Option<Point>,
@@ -294,7 +295,7 @@ impl VerbView {
         );
         type Dial = (ParamSpec, &'static str, Option<mite_core::DialCurve>);
         let layout: [(&'static str, &'static str, usize, usize, Vec<Dial>); 4] = [
-            ("SPACE", "the room itself", 0, 0, vec![(SIZE, "SIZE", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL)), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None)]),
+            ("SPACE", "the room itself", 0, 0, vec![(SIZE, "SIZE", None), (DECAY, "DECAY", None), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL))]),
             ("MOD", "the room's slow drift", 0, 1, vec![(MOD_DEPTH, "DEPTH", None), (MOD_RATE, "RATE", None)]),
             ("EARLY", "the first reflections", 1, 0, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
             ("DUCK", "the reverb stepping back while the input plays", 1, 1, vec![(DUCK, "DEPTH", None), (DUCK_RELEASE, "RELEASE", None)]),
@@ -323,6 +324,7 @@ impl VerbView {
             layer: Layer::Decay,
             curve: vec![0.0; CURVE_POINTS],
             curve_for: None,
+            model: std::cell::RefCell::new(None),
             tone: vec![0.0; CURVE_POINTS],
             tone_for: None,
             pointer: None,
@@ -390,13 +392,9 @@ impl VerbView {
     pub fn node(&self, host: &dyn ParamHost, node: Node) -> Point {
         let s = settings(host);
         match node {
-            Node::Base => {
-                let f = self.base_freq(&s);
-                Point::new(freq_x(f), decay_y(decay_at(&s, f, self.fs())))
-            }
             Node::Decay(b) => {
                 let f = f64::from(s.bands[b].freq);
-                Point::new(freq_x(f), decay_y(decay_at(&s, f, self.fs())))
+                Point::new(freq_x(f), decay_y(self.model(&s).at(f)))
             }
             Node::Tone(b) => {
                 let band = s.eq[b];
@@ -405,21 +403,24 @@ impl VerbView {
         }
     }
 
-    /// Where the Base grip sits: where the decay is DECAY (no band moves it), nearest 1 kHz.
-    fn base_freq(&self, s: &ReverbSettings) -> f64 {
-        const N: usize = 48;
-        let freqs: [f64; N] = std::array::from_fn(|i| 40.0 * 400f64.powf(i as f64 / (N - 1) as f64));
-        let mut t = [0.0; N];
-        decay_curve(s, &freqs, self.fs(), &mut t);
-        let d = f64::from(s.decay_s);
-        let cost = |i: usize| (t[i] / d).ln().abs() + 0.02 * (freqs[i] / 1000.0).log2().abs();
-        freqs[(0..N).min_by(|&a, &b| cost(a).total_cmp(&cost(b))).unwrap_or(N / 2)]
+    /// The decay model for `s` (cached: made again only when the settings change).
+    fn model(&self, s: &ReverbSettings) -> DecayModel {
+        let mut cache = self.model.borrow_mut();
+        let s = ReverbSettings { freeze: false, ..*s };
+        match *cache {
+            Some((for_s, m)) if for_s == s => m,
+            _ => {
+                let m = DecayModel::new(&s, self.fs());
+                *cache = Some((s, m));
+                m
+            }
+        }
     }
 
-    /// The grips that exist: Base, then each decay band and each tone band that is on. The
-    /// edited layer's last, so they win a hit.
+    /// The grips that exist: each decay band and each tone band that is on. The edited layer's
+    /// last, so they win a hit.
     fn nodes(&self, host: &dyn ParamHost) -> Vec<Node> {
-        let decay: Vec<Node> = std::iter::once(Node::Base).chain((0..DECAY_BANDS).filter(|&b| Self::on(host, &band_id(b, D_ON.id))).map(Node::Decay)).collect();
+        let decay: Vec<Node> = (0..DECAY_BANDS).filter(|&b| Self::on(host, &band_id(b, D_ON.id))).map(Node::Decay).collect();
         let tone: Vec<Node> = (0..TONE_BANDS).filter(|&b| Self::on(host, &tone_id(b, E_ON.id))).map(Node::Tone).collect();
         match self.layer {
             Layer::Decay => tone.into_iter().chain(decay).collect(),
@@ -475,11 +476,12 @@ impl VerbView {
     fn solve_mult(&self, s: &ReverbSettings, b: usize, freq: f64, target: f64) -> f32 {
         let (mut lo, mut hi) = (f64::from(D_MULT.min).ln(), f64::from(D_MULT.max).ln());
         let fs = self.fs();
-        for _ in 0..28 {
+        // 20 halvings: 1/250 000 of the range, far under a pixel.
+        for _ in 0..20 {
             let m = 0.5 * (lo + hi);
             let mut t = *s;
             t.bands[b].mult = m.exp() as f32;
-            if decay_at(&t, freq, fs) < target {
+            if DecayModel::new(&t, fs).at(freq) < target {
                 lo = m;
             } else {
                 hi = m;
@@ -498,7 +500,6 @@ impl VerbView {
 
     fn node_params(node: Node) -> Vec<String> {
         match node {
-            Node::Base => vec![DECAY.id.to_owned()],
             Node::Decay(b) => vec![band_id(b, D_FREQ.id), band_id(b, D_MULT.id)],
             Node::Tone(b) => vec![tone_id(b, E_FREQ.id), tone_id(b, E_GAIN.id)],
         }
@@ -519,8 +520,10 @@ impl VerbView {
         let s = ReverbSettings { freeze: false, ..settings(host) };
         let fs = self.fs();
         if self.curve_for != Some((s, fs as f32)) {
-            let freqs: Vec<f64> = (0..CURVE_POINTS).map(Self::curve_freq).collect();
-            decay_curve(&s, &freqs, fs, &mut self.curve);
+            let m = self.model(&s);
+            for (i, v) in self.curve.iter_mut().enumerate() {
+                *v = m.at(Self::curve_freq(i));
+            }
             self.curve_for = Some((s, fs as f32));
         }
         if self.tone_for != Some(s.eq) {
@@ -601,20 +604,11 @@ impl VerbView {
             let ink = if node.layer() == Layer::Tone { theme.curve } else { accent };
             let ink = if lit { ink } else { ink.multiply_alpha(0.45) };
             match node {
-                Node::Base => {
-                    let r = GRIP_R + 1.5;
-                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { ink } else { theme.display }, None, &Circle::new(p, r));
-                    if lit {
-                        glow_stroke(cx, &Circle::new(p, r), 2.0, ink, ink, if hot { 5.0 } else { 3.0 });
-                    } else {
-                        cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, ink, None, &Circle::new(p, r));
-                    }
-                }
                 Node::Decay(b) | Node::Tone(b) => {
                     // A bell's width as a bracket under it (to where it does half its dB).
                     let (bell, q, freq) = match node {
                         Node::Decay(_) => (s.bands[b].shape == DecayShape::Bell, f64::from(s.bands[b].q), f64::from(s.bands[b].freq)),
-                        _ => (s.eq[b].kind == BandType::Bell, s.eq[b].q, s.eq[b].freq),
+                        Node::Tone(_) => (s.eq[b].kind == BandType::Bell, s.eq[b].q, s.eq[b].freq),
                     };
                     if bell && lit {
                         let bw = 2.0 / std::f64::consts::LN_2 * (1.0 / (2.0 * q)).asinh();
@@ -764,15 +758,10 @@ impl VerbView {
     fn node_help(&self, host: &dyn ParamHost, node: Node, dragging: bool) -> Help {
         let s = settings(host);
         match node {
-            Node::Base => Help::default()
-                .text("Decay ")
-                .slot(fmt_s(f64::from(s.decay_s)), "30.00 s")
-                .text(" — how long the reverb takes to fall 60 dB where no band changes it")
-                .text(if dragging { " — Shift is fine." } else { " — drag it up and down; wheel steps; double-click resets." }),
             Node::Decay(b) => {
                 let band = s.bands[b];
                 let f = f64::from(band.freq);
-                let t = decay_at(&s, f, self.fs());
+                let t = self.model(&s).at(f);
                 Help::default()
                     .text(format!("Decay band {} · {} · ", b + 1, DECAY_MENU[band.shape.index()]))
                     .slot(fmt_s(t), "30.00 s")
@@ -915,9 +904,8 @@ impl VerbView {
                     host.begin_gesture(&id);
                 }
                 let s = settings(host);
-                let freq = if node == Node::Base { self.base_freq(&s) } else { 0.0 };
                 let mult = if let Node::Decay(b) = node { s.bands[b].mult } else { 1.0 };
-                self.drag = Some(Drag::Node { node, start: pos, at: self.node(host, node), freq, mult });
+                self.drag = Some(Drag::Node { node, start: pos, at: self.node(host, node), mult });
                 true
             }
             Some(Hot::Duck) => {
@@ -942,16 +930,10 @@ impl VerbView {
     }
 
     /// A grip dragged to `to` (where it should now sit on the plot).
-    fn move_node(&self, host: &dyn ParamHost, node: Node, to: Point, drag: (Point, f64, f32)) {
-        let (at, freq, mult) = drag;
+    fn move_node(&self, host: &dyn ParamHost, node: Node, to: Point, drag: (Point, f32)) {
+        let (at, mult) = drag;
         let mut s = settings(host);
         match node {
-            Node::Base => {
-                // The curve scales with the decay: put it through the pointer.
-                let now = decay_at(&s, freq, self.fs());
-                let d = (f64::from(s.decay_s) * y_decay(to.y) / now) as f32;
-                Self::set_raw(host, DECAY.id, DECAY.snap(d.clamp(DECAY.min, DECAY.max)));
-            }
             Node::Decay(b) => {
                 let f = (x_freq(to.x) as f32).clamp(D_FREQ.min, D_FREQ.max);
                 Self::set_raw(host, &band_id(b, D_FREQ.id), D_FREQ.snap(f));
@@ -1019,8 +1001,7 @@ impl VerbView {
                         let (on, kind) = match node {
                             Node::Decay(b) => (band_id(b, D_ON.id), band_id(b, D_TYPE.id)),
                             Node::Tone(b) => (tone_id(b, E_ON.id), tone_id(b, E_TYPE.id)),
-                            Node::Base => return true,
-                        };
+                                        };
                         if i == remove {
                             Self::set(host, &on, 0.0);
                         } else {
@@ -1058,13 +1039,10 @@ impl VerbView {
                 self.pointer = Some(pos);
                 let k = if mods.fine() { 0.2 } else { 1.0 };
                 match self.drag {
-                    Some(Drag::Node { node, start, at, freq, mult }) => {
+                    Some(Drag::Node { node, start, at, mult }) => {
                         let mut to = at + (pos - start) * k;
                         to.y = to.y.clamp(DECAY_TOP, DECAY_BOTTOM);
-                        if node == Node::Base {
-                            to.x = at.x;
-                        }
-                        self.move_node(host, node, to, (at, freq, mult));
+                        self.move_node(host, node, to, (at, mult));
                         return true;
                     }
                     Some(Drag::Duck { start, thresh }) => {
@@ -1098,7 +1076,6 @@ impl VerbView {
                 match hot {
                     Some(Hot::Node(Node::Decay(b))) => Self::set(host, &band_id(b, D_ON.id), 0.0),
                     Some(Hot::Node(Node::Tone(b))) => Self::set(host, &tone_id(b, E_ON.id), 0.0),
-                    Some(Hot::Node(Node::Base)) => Self::set(host, DECAY.id, DECAY.default),
                     Some(Hot::Duck) => Self::set(host, DUCK_THRESH.id, DUCK_THRESH.default),
                     Some(Hot::Layer(_)) => return false,
                     None if PLOT.contains(pos) => return self.add_band(host, self.layer, 0, pos),
@@ -1123,7 +1100,6 @@ impl VerbView {
                             Self::set(host, &id, E_Q.wheel(Self::plain(host, &id), lines, fine));
                         }
                     }
-                    Some(Hot::Node(Node::Base)) => Self::set(host, DECAY.id, DECAY.wheel(Self::plain(host, DECAY.id), lines, fine)),
                     Some(Hot::Duck) => Self::set(host, DUCK_THRESH.id, DUCK_THRESH.wheel(Self::plain(host, DUCK_THRESH.id), lines, fine)),
                     _ => return false,
                 }
@@ -1167,6 +1143,7 @@ fn draw_layer_glyph(cx: &mut DrawCx<'_>, layer: Layer, c: Point, ink: Color) {
 fn knob_words(id: &str) -> &'static str {
     match id {
         "size" => " — the room: how far apart its walls are (small rooms ring close and dense, halls spread out)",
+        "decay" => " — how long the reverb takes to fall 60 dB where no decay band changes it",
         "predelay" => " — the gap before the reverb starts: keeps a voice in front of its room",
         "diffusion" => " — how fast the echoes blur into a wash (low: each reflection heard)",
         "early" => " — the first reflections off the walls: they tell the ear the room's size",
