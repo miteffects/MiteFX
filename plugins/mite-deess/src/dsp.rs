@@ -3,7 +3,7 @@
 //! host's block size, and the input and output for the spectrum.
 
 use mite_core::{HistoryTap, SpectrumTap};
-use mite_dsp::deess::{DeEssSettings, DeEsser};
+use mite_dsp::deess::{reduction_filter, DeEssSettings, DeEsser, Reduce};
 use mite_dsp::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`DeEssShared::history`).
@@ -16,7 +16,35 @@ pub mod record {
     pub const WHOLE: usize = 5;
     /// The deepest reduction, dB (≥ 0).
     pub const GR: usize = 6;
-    pub const WIDTH: usize = 7;
+    /// The heat-map: the reduction (dB, the most in the slice) at `HEAT_ROWS` frequencies.
+    pub const HEAT: usize = 7;
+    pub const WIDTH: usize = HEAT + super::HEAT_ROWS;
+}
+
+/// The heat-map's rows: 2…20 kHz, log-spaced.
+pub const HEAT_ROWS: usize = 16;
+
+pub fn heat_freq(row: usize) -> f64 {
+    2000.0 * 10f64.powf(row as f64 / (HEAT_ROWS - 1) as f64)
+}
+
+/// The spectral reduction per bin, for the editor (a lock-free copy: the latest block's).
+pub struct GainsTap {
+    pub gains: Vec<mite_core::AtomicF32>,
+    pub bin_hz: mite_core::AtomicF32,
+    pub count: std::sync::atomic::AtomicUsize,
+}
+
+impl GainsTap {
+    pub fn new() -> Self {
+        Self { gains: (0..2049).map(|_| mite_core::AtomicF32::new(0.0)).collect(), bin_hz: mite_core::AtomicF32::new(0.0), count: std::sync::atomic::AtomicUsize::new(0) }
+    }
+}
+
+impl Default for GainsTap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub const HISTORY_SLICE_MS: f32 = 5.0;
@@ -61,7 +89,7 @@ impl DeEssEngine {
         self.deesser.latency()
     }
 
-    pub fn process(&mut self, channels: &mut [&mut [f32]], s: &DeEssSettings, gain_db: f32, history: &HistoryTap<{ record::WIDTH }>, spectra: Option<[&SpectrumTap; 2]>) {
+    pub fn process(&mut self, channels: &mut [&mut [f32]], s: &DeEssSettings, gain_db: f32, history: &HistoryTap<{ record::WIDTH }>, spectra: Option<[&SpectrumTap; 2]>, gains: Option<&GainsTap>) {
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
             return;
@@ -109,6 +137,31 @@ impl DeEssEngine {
             a[record::BAND] = a[record::BAND].max(tel.band_db);
             a[record::WHOLE] = a[record::WHOLE].max(tel.whole_db);
             a[record::GR] = a[record::GR].max(tel.gr_db);
+            // The heat-map: per frequency, the reduction this chunk.
+            let fs = self.deesser.sample_rate();
+            if self.deesser.spectral_on() {
+                let (g, bin_hz) = self.deesser.spectral_gains();
+                for r in 0..HEAT_ROWS {
+                    let k = ((heat_freq(r) / bin_hz).round() as usize).min(g.len() - 1);
+                    a[record::HEAT + r] = a[record::HEAT + r].max(g[k] as f32);
+                }
+            } else if tel.gr_db > 0.0 {
+                let sections = reduction_filter(s, tel.gr_db, fs);
+                for r in 0..HEAT_ROWS {
+                    let f = heat_freq(r).min(0.49 * f64::from(fs));
+                    let db = if s.reduce == Reduce::Wide { f64::from(tel.gr_db) } else { -sections.iter().map(|c| c.response_db(f, f64::from(fs))).sum::<f64>() };
+                    a[record::HEAT + r] = a[record::HEAT + r].max(db as f32);
+                }
+            }
+            if let Some(tap) = gains {
+                let (g, bin_hz) = self.deesser.spectral_gains();
+                let on = self.deesser.spectral_on();
+                for (dst, &v) in tap.gains.iter().zip(g) {
+                    dst.store(if on { v as f32 } else { 0.0 });
+                }
+                tap.bin_hz.store(bin_hz as f32);
+                tap.count.store(g.len().min(tap.gains.len()), std::sync::atomic::Ordering::Release);
+            }
             self.slice_pos += n;
             if self.slice_pos >= self.slice_len {
                 history.push(&self.acc);
@@ -121,8 +174,10 @@ impl DeEssEngine {
 }
 
 fn empty_record() -> [f32; record::WIDTH] {
-    let mut r = [MINUS_INFINITY_DB; record::WIDTH];
-    r[record::GR] = 0.0;
+    let mut r = [0.0; record::WIDTH];
+    for k in [record::IN, record::IN + 1, record::OUT, record::OUT + 1, record::BAND, record::WHOLE] {
+        r[k] = MINUS_INFINITY_DB;
+    }
     r
 }
 
@@ -138,13 +193,13 @@ mod tests {
         let mut e = DeEssEngine::new(48_000.0, &s, 0.0);
         let (mut l, mut r) = (x.clone(), x.clone());
         for (a, b) in l.chunks_mut(333).zip(r.chunks_mut(333)) {
-            e.process(&mut [a, b], &s, 0.0, &history, None);
+            e.process(&mut [a, b], &s, 0.0, &history, None, None);
         }
         let look = e.latency();
         assert_eq!(look, 144);
         assert_eq!(&l[look..], &x[..x.len() - look]);
         let mut m = x.clone();
-        e.process(&mut [&mut m], &s, 0.0, &history, None);
+        e.process(&mut [&mut m], &s, 0.0, &history, None, None);
         assert!(m.iter().all(|v| v.is_finite()));
     }
 }

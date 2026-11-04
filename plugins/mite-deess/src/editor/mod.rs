@@ -4,8 +4,8 @@
 //! edges (drag an edge, or the band itself), and the reduction as it happens (the filter's own
 //! response at the reduction now; dashed, at the full RANGE). Under it, left, the history: the
 //! voice (dim), the trigger band (lit), the threshold where it acts (in RELATIVE mode it rides on
-//! the voice; drag its grip), the reduction from the top. Right, DETECT and REDUCE, and a big
-//! reduction meter.
+//! the voice; drag its grip), and over it the heat-map (where in frequency it turned down, and
+//! how far). Right, DETECT and REDUCE, and a big reduction meter.
 
 mod spectrum;
 
@@ -24,7 +24,7 @@ use mite_ui::widgets::history::{self, HistoryLane};
 use mite_ui::widgets::{Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
-use crate::dsp::{record, HISTORY_RECORDS, HISTORY_SLICE_MS};
+use crate::dsp::{record, HEAT_ROWS, HISTORY_RECORDS, HISTORY_SLICE_MS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::DeEssShared;
@@ -53,6 +53,9 @@ const CURVE_POINTS: usize = 200;
 /// The history.
 const HIST: Rect = Rect::new(0.0, SPEC.y1 + 8.0, 740.0, HELP_TOP - 4.0);
 const HIST_SECONDS: f64 = 6.0;
+/// The heat-map strip at the history's top, the levels under it.
+const HEAT: Rect = Rect::new(HIST.x0, HIST.y0, HIST.x1, HIST.y0 + 96.0);
+const LEVELS: Rect = Rect::new(HIST.x0, HEAT.y1 + 4.0, HIST.x1, HIST.y1);
 const HIST_RANGE: f64 = 72.0;
 const THRESH_GRIP: (f64, f64) = (34.0, 20.0);
 
@@ -77,11 +80,11 @@ fn resp_y(db: f64) -> f64 {
 
 /// A level's y on the history (0…−72 dBFS).
 fn lv_y(db: f64) -> f64 {
-    HIST.y0 + 8.0 + (-db).clamp(0.0, HIST_RANGE) / HIST_RANGE * (HIST.height() - 16.0)
+    LEVELS.y0 + 8.0 + (-db).clamp(0.0, HIST_RANGE) / HIST_RANGE * (LEVELS.height() - 16.0)
 }
 
 fn px_per_db() -> f64 {
-    (HIST.height() - 16.0) / HIST_RANGE
+    (LEVELS.height() - 16.0) / HIST_RANGE
 }
 
 /// A stand-in host holding every Mite DeEss parameter at its default (tests, preview, tools).
@@ -264,7 +267,7 @@ impl DeEssView {
             Pill::Detection(Detection::Relative) => (0, 0, 3),
             Pill::Detection(Detection::Absolute) => (0, 1, 3),
             Pill::Lookahead => (0, 2, 3),
-            Pill::Reduce(r) => (1, r.index(), 3),
+            Pill::Reduce(r) => (1, r.index(), 4),
         };
         let x0 = GROUP_COLS[0].0 + 14.0;
         let w = (GROUP_COLS[0].1 - GROUP_COLS[0].0 - 28.0 - 8.0 * (n - 1) as f64) / n as f64;
@@ -354,9 +357,26 @@ impl DeEssView {
                 .collect();
             history::smooth_path(&pts)
         };
-        cx.scene.stroke(&Stroke::new(1.2).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, accent.multiply_alpha(0.45), None, &curve(s.range_db));
-        let now = curve(self.gr);
-        glow_stroke(cx, &now, 2.2, accent, accent, 4.0);
+        if s.reduce == Reduce::Spectral {
+            // Per frequency, as it happens: the reduction of every bin; dashed, the most RANGE
+            // allows across the band.
+            let full = {
+                let mut p = BezPath::new();
+                p.move_to((PLOT_X0, resp_y(0.0)));
+                p.line_to((xl, resp_y(0.0)));
+                p.line_to((xl, resp_y(-f64::from(s.range_db))));
+                p.line_to((xh, resp_y(-f64::from(s.range_db))));
+                p.line_to((xh, resp_y(0.0)));
+                p.line_to((SPEC.x1, resp_y(0.0)));
+                p
+            };
+            cx.scene.stroke(&Stroke::new(1.2).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, accent.multiply_alpha(0.45), None, &full);
+            glow_stroke(cx, &self.spectral_curve(), 2.0, accent, accent, 4.0);
+        } else {
+            cx.scene.stroke(&Stroke::new(1.2).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, accent.multiply_alpha(0.45), None, &curve(s.range_db));
+            let now = curve(self.gr);
+            glow_stroke(cx, &now, 2.2, accent, accent, 4.0);
+        }
         cx.end_clip();
         // The band's edges and its handles.
         for (grip, x) in [(Grip::Lo, xl), (Grip::Hi, xh)] {
@@ -375,6 +395,33 @@ impl DeEssView {
         cx.text.draw(cx.scene, "TRIGGER", mid.x, SPEC.y0 + 14.0, TextStyle::LABEL.sized(9.0), if band_hot { theme.text_hi } else { accent.multiply_alpha(0.8) }, Align::Center);
     }
 
+    /// The spectral reduction per bin, as the engine last left it, on the response scale.
+    fn spectral_curve(&self) -> BezPath {
+        let tap = &self.shared.gains;
+        let count = tap.count.load(std::sync::atomic::Ordering::Acquire);
+        let bin_hz = f64::from(tap.bin_hz.load());
+        let mut pts = vec![Point::new(PLOT_X0, resp_y(0.0))];
+        if bin_hz > 0.0 {
+            for k in 1..count {
+                let f = k as f64 * bin_hz;
+                if !(20.0..=20_000.0).contains(&f) {
+                    continue;
+                }
+                pts.push(Point::new(freq_x(f), resp_y(-f64::from(tap.gains[k].load()))));
+            }
+        }
+        pts.push(Point::new(SPEC.x1, resp_y(0.0)));
+        let mut p = BezPath::new();
+        for (i, q) in pts.iter().enumerate() {
+            if i == 0 {
+                p.move_to(*q);
+            } else {
+                p.line_to(*q);
+            }
+        }
+        p
+    }
+
     fn since_fresh(&self) -> f64 {
         (self.last_fresh.elapsed().as_secs_f64() * 1000.0 / f64::from(HISTORY_SLICE_MS)).min(4.0)
     }
@@ -386,12 +433,34 @@ impl DeEssView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &HIST);
         let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) };
         for db in [-12.0, -24.0, -36.0, -48.0, -60.0] {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((HIST.x0, lv_y(db)), (HIST.x1, lv_y(db))));
-            cx.text.draw(cx.scene, &format!("−{}", -db as i32), HIST.x0 + 6.0, lv_y(db) - 13.0, label, theme.text_lo, Align::Left);
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((LEVELS.x0, lv_y(db)), (LEVELS.x1, lv_y(db))));
+            cx.text.draw(cx.scene, &format!("−{}", -db as i32), LEVELS.x0 + 6.0, lv_y(db) - 13.0, label, theme.text_lo, Align::Left);
         }
         let lane = HistoryLane { x0: HIST.x0, width: HIST.width(), top: HIST.y0, bottom: HIST.y1, seconds: HIST_SECONDS, slice_ms: HISTORY_SLICE_MS };
+        // The heat-map along the top: where in frequency it reduced (2…20 kHz, high at the top),
+        // the deeper the brighter.
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &HEAT);
+        cx.text.draw(cx.scene, "20k", HEAT.x0 + 6.0, HEAT.y0 + 1.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(9.0).weighted(600.0) }, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, "2k", HEAT.x0 + 6.0, HEAT.y1 - 12.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(9.0).weighted(600.0) }, theme.text_lo, Align::Left);
         let cols = lane.columns(&self.history, self.seen, self.since_fresh());
-        cx.begin_clip(&HIST);
+        if cols.len() >= 2 {
+            cx.begin_clip(&HEAT);
+            let row_h = HEAT.height() / HEAT_ROWS as f64;
+            let range = f64::from(s.range_db.max(1.0));
+            for w in cols.windows(2) {
+                let (c, x1) = (&w[0], w[1].x);
+                for r in 0..HEAT_ROWS {
+                    let db = f64::from(c.high[record::HEAT + r]);
+                    if db > 0.1 {
+                        let y0 = HEAT.y1 - (r + 1) as f64 * row_h;
+                        let a = (db / range).clamp(0.0, 1.0) as f32;
+                        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.gain_reduction.multiply_alpha(0.15 + 0.85 * a), None, &Rect::new(c.x, y0, x1 + 0.5, y0 + row_h + 0.5));
+                    }
+                }
+            }
+            cx.end_clip();
+        }
+        cx.begin_clip(&LEVELS);
         let t = f64::from(s.threshold_db);
         if cols.len() >= 2 {
             type Col = history::Column<{ record::WIDTH }>;
@@ -410,11 +479,6 @@ impl DeEssView {
             let band = line(&|c| lv_y(f64::from(c.high[record::BAND])));
             let look = history::LevelLook { fill: [accent.multiply_alpha(0.18), accent.multiply_alpha(0.02)], span: (HIST.y0, HIST.y1), edge: accent, width: 1.8, glow: 2.4 };
             history::draw_level(cx, &cols, &band, HIST.y1, look);
-            // The reduction from the top.
-            if cols.iter().any(|c| c.high[record::GR] > 0.05) {
-                let edge = line(&|c| HIST.y0 + (f64::from(c.high[record::GR]) * px_per_db() * 2.0).clamp(0.0, HIST.height()));
-                history::draw_reduction(cx, &cols, &edge, HIST.y0, 0.5 * HIST.height());
-            }
         }
         cx.end_clip();
         // The threshold's grip.
@@ -450,7 +514,7 @@ impl DeEssView {
         self.draw_pill(cx, Pill::Detection(Detection::Relative), "RELATIVE", s.detection == Detection::Relative);
         self.draw_pill(cx, Pill::Detection(Detection::Absolute), "ABSOLUTE", s.detection == Detection::Absolute);
         self.draw_pill(cx, Pill::Lookahead, "LOOKAHEAD", s.lookahead);
-        for r in [Reduce::Shelf, Reduce::Band, Reduce::Wide] {
+        for r in [Reduce::Shelf, Reduce::Band, Reduce::Wide, Reduce::Spectral] {
             self.draw_pill(cx, Pill::Reduce(r), &Reduce::NAMES[r.index()].to_uppercase(), s.reduce == r);
         }
         // The reduction meter: a bar down from the top (0…24 dB), the peak held.
@@ -522,10 +586,11 @@ impl DeEssView {
         match self.hot {
             Some(Hot::Pill(Pill::Detection(Detection::Relative))) => return Help::default().text("Relative — a sibilant is the top of the voice loud against the voice itself: the same de-essing loud or quiet (smart, the default)"),
             Some(Hot::Pill(Pill::Detection(Detection::Absolute))) => return Help::default().text("Absolute — the top past a level (dBFS): for cymbals and anything not a voice"),
-            Some(Hot::Pill(Pill::Lookahead)) => return Help::default().text("Lookahead — the audio 3 ms behind the detector, so the reduction is in place when the sibilant arrives (3 ms of latency)"),
+            Some(Hot::Pill(Pill::Lookahead)) => return Help::default().text("Lookahead — the audio 3 ms behind the detector, so the reduction is in place when the sibilant arrives (3 ms of latency; SPECTRAL has its own)"),
             Some(Hot::Pill(Pill::Reduce(Reduce::Shelf))) => return Help::default().text("Shelf — everything above the band's low edge turned down (the classic split de-esser)"),
             Some(Hot::Pill(Pill::Reduce(Reduce::Band))) => return Help::default().text("Band — only the trigger band turned down; the air above it stays"),
             Some(Hot::Pill(Pill::Reduce(Reduce::Wide))) => return Help::default().text("Wide — the whole signal turned down while a sibilant sounds"),
+            Some(Hot::Pill(Pill::Reduce(Reduce::Spectral))) => return Help::default().text("Spectral — every frequency of the band on its own: only what pokes over comes down (a whistly s loses its whistle, the hiss beside it stays). 11 ms of latency; LOOKAHEAD is built in."),
             _ => {}
         }
         if let Some(h) = self.footer.help(host) {
@@ -547,8 +612,11 @@ impl DeEssView {
         if let Some(h) = self.session.help() {
             return h;
         }
+        if self.pointer.is_some_and(|p| HEAT.contains(p)) {
+            return Help::default().text("The heat-map: where in frequency (2 kHz at the bottom, 20 kHz at the top) it turned down, and how far (the brighter the deeper), over the last six seconds.");
+        }
         if self.pointer.is_some_and(|p| HIST.contains(p)) {
-            return Help::default().text("The voice (dim), the trigger band (lit) and the threshold (dashed) where it acts; the reduction hangs from the top.");
+            return Help::default().text("The voice (dim), the trigger band (lit) and the threshold (dashed) where it acts; above, the heat-map of what was turned down.");
         }
         Help::default().text("Top: the trigger band (drag its edges) and the reduction as it happens (dashed: at the full RANGE). Below: the voice, the band and the threshold.")
     }
@@ -560,7 +628,7 @@ impl DeEssView {
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
-        let pills = [Pill::Detection(Detection::Relative), Pill::Detection(Detection::Absolute), Pill::Lookahead, Pill::Reduce(Reduce::Shelf), Pill::Reduce(Reduce::Band), Pill::Reduce(Reduce::Wide)];
+        let pills = [Pill::Detection(Detection::Relative), Pill::Detection(Detection::Absolute), Pill::Lookahead, Pill::Reduce(Reduce::Shelf), Pill::Reduce(Reduce::Band), Pill::Reduce(Reduce::Wide), Pill::Reduce(Reduce::Spectral)];
         for pill in pills {
             if self.pill(pill).inflate(2.0, 2.0).contains(p) {
                 return Some(Hot::Pill(pill));

@@ -192,3 +192,100 @@ fn moving_any_setting_never_clicks() {
         assert!(moving <= steady.max(held) * 2.0 + 1e-4, "{name}: {moving} after {steady} (held {held})");
     }
 }
+
+#[test]
+fn spectral_is_transparent_at_rest_and_says_its_latency() {
+    let (x, _) = voice(1.0, -12.0, -200.0);
+    let s = DeEssSettings { reduce: Reduce::Spectral, ..DeEssSettings::default() };
+    let y = run(&s, &x, 333);
+    let look = DeEsser::latency_for(&s, FS);
+    assert_eq!(look, mite_dsp::deess::spectral_size(FS));
+    let worst = y[look..].iter().zip(&x).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+    assert!(worst < 1e-5, "{worst}");
+}
+
+#[test]
+fn spectral_takes_a_sibilant_down_and_leaves_the_rest() {
+    let (x, _) = voice(2.0, -12.0, -12.0);
+    let s = DeEssSettings { reduce: Reduce::Spectral, range_db: 24.0, ..DeEssSettings::default() };
+    let y = run(&s, &x, 512);
+    let look = DeEsser::latency_for(&s, FS);
+    let start = 9600 + 19_200 + 960;
+    let drop = |fc: f32| band_db(&x, fc, start..start + 1920) - band_db(&y, fc, start + look..start + look + 1920);
+    assert!(drop(7000.0) > 6.0, "{}", drop(7000.0));
+    for fc in [440.0, 2500.0, 15_000.0] {
+        assert!(drop(fc).abs() < 1.0, "{fc} Hz: {}", drop(fc));
+    }
+}
+
+#[test]
+fn spectral_takes_only_the_peak_of_a_peaky_sibilant() {
+    // A whistle at 7 kHz over an even hiss across the band, the voice under it: the whistle is
+    // brought down, the hiss beside it (9.5 kHz) barely.
+    let n = 48_000;
+    let mut seed = 3u32;
+    let x: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / FS;
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let hiss = 0.02 * (seed as f32 / u32::MAX as f32 - 0.5);
+            let vowel: f32 = (1..8).map(|k| (std::f32::consts::TAU * 200.0 * k as f32 * t).sin() / k as f32).sum::<f32>() * 0.2;
+            vowel + hiss + 0.15 * (std::f32::consts::TAU * 7000.0 * t).sin()
+        })
+        .collect();
+    let s = DeEssSettings { reduce: Reduce::Spectral, range_db: 24.0, ..DeEssSettings::default() };
+    let y = run(&s, &x, 512);
+    let look = DeEsser::latency_for(&s, FS);
+    // Read on a fine spectrum (3 Hz bins, Hann): the whistle's own leakage stays out of the hiss.
+    let drop = |y: &[f32], look: usize, fc: f32, width: f32| fine_db(&x[24_000..40_000], fc, width) - fine_db(&y[24_000 + look..40_000 + look], fc, width);
+    assert!(drop(&y, look, 7000.0, 10.0) > 6.0, "whistle {}", drop(&y, look, 7000.0, 10.0));
+    assert!(drop(&y, look, 9500.0, 400.0) < 1.5, "hiss beside it {}", drop(&y, look, 9500.0, 400.0));
+    // The broadband band mode takes the hiss down with it.
+    let band = run(&DeEssSettings { reduce: Reduce::Band, range_db: 24.0, ..DeEssSettings::default() }, &x, 512);
+    let b = drop(&band, 144, 9500.0, 400.0);
+    assert!(b > 3.0, "band mode on the hiss {b}");
+}
+
+#[test]
+fn spectral_is_the_same_for_any_block_size_and_switches_without_a_click() {
+    let (x, _) = voice(1.0, -12.0, -10.0);
+    let s = DeEssSettings { reduce: Reduce::Spectral, ..DeEssSettings::default() };
+    let a = run(&s, &x, 512);
+    for block in [1, 7, 64, 333] {
+        assert_eq!(a, run(&s, &x, block), "block {block}");
+    }
+    // Into the spectral mode and out: behind the dip, no step.
+    let base = DeEssSettings::default();
+    let d2 = |v: &[f32], i: usize| (v[i + 1] - 2.0 * v[i] + v[i - 1]).abs();
+    let plain = run(&base, &x, 480);
+    let steady = (24_000..40_000).map(|i| d2(&plain, i)).fold(0.0f32, f32::max);
+    let mut d = DeEsser::new(FS, &base);
+    let mut y = x.clone();
+    for (k, c) in y.chunks_mut(480).enumerate() {
+        let s = if (k * 480) >= 24_000 && (k * 480) < 33_600 { s } else { base };
+        d.process(&mut [c], &s);
+    }
+    let moving = (24_000..40_000).map(|i| d2(&y, i)).fold(0.0f32, f32::max);
+    assert!(moving <= steady * 2.0 + 1e-4, "{moving} against {steady}");
+}
+
+/// `x`'s power within `width` Hz of `fc`, dB, on its Hann-windowed DFT.
+fn fine_db(x: &[f32], fc: f32, width: f32) -> f32 {
+    let n = x.len();
+    let res = FS / n as f32;
+    let (k0, k1) = (((fc - width / 2.0) / res).floor() as usize, ((fc + width / 2.0) / res).ceil() as usize);
+    let mut p = 0.0f64;
+    for k in k0..=k1 {
+        let w = std::f64::consts::TAU * k as f64 / n as f64;
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (i, &v) in x.iter().enumerate() {
+            let h = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos();
+            re += f64::from(v) * h * (w * i as f64).cos();
+            im -= f64::from(v) * h * (w * i as f64).sin();
+        }
+        p += re * re + im * im;
+    }
+    (10.0 * p.max(1e-30).log10()) as f32
+}

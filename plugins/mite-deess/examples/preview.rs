@@ -40,7 +40,7 @@ fn main() -> Result<(), String> {
                 r[i] = l[i];
             }
             pos = (pos + 512) % x.len();
-            engine.process(&mut [&mut l, &mut r], &s, g, &audio.history, Some([&audio.spectrum, &audio.output]));
+            engine.process(&mut [&mut l, &mut r], &s, g, &audio.history, Some([&audio.spectrum, &audio.output]), Some(&audio.gains));
             blocks += 1;
             let due = start + Duration::from_secs_f64(blocks as f64 * 512.0 / 48_000.0);
             if let Some(wait) = due.checked_duration_since(Instant::now()) {

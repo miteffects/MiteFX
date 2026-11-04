@@ -62,13 +62,15 @@ pub enum Reduce {
     Band,
     /// The whole signal.
     Wide,
+    /// Only the frequencies that poke over, each on its own (see [`Spectral`]).
+    Spectral,
 }
 
 impl Reduce {
-    pub const NAMES: [&'static str; 3] = ["Shelf", "Band", "Wide"];
+    pub const NAMES: [&'static str; 4] = ["Shelf", "Band", "Wide", "Spectral"];
 
     pub fn from_index(i: usize) -> Self {
-        [Self::Shelf, Self::Band, Self::Wide][i.min(2)]
+        [Self::Shelf, Self::Band, Self::Wide, Self::Spectral][i.min(3)]
     }
 
     pub fn index(self) -> usize {
@@ -186,7 +188,7 @@ pub fn reduction_filter(s: &DeEssSettings, gr_db: f32, fs: f32) -> [Coeffs; BAND
                 *sec = Coeffs::bell(centre * 2f64.powf(-half), centre * 2f64.powf(half), fs, g * BAND_SHARE);
             }
         }
-        Reduce::Wide => {}
+        Reduce::Wide | Reduce::Spectral => {}
     }
     c
 }
@@ -195,6 +197,8 @@ pub fn reduction_filter(s: &DeEssSettings, gr_db: f32, fs: f32) -> [Coeffs; BAND
 pub fn response_db(s: &DeEssSettings, gr_db: f32, freq: f64, fs: f32) -> f64 {
     match s.reduce {
         Reduce::Wide => -f64::from(gr_db.max(0.0)),
+        // Per frequency, as it happens: the editor draws `DeEsser::spectral_gains`.
+        Reduce::Spectral => 0.0,
         _ => reduction_filter(s, gr_db, fs).iter().map(|c| c.response_db(freq, f64::from(fs))).sum(),
     }
 }
@@ -255,11 +259,150 @@ pub struct DeEsser {
     listen: f32,
     bypass: f32,
     k_switch: f32,
+    spectral: Spectral,
+    /// Whether the spectral path is the one heard (switched at the bottom of a dip, as the
+    /// latency changes with it).
+    spectral_on: bool,
+}
+
+/// The spectral mode's frame: 512 samples at 48 kHz (scaled with the rate), a quarter hop.
+pub fn spectral_size(fs: f32) -> usize {
+    ((512.0 * fs / 48_000.0) as usize).next_power_of_two().clamp(256, 4096)
+}
+
+/// The spectral reduction: the input in frames (`Stft`: 512 samples at 48 kHz, 94 Hz a bin, a
+/// 2.7 ms hop), every bin of the trigger band against its own threshold. That threshold is the
+/// broadband one spread over the band: RELATIVE, the voice's power (the whole frame) shared evenly
+/// by the band's bins, + THRESHOLD; ABSOLUTE, THRESHOLD shared evenly. So a sibilant spread evenly
+/// across the band is reduced as BAND would, and a peaky one (a whistle, a lisp) only where it
+/// peaks. Each bin: as far as it pokes over (the knee), at most RANGE, at once, letting go at the
+/// smart release; its gain shared a little with its neighbours (0.2 / 0.6 / 0.2). The band's edges
+/// taper over a sixth of an octave.
+struct Spectral {
+    stft: crate::stft::Stft,
+    buf: [Vec<f32>; 2],
+    /// Per bin: the reduction now (dB), its target, the band's weight.
+    gain_db: Vec<f64>,
+    target: Vec<f64>,
+    power: Vec<f64>,
+    weight: Vec<f64>,
+    weight_for: (f32, f32),
+    bin_hz: f64,
+    /// The band's reduction, energy-weighted, the most in the frames since it was read (dB).
+    gr_db: f32,
+}
+
+const SPEC_CHUNK: usize = 256;
+
+impl Spectral {
+    fn new(fs: f32) -> Self {
+        let size = spectral_size(fs);
+        let stft = crate::stft::Stft::new(size);
+        let bins = stft.bins();
+        Self {
+            bin_hz: f64::from(fs) / size as f64,
+            stft,
+            buf: [vec![0.0; SPEC_CHUNK], vec![0.0; SPEC_CHUNK]],
+            gain_db: vec![0.0; bins],
+            target: vec![0.0; bins],
+            power: vec![0.0; bins],
+            weight: vec![0.0; bins],
+            weight_for: (0.0, 0.0),
+            gr_db: 0.0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.stft.reset();
+        self.gain_db.iter_mut().for_each(|g| *g = 0.0);
+        self.gr_db = 0.0;
+    }
+
+    fn set_band(&mut self, lo: f32, hi: f32) {
+        if (lo, hi) == self.weight_for {
+            return;
+        }
+        let taper = 2f64.powf(1.0 / 6.0);
+        let (lo, hi) = (f64::from(lo), f64::from(hi));
+        for (k, w) in self.weight.iter_mut().enumerate() {
+            let f = k as f64 * self.bin_hz;
+            *w = if f >= lo && f <= hi {
+                1.0
+            } else if f < lo && f > lo / taper {
+                0.5 - 0.5 * (std::f64::consts::PI * (f - lo / taper) / (lo - lo / taper)).cos()
+            } else if f > hi && f < hi * taper {
+                0.5 + 0.5 * (std::f64::consts::PI * (f - hi) / (hi * taper - hi)).cos()
+            } else {
+                0.0
+            };
+        }
+        self.weight_for = (lo as f32, hi as f32);
+    }
+}
+
+/// What a spectral frame needs to know.
+#[derive(Clone, Copy)]
+struct FrameParams {
+    threshold_db: f64,
+    absolute: f64,
+    range_db: f64,
+    k_rel: f64,
+    full_scale_sq: f64,
+}
+
+#[allow(clippy::too_many_arguments)] // the frame's parts, borrowed apart from the STFT
+fn spectral_frame(l: &mut [realfft::num_complex::Complex<f64>], r: &mut [realfft::num_complex::Complex<f64>], gain_db: &mut [f64], target: &mut [f64], power: &mut [f64], weight: &[f64], p: FrameParams, gr_out: &mut f32) {
+    let bins = l.len().min(r.len()).min(gain_db.len());
+    for k in 0..bins {
+        power[k] = if k > 0 && k < bins - 1 { (l[k].norm_sqr() + r[k].norm_sqr()) / (2.0 * p.full_scale_sq) } else { 0.0 };
+    }
+    let whole: f64 = power[..bins].iter().sum();
+    let n_band: f64 = weight[..bins].iter().sum::<f64>().max(1.0);
+    let gate = 10f64.powf(f64::from(GATE_DB) / 10.0);
+    let reference = 10.0 * (whole.max(1e-30) / n_band).log10() * (1.0 - p.absolute) + 10.0 * (1.0 / n_band).log10() * p.absolute + p.threshold_db;
+    let level = |k: usize| 10.0 * power[k].max(1e-30).log10();
+    for k in 0..bins {
+        target[k] = 0.0;
+        if weight[k] > 0.0 && whole >= gate && power[k] > 0.0 {
+            let over = f64::from(over_db(level(k) as f32, reference as f32));
+            target[k] = over.min(p.range_db).max(0.0) * weight[k];
+        }
+    }
+    let (mut num, mut den) = (0.0, 0.0);
+    let mut prev = 0.0;
+    for k in 0..bins {
+        let next = if k + 1 < bins { target[k + 1] } else { 0.0 };
+        let t = 0.2 * prev + 0.6 * target[k] + 0.2 * next;
+        prev = target[k];
+        let g = &mut gain_db[k];
+        if t > *g {
+            *g = t;
+        } else {
+            // Smart release, per bin: faster the further it sits under its threshold.
+            let below = (reference - level(k)).clamp(0.0, 60.0);
+            let k_down = 1.0 - (1.0 - p.k_rel).powf(1.0 + below / f64::from(SMART_DB));
+            *g += (t - *g) * k_down;
+            if *g < 1e-6 {
+                *g = 0.0;
+            }
+        }
+        let lin = if *g > 0.0 { 10f64.powf(-*g / 20.0) } else { 1.0 };
+        if *g > 0.0 {
+            l[k] *= lin;
+            r[k] *= lin;
+        }
+        let pk = power[k] * weight[k];
+        num += pk;
+        den += pk * lin * lin;
+    }
+    if num > 1e-30 && den > 0.0 {
+        *gr_out = gr_out.max((10.0 * (num / den).log10()) as f32);
+    }
 }
 
 impl DeEsser {
     pub fn new(fs: f32, s: &DeEssSettings) -> Self {
-        let len = (LOOKAHEAD_MS * 0.001 * fs) as usize + 2;
+        let len = ((LOOKAHEAD_MS * 0.001 * fs) as usize).max(spectral_size(fs)) + 2;
         let mut d = Self {
             fs,
             band_c: [Coeffs::IDENTITY; 2],
@@ -283,6 +426,8 @@ impl DeEsser {
             listen: 0.0,
             bypass: 0.0,
             k_switch: 1.0 - (-1.0 / (0.010 * fs)).exp(),
+            spectral: Spectral::new(fs),
+            spectral_on: false,
         };
         d.reset(s);
         d
@@ -292,9 +437,11 @@ impl DeEsser {
         self.fs
     }
 
-    /// The lookahead for `s`, samples.
+    /// The latency for `s`, samples: the spectral frame, or the lookahead.
     pub fn latency_for(s: &DeEssSettings, fs: f32) -> usize {
-        if s.lookahead {
+        if s.reduce == Reduce::Spectral {
+            spectral_size(fs)
+        } else if s.lookahead {
             (LOOKAHEAD_MS * 0.001 * fs).round() as usize
         } else {
             0
@@ -324,6 +471,18 @@ impl DeEsser {
         self.designed = (0.0, 0.0);
         self.listen = f32::from(u8::from(s.listen));
         self.bypass = f32::from(u8::from(s.bypass));
+        self.spectral.reset();
+        self.spectral_on = s.reduce == Reduce::Spectral;
+    }
+
+    /// The spectral reduction per bin now (dB, ≥ 0), and a bin's width (Hz).
+    pub fn spectral_gains(&self) -> (&[f64], f64) {
+        (&self.spectral.gain_db, self.spectral.bin_hz)
+    }
+
+    /// Whether the spectral path is the one heard.
+    pub fn spectral_on(&self) -> bool {
+        self.spectral_on
     }
 
     fn design(&mut self, s: &DeEssSettings) {
@@ -349,10 +508,36 @@ impl DeEsser {
         let k_rel = 1.0 - (-1.0 / (s.release_ms.max(1.0) * 0.001 * fs)).exp();
         let gate = 10f64.powf(f64::from(GATE_DB) / 10.0);
         let want_look = Self::latency_for(s, fs);
+        let want_spectral = s.reduce == Reduce::Spectral;
         let size = self.delay[0].len();
-        for i in 0..len {
-            // A lookahead change: fade out, switch, fade in.
-            if want_look != self.look && self.dip_dir == 0.0 {
+        let (lo, hi) = s.band(fs);
+        self.spectral.set_band(lo, hi);
+        let mut spec_gr = 0.0f32;
+        let mut chunk_start = 0;
+        while chunk_start < len {
+            let chunk_end = (chunk_start + SPEC_CHUNK).min(len);
+            let n = chunk_end - chunk_start;
+            // The spectral path runs always (its frames warm), heard only while on.
+            {
+                let p = FrameParams {
+                    threshold_db: f64::from(self.threshold),
+                    absolute: f64::from(self.absolute),
+                    range_db: f64::from(s.range_db.max(0.0)),
+                    k_rel: 1.0 - (-(self.spectral.stft.hop() as f64) / (f64::from(s.release_ms.max(1.0)) * 0.001 * f64::from(fs))).exp(),
+                    full_scale_sq: self.spectral.stft.full_scale().powi(2),
+                };
+                let Spectral { stft, buf, gain_db, target, power, weight, gr_db, .. } = &mut self.spectral;
+                let [bl, br] = buf;
+                bl[..n].copy_from_slice(&channels[0][chunk_start..chunk_end]);
+                br[..n].copy_from_slice(&channels[n_ch - 1][chunk_start..chunk_end]);
+                stft.process(&mut bl[..n], &mut br[..n], &mut |a, b| spectral_frame(a, b, gain_db, target, power, weight, p, gr_db));
+                spec_gr = spec_gr.max(*gr_db);
+                *gr_db = 0.0;
+            }
+        for i in chunk_start..chunk_end {
+            // A latency change (lookahead, or the spectral mode in or out): fade out, switch,
+            // fade in.
+            if (want_look != self.look || want_spectral != self.spectral_on) && self.dip_dir == 0.0 {
                 self.dip_dir = -1.0;
             }
             if self.dip_dir != 0.0 {
@@ -360,6 +545,7 @@ impl DeEsser {
                 if self.dip <= 0.0 {
                     self.dip = 0.0;
                     self.look = want_look;
+                    self.spectral_on = want_spectral;
                     self.dip_dir = 1.0;
                 } else if self.dip >= 1.0 {
                     self.dip = 1.0;
@@ -410,7 +596,9 @@ impl DeEsser {
             if self.gr < 1e-6 {
                 self.gr = 0.0;
             }
-            tel.gr_db = tel.gr_db.max(self.gr);
+            if !self.spectral_on {
+                tel.gr_db = tel.gr_db.max(self.gr);
+            }
             let coeffs = reduction_filter(s, self.gr, fs);
             let wide = if s.reduce == Reduce::Wide { crate::db_to_gain(-self.gr) } else { 1.0 };
             for c in 0..n_ch {
@@ -423,13 +611,18 @@ impl DeEsser {
                 for (st, co) in self.filt[c].iter_mut().zip(&coeffs) {
                     y = st.run(co, y);
                 }
-                let y = y as f32 * wide;
+                let y = if self.spectral_on { self.spectral.buf[c.min(1)][i - chunk_start] } else { y as f32 * wide };
                 // Each blend as a·(1 − t) + b·t, so its ends are exact (bypass gives the input).
                 let y = y * (1.0 - self.listen) + band_out[c] * self.listen;
                 let y = y * (1.0 - self.bypass) + xd * self.bypass;
                 channels[c][i] = y * self.dip;
             }
             self.pos = (self.pos + 1) % size;
+        }
+            chunk_start = chunk_end;
+        }
+        if self.spectral_on {
+            tel.gr_db = tel.gr_db.max(spec_gr);
         }
         tel
     }

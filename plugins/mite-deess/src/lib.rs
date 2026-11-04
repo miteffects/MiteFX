@@ -11,10 +11,11 @@ use nih_plug::prelude::*;
 
 pub mod dsp;
 pub mod editor;
+pub mod migrate;
 pub mod params;
 pub mod presets;
 
-use dsp::{record, DeEssEngine, HISTORY_RECORDS};
+use dsp::{record, DeEssEngine, GainsTap, HISTORY_RECORDS};
 use params::DeEssParams;
 
 /// Audio → UI telemetry. Lock-free and allocation-free on the audio side.
@@ -23,6 +24,8 @@ pub struct DeEssShared {
     /// The input and the output (mono), for the spectrum.
     pub spectrum: SpectrumTap,
     pub output: SpectrumTap,
+    /// The spectral reduction per bin (spectral mode).
+    pub gains: GainsTap,
     pub sample_rate: AtomicF32,
     /// The latency the engine runs with, samples.
     pub latency: AtomicF32,
@@ -40,6 +43,7 @@ impl DeEssShared {
             history: HistoryTap::new(HISTORY_RECORDS),
             spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE),
             output: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE),
+            gains: GainsTap::new(),
             sample_rate: AtomicF32::new(48_000.0),
             latency: AtomicF32::new(0.0),
             snapshots,
@@ -89,7 +93,7 @@ impl Plugin for MiteDeEss {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -116,7 +120,7 @@ impl Plugin for MiteDeEss {
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let s = self.params.settings();
-        self.engine.process(buffer.as_slice(), &s, self.params.out_gain.value(), &self.shared.history, Some([&self.shared.spectrum, &self.shared.output]));
+        self.engine.process(buffer.as_slice(), &s, self.params.out_gain.value(), &self.shared.history, Some([&self.shared.spectrum, &self.shared.output]), Some(&self.shared.gains));
         // Lookahead switched (behind a dip): tell the host.
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {

@@ -16,7 +16,7 @@ fn main() {
             (seed as f32 / u32::MAX as f32 - 0.5) * 0.5
         })
         .collect();
-    for reduce in [Reduce::Shelf, Reduce::Band, Reduce::Wide] {
+    for reduce in [Reduce::Shelf, Reduce::Band, Reduce::Wide, Reduce::Spectral] {
         let s = DeEssSettings { reduce, threshold_db: -20.0, ..DeEssSettings::default() };
         let mut d = DeEsser::new(fs, &s);
         let (mut l, mut r) = (x.clone(), x.clone());

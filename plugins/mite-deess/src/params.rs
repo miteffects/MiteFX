@@ -10,7 +10,10 @@ use mite_plugin::{bool_param, choice_param, float_param};
 use nih_plug::prelude::*;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 2 (2026-11-05): REDUCE gained Spectral; [`crate::migrate::v1_to_v2`] re-normalises the
+///   choice in stored snapshots.
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {

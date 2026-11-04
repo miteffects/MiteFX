@@ -618,4 +618,5 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
   double-click a handle: back to its default. Shift is fine (×0.2). One undo step a drag.
 - **Threshold** grip at the history's right end: up and down at the history's dB scale (in
   RELATIVE it sits on the voice now); wheel; double-click: back.
-- **Pills:** RELATIVE / ABSOLUTE, LOOKAHEAD (on/off), SHELF / BAND / WIDE.
+- **Pills:** RELATIVE / ABSOLUTE, LOOKAHEAD (on/off), SHELF / BAND / WIDE / SPECTRAL. The heat-map
+  over the history is read-only (hover for its help).

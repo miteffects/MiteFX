@@ -3,7 +3,7 @@
 //!
 //!     cargo run -p mite_deess --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, band, wide. SNAPSHOT_HOVER=x,y hovers a point.
+//! SNAPSHOT_VARIANT: default, band, wide, spectral. SNAPSHOT_HOVER=x,y hovers a point.
 
 #[path = "common/voice.rs"]
 mod voice;
@@ -31,6 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match std::env::var("SNAPSHOT_VARIANT").as_deref() {
         Ok("band") => host.set_plain("reduce", 1.0),
         Ok("wide") => host.set_plain("reduce", 2.0),
+        Ok("spectral") => host.set_plain("reduce", 3.0),
         _ => {}
     }
     let shared = Arc::new(DeEssShared::new());
@@ -42,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let x = voice::voice(6.33, fs);
     for block in x.chunks(480) {
         let (mut l, mut r) = (block.to_vec(), block.to_vec());
-        engine.process(&mut [&mut l, &mut r], &s, out_gain(&host), &shared.history, Some([&shared.spectrum, &shared.output]));
+        engine.process(&mut [&mut l, &mut r], &s, out_gain(&host), &shared.history, Some([&shared.spectrum, &shared.output]), Some(&shared.gains));
     }
     let mut view = DeEssView::new(shared.clone());
     view.tick(&host);

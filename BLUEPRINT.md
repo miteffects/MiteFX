@@ -319,7 +319,11 @@ above it kept) or wide; exactly the identity when nothing is reduced (bit for bi
 lookahead (latency reported); smart release (a vowel after a sibilant comes back in a fifth of the
 time); Listen. Editor: the spectrum with the draggable trigger band and the reduction's response,
 the history with the voice, the band, the threshold riding on the voice and the reduction, a big
-reduction meter. 0.5–1.1 % of a core, 120 fps. Next: the spectral mode and the heat-map.
+reduction meter. 0.5–1.1 % of a core, 120 fps. Same day, slice 2: the **spectral mode** (every
+94 Hz bin of the band against the broadband threshold spread over the band: a peaky sibilant
+loses only its peak, the hiss beside it stays; 10.7 ms latency) and the **heat-map** (where in
+frequency it turned down, every mode); state 2 migrates snapshots' `reduce`. Next: mid/side
+detection.
 
 ### 9. Mite Gate. Rival: FabFilter Pro-G
 

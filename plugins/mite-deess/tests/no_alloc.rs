@@ -9,13 +9,14 @@ use mite_dsp::deess::{DeEssSettings, Detection, Reduce};
 fn engine_process_never_allocates() {
     let history: HistoryTap<{ record::WIDTH }> = HistoryTap::new(512);
     let taps = [SpectrumTap::new(8192), SpectrumTap::new(8192)];
+    let gains = mite_deess::dsp::GainsTap::new();
     let mut s = DeEssSettings::default();
     let mut engine = DeEssEngine::new(48_000.0, &s, 0.0);
     let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
     let mut seed = 5u32;
     for i in 0..1200 {
         s.detection = if (i / 70) % 2 == 0 { Detection::Relative } else { Detection::Absolute };
-        s.reduce = Reduce::from_index((i / 40) % 3);
+        s.reduce = Reduce::from_index((i / 40) % 4);
         s.lookahead = (i / 90) % 3 != 2;
         s.listen = (i / 130) % 4 == 3;
         s.bypass = (i / 150) % 5 == 4;
@@ -29,9 +30,9 @@ fn engine_process_never_allocates() {
             *b = -*a;
         }
         let n = if i % 3 == 0 { 512 } else { 100 };
-        process_wrapper(|| engine.process(&mut [&mut l[..n], &mut r[..n]], &s, -1.0, &history, Some([&taps[0], &taps[1]])));
+        process_wrapper(|| engine.process(&mut [&mut l[..n], &mut r[..n]], &s, -1.0, &history, Some([&taps[0], &taps[1]]), Some(&gains)));
         if i % 50 == 0 {
-            process_wrapper(|| engine.process(&mut [&mut l[..n]], &s, 0.0, &history, None));
+            process_wrapper(|| engine.process(&mut [&mut l[..n]], &s, 0.0, &history, None, None));
         }
         assert!(l.iter().chain(&r).all(|x| x.is_finite()));
     }
