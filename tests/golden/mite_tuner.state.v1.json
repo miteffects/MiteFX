@@ -1,0 +1,18 @@
+{
+  "fields": {
+    "mitefx_state": "1",
+    "preset": "Init",
+    "snapshots": "{\"active\":0,\"slots\":[{\"reference\":0.55,\"tuning\":0.25},{\"reference\":0.25},null,null]}"
+  },
+  "params": {
+    "mute": {
+      "bool": false
+    },
+    "reference": {
+      "f32": 442.0
+    },
+    "tuning": {
+      "i32": 2
+    }
+  }
+}

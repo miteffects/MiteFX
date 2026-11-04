@@ -35,6 +35,8 @@ pub enum ToggleGlyph {
     Listen,
     /// Freeze (hold a reverb's tail): a snowflake.
     Freeze,
+    /// Mute (silence the output, e.g. while tuning): a speaker with a cross.
+    Mute,
 }
 
 /// A toggle: its parameter (on at ≥ 0.5), glyph, and what the help strip says about it.
@@ -250,6 +252,23 @@ pub fn draw_toggle_glyph(scene: &mut Scene, glyph: ToggleGlyph, c: Point, color:
                 }
             }
             scene.stroke(&round, Affine::IDENTITY, color, None, &flake);
+        }
+        ToggleGlyph::Mute => {
+            let mut cone = BezPath::new();
+            cone.move_to((c.x - 7.5, c.y - 2.5));
+            cone.line_to((c.x - 4.5, c.y - 2.5));
+            cone.line_to((c.x - 0.5, c.y - 6.5));
+            cone.line_to((c.x - 0.5, c.y + 6.5));
+            cone.line_to((c.x - 4.5, c.y + 2.5));
+            cone.line_to((c.x - 7.5, c.y + 2.5));
+            cone.close_path();
+            scene.stroke(&round, Affine::IDENTITY, color, None, &cone);
+            let mut cross = BezPath::new();
+            cross.move_to((c.x + 2.5, c.y - 3.0));
+            cross.line_to((c.x + 8.0, c.y + 3.0));
+            cross.move_to((c.x + 8.0, c.y - 3.0));
+            cross.line_to((c.x + 2.5, c.y + 3.0));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &cross);
         }
         ToggleGlyph::Bypass => {
             let mut stem = BezPath::new();

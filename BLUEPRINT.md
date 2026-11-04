@@ -113,6 +113,7 @@ MiteFX/
 | Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
 | Reverb: modulated 32-line FDN with per-line absorption (decay time per frequency from free decay bands: bell, shelves, tilt), a tone EQ of `mite_dsp::eq` bands on its output, its T60 curve for drawing | `mite_dsp::reverb` (`Reverb`, `decay_at`, `decay_curve`; Verb, 2026-11-04; Delay's diffusion can build on it) |
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
+| Pitch detection (McLeod pitch method, sub-cent), notes and cents against a reference | `mite_dsp::pitch` (`PitchDetector`, `note_of`, `note_hz`; Tuner, 2026-11-04) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
 | Crossover rail: band regions, grips, ghost grips to pull a band in, merging onto a neighbour or off an end, badges with S/M tags, funnels to the cards, the band menu (solo, mute, copy, paste, reset, merge, remove), split/merge/remove/solo on the host's parameters, its help | `mite_ui::widgets::rail` (`Rail<B>`, `RailParams`, `BandMenu`; Shape and Sat, 2026-10-26) |
@@ -357,6 +358,17 @@ Nova Shaper ported:
 
 - **Mite Meter:** loudness (R128 with history graph), true peak, spectrum, spectrogram, phase scope, correlation and stereo imager.
 - **Mite Utility:** gain, pan law, width, mono, phase, swap, DC and bass-mono below a set frequency.
+
+### 14b. Mite Tuner (2026-11-04)
+
+- A big, precise chromatic tuner for guitar and bass (user: "simple tuner plugin for guitars. make
+  it in a way it's big. keep the styling").
+
+**Status (2026-11-04): built** (`docs/design/tuner-brief.md`; accent seafoam, new). The audio
+passes untouched or muted; the editor finds the pitch every 20 ms with the McLeod pitch method
+(`mite_dsp::pitch`, refined on a sinc-interpolated NSDF): within 0.2 cent on guitar strings, 0.5
+cent on a bass's lowest (tested). A huge note with its arrows, a ±50-cent strip with a needle, a
+six-second trace of the cents, the tuning's strings (nine tunings), A4 420…460 Hz, Mute.
 
 ### 15. Mite Amp (later)
 

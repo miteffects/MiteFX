@@ -28,3 +28,6 @@ name = "Mite Verb"
 
 [mite_delay]
 name = "Mite Delay"
+
+[mite_tuner]
+name = "Mite Tuner"

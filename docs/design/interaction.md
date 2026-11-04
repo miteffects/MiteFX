@@ -595,3 +595,9 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
   a band for its shape or Remove, drag, wheel its Q (a cut's slope), double-click removes it. The
   dashed line is the machine's own losses each pass (Tape, BBD).
 - **Machine.** Three pills in the MACHINE panel (DIGITAL, TAPE, BBD) and DRIVE.
+
+## Mite Tuner (in-house design, 2026-11-04; docs/design/tuner-brief.md)
+
+- Nothing to drag: the note, its arrows, the needle and the trace follow the input. Click the
+  TUNING pill for the list of tunings (the strings shown; every note is read either way).
+  Footer: Mute (silence the output while tuning), A4 (the reference, wheel 0.5 Hz, Shift 0.1).

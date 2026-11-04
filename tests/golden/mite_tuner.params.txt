@@ -1,0 +1,3 @@
+reference | Hz | 420 | 460 | 440 | Linear
+tuning | choice | Chromatic, Standard, Drop D, Half Step Down, D Standard, DADGAD, Open G, 7-String, Bass | 1
+mute | bool | false

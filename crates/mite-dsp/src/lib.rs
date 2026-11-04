@@ -19,6 +19,7 @@ pub mod loudness;
 pub mod matching;
 pub mod natural_phase;
 pub mod oversample;
+pub mod pitch;
 pub mod output;
 pub mod reverb;
 pub mod reverb_quality;

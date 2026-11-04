@@ -1681,6 +1681,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mite_tuner"
+version = "0.1.0"
+dependencies = [
+ "assert_no_alloc",
+ "baseview",
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
+ "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mite_verb"
 version = "0.1.0"
 dependencies = [
