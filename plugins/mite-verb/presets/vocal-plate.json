@@ -3,7 +3,30 @@
   "version": 1,
   "name": "Vocal Plate",
   "params": {
-    "predelay": 25.0, "size": 35.0, "decay": 1.6, "lo_mult": 0.8, "lo_freq": 300.0, "hi_mult": 0.7, "hi_freq": 6000.0,
-    "diffusion": 90.0, "early": 15.0, "mod_depth": 40.0, "lo_cut": 180.0, "hi_cut": 12000.0, "mix": 22.0
+    "predelay": 25.0,
+    "size": 35.0,
+    "decay": 1.6,
+    "d1_on": 1.0,
+    "d1_type": 1.0,
+    "d1_freq": 300.0,
+    "d1_mult": 0.8,
+    "d1_q": 0.71,
+    "d2_on": 1.0,
+    "d2_type": 2.0,
+    "d2_freq": 6000.0,
+    "d2_mult": 0.7,
+    "d2_q": 0.71,
+    "diffusion": 90.0,
+    "early": 15.0,
+    "mod_depth": 40.0,
+    "e1_on": 1.0,
+    "e1_type": 3.0,
+    "e1_freq": 180.0,
+    "e1_slope": 1.0,
+    "e2_on": 1.0,
+    "e2_type": 4.0,
+    "e2_freq": 12000.0,
+    "e2_slope": 1.0,
+    "mix": 22.0
   }
 }

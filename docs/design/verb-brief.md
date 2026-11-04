@@ -75,17 +75,22 @@ Signal flow per channel (mono runs the left path only):
    with first-order allpass interpolation (lossless: cubic Lagrange in the loop shortened the highs
    by 13 % and leaked a frozen tail) through its two allpasses, mixed by P·H·D. The topology is
    drawn once from a fixed seed (`Topology`).
-5. **Absorption (the decay EQ):** every line has a gain, a low and a high RBJ shelf and four RBJ
-   bells, so that a pass loses −60 dB × loop / T60(f): DECAY at mid, × LOW at DC, × HIGH at
-   Nyquist, and each bell multiplies the decay around its frequency (rates add). Any frequency's
-   loop gain is kept < 1 at design time (34 grid points plus every section's frequency, the highest
-   refined by ternary search), so no setting can blow up. A new design is reached along a straight
-   line over 32 samples, every sample (stepping it was heard on a fast HIGH move); a bell glides to
-   nothing before it stops running. `decay_at`/`decay_curve` are the mean T60 the lines' filters
-   give, from the same design: what the editor draws.
-6. **Post:** low cut and high cut on the reverb (second-order Butterworth), width (M/S, 0…150 %),
-   ducking (from THRESHOLD up 1 dB per dB, at most DEPTH, letting go over RELEASE, through a 3 ms
-   one-pole).
+5. **Absorption (the decay EQ):** every line has a gain and one section per decay band (eight;
+   none by default, user 2026-11-04: "fully flexible eq like eq plugin … dont make default
+   bands"), so that a pass loses −60 dB × loop / T60(f): DECAY where no band acts, and each band
+   multiplies the decay where it acts by its `mult` (rates add). A band is a bell, a low or high
+   shelf (the decay below or above its frequency × mult) or a tilt (pivoting on its frequency),
+   each one section of `mite_dsp::eq`'s matched design. Any frequency's loop gain is kept < 1 at
+   design time (66 grid points plus every band's frequency, the highest refined by ternary search,
+   a 1e−5 margin for broad maxima where bands overlap), so no setting can blow up. A new design is
+   reached along a straight line over 32 samples, every sample; a band glides to nothing before
+   it stops running, and before it changes shape. `decay_at`/`decay_curve` are the mean T60 the
+   lines' filters give, from the same design: what the editor draws.
+6. **Post:** width (M/S, 0…150 %), ducking (from THRESHOLD up 1 dB per dB, at most DEPTH, letting
+   go over RELEASE, through a 3 ms one-pole), then the tone EQ: eight of Mite EQ's bands
+   (`mite_dsp::eq::BandProcessor`: every shape, cuts at 6…96 dB/oct; smoothed, a shape change
+   crossfaded), the same on both sides (so it commutes with the width). None by default; the
+   fixed low and high cut are gone.
 7. **Output:** mix against the dry input (no latency: mix 0 % and bypass give the input bit for
    bit), output gain, bypass (an ordinary parameter, never the host's).
 
@@ -94,43 +99,56 @@ absorption fades to unity: the tail holds forever, and fades back to the set dec
 
 **Control rate:** designs every 32 samples, counted across blocks, from 20 ms-smoothed settings
 (Size over 200 ms: a pitch glide, as the room's walls move); every gain within a step glides per
-sample. Output identical for any block size. 3.9 % of a core at 48 kHz.
+sample. Output identical for any block size. 3.8 % of a core at 48 kHz; 5.2 % with all sixteen
+bands on.
 
 ## 2. Main view (1280 × 760)
 
-- **Decay plot** (the hero, top, full width but the meters): frequency across (20 Hz…20 kHz),
-  decay time up on a log scale (0.1…30 s). The input spectrum dim and the reverb's spectrum lit
-  behind it (their own dB scale), the T60(f) curve in the accent from `decay_at`, three grips:
-  LOW (x = low frequency, y = its decay), MID (y = DECAY, between them), HIGH (x = high frequency,
-  y = its decay). The post EQ's cuts as two vertical grips on the plot's floor, the region they
-  remove shaded. Frozen: the curve rises off the top (it is infinite) and the plot says so with
-  the snowflake pill.
+- **The plot** (the hero, top, full width but the meters): frequency across (20 Hz…20 kHz), the
+  input spectrum dim and the reverb's lit behind it (their own dB scale), and both EQs: the decay
+  EQ (T60(f) in the accent from `decay_at`, decay time up on a log scale 0.1…30 s) and the tone
+  EQ (the bands' summed analog response in the suite's curve colour, ±24 dB about the middle).
+  Two glyph pills top left (a falling tail, a bell) pick which one is edited: it is drawn lit
+  with its grid labels (seconds or dB), the other dim; grabbing one of the other's bands picks it.
+  The BASE grip sits on the decay curve where no band moves it (nearest 1 kHz): up and down sets
+  DECAY so the curve passes through the pointer. Frozen: the curve rises off the top (it is
+  infinite) and the plot says so with the snowflake pill.
+- **Bands** (eight per EQ, none by default): double-click the plot for a bell through the
+  pointer (decay: the curve passes through it; tone: its gain); right-click the plot for a band of
+  any shape there; right-click a band for its shape or to remove it; drag it (across: frequency;
+  up and down: the decay through the pointer, or the gain; a tilt's decay doubles per 80 px);
+  wheel for its width (a cut's slope); double-click removes it. A bell shows a bracket under it
+  where it does half its dB.
 - **History** (bottom left, 6 s): the input's peaks dim, the reverb lit; the tail is visible
   decaying. The duck threshold as a line with a grip (where the input crosses it, ducking
   starts) and the ducking from the top at the levels' scale.
-- **Dials** (bottom right): SIZE, PREDELAY, DIFFUSION, WIDTH, MOD, RATE / EARLY, E.SIZE, SEND,
-  DUCK, RELEASE.
-- **Decay bells** (up to four) on the curve: double-click the plot to make one through the
-  pointer, drag it (across: frequency; up and down: the curve passes through the pointer), wheel
-  for its width (a bracket under it shows where it does half its dB), double-click to remove it.
+- **Dials** (bottom right) grouped by what they do, each group a named panel (user: "group knobs
+  per feature, right now everything is clustered"): SPACE (SIZE, PREDELAY, DIFFUSION, WIDTH), MOD
+  (DEPTH, RATE), EARLY (LEVEL, SIZE, SEND), DUCK (DEPTH, RELEASE; the threshold is on the
+  history).
 - **Meters** IN and OUT. **Footer:** Freeze, Bypass, latency, MIX, OUTPUT.
 
 ## 3. Parameters (frozen with the first release; `tests/golden/mite_verb.params.txt`)
 
 State 2 (2026-11-04) appended `early_size`, `early_send` and the bells `d1…d4_{on,freq,mult,q}`.
+State 3 (2026-11-04) made both EQs free bands: `d1…d8_{on,type,freq,mult,q}` (type: Bell, Low
+Shelf, High Shelf, Tilt) and `e1…e8_{on,type,freq,gain,q,slope}` (Mite EQ's types and slopes);
+`lo_mult`, `lo_freq`, `hi_mult`, `hi_freq`, `lo_cut` and `hi_cut` are gone. Its migration
+(`migrate::v2_to_v3`) keeps an old state's sound: the low shelf becomes decay band 5, the high
+shelf band 6, a cut that acted tone band 1 or 2 at 12 dB/oct; the snapshots are lifted too.
 
-
-`predelay`, `size`, `decay`, `lo_mult`, `lo_freq`, `hi_mult`, `hi_freq`, `diffusion`, `early`,
-`mod_depth`, `mod_rate`, `width`, `lo_cut`, `hi_cut`, `freeze`, `duck`, `duck_thresh`,
-`duck_release`, `mix`, `out_gain`, `bypass`. Freeze and bypass are performance, not sound: never
-in presets or snapshots.
+`predelay`, `size`, `decay`, `diffusion`, `early`, `mod_depth`, `mod_rate`, `width`, `freeze`,
+`duck`, `duck_thresh`, `duck_release`, `mix`, `out_gain`, `bypass`, `early_size`, `early_send`, the
+decay bands, the tone bands. Freeze and bypass are performance, not sound: never in presets or
+snapshots.
 
 ## 4. Tests (theory, not taste)
 
 - Mix 0 % and bypass null bit for bit; latency 0.
 - The measured T60 (Schroeder integration, T20 × 3, octave bands at 125 Hz…8 kHz) matches
-  `decay_at` within 10 %, at 44.1, 48 and 96 kHz and three sizes; `decay_at` is DECAY × LOW at
-  DC, DECAY × HIGH at Nyquist, and DECAY within 12 % between the shelves.
+  `decay_at` within 10 %, at 44.1, 48 and 96 kHz and three sizes, with a low and a high shelf band;
+  `decay_at` is DECAY × the low shelf's mult at DC, × the high shelf's at Nyquist, and DECAY within
+  12 % between them.
 - Stability: the loop gain < 1 at every extreme setting; 60 s of noise never grows.
 - Freeze holds the tail's energy within 1 dB over 10 s, and releases to the set decay.
 - Echo density: after 80 ms the impulse response's kurtosis is near Gaussian (< 4).
@@ -154,8 +172,13 @@ in presets or snapshots.
    `the_tail_is_smooth_at_every_size`, `a_decay_bell_changes_the_decay_where_it_sits`, the band's
    measured T60 against `decay_at` folded across the octave as the measurement folds it); the
    decay EQ's four bells; Valhalla Room's early controls (EARLY SIZE, EARLY SEND); state 2; a
-   size-0 Tight Booth preset. 120 fps at 2× DPI. Not yet heard by the user. Next: the post EQ as
-   bands on the plot.
+   size-0 Tight Booth preset. 120 fps at 2× DPI. Not yet heard by the user.
+2b. (done 2026-11-04, user: "verb should have fully flexible eq like eq plugin … multiple shapes
+   of bands. dont make default bands … remove default low cut and high cuts"; "group knobs per
+   feature") Both EQs as free bands on one plot (§1.5, §1.6, §2), state 3 with its migration, the
+   dials in four named groups. Tests: every shape keeps the loop gain < 1, a shape change and the
+   tone EQ are click-free, no band is on by default, the editor's bands and menus, the groups.
+   120 fps, 1.7 ms a frame.
 3. Convolution (IR import, worker-thread load, handover, partitioned convolution), then the
    IR-matched algorithm (analyse an IR's T60(f), ER pattern and density, fit the algorithm).
 4. The decay spectrogram.

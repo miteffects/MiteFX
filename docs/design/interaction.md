@@ -556,17 +556,18 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
 
 ## Mite Verb (in-house design, 2026-11-04; docs/design/verb-brief.md)
 
-- **Decay curve grips.** MID: up and down scales the decay (the curve passes through the
-  pointer). LOW and HIGH: across moves their frequency, up and down solves their multiplier so
-  the curve passes through the pointer at that frequency (it stops where 0.25…4×, high 0.1…4×,
-  end). Shift is fine (×0.2); the wheel steps the decay or the multiplier; double-click resets
-  the grip's parameters. Each drag is one undo step.
-- **Decay bells.** Double-click the plot away from the grips: a bell there (the first of four that
-  is off), the curve through the pointer. Drag: across its frequency, up and down the curve
-  through the pointer. Wheel: its width (Q). Double-click it: removed. Its number in its grip,
-  a bracket under it where it does half its dB.
-- **Cuts.** The two grips on the plot's floor drag across (low cut, high cut on the reverb only);
-  what they take off is shaded. Wheel steps, double-click resets.
+- **Layers.** One plot, two EQs: the decay EQ (how long each frequency rings) and the tone EQ (the
+  reverb's own EQ). The two glyph pills top left pick which one the pointer edits; the other is
+  drawn dim and grabbing one of its bands picks it. Neither has a band by default.
+- **Base grip** (on the decay curve where no band acts): up and down scales DECAY so the curve
+  passes through the pointer. Wheel steps; double-click resets.
+- **Bands** (eight per EQ). Double-click the plot: a bell there (decay: the curve through the
+  pointer; tone: its gain at the pointer). Right-click the plot: a menu of every shape (decay:
+  bell, low shelf, high shelf, tilt; tone: Mite EQ's ten) makes that band there. Right-click a
+  band: its shape, or Remove. Drag: across its frequency, up and down the decay through the
+  pointer (a tilt: doubles per 80 px) or its gain. Wheel: its width (a cut: its slope).
+  Double-click it: removed. Shift is fine (×0.2). Each gesture is one undo step. Its number in its
+  grip; a bell shows a bracket under it where it does half its dB.
 - **Ducking threshold.** The dashed line on the history with its grip at the right: up and down
   at the history's dB scale; dim while DUCK is 0. The ducking hangs from the history's top.
 - **Freeze.** The footer's snowflake. While frozen the curve's line sits at the plot's top (the

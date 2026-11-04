@@ -2,7 +2,8 @@
 //! the settings and against `decay_at`, stability at the extremes, freeze, echo density, stereo,
 //! block-size invariance and click-free parameter moves.
 
-use mite_dsp::reverb::{decay_at, design_absorption, line_len, DecayBand, Reverb, ReverbSettings, LINES};
+use mite_dsp::eq::{BandSettings, BandType};
+use mite_dsp::reverb::{decay_at, design_absorption, line_len, DecayBand, DecayShape, Reverb, ReverbSettings, LINES};
 use mite_dsp::reverb_quality::{highpass, peakiness, periodicity};
 
 fn render(fs: f32, s: &ReverbSettings, input: &[f32], block: usize) -> [Vec<f32>; 2] {
@@ -79,13 +80,13 @@ fn t60(band: &[f64], fs: f64) -> f64 {
 #[test]
 fn measured_decay_times_follow_the_settings_and_decay_at() {
     let cases = [
-        (48_000.0, ReverbSettings { decay_s: 1.5, lo_mult: 2.0, lo_freq: 300.0, hi_mult: 0.4, hi_freq: 3000.0, size: 0.5, ..ReverbSettings::default() }),
-        (44_100.0, ReverbSettings { decay_s: 0.8, lo_mult: 1.0, hi_mult: 1.0, size: 0.2, ..ReverbSettings::default() }),
-        (96_000.0, ReverbSettings { decay_s: 2.5, lo_mult: 0.5, lo_freq: 400.0, hi_mult: 0.6, hi_freq: 4000.0, size: 0.8, ..ReverbSettings::default() }),
+        (48_000.0, ReverbSettings { decay_s: 1.5, size: 0.5, ..ReverbSettings::default() }.with_shelves((300.0, 2.0), (3000.0, 0.4))),
+        (44_100.0, ReverbSettings { decay_s: 0.8, size: 0.2, ..ReverbSettings::default() }.with_shelves((300.0, 1.0), (3000.0, 1.0))),
+        (96_000.0, ReverbSettings { decay_s: 2.5, size: 0.8, ..ReverbSettings::default() }.with_shelves((400.0, 0.5), (4000.0, 0.6))),
     ];
     for (fs, s) in cases {
         let s = plain(s);
-        let n = (fs * (s.decay_s * s.lo_mult.max(1.0) * 1.2 + 0.3)) as usize;
+        let n = (fs * (s.decay_s * s.bands[0].mult.max(1.0) * 1.2 + 0.3)) as usize;
         let [l, r] = render(fs, &s, &impulse(n), 512);
         let mono: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a + b).collect();
         for fc in [125.0, 500.0, 1000.0, 2000.0, 8000.0] {
@@ -94,7 +95,7 @@ fn measured_decay_times_follow_the_settings_and_decay_at() {
             assert!((measured / predicted - 1.0).abs() < 0.1, "{fs} Hz, {fc} Hz octave: measured {measured:.3} s, decay_at {predicted:.3} s");
         }
         // And decay_at says what the settings say where the shelves have settled.
-        let mid = decay_at(&s, (f64::from(s.lo_freq) * f64::from(s.hi_freq)).sqrt(), f64::from(fs));
+        let mid = decay_at(&s, (f64::from(s.bands[0].freq) * f64::from(s.bands[1].freq)).sqrt(), f64::from(fs));
         assert!((mid / f64::from(s.decay_s) - 1.0).abs() < 0.12, "mid {mid}");
     }
 }
@@ -106,7 +107,10 @@ fn the_loop_never_gains_at_any_extreme() {
         for (lo_mult, hi_mult) in [(4.0, 4.0), (0.25, 0.1), (4.0, 0.1), (0.25, 4.0)] {
             for (lo_freq, hi_freq) in [(50.0, 16_000.0), (2000.0, 1000.0)] {
                 for size in [0.0, 1.0] {
-                    let s = ReverbSettings { decay_s, lo_mult, hi_mult, lo_freq, hi_freq, size, ..ReverbSettings::default() };
+                    let mut s = ReverbSettings { decay_s, size, ..ReverbSettings::default() }.with_shelves((lo_freq, lo_mult), (hi_freq, hi_mult));
+                    // Every other shape too, at its extremes.
+                    s.bands[2] = DecayBand::bell(lo_freq, hi_mult, 6.0);
+                    s.bands[3] = DecayBand { shape: DecayShape::Tilt, ..DecayBand::bell(hi_freq, lo_mult, 1.0) };
                     for i in 0..LINES {
                         let a = design_absorption(f64::from(line_len(i, size, fs)), &s, f64::from(fs), 0.0);
                         for k in 0..=2000 {
@@ -123,7 +127,7 @@ fn the_loop_never_gains_at_any_extreme() {
 #[test]
 fn a_minute_of_noise_at_the_longest_settings_never_grows() {
     let fs = 48_000.0;
-    let s = ReverbSettings { decay_s: 30.0, lo_mult: 4.0, hi_mult: 4.0, lo_freq: 2000.0, hi_freq: 1000.0, size: 1.0, mod_depth: 1.0, mod_rate: 5.0, diffusion: 1.0, ..ReverbSettings::default() };
+    let s = ReverbSettings { decay_s: 30.0, size: 1.0, mod_depth: 1.0, mod_rate: 5.0, diffusion: 1.0, ..ReverbSettings::default() }.with_shelves((2000.0, 4.0), (1000.0, 4.0));
     let mut seed = 1u32;
     let mut noise = || {
         seed ^= seed << 13;
@@ -236,23 +240,27 @@ fn moving_any_setting_fast_never_clicks() {
     let fs = 48_000.0;
     let n = 96_000;
     let x: Vec<f32> = (0..n).map(|i| 0.5 * (std::f32::consts::TAU * 150.0 * i as f32 / fs).sin()).collect();
-    let base = ReverbSettings { hi_cut: 4000.0, ..ReverbSettings::default() };
+    let mut base = ReverbSettings::default().with_shelves((250.0, 1.2), (5000.0, 0.5));
+    base.eq[0] = BandSettings { enabled: true, kind: BandType::HighCut, freq: 4000.0, ..BandSettings::default() };
     let with = |f: &dyn Fn(&mut ReverbSettings)| {
         let mut s = base;
         f(&mut s);
         s
     };
-    let cases: [(&str, ReverbSettings); 12] = [
+    let cases: [(&str, ReverbSettings); 15] = [
         ("predelay", with(&|s| s.predelay_ms = 500.0)),
         ("size", with(&|s| s.size = 0.8)),
         ("decay", with(&|s| s.decay_s = 20.0)),
-        ("lo_mult", with(&|s| s.lo_mult = 4.0)),
-        ("hi_mult", with(&|s| s.hi_mult = 0.1)),
-        ("lo_freq", with(&|s| s.lo_freq = 2000.0)),
+        ("lo_mult", with(&|s| s.bands[0].mult = 4.0)),
+        ("hi_mult", with(&|s| s.bands[1].mult = 0.1)),
+        ("lo_freq", with(&|s| s.bands[0].freq = 2000.0)),
+        ("shape", with(&|s| s.bands[0].shape = DecayShape::Bell)),
+        ("band on", with(&|s| s.bands[2] = DecayBand::bell(300.0, 3.0, 1.0))),
         ("diffusion", with(&|s| s.diffusion = 0.0)),
         ("early", with(&|s| s.early = 1.0)),
         ("width", with(&|s| s.width = 0.0)),
-        ("lo_cut", with(&|s| s.lo_cut = 1000.0)),
+        ("lo_cut", with(&|s| s.eq[1] = BandSettings { enabled: true, kind: BandType::LowCut, freq: 1000.0, ..BandSettings::default() })),
+        ("tone type", with(&|s| s.eq[0].kind = BandType::LowShelf)),
         ("freeze", with(&|s| s.freeze = true)),
         ("duck", with(&|s| s.duck_db = 24.0)),
     ];
@@ -287,7 +295,7 @@ fn the_tail_is_smooth_at_every_size() {
     // 0.84 % at size 0 (metallic), 0.083 and 0.10 % at size 50.
     let fs = 48_000.0;
     for (size, decay_s) in [(0.0, 1.0), (0.0, 2.0), (0.25, 1.5), (0.5, 2.0), (1.0, 3.0)] {
-        let s = ReverbSettings { size, decay_s, lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() };
+        let s = ReverbSettings { size, decay_s, ..ReverbSettings::default() };
         let [l, _] = render(fs, &s, &impulse(fs as usize * 2), 512);
         let l = highpass(&l, 150.0, f64::from(fs));
         let p = periodicity(&l, f64::from(fs), 0.15, 0.65);
@@ -300,9 +308,9 @@ fn the_tail_is_smooth_at_every_size() {
 #[test]
 fn a_decay_bell_changes_the_decay_where_it_sits() {
     let fs = 48_000.0;
-    let base = plain(ReverbSettings { decay_s: 2.0, lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() });
+    let base = plain(ReverbSettings { decay_s: 2.0, ..ReverbSettings::default() });
     let mut s = base;
-    s.bands[1] = DecayBand { on: true, freq: 1000.0, mult: 0.4, q: 1.0 };
+    s.bands[1] = DecayBand::bell(1000.0, 0.4, 1.0);
     let n = (fs * 2.6) as usize;
     let [l, r] = render(fs, &s, &impulse(n), 512);
     let mono: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a + b).collect();

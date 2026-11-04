@@ -1,5 +1,5 @@
-//! Mite Verb: an algorithmic reverb (BLUEPRINT §6.5, docs/design/verb-brief.md) with decay time
-//! per frequency, freeze and ducking.
+//! Mite Verb: an algorithmic reverb (BLUEPRINT §6.5, docs/design/verb-brief.md) with a free decay
+//! EQ (decay time per frequency), a free tone EQ, freeze and ducking.
 
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ use nih_plug::prelude::*;
 
 pub mod dsp;
 pub mod editor;
+pub mod migrate;
 pub mod params;
 pub mod presets;
 
@@ -76,7 +77,7 @@ impl Plugin for MiteVerb {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[params::v1_to_v2]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3]);
     }
 
     fn params(&self) -> Arc<dyn Params> {

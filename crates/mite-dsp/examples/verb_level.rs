@@ -5,10 +5,10 @@
 use mite_dsp::reverb::{Reverb, ReverbSettings};
 
 fn main() {
-    // What the editor pays when a setting moves: the decay curve at 240 points, four bells on.
+    // What the editor pays when a setting moves: the decay curve at 240 points, eight bells on.
     let mut s = ReverbSettings::default();
     for (k, b) in s.bands.iter_mut().enumerate() {
-        *b = mite_dsp::reverb::DecayBand { on: true, freq: 200.0 * 3f32.powi(k as i32), mult: 0.7, q: 1.0 };
+        *b = mite_dsp::reverb::DecayBand::bell(200.0 * 3f32.powi(k as i32), 0.7, 1.0);
     }
     let freqs: Vec<f64> = (0..240).map(|i| 20.0 * 1000f64.powf(i as f64 / 239.0)).collect();
     let mut out = vec![0.0; 240];
@@ -16,7 +16,7 @@ fn main() {
     for _ in 0..100 {
         mite_dsp::reverb::decay_curve(&s, &freqs, 48_000.0, &mut out);
     }
-    println!("decay curve, 240 points, four bells: {:.2} ms", t.elapsed().as_secs_f64() * 10.0);
+    println!("decay curve, 240 points, eight bells: {:.2} ms", t.elapsed().as_secs_f64() * 10.0);
     let fs = 48_000.0;
     let mut seed = 3u32;
     let mut noise = move || {
@@ -35,6 +35,19 @@ fn main() {
         ("small 0.6 s", ReverbSettings { size: 0.15, decay_s: 0.6, ..ReverbSettings::default() }),
         ("hall 4 s", ReverbSettings { size: 0.85, decay_s: 4.0, ..ReverbSettings::default() }),
         ("huge 15 s", ReverbSettings { size: 1.0, decay_s: 15.0, ..ReverbSettings::default() }),
+        ("all bands", {
+            // Every decay band and every tone band on: the most the EQs can cost.
+            let mut s = ReverbSettings::default();
+            for (k, b) in s.bands.iter_mut().enumerate() {
+                *b = mite_dsp::reverb::DecayBand::bell(100.0 * 2f32.powi(k as i32), 0.7, 1.0);
+            }
+            for (k, b) in s.eq.iter_mut().enumerate() {
+                *b = mite_dsp::eq::BandSettings { enabled: true, freq: 100.0 * 2f64.powi(k as i32), gain_db: -3.0, ..Default::default() };
+            }
+            s.eq[0].kind = mite_dsp::eq::BandType::LowCut;
+            s.eq[0].slope = 8;
+            s
+        }),
     ] {
         let mut r = Reverb::new(fs, &s);
         let (mut l, mut rr) = (vec![0.0f32; n], vec![0.0f32; n]);

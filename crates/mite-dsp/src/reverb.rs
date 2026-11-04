@@ -5,20 +5,25 @@
 //! 16-line feedback delay network under a Hadamard matrix in which every line carries two
 //! allpass diffusers (each pass round the loop is smeared, so the tail turns dense fast and does
 //! not repeat), modulated by smoothed random motion, with per-line absorption: decay time per
-//! frequency from a low and a high shelf and four bell bands. Then a low and a high cut, width
-//! and ducking on the reverb. This makes the reverb only; the plugin mixes it with the dry signal.
+//! frequency from the decay EQ's bands (each a bell, a shelf or a tilt, none by default). Then
+//! width, ducking and the tone EQ (Mite EQ's bands, every shape) on the reverb. This makes the reverb only; the plugin mixes it with the dry signal.
 //!
 //! Everything is sized in [`Reverb::new`]; `process` and `reset` never allocate. Settings glide
 //! (20 ms; Size over 200 ms) and the absorption is designed every [`CONTROL`] samples counted
 //! across blocks, so the output is the same for every block size.
 
+use crate::eq::{BandProcessor, BandSettings, BandType};
 use crate::filter::Coeffs;
 use crate::smooth::LinearSmoother;
 
 pub const LINES: usize = 32;
 pub const MAX_PREDELAY_MS: f32 = 500.0;
-/// The decay EQ's bell bands (beside its low and high shelves).
-pub const DECAY_BANDS: usize = 4;
+/// The decay EQ's bands.
+pub const DECAY_BANDS: usize = 8;
+/// The tone EQ's bands (on the reverb's output).
+pub const TONE_BANDS: usize = 8;
+/// The tone EQ's glide, ms.
+const TONE_SMOOTH_MS: f32 = 20.0;
 pub const ER_TAPS: usize = 24;
 pub const MAX_EARLY_MS: f32 = 200.0;
 /// Samples per control step (designs, glides, the ducking's target).
@@ -134,10 +139,50 @@ impl Default for Topology {
     }
 }
 
-/// One bell of the decay EQ: around `freq` the decay is `mult` × the decay there without it.
+/// A decay band's shape, in its frozen parameter order (append only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DecayShape {
+    /// Around `freq` the decay is `mult` × what it would be without the band.
+    #[default]
+    Bell,
+    /// Below `freq` (towards DC) the decay is `mult` ×.
+    LowShelf,
+    /// Above `freq` (towards Nyquist) the decay is `mult` ×.
+    HighShelf,
+    /// A first-order tilt pivoting on `freq`: half the band's rate change at the top, the
+    /// opposite half at DC (`mult` > 1: the highs ring longer and the lows shorter).
+    Tilt,
+}
+
+impl DecayShape {
+    pub const ALL: [Self; 4] = [Self::Bell, Self::LowShelf, Self::HighShelf, Self::Tilt];
+    pub const NAMES: [&'static str; 4] = ["Bell", "Low Shelf", "High Shelf", "Tilt"];
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL.get(i).copied().unwrap_or_default()
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|&s| s == self).unwrap_or(0)
+    }
+
+    /// The EQ band type that makes it (`mite_dsp::eq`, one section).
+    pub fn band_type(self) -> BandType {
+        match self {
+            Self::Bell => BandType::Bell,
+            Self::LowShelf => BandType::LowShelf,
+            Self::HighShelf => BandType::HighShelf,
+            Self::Tilt => BandType::TiltShelf,
+        }
+    }
+}
+
+/// One band of the decay EQ: its shape multiplies the decay around (bell), below or above
+/// (shelves) `freq` by `mult`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DecayBand {
     pub on: bool,
+    pub shape: DecayShape,
     pub freq: f32,
     pub mult: f32,
     pub q: f32,
@@ -145,7 +190,21 @@ pub struct DecayBand {
 
 impl Default for DecayBand {
     fn default() -> Self {
-        Self { on: false, freq: 1000.0, mult: 1.0, q: 1.0 }
+        Self { on: false, shape: DecayShape::Bell, freq: 1000.0, mult: 1.0, q: 1.0 }
+    }
+}
+
+impl DecayBand {
+    pub fn bell(freq: f32, mult: f32, q: f32) -> Self {
+        Self { on: true, shape: DecayShape::Bell, freq, mult, q }
+    }
+
+    pub fn low_shelf(freq: f32, mult: f32) -> Self {
+        Self { on: true, shape: DecayShape::LowShelf, freq, mult, q: std::f32::consts::FRAC_1_SQRT_2 }
+    }
+
+    pub fn high_shelf(freq: f32, mult: f32) -> Self {
+        Self { on: true, shape: DecayShape::HighShelf, freq, mult, q: std::f32::consts::FRAC_1_SQRT_2 }
     }
 }
 
@@ -154,15 +213,11 @@ pub struct ReverbSettings {
     pub predelay_ms: f32,
     /// 0…1.
     pub size: f32,
-    /// T60 at mid frequencies, s.
+    /// T60 where no decay band acts, s.
     pub decay_s: f32,
-    /// T60 at DC against `decay_s`.
-    pub lo_mult: f32,
-    pub lo_freq: f32,
-    /// T60 at Nyquist against `decay_s`.
-    pub hi_mult: f32,
-    pub hi_freq: f32,
     pub bands: [DecayBand; DECAY_BANDS],
+    /// The tone EQ on the reverb (Mite EQ's bands; placement and dynamics are not used).
+    pub eq: [BandSettings; TONE_BANDS],
     /// 0…1.
     pub diffusion: f32,
     /// Early reflections' level, 0…1.
@@ -176,8 +231,6 @@ pub struct ReverbSettings {
     pub mod_rate: f32,
     /// 0…1.5 (1: as the tank makes it).
     pub width: f32,
-    pub lo_cut: f32,
-    pub hi_cut: f32,
     pub freeze: bool,
     /// Ducking depth, dB (≥ 0; 0: off).
     pub duck_db: f32,
@@ -191,11 +244,8 @@ impl Default for ReverbSettings {
             predelay_ms: 10.0,
             size: 0.5,
             decay_s: 2.0,
-            lo_mult: 1.2,
-            lo_freq: 250.0,
-            hi_mult: 0.5,
-            hi_freq: 5000.0,
             bands: [DecayBand::default(); DECAY_BANDS],
+            eq: [BandSettings::default(); TONE_BANDS],
             diffusion: 0.7,
             early: 0.5,
             early_size_ms: 35.0,
@@ -203,8 +253,6 @@ impl Default for ReverbSettings {
             mod_depth: 0.3,
             mod_rate: 0.6,
             width: 1.0,
-            lo_cut: 20.0,
-            hi_cut: 20_000.0,
             freeze: false,
             duck_db: 0.0,
             duck_thresh_db: -30.0,
@@ -223,44 +271,27 @@ pub fn line_len(i: usize, size: f32, fs: f32) -> f32 {
     Topology::new().line_len(i, size, fs)
 }
 
-/// A second-order shelf (RBJ, slope 1: monotone, no overshoot), its transition centred (in dB)
-/// on `fc`: `gain` at DC (`low`) or at Nyquist (high), 1 at the other end.
-pub fn shelf(low: bool, gain: f64, fc: f64, fs: f64) -> Coeffs {
-    if (gain - 1.0).abs() < 1e-12 {
-        return Coeffs::IDENTITY;
+impl ReverbSettings {
+    /// With a low shelf (decay × `lo.1` below `lo.0`) in band 1 and a high shelf in band 2: a
+    /// room's usual absorption, for tests and presets.
+    pub fn with_shelves(mut self, lo: (f32, f32), hi: (f32, f32)) -> Self {
+        self.bands[0] = DecayBand::low_shelf(lo.0, lo.1);
+        self.bands[1] = DecayBand::high_shelf(hi.0, hi.1);
+        self
     }
-    let a = gain.sqrt();
-    let w = std::f64::consts::TAU * (fc / fs).clamp(1e-5, 0.49);
-    let (sin, cos) = w.sin_cos();
-    let k = 2.0 * a.sqrt() * sin * 0.5 * std::f64::consts::SQRT_2;
-    let (ap, am) = (a + 1.0, a - 1.0);
-    let (b0, b1, b2, a0, a1, a2) = if low {
-        (a * (ap - am * cos + k), 2.0 * a * (am - ap * cos), a * (ap - am * cos - k), ap + am * cos + k, -2.0 * (am + ap * cos), ap + am * cos - k)
-    } else {
-        (a * (ap + am * cos + k), -2.0 * a * (am + ap * cos), a * (ap + am * cos - k), ap - am * cos + k, 2.0 * (am - ap * cos), ap - am * cos - k)
-    };
-    Coeffs { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
 }
 
-/// A bell (RBJ peaking), `gain` at `fc`.
-pub fn bell(gain: f64, fc: f64, q: f64, fs: f64) -> Coeffs {
-    if (gain - 1.0).abs() < 1e-12 {
-        return Coeffs::IDENTITY;
-    }
-    let a = gain.sqrt();
-    let w = std::f64::consts::TAU * (fc / fs).clamp(1e-5, 0.49);
-    let (sin, cos) = w.sin_cos();
-    let alpha = sin / (2.0 * q.max(0.05));
-    let a0 = 1.0 + alpha / a;
-    Coeffs { b0: (1.0 + alpha * a) / a0, b1: -2.0 * cos / a0, b2: (1.0 - alpha * a) / a0, a1: -2.0 * cos / a0, a2: (1.0 - alpha / a) / a0 }
+/// A decay band's section for a loss of `db` (dB a pass) against the rest of the loop.
+fn decay_section(b: &DecayBand, db: f64, fs: f64) -> Coeffs {
+    let settings = BandSettings { enabled: true, kind: b.shape.band_type(), freq: f64::from(b.freq), gain_db: db, q: f64::from(b.q), ..BandSettings::default() };
+    crate::eq::design(&settings, fs).as_slice().first().copied().unwrap_or(Coeffs::IDENTITY)
 }
 
-/// One line's absorption: a gain, two shelves and the bells.
+/// One line's absorption: a gain and a section per decay band.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Absorption {
     pub gain: f64,
-    /// Low shelf, high shelf, then the bells.
-    pub sections: [Coeffs; 2 + DECAY_BANDS],
+    pub sections: [Coeffs; DECAY_BANDS],
 }
 
 impl Absorption {
@@ -270,46 +301,44 @@ impl Absorption {
     }
 }
 
-/// The grid the loop gain is checked on: DC, 32 log-spaced points, Nyquist, then each section's
+/// The grid the loop gain is checked on: DC, 64 log-spaced points, Nyquist, then each section's
 /// own frequency (a sharp bell's peak can sit between grid points).
-fn check_points(s: &ReverbSettings, fs: f64) -> [f64; 34 + 2 + DECAY_BANDS] {
-    let mut p = [0.0; 34 + 2 + DECAY_BANDS];
-    for (i, v) in p.iter_mut().enumerate().take(34) {
+const GRID: usize = 66;
+fn check_points(s: &ReverbSettings, fs: f64) -> [f64; GRID + DECAY_BANDS] {
+    let mut p = [0.0; GRID + DECAY_BANDS];
+    for (i, v) in p.iter_mut().enumerate().take(GRID) {
         *v = match i {
             0 => 0.0,
-            33 => std::f64::consts::PI,
-            _ => std::f64::consts::PI * 10f64.powf(-3.5 + 3.5 * (i - 1) as f64 / 31.0),
+            i if i == GRID - 1 => std::f64::consts::PI,
+            _ => std::f64::consts::PI * 10f64.powf(-3.5 + 3.5 * (i - 1) as f64 / (GRID - 3) as f64),
         };
     }
     let w = |f: f32| std::f64::consts::TAU * (f64::from(f) / fs).clamp(0.0, 0.5);
-    p[34] = w(s.lo_freq);
-    p[35] = w(s.hi_freq);
     for (k, b) in s.bands.iter().enumerate() {
-        p[36 + k] = w(b.freq);
+        p[GRID + k] = w(b.freq);
     }
     p.sort_by(f64::total_cmp);
     p
 }
 
 /// The absorption for a line of `len` samples: a pass loses −60 dB × len / (T60(f)·fs), with
-/// T60 the decay at mid, × `lo_mult` at DC and × `hi_mult` at Nyquist; each bell multiplies the
-/// decay around its frequency by its `mult` (rates add: a bell's dB a pass is what turns the
-/// decay there from T to T × mult). `freeze` (0…1) fades every loss to nothing. The loop gain is
-/// kept under 1 at every frequency.
+/// T60 the decay; each band multiplies the decay where it acts by its `mult` (rates add: a
+/// band's dB a pass is what turns the decay there from T to T × mult). `freeze` (0…1) fades
+/// every loss to nothing. The loop gain is kept under 1 at every frequency.
 pub fn design_absorption(len: f64, s: &ReverbSettings, fs: f64, freeze: f64) -> Absorption {
     let keep = (1.0 - freeze).clamp(0.0, 1.0);
     let t = f64::from(s.decay_s.max(0.01));
     // At most 100 dB a pass: a decay shorter than a pass round the loop is gone after one anyway.
     let per_pass = |t60: f64| (-60.0 * len / (fs * t60.max(0.01))).max(-100.0) * keep;
-    let (mid, lo, hi) = (per_pass(t), per_pass(t * f64::from(s.lo_mult)), per_pass(t * f64::from(s.hi_mult)));
+    let mid = per_pass(t);
     let db = |d: f64| 10f64.powf(d / 20.0);
-    let mut sections = [Coeffs::IDENTITY; 2 + DECAY_BANDS];
-    sections[0] = shelf(true, db(lo - mid), f64::from(s.lo_freq), fs);
-    sections[1] = shelf(false, db(hi - mid), f64::from(s.hi_freq), fs);
+    let mut sections = [Coeffs::IDENTITY; DECAY_BANDS];
     for (k, b) in s.bands.iter().enumerate() {
         if b.on && (b.mult - 1.0).abs() > 1e-6 {
-            let d = (per_pass(t * f64::from(b.mult)) - mid).clamp(-60.0, 40.0);
-            sections[2 + k] = bell(db(d), f64::from(b.freq), f64::from(b.q), fs);
+            let d = per_pass(t * f64::from(b.mult)) - mid;
+            // A tilt's gain is the swing from DC to the top: the band's rate change at the top.
+            let d = if b.shape == DecayShape::Tilt { 2.0 * d } else { d };
+            sections[k] = decay_section(b, d, fs);
         }
     }
     let mut a = Absorption { gain: db(mid), sections };
@@ -327,7 +356,8 @@ pub fn design_absorption(len: f64, s: &ReverbSettings, fs: f64, freeze: f64) -> 
             }
         }
         let peak = a.magnitude(pts[best]).max(a.magnitude(0.5 * (lo + hi)));
-        let limit = 1.0 - 1e-6;
+        // A margin for a broad maximum the search lands just beside (bands overlapping).
+        let limit = 1.0 - 1e-5;
         if peak > limit {
             a.gain *= limit / peak;
         }
@@ -463,39 +493,6 @@ impl Allpass {
     }
 }
 
-/// A second-order section, transposed direct form II.
-#[derive(Debug, Clone, Copy, Default)]
-struct Biquad {
-    b: [f32; 3],
-    a: [f32; 2],
-    s: [f32; 2],
-}
-
-impl Biquad {
-    /// RBJ Butterworth high-pass (`high`) or low-pass at `fc`.
-    fn set(&mut self, high: bool, fc: f32, fs: f32) {
-        let w = std::f32::consts::TAU * (fc / fs).clamp(1e-5, 0.49);
-        let (sin, cos) = w.sin_cos();
-        let alpha = sin * std::f32::consts::FRAC_1_SQRT_2;
-        let a0 = 1.0 + alpha;
-        let (b0, b1) = if high { ((1.0 + cos) * 0.5, -(1.0 + cos)) } else { ((1.0 - cos) * 0.5, 1.0 - cos) };
-        self.b = [b0 / a0, b1 / a0, b0 / a0];
-        self.a = [-2.0 * cos / a0, (1.0 - alpha) / a0];
-    }
-
-    #[inline]
-    fn process(&mut self, x: f32) -> f32 {
-        let y = self.b[0] * x + self.s[0];
-        self.s[0] = self.b[1] * x - self.a[0] * y + self.s[1];
-        self.s[1] = self.b[2] * x - self.a[1] * y;
-        y
-    }
-
-    fn reset(&mut self) {
-        self.s = [0.0; 2];
-    }
-}
-
 /// A line's absorption in the audio path: the sections that do something (f32, transposed
 /// direct form II) and a gain. A new design is reached along a straight line over one control
 /// step, every sample (a step every 32 samples is heard when the decay's tone moves fast). A
@@ -503,14 +500,14 @@ impl Biquad {
 #[derive(Debug, Clone, Copy, Default)]
 struct LineFilter {
     gain: f32,
-    c: [[f32; 5]; 2 + DECAY_BANDS],
+    c: [[f32; 5]; DECAY_BANDS],
     /// Per sample towards the target, while `left` > 0.
     d_gain: f32,
-    dc: [[f32; 5]; 2 + DECAY_BANDS],
+    dc: [[f32; 5]; DECAY_BANDS],
     left: u32,
-    on: [bool; 2 + DECAY_BANDS],
-    off_after: [bool; 2 + DECAY_BANDS],
-    z: [[f32; 2]; 2 + DECAY_BANDS],
+    on: [bool; DECAY_BANDS],
+    off_after: [bool; DECAY_BANDS],
+    z: [[f32; 2]; DECAY_BANDS],
 }
 
 impl LineFilter {
@@ -556,7 +553,7 @@ impl LineFilter {
         if self.left > 0 {
             self.left -= 1;
             self.gain += self.d_gain;
-            for k in 0..2 + DECAY_BANDS {
+            for k in 0..DECAY_BANDS {
                 if self.on[k] {
                     for j in 0..5 {
                         self.c[k][j] += self.dc[k][j];
@@ -564,7 +561,7 @@ impl LineFilter {
                 }
             }
             if self.left == 0 {
-                for k in 0..2 + DECAY_BANDS {
+                for k in 0..DECAY_BANDS {
                     if self.on[k] && self.off_after[k] {
                         self.on[k] = false;
                         self.z[k] = [0.0; 2];
@@ -572,7 +569,7 @@ impl LineFilter {
                 }
             }
         }
-        for k in 0..2 + DECAY_BANDS {
+        for k in 0..DECAY_BANDS {
             if self.on[k] {
                 let (c, z) = (&self.c[k], &mut self.z[k]);
                 let y = c[0] * x + z[0];
@@ -585,8 +582,8 @@ impl LineFilter {
     }
 
     fn reset(&mut self) {
-        self.z = [[0.0; 2]; 2 + DECAY_BANDS];
-        self.on = [false; 2 + DECAY_BANDS];
+        self.z = [[0.0; 2]; DECAY_BANDS];
+        self.on = [false; DECAY_BANDS];
         self.left = 0;
     }
 }
@@ -696,47 +693,31 @@ impl EarlyTaps {
     }
 }
 
-/// The settings that glide, in one array: the scalars, then each band's freq, mult (1 while off,
-/// so switching a band glides) and Q.
-const SCALARS: usize = 18;
+/// The settings that glide, in one array: the scalars, then each band's freq, mult (1 while off
+/// or while its shape is changing, so switching glides) and Q.
+const SCALARS: usize = 12;
 const SMOOTHED: usize = SCALARS + 3 * DECAY_BANDS;
 
-fn pack(s: &ReverbSettings) -> [f32; SMOOTHED] {
+/// `shapes`: the shape each band is running (a band whose shape is to change glides to nothing
+/// first).
+fn pack(s: &ReverbSettings, shapes: &[DecayShape; DECAY_BANDS]) -> [f32; SMOOTHED] {
     let mut v = [0.0; SMOOTHED];
-    v[..SCALARS].copy_from_slice(&[
-        s.predelay_ms,
-        s.size,
-        s.decay_s,
-        s.lo_mult,
-        s.lo_freq,
-        s.hi_mult,
-        s.hi_freq,
-        s.diffusion,
-        s.early,
-        s.mod_depth,
-        s.mod_rate,
-        s.width,
-        s.lo_cut,
-        s.hi_cut,
-        s.duck_thresh_db,
-        s.duck_db,
-        s.early_size_ms,
-        s.early_send,
-    ]);
+    v[..SCALARS].copy_from_slice(&[s.predelay_ms, s.size, s.decay_s, s.diffusion, s.early, s.mod_depth, s.mod_rate, s.width, s.duck_thresh_db, s.duck_db, s.early_size_ms, s.early_send]);
     for (k, b) in s.bands.iter().enumerate() {
         v[SCALARS + 3 * k] = b.freq;
-        v[SCALARS + 3 * k + 1] = if b.on { b.mult } else { 1.0 };
+        v[SCALARS + 3 * k + 1] = if b.on && b.shape == shapes[k] { b.mult } else { 1.0 };
         v[SCALARS + 3 * k + 2] = b.q;
     }
     v
 }
 
-fn unpack(v: &[f32; SMOOTHED], s: &ReverbSettings) -> ReverbSettings {
+fn unpack(v: &[f32; SMOOTHED], s: &ReverbSettings, shapes: &[DecayShape; DECAY_BANDS]) -> ReverbSettings {
     let mut bands = s.bands;
     for (k, b) in bands.iter_mut().enumerate() {
         b.freq = v[SCALARS + 3 * k];
         b.mult = v[SCALARS + 3 * k + 1];
         b.q = v[SCALARS + 3 * k + 2];
+        b.shape = shapes[k];
         // Still sounding while it glides back to nothing.
         b.on = (b.mult - 1.0).abs() > 1e-6;
     }
@@ -744,21 +725,15 @@ fn unpack(v: &[f32; SMOOTHED], s: &ReverbSettings) -> ReverbSettings {
         predelay_ms: v[0],
         size: v[1],
         decay_s: v[2],
-        lo_mult: v[3],
-        lo_freq: v[4],
-        hi_mult: v[5],
-        hi_freq: v[6],
-        diffusion: v[7],
-        early: v[8],
-        mod_depth: v[9],
-        mod_rate: v[10],
-        width: v[11],
-        lo_cut: v[12],
-        hi_cut: v[13],
-        duck_thresh_db: v[14],
-        duck_db: v[15],
-        early_size_ms: v[16],
-        early_send: v[17],
+        diffusion: v[3],
+        early: v[4],
+        mod_depth: v[5],
+        mod_rate: v[6],
+        width: v[7],
+        duck_thresh_db: v[8],
+        duck_db: v[9],
+        early_size_ms: v[10],
+        early_send: v[11],
         bands,
         ..*s
     }
@@ -790,7 +765,9 @@ pub struct Reverb {
     reads: [AllpassRead; LINES],
     loop_ap: [[Allpass; 2]; LINES],
     filters: [LineFilter; LINES],
-    cuts: [[Biquad; 2]; 2],
+    /// The shape each decay band is running.
+    shapes: [DecayShape; DECAY_BANDS],
+    tone: [BandProcessor; TONE_BANDS],
     smooth: [LinearSmoother; SMOOTHED],
     freeze: LinearSmoother,
     /// The pre-delay's two read heads (samples) and the crossfade between them (0: all on the
@@ -834,7 +811,8 @@ impl Reverb {
             reads: [AllpassRead::default(); LINES],
             loop_ap: std::array::from_fn(|i| std::array::from_fn(|k| Allpass::new(topo.ap_len(i, k, fs)))),
             filters: [LineFilter::default(); LINES],
-            cuts: [[Biquad::default(); 2]; 2],
+            shapes: [DecayShape::Bell; DECAY_BANDS],
+            tone: std::array::from_fn(|_| BandProcessor::new(f64::from(fs), TONE_SMOOTH_MS)),
             smooth: std::array::from_fn(|_| LinearSmoother::new(0.0)),
             freeze: LinearSmoother::new(0.0),
             pd: [0.0; 2],
@@ -881,10 +859,11 @@ impl Reverb {
             f.reset();
         }
         self.reads = [AllpassRead::default(); LINES];
-        for b in self.cuts.iter_mut().flatten() {
-            b.reset();
+        for (p, b) in self.tone.iter_mut().zip(&s.eq) {
+            p.reset(b);
         }
-        for (sm, v) in self.smooth.iter_mut().zip(pack(s)) {
+        self.shapes = std::array::from_fn(|k| s.bands[k].shape);
+        for (sm, v) in self.smooth.iter_mut().zip(pack(s, &self.shapes)) {
             sm.reset(v);
         }
         self.freeze.reset(if s.freeze { 1.0 } else { 0.0 });
@@ -901,7 +880,10 @@ impl Reverb {
     /// glide's start and end.
     #[allow(clippy::needless_range_loop)] // the lines' parallel arrays, by line
     fn control(&mut self, s: &ReverbSettings, jump: bool) {
-        for (sm, v) in self.smooth.iter_mut().zip(pack(s)) {
+        if jump {
+            self.shapes = std::array::from_fn(|k| s.bands[k].shape);
+        }
+        for (sm, v) in self.smooth.iter_mut().zip(pack(s, &self.shapes)) {
             sm.set_target(v);
             if jump {
                 sm.reset(v);
@@ -909,8 +891,15 @@ impl Reverb {
                 sm.next_value();
             }
         }
+        // A band changing shape has glided to nothing: it takes its new shape and glides back.
+        for k in 0..DECAY_BANDS {
+            let mult = &self.smooth[SCALARS + 3 * k + 1];
+            if self.shapes[k] != s.bands[k].shape && (mult.current() - 1.0).abs() < 1e-6 {
+                self.shapes[k] = s.bands[k].shape;
+            }
+        }
         let v: [f32; SMOOTHED] = std::array::from_fn(|k| self.smooth[k].current());
-        let g = unpack(&v, s);
+        let g = unpack(&v, s, &self.shapes);
         let fs = self.fs;
         let freeze = self.freeze.current();
         let pd = (s.predelay_ms.clamp(0.0, MAX_PREDELAY_MS) * 0.001 * fs).max(1.0);
@@ -934,11 +923,6 @@ impl Reverb {
         if self.designed != Some((g, freeze)) {
             for i in 0..LINES {
                 self.filters[i].set(&design_absorption(f64::from(self.topo.line_len(i, g.size, fs)), &g, f64::from(fs), f64::from(freeze)), !jump);
-            }
-            let nyq = 0.45 * fs;
-            for c in 0..2 {
-                self.cuts[c][0].set(true, g.lo_cut.min(nyq), fs);
-                self.cuts[c][1].set(false, g.hi_cut.min(nyq), fs);
             }
             let step = g.mod_rate.max(0.01) / fs;
             for w in &mut self.wander {
@@ -1065,11 +1049,7 @@ impl Reverb {
             }
             let mut l = ol * OUT_GAIN + early[0];
             let mut r = or * OUT_GAIN + early[1];
-            l = self.cuts[0][0].process(l);
-            l = self.cuts[0][1].process(l);
             if stereo {
-                r = self.cuts[1][0].process(r);
-                r = self.cuts[1][1].process(r);
                 let m = 0.5 * (l + r);
                 let side = 0.5 * (l - r) * width;
                 l = m + side;
@@ -1082,6 +1062,15 @@ impl Reverb {
             wl[j] = l * duck;
             if stereo {
                 wr[j] = r * duck;
+            }
+        }
+        // The tone EQ: the same on both sides, so it commutes with the width.
+        for (p, b) in self.tone.iter_mut().zip(&s.eq) {
+            p.set_target(&BandSettings { placement: crate::eq::Placement::Stereo, dynamics: crate::eq::Dynamics::default(), ..*b });
+            if stereo {
+                p.process(&mut [&mut wl[..n], &mut wr[..n]]);
+            } else {
+                p.process(&mut [&mut wl[..n]]);
             }
         }
         tel.freeze = self.freeze.current();
@@ -1117,28 +1106,6 @@ mod tests {
     }
 
     #[test]
-    fn the_shelf_reaches_its_gains_at_dc_and_nyquist() {
-        let f = shelf(true, 0.5, 1000.0, 48000.0);
-        let m = |w: f64| f.magnitude_sq(w).sqrt();
-        assert!((m(0.0) - 0.5).abs() < 1e-12);
-        assert!((m(std::f64::consts::PI) - 1.0).abs() < 1e-9);
-        let h = shelf(false, 0.5, 1000.0, 48000.0);
-        assert!((h.magnitude_sq(0.0).sqrt() - 1.0).abs() < 1e-12);
-        assert!((h.magnitude_sq(std::f64::consts::PI).sqrt() - 0.5).abs() < 1e-9);
-        // Half the dB at the transition frequency.
-        let mid = 20.0 * m(std::f64::consts::TAU * 1000.0 / 48000.0).log10();
-        assert!((mid - 0.5 * 20.0 * 0.5f64.log10()).abs() < 0.05, "{mid}");
-    }
-
-    #[test]
-    fn the_bell_reaches_its_gain_at_its_frequency() {
-        let b = bell(0.5, 2000.0, 2.0, 48000.0);
-        let at = b.magnitude_sq(std::f64::consts::TAU * 2000.0 / 48000.0).sqrt();
-        assert!((at - 0.5).abs() < 1e-9, "{at}");
-        assert!((b.magnitude_sq(0.0).sqrt() - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
     fn lagrange_read_is_exact_on_whole_delays() {
         let mut d = Delay::new(64);
         for i in 0..40 {
@@ -1153,14 +1120,14 @@ mod tests {
     #[test]
     fn decay_at_matches_the_settings_at_the_ends_and_at_a_bell() {
         let fs = 48000.0;
-        let s = ReverbSettings { decay_s: 3.0, lo_mult: 2.0, hi_mult: 0.4, ..ReverbSettings::default() };
+        let s = ReverbSettings { decay_s: 3.0, ..ReverbSettings::default() }.with_shelves((250.0, 2.0), (5000.0, 0.4));
         assert!((decay_at(&s, 0.0, fs) - 6.0).abs() < 0.01);
         assert!((decay_at(&s, 24000.0, fs) - 1.2).abs() < 0.01);
         let mid = decay_at(&s, 1500.0, fs);
         assert!((mid - 3.0).abs() < 0.3, "{mid}");
         // A bell at 1.5 kHz halving the decay there.
         let mut b = s;
-        b.bands[0] = DecayBand { on: true, freq: 1500.0, mult: 0.5, q: 1.0 };
+        b.bands[2] = DecayBand::bell(1500.0, 0.5, 1.0);
         let at = decay_at(&b, 1500.0, fs);
         assert!((at / (mid * 0.5) - 1.0).abs() < 0.02, "{at} against {}", mid * 0.5);
     }

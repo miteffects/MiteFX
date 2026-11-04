@@ -3,8 +3,9 @@
 //!
 //!     cargo run -p mite_verb --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, hall (a large dark hall), bands (two decay bells), freeze, duck.
-//! SNAPSHOT_HOVER=x,y hovers a point.
+//! SNAPSHOT_VARIANT: default, hall (a large dark hall: shelves, cuts and a bell), bands (two decay
+//! bells), freeze, duck. SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_CLICK=x,y clicks one (a layer
+//! pill), SNAPSHOT_RCLICK=x,y right-clicks one (a shape menu).
 
 #[path = "common/music.rs"]
 mod music;
@@ -35,11 +36,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("hall") {
         host.set_plain(SIZE.id, 85.0);
         host.set_plain(DECAY.id, 4.0);
-        host.set_plain(LO_MULT.id, 1.5);
-        host.set_plain(HI_MULT.id, 0.35);
-        host.set_plain(HI_FREQ.id, 3500.0);
-        host.set_plain(HI_CUT.id, 9000.0);
-        host.set_plain(LO_CUT.id, 60.0);
+        for (id, v) in [("d1_on", 1.0), ("d1_type", 1.0), ("d1_freq", 250.0), ("d1_mult", 1.5), ("d1_q", 0.71)] {
+            host.set_plain(id, v);
+        }
+        for (id, v) in [("d2_on", 1.0), ("d2_type", 2.0), ("d2_freq", 3500.0), ("d2_mult", 0.35), ("d2_q", 0.71)] {
+            host.set_plain(id, v);
+        }
+        for (id, v) in [("e1_on", 1.0), ("e1_type", 3.0), ("e1_freq", 60.0), ("e2_on", 1.0), ("e2_type", 4.0), ("e2_freq", 9000.0), ("e3_on", 1.0), ("e3_freq", 2500.0), ("e3_gain", -4.0), ("e3_q", 1.2)] {
+            host.set_plain(id, v);
+        }
     }
     if v("bands") {
         host.set_plain("d2_on", 1.0);
@@ -79,6 +84,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let theme_obj = Theme::load(theme, ACCENT);
     render_view(&mut view, &host, &theme_obj, 1.0)?;
     let mods = Modifiers::default();
+    if let Ok(p) = std::env::var("SNAPSHOT_CLICK") {
+        if let Some((x, y)) = p.split_once(',') {
+            let pos = Point::new(x.trim().parse()?, y.trim().parse()?);
+            view.event(&UiEvent::PointerMove { pos, mods }, &host);
+            view.event(&UiEvent::PointerDown { pos, button: mite_ui::MouseButton::Left, mods }, &host);
+            view.event(&UiEvent::PointerUp { pos, button: mite_ui::MouseButton::Left, mods }, &host);
+        }
+    }
+    if let Ok(p) = std::env::var("SNAPSHOT_RCLICK") {
+        if let Some((x, y)) = p.split_once(',') {
+            let pos = Point::new(x.trim().parse()?, y.trim().parse()?);
+            view.event(&UiEvent::PointerMove { pos, mods }, &host);
+            view.event(&UiEvent::PointerDown { pos, button: mite_ui::MouseButton::Right, mods }, &host);
+        }
+    }
     if let Ok(p) = std::env::var("SNAPSHOT_HOVER") {
         if let Some((x, y)) = p.split_once(',') {
             view.event(&UiEvent::PointerMove { pos: Point::new(x.trim().parse()?, y.trim().parse()?), mods }, &host);

@@ -1,17 +1,11 @@
 predelay | ms | 0 | 500 | 10 | Linear
 size | % | 0 | 100 | 50 | Linear
 decay | s | 0.1 | 30 | 2 | Log
-lo_mult | × | 0.25 | 4 | 1.2 | Log
-lo_freq | Hz | 50 | 2000 | 250 | Log
-hi_mult | × | 0.1 | 4 | 0.5 | Log
-hi_freq | Hz | 1000 | 16000 | 5000 | Log
 diffusion | % | 0 | 100 | 70 | Linear
 early | % | 0 | 100 | 50 | Linear
 mod_depth | % | 0 | 100 | 30 | Linear
 mod_rate | Hz | 0.05 | 5 | 0.6 | Log
 width | % | 0 | 150 | 100 | Linear
-lo_cut | Hz | 10 | 1000 | 20 | Log
-hi_cut | Hz | 1000 | 20000 | 20000 | Log
 freeze | bool | false
 duck | dB | 0 | 24 | 0 | Linear
 duck_thresh | dB | -60 | 0 | -30 | Linear
@@ -22,18 +16,90 @@ bypass | bool | false
 early_size | ms | 2 | 200 | 35 | Log
 early_send | % | 0 | 100 | 0 | Linear
 d1_on | bool | false
-d1_freq | Hz | 50 | 16000 | 150 | Log
+d1_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d1_freq | Hz | 20 | 20000 | 1000 | Log
 d1_mult | × | 0.1 | 4 | 1 | Log
 d1_q |  | 0.3 | 6 | 1 | Log
 d2_on | bool | false
-d2_freq | Hz | 50 | 16000 | 600 | Log
+d2_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d2_freq | Hz | 20 | 20000 | 1000 | Log
 d2_mult | × | 0.1 | 4 | 1 | Log
 d2_q |  | 0.3 | 6 | 1 | Log
 d3_on | bool | false
-d3_freq | Hz | 50 | 16000 | 2500 | Log
+d3_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d3_freq | Hz | 20 | 20000 | 1000 | Log
 d3_mult | × | 0.1 | 4 | 1 | Log
 d3_q |  | 0.3 | 6 | 1 | Log
 d4_on | bool | false
-d4_freq | Hz | 50 | 16000 | 8000 | Log
+d4_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d4_freq | Hz | 20 | 20000 | 1000 | Log
 d4_mult | × | 0.1 | 4 | 1 | Log
 d4_q |  | 0.3 | 6 | 1 | Log
+d5_on | bool | false
+d5_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d5_freq | Hz | 20 | 20000 | 1000 | Log
+d5_mult | × | 0.1 | 4 | 1 | Log
+d5_q |  | 0.3 | 6 | 1 | Log
+d6_on | bool | false
+d6_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d6_freq | Hz | 20 | 20000 | 1000 | Log
+d6_mult | × | 0.1 | 4 | 1 | Log
+d6_q |  | 0.3 | 6 | 1 | Log
+d7_on | bool | false
+d7_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d7_freq | Hz | 20 | 20000 | 1000 | Log
+d7_mult | × | 0.1 | 4 | 1 | Log
+d7_q |  | 0.3 | 6 | 1 | Log
+d8_on | bool | false
+d8_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d8_freq | Hz | 20 | 20000 | 1000 | Log
+d8_mult | × | 0.1 | 4 | 1 | Log
+d8_q |  | 0.3 | 6 | 1 | Log
+e1_on | bool | false
+e1_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e1_freq | Hz | 20 | 20000 | 1000 | Log
+e1_gain | dB | -24 | 24 | 0 | Linear
+e1_q |  | 0.1 | 10 | 0.70710677 | Log
+e1_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e2_on | bool | false
+e2_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e2_freq | Hz | 20 | 20000 | 1000 | Log
+e2_gain | dB | -24 | 24 | 0 | Linear
+e2_q |  | 0.1 | 10 | 0.70710677 | Log
+e2_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e3_on | bool | false
+e3_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e3_freq | Hz | 20 | 20000 | 1000 | Log
+e3_gain | dB | -24 | 24 | 0 | Linear
+e3_q |  | 0.1 | 10 | 0.70710677 | Log
+e3_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e4_on | bool | false
+e4_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e4_freq | Hz | 20 | 20000 | 1000 | Log
+e4_gain | dB | -24 | 24 | 0 | Linear
+e4_q |  | 0.1 | 10 | 0.70710677 | Log
+e4_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e5_on | bool | false
+e5_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e5_freq | Hz | 20 | 20000 | 1000 | Log
+e5_gain | dB | -24 | 24 | 0 | Linear
+e5_q |  | 0.1 | 10 | 0.70710677 | Log
+e5_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e6_on | bool | false
+e6_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e6_freq | Hz | 20 | 20000 | 1000 | Log
+e6_gain | dB | -24 | 24 | 0 | Linear
+e6_q |  | 0.1 | 10 | 0.70710677 | Log
+e6_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e7_on | bool | false
+e7_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e7_freq | Hz | 20 | 20000 | 1000 | Log
+e7_gain | dB | -24 | 24 | 0 | Linear
+e7_q |  | 0.1 | 10 | 0.70710677 | Log
+e7_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e8_on | bool | false
+e8_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e8_freq | Hz | 20 | 20000 | 1000 | Log
+e8_gain | dB | -24 | 24 | 0 | Linear
+e8_q |  | 0.1 | 10 | 0.70710677 | Log
+e8_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3

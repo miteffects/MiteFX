@@ -5,6 +5,9 @@
 //!     cargo run --release -p mite-dsp --example verb_quality
 
 use mite_dsp::reverb::{Reverb, ReverbSettings};
+
+/// The absorption the first engine had built in: low ×1.2 below 250 Hz, high ×0.5 over 5 kHz.
+const ROOM: ((f32, f32), (f32, f32)) = ((250.0, 1.2), (5000.0, 0.5));
 use mite_dsp::reverb_quality::{dense_after, highpass, peakiness, peaks, periodic_lags, periodicity};
 
 fn ir(s: &ReverbSettings, fs: f32, seconds: f32) -> [Vec<f32>; 2] {
@@ -66,15 +69,15 @@ fn main() {
     let fs = 48_000.0;
     let wav = std::env::var("VERB_WAV").ok();
     let cases = [
-        ("size 0, 1.0 s", ReverbSettings { size: 0.0, decay_s: 1.0, ..ReverbSettings::default() }),
-        ("size 0, 2.0 s", ReverbSettings { size: 0.0, decay_s: 2.0, ..ReverbSettings::default() }),
-        ("size 0, 1.0 s, flat", ReverbSettings { size: 0.0, decay_s: 1.0, lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() }),
-        ("size 0, 2.0 s, no mod", ReverbSettings { size: 0.0, decay_s: 2.0, mod_depth: 0.0, ..ReverbSettings::default() }),
-        ("size 25, 1.2 s", ReverbSettings { size: 0.25, decay_s: 1.2, ..ReverbSettings::default() }),
-        ("default (50, 2 s)", ReverbSettings::default()),
-        ("50, 2 s, flat decay", ReverbSettings { lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() }),
-        ("size 0, 2 s, flat decay", ReverbSettings { size: 0.0, lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() }),
-        ("size 100, 4 s", ReverbSettings { size: 1.0, decay_s: 4.0, ..ReverbSettings::default() }),
+        ("size 0, 1.0 s", ReverbSettings { size: 0.0, decay_s: 1.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
+        ("size 0, 2.0 s", ReverbSettings { size: 0.0, decay_s: 2.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
+        ("size 0, 1.0 s, flat", ReverbSettings { size: 0.0, decay_s: 1.0, ..ReverbSettings::default() }),
+        ("size 0, 2.0 s, no mod", ReverbSettings { size: 0.0, decay_s: 2.0, mod_depth: 0.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
+        ("size 25, 1.2 s", ReverbSettings { size: 0.25, decay_s: 1.2, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
+        ("default (50, 2 s)", ReverbSettings::default().with_shelves(ROOM.0, ROOM.1)),
+        ("50, 2 s, flat decay", ReverbSettings::default()),
+        ("size 0, 2 s, flat decay", ReverbSettings { size: 0.0, ..ReverbSettings::default() }),
+        ("size 100, 4 s", ReverbSettings { size: 1.0, decay_s: 4.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
     ];
     for (name, s) in cases {
         let [l, r] = ir(&s, fs, 2.0);

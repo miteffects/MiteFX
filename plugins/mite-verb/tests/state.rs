@@ -22,9 +22,16 @@ fn configured_state() -> Vec<u8> {
         ("predelay", json!({"f32": 35.0})),
         ("size", json!({"f32": 80.0})),
         ("decay", json!({"f32": 3.5})),
-        ("lo_mult", json!({"f32": 1.5})),
-        ("hi_mult", json!({"f32": 0.4})),
-        ("hi_cut", json!({"f32": 9000.0})),
+        ("d1_on", json!({"bool": true})),
+        ("d1_type", json!({"i32": 1})),
+        ("d1_mult", json!({"f32": 1.5})),
+        ("d2_on", json!({"bool": true})),
+        ("d2_type", json!({"i32": 2})),
+        ("d2_freq", json!({"f32": 5000.0})),
+        ("d2_mult", json!({"f32": 0.4})),
+        ("e1_on", json!({"bool": true})),
+        ("e1_type", json!({"i32": 4})),
+        ("e1_freq", json!({"f32": 9000.0})),
         ("duck", json!({"f32": 9.0})),
         ("mix", json!({"f32": 40.0})),
     ] {
@@ -50,3 +57,4 @@ fn a_saved_state_carries_the_current_version() {
     let state = normalized_state_json(&instance().save());
     assert_eq!(state["fields"]["mitefx_state"], json!(STATE_VERSION.to_string()));
 }
+
