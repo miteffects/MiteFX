@@ -13,7 +13,14 @@ use mite_dsp::multiband::{MbBand, MbSettings, BANDS, CROSSOVERS, DEFAULT_CROSSOV
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
-pub const STATE_VERSION: u32 = 1;
+/// The state format version (`mite_plugin::state`).
+///
+/// - 2 (2026-11-04): auto gain (`auto_gain`, appended; off in older states, so they sound as
+///   before: [`v1_to_v2`] has nothing to do).
+pub const STATE_VERSION: u32 = 2;
+
+/// State 1 → 2: auto gain is new. Absent from an older state, it reads as off.
+pub fn v1_to_v2(_state: &mut nih_plug::wrapper::state::PluginState) {}
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -30,6 +37,9 @@ pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.
 pub const DELTA: BoolSpec = BoolSpec { id: "delta", name: "Delta", default: false };
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 pub const SC_SOURCE: ChoiceSpec = ChoiceSpec { id: "sc_source", name: "Sidechain", choices: &["Internal", "External"], default: 0 };
+/// Each band's loudness out matched to its loudness in (Comp's auto makeup per band). Appended
+/// in state 2.
+pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: false };
 /// Hear the key (slice 2; monitoring).
 pub const LISTEN: BoolSpec = BoolSpec { id: "listen", name: "Listen", default: false };
 
@@ -137,6 +147,8 @@ pub fn manifest() -> String {
             lines.push(prefix(s.manifest_line()));
         }
     }
+    // Appended in state 2.
+    lines.push(AUTO_GAIN.manifest_line());
     lines.join("\n") + "\n"
 }
 
@@ -284,6 +296,7 @@ pub struct MbParams {
     pub bypass: BoolParam,
     pub sc_source: IntParam,
     pub listen: BoolParam,
+    pub auto_gain: BoolParam,
     pub keys: [KeyParams; KEY_BANDS],
     pub cross: [CrossParams; CROSSOVERS],
     pub bands: [BandParams; BANDS],
@@ -304,6 +317,7 @@ impl Default for MbParams {
             bypass: flag(&BYPASS),
             sc_source: choice_param(&SC_SOURCE, SC_SOURCE.name.to_owned()),
             listen: flag(&LISTEN),
+            auto_gain: flag(&AUTO_GAIN),
             keys: std::array::from_fn(KeyParams::new),
             cross: std::array::from_fn(|k| CrossParams { on: bool_param(&X_ON, format!("Crossover {} On", k + 1)), freq: float_param_named(&X_FREQS[k], format!("Crossover {} Frequency", k + 1)) }),
             bands: std::array::from_fn(BandParams::new),
@@ -331,6 +345,7 @@ impl MbParams {
             delta: self.delta.value(),
             bypass: self.bypass.value(),
             listen: external && self.listen.value(),
+            auto_gain: self.auto_gain.value(),
         }
     }
 }
@@ -390,6 +405,7 @@ unsafe impl Params for MbParams {
                 map.push(p(band_id(b, id), ptr, &g));
             }
         }
+        map.push(p(AUTO_GAIN.id.into(), self.auto_gain.as_ptr(), ""));
         map
     }
 }

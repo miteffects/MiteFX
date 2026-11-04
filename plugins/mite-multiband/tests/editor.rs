@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mite_multiband::editor::{memory_host, MbView};
-use mite_multiband::params::{band_id, cross_id, key_id, B_BYPASS, B_DELTA, B_EXTERNAL, B_ON, B_QUAD, B_RATIO, B_THRESH, BYPASS, DELTA, K_ON, LISTEN, SC_SOURCE, X_ON};
+use mite_multiband::params::{band_id, cross_id, key_id, AUTO_GAIN, B_BYPASS, B_DELTA, B_EXTERNAL, B_ON, B_QUAD, B_RATIO, B_THRESH, BYPASS, DELTA, K_ON, LISTEN, SC_SOURCE, X_ON};
 use mite_multiband::MbShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -83,7 +83,7 @@ fn quadrants_power_and_footer_toggles() {
     let power = view.band_power(&host, 0).expect("drawn");
     click(&mut view, &host, power.center());
     assert_eq!(plain(&host, &band_id(0, B_BYPASS.id)), 1.0);
-    for id in [DELTA.id, BYPASS.id] {
+    for id in [AUTO_GAIN.id, DELTA.id, BYPASS.id] {
         let at = view.footer_toggle(id).expect("drawn").center();
         click(&mut view, &host, at);
         assert_eq!(plain(&host, id), 1.0, "{id} on");

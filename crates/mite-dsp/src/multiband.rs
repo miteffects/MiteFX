@@ -74,11 +74,14 @@ pub struct MbSettings {
     pub bypass: bool,
     /// Hear the EQ'd sidechain instead (monitoring).
     pub listen: bool,
+    /// Each band's auto makeup (Comp's: its loudness out matched to its loudness in), so the
+    /// bands, and their sum, stay as loud as they came in.
+    pub auto_gain: bool,
 }
 
 impl Default for MbSettings {
     fn default() -> Self {
-        Self { crossovers: [None; CROSSOVERS], bands: [MbBand::default(); BANDS], lookahead_ms: 0.0, link: 1.0, key_eq: [BandSettings::default(); KEY_BANDS], mix: 1.0, out_db: 0.0, delta: false, bypass: false, listen: false }
+        Self { crossovers: [None; CROSSOVERS], bands: [MbBand::default(); BANDS], lookahead_ms: 0.0, link: 1.0, key_eq: [BandSettings::default(); KEY_BANDS], mix: 1.0, out_db: 0.0, delta: false, bypass: false, listen: false, auto_gain: false }
     }
 }
 
@@ -94,11 +97,13 @@ pub struct MbTelemetry {
     /// Each band's detector level at its highest (the detector its stage uses), dBFS: what its
     /// threshold is compared with.
     pub band_det_db: [f32; BANDS],
+    /// Each band's auto makeup at the end of the block, dB (0 while auto gain is off).
+    pub band_auto_db: [f32; BANDS],
 }
 
 impl Default for MbTelemetry {
     fn default() -> Self {
-        Self { in_peak_db: [MINUS_INFINITY_DB; 2], out_peak_db: [MINUS_INFINITY_DB; 2], band_in_db: [MINUS_INFINITY_DB; BANDS], band_gain_db: [0.0; BANDS], band_det_db: [MINUS_INFINITY_DB; BANDS] }
+        Self { in_peak_db: [MINUS_INFINITY_DB; 2], out_peak_db: [MINUS_INFINITY_DB; 2], band_in_db: [MINUS_INFINITY_DB; BANDS], band_gain_db: [0.0; BANDS], band_det_db: [MINUS_INFINITY_DB; BANDS], band_auto_db: [0.0; BANDS] }
     }
 }
 
@@ -124,6 +129,7 @@ fn comp_settings_at(s: &MbSettings, b: usize, lookahead_ms: f32) -> CompSettings
         link: s.link,
         lookahead_ms,
         makeup_db: if band.bypass { 0.0 } else { band.gain_db },
+        auto_makeup: s.auto_gain && !band.bypass,
         external_key: band.external,
         ..CompSettings::default()
     }
@@ -401,6 +407,7 @@ impl Multiband {
                 let keys: [&[f32]; 2] = [&ka[..n], &kb[..n]];
                 let tel = self.comps[slot].process(&mut parts[..n_ch], cs.external_key.then_some(&keys[..n_ch]), &cs);
                 t.band_det_db[slot] = t.band_det_db[slot].max(tel.detector_levels_db[s.bands[slot].stage.detector as usize]);
+                t.band_auto_db[slot] = self.comps[slot].auto_db();
                 for c in 0..n_ch {
                     let (cut, lift) = (tel.cut_db[c], tel.lift_db[c]);
                     let g = if -cut >= lift { cut } else { lift };
@@ -636,6 +643,49 @@ mod tests {
             m.process(&mut [a, b], None, &s);
         }
         assert!(l.iter().all(|v| v.is_finite() && v.abs() < 2.0));
+    }
+
+    #[test]
+    fn auto_gain_brings_each_band_back_to_its_loudness() {
+        // Every band compressed hard: without auto gain the sum drops by many dB; with it the
+        // sum, and a tone alone in one band, come out as loud as they went in.
+        let mut s = three_bands();
+        for b in &mut s.bands {
+            b.stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -36.0, ratio: 6.0, ..Stage::default() };
+        }
+        let level = |v: &[f32]| 10.0 * (v[v.len() / 2..].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / (v.len() / 2) as f64).log10();
+        let x = noise(6 * 48000, -12.0);
+        let tone: Vec<f32> = (0..6 * 48000).map(|i| 0.3 * (std::f32::consts::TAU * 80.0 * i as f32 / FS).sin()).collect();
+        for (name, sig) in [("noise", &x), ("80 Hz tone", &tone)] {
+            let mut m = Multiband::new(FS);
+            m.reset(&s);
+            let off = run(&mut m, &s, sig, 256);
+            let on_s = MbSettings { auto_gain: true, ..s };
+            let mut m = Multiband::new(FS);
+            m.reset(&on_s);
+            let on = run(&mut m, &on_s, sig, 256);
+            let (l_in, l_off, l_on) = (level(sig), level(&off), level(&on));
+            println!("{name}: in {l_in:.2} off {l_off:.2} auto {l_on:.2} dB");
+            assert!(l_off < l_in - 6.0, "{name}: compressed without auto gain");
+            assert!((l_on - l_in).abs() < 1.0, "{name}: {l_on} vs {l_in}");
+        }
+    }
+
+    #[test]
+    fn auto_gain_leaves_a_bypassed_band_alone_and_reports_the_makeup() {
+        let mut s = MbSettings { auto_gain: true, ..three_bands() };
+        s.bands[0].stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -60.0, ratio: 6.0, ..Stage::default() };
+        s.bands[1].bypass = true;
+        let mut m = Multiband::new(FS);
+        m.reset(&s);
+        let x = noise(48000, -12.0);
+        let (mut l, mut r) = (x.clone(), x.clone());
+        let mut t = MbTelemetry::default();
+        for (a, b) in l.chunks_mut(256).zip(r.chunks_mut(256)) {
+            t = m.process(&mut [a, b], None, &s);
+        }
+        assert!(t.band_auto_db[0] > 3.0, "band 1 made up: {}", t.band_auto_db[0]);
+        assert_eq!(t.band_auto_db[1], 0.0, "bypassed");
     }
 
     /// The lowest and highest level of the 1 ms windows of `y` after `from`, against a tone of

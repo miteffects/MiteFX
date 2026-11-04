@@ -165,6 +165,7 @@ pub fn settings(host: &dyn ParamHost) -> MbSettings {
         delta: on(DELTA.id),
         bypass: on(BYPASS.id),
         listen: external && on(LISTEN.id),
+        auto_gain: on(AUTO_GAIN.id),
     }
 }
 
@@ -262,6 +263,8 @@ pub struct MbView {
     /// Each band's input peak (linear) and gain change (dB), eased.
     peak: [f32; BANDS],
     gain: [f32; BANDS],
+    /// Each band's auto makeup as the engine applies it, dB (eased like `gain`).
+    auto: [f32; BANDS],
     source_menu: Option<Dropdown>,
     key_eq: KeyEq,
     key_spectrum: KeySpectrum,
@@ -274,6 +277,7 @@ impl MbView {
             FOOTER_TOP,
             (WIDTH, HEIGHT),
             vec![
+                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — each band comes out as loud as it went in, so its dynamics never change the level or the balance (measured over a few seconds)" },
                 FooterToggle { id: LISTEN.id, glyph: ToggleGlyph::Listen, words: "Listen — hear the sidechain as the external bands' detectors hear it (after its EQ)" },
                 FooterToggle { id: DELTA.id, glyph: ToggleGlyph::Delta, words: "Delta — hear only what the bands' dynamics change" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input, latency kept" },
@@ -312,6 +316,7 @@ impl MbView {
             spectrum: spectrum::Spectrum::new(),
             peak: [0.0; BANDS],
             gain: [0.0; BANDS],
+            auto: [0.0; BANDS],
             source_menu: None,
             key_eq: {
                 let mut k = KeyEq::new(Rect::new(EQ_PANEL.x0 + 16.0, EQ_PANEL.y0 + 44.0, EQ_PANEL.x1 - 16.0, EQ_PANEL.y1 - 14.0), mite_dsp::multiband::KEY_BANDS).with_slopes();
@@ -550,7 +555,7 @@ impl MbView {
     fn response_db(&self, host: &dyn ParamHost, layout: &Layout, freqs: &[f64]) -> Vec<f64> {
         let x: [Option<f32>; CROSSOVERS] = std::array::from_fn(|k| Self::on(host, &cross_id(k, X_ON.id)).then(|| Self::plain(host, &cross_id(k, X_FREQ.id))));
         let heard = mite_dsp::multiband::audible(&settings(host), layout);
-        let power: [f64; BANDS] = std::array::from_fn(|b| if heard[b] { 10f64.powf((f64::from(self.gain[b]) + if Self::on(host, &band_id(b, B_BYPASS.id)) { 0.0 } else { f64::from(Self::plain(host, &band_id(b, B_GAIN.id))) }) / 10.0) } else { 0.0 });
+        let power: [f64; BANDS] = std::array::from_fn(|b| if heard[b] { 10f64.powf((f64::from(self.gain[b]) + if Self::on(host, &band_id(b, B_BYPASS.id)) { 0.0 } else { f64::from(Self::plain(host, &band_id(b, B_GAIN.id)) + self.auto[b]) }) / 10.0) } else { 0.0 });
         freqs
             .iter()
             .map(|&f| {
@@ -707,7 +712,8 @@ impl MbView {
         let stage = &Stage { on: stage.on && !bypassed, ..*stage };
         let mut stages = [Stage::default(); STAGES];
         stages[0] = *stage;
-        let gain = if bypassed { 0.0 } else { Self::plain(cx.host, &band_id(b, B_GAIN.id)) };
+        // Its gain: the band's own and what auto gain adds (as the engine applies it).
+        let gain = if bypassed { 0.0 } else { Self::plain(cx.host, &band_id(b, B_GAIN.id)) + self.auto[b] };
         let pts: Vec<Point> = (0..=120)
             .map(|i| {
                 let x = -SQ_RANGE + SQ_RANGE * i as f32 / 120.0;
@@ -1405,6 +1411,9 @@ impl View for MbView {
             self.peak[b] += (target - self.peak[b]) * if target > self.peak[b] { k(PEAK_RISE_S) } else { k(PEAK_FALL_S) };
             if let Some(r) = self.history.back() {
                 self.gain[b] += (r[record::BAND_GAIN + b] - self.gain[b]) * k(0.05);
+                let before = self.auto[b];
+                self.auto[b] += (r[record::BAND_AUTO + b] - self.auto[b]) * k(0.05);
+                moved |= (self.auto[b] - before).abs() > 1e-3;
             }
             moved |= (self.peak[b] - before.0).abs() > 1e-4 || (self.gain[b] - before.1).abs() > 1e-3;
         }

@@ -63,10 +63,16 @@ pub const AUTO_MAKEUP_REF_DB: f32 = -12.0;
 /// [`AUTO_MAKEUP_REF_DB`], louder than the music, which mostly sits well below it). It predicts
 /// the curve's gain at the music's level (instant as settings move) and trims that to what it
 /// measures, over the whole signal: a compressor does not lift the gaps (unlike saturation), so
-/// matching only the hits would leave the result louder. The meters hold in silence (the 20 ms
-/// level under [`AUTO_FLOOR_DB`]).
+/// matching only the hits would leave the result louder. The trim is a closed loop (2026-11-04):
+/// it meters the output after the auto makeup and integrates what is still missing, so the
+/// prediction's bias on spiky material (its makeup swings with a level that follows the hits)
+/// is made up too. The meters hold in silence (the 20 ms mean square under [`AUTO_FLOOR_DB`];
+/// until 2026-11-04 the floor was compared as an amplitude, so it held under −35 dB).
 const AUTO_LEVEL_MS: f32 = 400.0;
 const AUTO_TRIM_MS: f32 = 3000.0;
+/// The trim's meters (in, and out after the auto makeup), ms: a third of the trim's time, so
+/// the loop settles without ringing (damping about 0.87).
+const AUTO_METER_MS: f32 = 1000.0;
 const AUTO_SHORT_MS: f32 = 20.0;
 const AUTO_FLOOR_DB: f32 = -70.0;
 const AUTO_TRIM_LIMIT_DB: f32 = 9.0;
@@ -845,6 +851,11 @@ impl Compressor {
 
     /// The latency in force, samples at the rate it runs at (the lookahead; a whole number of
     /// host samples).
+    /// What auto makeup adds now, dB (0 while it is off).
+    pub fn auto_db(&self) -> f32 {
+        self.auto_db
+    }
+
     pub fn latency(&self) -> usize {
         self.latency
     }
@@ -945,10 +956,12 @@ impl Compressor {
         let program_gate = db_to_gain(PROGRAM_GATE_DB);
         self.makeup.set_target(s.makeup_total_db(self.auto_db));
         let auto_level_k = 1.0 - coef(AUTO_LEVEL_MS, fs);
-        let auto_trim_k = 1.0 - coef(AUTO_TRIM_MS, fs);
+        let auto_trim_k = 1.0 - coef(AUTO_METER_MS, fs);
         let auto_short_k = 1.0 - coef(AUTO_SHORT_MS, fs);
-        let auto_floor = db_to_gain(AUTO_FLOOR_DB);
+        // The meters hold mean squares: the floor is a power (it was the amplitude, −35 dB).
+        let auto_floor = db_to_gain(AUTO_FLOOR_DB).powi(2);
         let auto_step = 1.0 - coef(AUTO_TRIM_MS, fs / AUTO_EVERY as f32);
+        let set_makeup_sq = db_to_gain(s.makeup_db).powi(2);
 
         let uses = |d: Detector| s.stages.iter().any(|st| st.on && st.detector == d);
         let (use_peak, use_rms, use_loud) = (uses(Detector::Peak), uses(Detector::Rms), uses(Detector::Loudness));
@@ -1226,7 +1239,8 @@ impl Compressor {
             // Auto makeup's meters: the power going in and coming out before makeup (not in silence).
             let power = |v: [f32; 2]| if ms { v[0] * v[0] + v[1] * v[1] } else { (v[0] * v[0] + v[1] * v[1]) / n_ch as f32 };
             let p_in = power(audio);
-            let p_out = if makeup > 0.0 { power([out[0] / makeup, out[1] / makeup]) } else { 0.0 };
+            // After the auto part of the makeup (not the set part): the trim closes the loop on it.
+            let p_out = power(out) / set_makeup_sq;
             self.auto_short += (p_in - self.auto_short) * auto_short_k;
             if self.auto_short > auto_floor && !s.listen {
                 self.auto_level += (p_in - self.auto_level) * auto_level_k;
@@ -1241,9 +1255,9 @@ impl Compressor {
                     let level = 10.0 * self.auto_level.log10();
                     let predicted = level - curve_db(&s.stages, level, self.offset_db);
                     if self.auto_in > 0.0 && self.auto_out > 0.0 {
-                        let measured = 10.0 * (self.auto_in / self.auto_out).log10();
-                        let want = (measured - predicted).clamp(-AUTO_TRIM_LIMIT_DB, AUTO_TRIM_LIMIT_DB);
-                        self.auto_trim += (want - self.auto_trim) * auto_step;
+                        // What is still missing, made up over the trim's time.
+                        let error = 10.0 * (self.auto_in / self.auto_out).log10();
+                        self.auto_trim = (self.auto_trim + error * auto_step).clamp(-AUTO_TRIM_LIMIT_DB, AUTO_TRIM_LIMIT_DB);
                     }
                     self.auto_db = (predicted + self.auto_trim).clamp(-24.0, 24.0);
                 } else if !s.auto_makeup {
@@ -1626,6 +1640,7 @@ mod tests {
                 let x = material(n, peak, hits);
                 let y = run_blocks(&s, &x, 512);
                 let db = 20.0 * (rms(&y[tail.clone()]) / rms(&x[tail.clone()])).log10();
+                println!("{threshold} dB {ratio}:1, hits {hits} at {peak}: {db:.2} dB");
                 assert!(db.abs() < 0.5, "{threshold} dB {ratio}:1, hits {hits} at {peak}: {db:.2} dB");
             }
         }

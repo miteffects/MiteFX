@@ -53,6 +53,7 @@ sidechain source and EQ button, latency, Δ, bypass, MIX, OUTPUT. Meters IN, OUT
 - Crossovers `x1…x5_on`, `x1…x5_freq` (defaults 120, 500, 2000, 6000, 12000 Hz).
 - Bands `b1…b6_`: `on`, `quad`, `thresh`, `ratio`, `knee`, `range`, `attack`, `release`, `det`,
   `gain`, `bypass`, `mute`, `solo`, `delta`, `external`.
+- Appended in state 2: `auto_gain` (off in older states).
 
 ## 4. Slices
 
@@ -86,3 +87,15 @@ sidechain source and EQ button, latency, Δ, bypass, MIX, OUTPUT. Meters IN, OUT
    `Compressor::absorb_delayed` and `DryDelay::absorb` hand the merged band's delays to the band
    that takes its region; a new band's dry path starts empty; every live band's dry path is kept
    current (band Delta switched on mid-play no longer reads stale audio).
+5. (done 2026-11-04, user: "auto gain for multiband too") Auto gain: the footer's Auto toggle
+   (`auto_gain`, state 2; off in a state 1, which sounds as before) turns on each band's own
+   auto makeup (Comp's, `CompSettings::auto_makeup`), so each band, and with it the balance and
+   the sum, comes out as loud as it went in (tested: everything compressed by 13–17 dB comes back
+   within 0.4 dB; a bypassed band gets none). The makeup each band applies
+   (`MbTelemetry::band_auto_db`, record `BAND_AUTO`) is drawn into its square and the spectrum's
+   response, so what is drawn is what is heard. Found on the way, fixed in Comp too: auto
+   makeup's silence gate compared a mean square with an amplitude (it held below −35 dB, not
+   −70: a low band never measured); with the gate right, the prediction's bias on spiky
+   material showed (−1 dB), so the trim is now a closed loop on the output after the makeup
+   (meters 1 s, trim 3 s: settles in about 8 s without ringing). A bypassed band now draws the
+   diagonal (the user's band 1 "didn't move": it was bypassed).

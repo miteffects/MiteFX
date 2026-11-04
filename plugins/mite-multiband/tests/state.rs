@@ -30,6 +30,7 @@ fn configured_state() -> Vec<u8> {
         ("b4_mute", json!({"bool": true})),
         ("b4_gain", json!({"f32": -2.5})),
         ("lookahead", json!({"f32": 4.0})),
+        ("auto_gain", json!({"bool": true})),
         ("k2_on", json!({"bool": true})),
     ] {
         assert!(params.contains_key(id), "no parameter {id}");

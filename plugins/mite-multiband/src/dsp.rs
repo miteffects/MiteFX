@@ -17,7 +17,9 @@ pub mod record {
     pub const BAND_GAIN: usize = BAND_IN + BANDS;
     /// Each band slot's detector level (dBFS): what its threshold is compared with.
     pub const BAND_DET: usize = BAND_GAIN + BANDS;
-    pub const WIDTH: usize = BAND_DET + BANDS;
+    /// Each band slot's auto makeup (dB, 0 while auto gain is off), at the slice's end.
+    pub const BAND_AUTO: usize = BAND_DET + BANDS;
+    pub const WIDTH: usize = BAND_AUTO + BANDS;
 }
 
 pub const HISTORY_SLICE_MS: f32 = 5.0;
@@ -105,6 +107,7 @@ impl MbEngine {
             for b in 0..BANDS {
                 a[record::BAND_IN + b] = a[record::BAND_IN + b].max(t.band_in_db[b]);
                 a[record::BAND_DET + b] = a[record::BAND_DET + b].max(t.band_det_db[b]);
+                a[record::BAND_AUTO + b] = t.band_auto_db[b];
                 let g = t.band_gain_db[b];
                 if g.abs() > a[record::BAND_GAIN + b].abs() {
                     a[record::BAND_GAIN + b] = g;

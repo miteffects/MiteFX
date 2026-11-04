@@ -4,7 +4,7 @@
 > follows this file or changes this file first. Audience: Claude Design (visual
 > system), implementation sessions, and future contributors.
 
-**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-11-03
+**Status:** Phase 0 (not started) · design first pass in · **License:** GPL-3.0-or-later · **Last revised:** 2026-11-04
 
 ---
 
@@ -251,7 +251,7 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
   - Per-band transient and sustain targeting.
   - Bands draggable directly on the spectrum, like EQ bands.
 
-**Status (2026-11-03): designed in-house** (user decision): `docs/design/multiband-brief.md`. Accent mint. Scope: Pro-MB baseline plus sidechain (six bands on the shared crossover and rail, Comp's dynamics per band, solo, mute, bypass, Delta, external sidechain with the shared sidechain EQ). DSP in `mite_dsp::multiband`.
+**Status (2026-11-03): designed in-house** (user decision): `docs/design/multiband-brief.md`. Accent mint. Scope: Pro-MB baseline plus sidechain (six bands on the shared crossover and rail, Comp's dynamics per band, solo, mute, bypass, Delta, external sidechain with the shared sidechain EQ). DSP in `mite_dsp::multiband`. Auto gain (2026-11-04): each band's own loudness-matched makeup (Comp's, whose trim became a closed loop the same day).
 
 ### 5. Mite Verb. Rival: FabFilter Pro-R 2
 

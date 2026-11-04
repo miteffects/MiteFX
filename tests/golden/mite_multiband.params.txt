@@ -142,3 +142,4 @@ b6_mute | bool | false
 b6_solo | bool | false
 b6_delta | bool | false
 b6_external | bool | false
+auto_gain | bool | false
