@@ -22,3 +22,6 @@ name = "Mite Multiband"
 
 [mite_sat]
 name = "Mite Sat"
+
+[mite_verb]
+name = "Mite Verb"

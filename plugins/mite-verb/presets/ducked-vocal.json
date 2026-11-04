@@ -1,0 +1,9 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Ducked Vocal",
+  "params": {
+    "predelay": 40.0, "size": 55.0, "decay": 2.4, "hi_mult": 0.5, "lo_cut": 200.0, "duck": 12.0, "duck_thresh": -32.0,
+    "duck_release": 400.0, "mix": 35.0
+  }
+}

@@ -1,0 +1,21 @@
+predelay | ms | 0 | 500 | 10 | Linear
+size | % | 0 | 100 | 50 | Linear
+decay | s | 0.1 | 30 | 2 | Log
+lo_mult | × | 0.25 | 4 | 1.2 | Log
+lo_freq | Hz | 50 | 2000 | 250 | Log
+hi_mult | × | 0.1 | 4 | 0.5 | Log
+hi_freq | Hz | 1000 | 16000 | 5000 | Log
+diffusion | % | 0 | 100 | 70 | Linear
+early | % | 0 | 100 | 50 | Linear
+mod_depth | % | 0 | 100 | 30 | Linear
+mod_rate | Hz | 0.05 | 5 | 0.6 | Log
+width | % | 0 | 150 | 100 | Linear
+lo_cut | Hz | 10 | 1000 | 20 | Log
+hi_cut | Hz | 1000 | 20000 | 20000 | Log
+freeze | bool | false
+duck | dB | 0 | 24 | 0 | Linear
+duck_thresh | dB | -60 | 0 | -30 | Linear
+duck_release | ms | 20 | 2000 | 300 | Log
+mix | % | 0 | 100 | 30 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false

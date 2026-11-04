@@ -111,6 +111,7 @@ MiteFX/
 | Drawing that history: columns, grid, level lanes, GR from the top | `mite_ui::widgets::history` (`HistoryLane`; Comp and Limit, 2026-11-03) |
 | Loudness (BS.1770-4 / R128: M, S, I, LRA) and true peak | `mite_dsp::loudness` (Limit, 2026-11-03) |
 | Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
+| Reverb: modulated 16-line FDN with per-line absorption (decay time per frequency), its T60 curve for drawing | `mite_dsp::reverb` (`Reverb`, `decay_at`, `decay_curve`; Verb, 2026-11-04; Delay's diffusion can build on it) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
 | Crossover rail: band regions, grips, ghost grips to pull a band in, merging onto a neighbour or off an end, badges with S/M tags, funnels to the cards, the band menu (solo, mute, copy, paste, reset, merge, remove), split/merge/remove/solo on the host's parameters, its help | `mite_ui::widgets::rail` (`Rail<B>`, `RailParams`, `BandMenu`; Shape and Sat, 2026-10-26) |
@@ -262,6 +263,8 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
 - **Beyond:**
   - Convolution mode with IR import, and **reverb as an IR-matched algorithm** (analyse an IR, fit the algorithm to it).
   - A real-time decay spectrogram display.
+
+**Status (2026-11-04): slice 1 built, designed in-house** (`docs/design/verb-brief.md`; accent ice). DSP in `mite_dsp::reverb`: pre-delay (two crossfading read heads), ten early reflections a side, four input allpasses a side, 16 lines under a Hadamard matrix with allpass-interpolated modulated reads and per-line absorption (a gain and two RBJ shelves: T60 = decay at mid, × low at DC, × high at Nyquist; the loop gain checked < 1 at design time), low and high cut, width, ducking, freeze; `decay_at`/`decay_curve` give the T60 the lines' filters make, which the editor draws. Theory tests measure the T60 per octave against it, stability at every extreme, freeze, echo density, stereo, block-size invariance and click-free moves. Editor: the decay curve with three grips over the input's and the reverb's spectra, the cuts on the plot's floor, the history (the tail falling, the duck threshold), nine dials, IN/OUT meters. Next: the full decay-rate EQ, convolution and the IR-matched algorithm, the decay spectrogram.
 
 ### 6. Mite Delay. Rival: FabFilter Timeless 3
 
@@ -430,6 +433,8 @@ FabFilter's strengths:
 - Multiband crossover bar.
 
 ### 7.4 Design status
+
+**Mite Verb designed in-house on 2026-11-04** (`docs/design/verb-brief.md`, interaction.md "Mite Verb"), as Sat, Limit, Gate and Multiband: the decay curve over the spectra is the hero, the history shows the tail; the accent is ice.
 
 **Mite Sat designed in-house on 2026-10-26** (`docs/design/sat-brief.md`, interaction.md "Mite Sat"): user decision, no Claude Design pass. Shape's frame with the spectrum on top and a card per band; the transfer square is the hero of the card; the accent is crimson.
 

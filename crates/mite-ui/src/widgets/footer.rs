@@ -33,6 +33,8 @@ pub enum ToggleGlyph {
     TruePeak,
     /// Listen (hear the detector's key): headphones.
     Listen,
+    /// Freeze (hold a reverb's tail): a snowflake.
+    Freeze,
 }
 
 /// A toggle: its parameter (on at ≥ 0.5), glyph, and what the help strip says about it.
@@ -229,6 +231,25 @@ pub fn draw_toggle_glyph(scene: &mut Scene, glyph: ToggleGlyph, c: Point, color:
                 p.apply_affine(Affine::translate((c.x - 9.6, c.y - 9.6)) * Affine::scale(0.8));
                 scene.stroke(&round, Affine::IDENTITY, color, None, &p);
             }
+        }
+        ToggleGlyph::Freeze => {
+            let mut flake = BezPath::new();
+            for k in 0..3 {
+                let a = std::f64::consts::PI * (0.5 + k as f64 / 3.0);
+                let (dx, dy) = (a.cos(), a.sin());
+                flake.move_to((c.x - 7.5 * dx, c.y - 7.5 * dy));
+                flake.line_to((c.x + 7.5 * dx, c.y + 7.5 * dy));
+                // A small V near each end.
+                for end in [-1.0, 1.0] {
+                    let (ex, ey) = (c.x + end * 5.0 * dx, c.y + end * 5.0 * dy);
+                    for side in [-1.0, 1.0] {
+                        let b = a + side * std::f64::consts::FRAC_PI_4 * end;
+                        flake.move_to((ex, ey));
+                        flake.line_to((ex + end * 2.6 * b.cos(), ey + end * 2.6 * b.sin()));
+                    }
+                }
+            }
+            scene.stroke(&round, Affine::IDENTITY, color, None, &flake);
         }
         ToggleGlyph::Bypass => {
             let mut stem = BezPath::new();

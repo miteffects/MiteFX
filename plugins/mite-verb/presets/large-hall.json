@@ -1,0 +1,9 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Large Hall",
+  "params": {
+    "predelay": 30.0, "size": 85.0, "decay": 3.8, "lo_mult": 1.4, "lo_freq": 220.0, "hi_mult": 0.45, "hi_freq": 4000.0,
+    "diffusion": 80.0, "early": 40.0, "mod_depth": 35.0, "mod_rate": 0.4, "width": 120.0, "mix": 30.0
+  }
+}

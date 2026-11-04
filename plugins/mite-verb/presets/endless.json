@@ -1,0 +1,9 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Endless",
+  "params": {
+    "predelay": 0.0, "size": 100.0, "decay": 20.0, "lo_mult": 1.0, "hi_mult": 0.8, "diffusion": 100.0, "early": 0.0,
+    "mod_depth": 60.0, "mod_rate": 0.25, "width": 130.0, "mix": 50.0
+  }
+}

@@ -553,3 +553,18 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
 - Footer: sidechain source, the sidechain EQ (its panel over the cards: the shared `KeyEq`
   gestures), latency, Listen, Δ, bypass, LOOKAHEAD, MIX, OUTPUT. Keys: S, M, Delete, ↑ ↓
   threshold, Esc closes the panel or a menu.
+
+## Mite Verb (in-house design, 2026-11-04; docs/design/verb-brief.md)
+
+- **Decay curve grips.** MID: up and down scales the decay (the curve passes through the
+  pointer). LOW and HIGH: across moves their frequency, up and down solves their multiplier so
+  the curve passes through the pointer at that frequency (it stops where 0.25…4×, high 0.1…4×,
+  end). Shift is fine (×0.2); the wheel steps the decay or the multiplier; double-click resets
+  the grip's parameters. Each drag is one undo step.
+- **Cuts.** The two grips on the plot's floor drag across (low cut, high cut on the reverb only);
+  what they take off is shaded. Wheel steps, double-click resets.
+- **Ducking threshold.** The dashed line on the history with its grip at the right: up and down
+  at the history's dB scale; dim while DUCK is 0. The ducking hangs from the history's top.
+- **Freeze.** The footer's snowflake. While frozen the curve's line sits at the plot's top (the
+  decay is endless), the curve itself dims and dashes (what returns), a snowflake pill lights in
+  the plot's corner.
