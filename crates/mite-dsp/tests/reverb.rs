@@ -2,7 +2,8 @@
 //! the settings and against `decay_at`, stability at the extremes, freeze, echo density, stereo,
 //! block-size invariance and click-free parameter moves.
 
-use mite_dsp::reverb::{decay_at, design_absorption, line_len, Reverb, ReverbSettings, LINES};
+use mite_dsp::reverb::{decay_at, design_absorption, line_len, DecayBand, Reverb, ReverbSettings, LINES};
+use mite_dsp::reverb_quality::{highpass, peakiness, periodicity};
 
 fn render(fs: f32, s: &ReverbSettings, input: &[f32], block: usize) -> [Vec<f32>; 2] {
     let mut r = Reverb::new(fs, s);
@@ -256,17 +257,93 @@ fn moving_any_setting_fast_never_clicks() {
         ("duck", with(&|s| s.duck_db = 24.0)),
     ];
     let d2 = |v: &[f32], i: usize| (v[i + 1] - 2.0 * v[i] + v[i - 1]).abs();
-    for (name, after) in cases {
+    let render = |switch: bool, after: &ReverbSettings| {
         let mut r = Reverb::new(fs, &base);
         let [mut l, mut rr] = [vec![0.0f32; n], vec![0.0f32; n]];
-        let at = 48_000;
         for (k, (a, b)) in l.chunks_mut(480).zip(rr.chunks_mut(480)).enumerate() {
-            let s = if k * 480 >= at { &after } else { &base };
+            let s = if !switch || k * 480 >= 48_000 { after } else { &base };
             let p = k * 480;
             r.process([&x[p..p + a.len()], &x[p..p + a.len()]], [a, b], true, s);
         }
-        let steady = (at - 24_000..at).map(|i| d2(&l, i).max(d2(&rr, i))).fold(0.0, f32::max);
+        [l, rr]
+    };
+    let at = 48_000;
+    let [bl, br] = render(false, &base);
+    let steady = (at..at + 24_000).map(|i| d2(&bl, i).max(d2(&br, i))).fold(0.0, f32::max);
+    for (name, after) in cases {
+        // The new setting held from the start: a longer decay is louder, a step there is no click.
+        let [hl, hr] = render(false, &after);
+        let held = (at..at + 24_000).map(|i| d2(&hl, i).max(d2(&hr, i))).fold(0.0, f32::max);
+        let [l, rr] = render(true, &after);
         let moving = (at..at + 24_000).map(|i| d2(&l, i).max(d2(&rr, i))).fold(0.0, f32::max);
-        assert!(moving <= steady * 4.0 + 1e-5, "{name}: {moving} after {steady}");
+        assert!(moving <= steady.max(held) * 4.0 + 1e-5, "{name}: {moving} after {steady} (held {held})");
     }
+}
+
+#[test]
+fn the_tail_is_smooth_at_every_size() {
+    // Flat decay (the network's own colour, not the decay EQ's), over 150 Hz. A Gaussian noise
+    // tail measures periodicity 0.024 and no peaky bins; the first version measured 0.15 and
+    // 0.84 % at size 0 (metallic), 0.083 and 0.10 % at size 50.
+    let fs = 48_000.0;
+    for (size, decay_s) in [(0.0, 1.0), (0.0, 2.0), (0.25, 1.5), (0.5, 2.0), (1.0, 3.0)] {
+        let s = ReverbSettings { size, decay_s, lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() };
+        let [l, _] = render(fs, &s, &impulse(fs as usize * 2), 512);
+        let l = highpass(&l, 150.0, f64::from(fs));
+        let p = periodicity(&l, f64::from(fs), 0.15, 0.65);
+        let k = peakiness(&l, f64::from(fs), 0.1, 0.9);
+        assert!(p < 0.06, "size {size}, {decay_s} s: periodicity {p}");
+        assert!(k < 0.003, "size {size}, {decay_s} s: {} % peaky", k * 100.0);
+    }
+}
+
+#[test]
+fn a_decay_bell_changes_the_decay_where_it_sits() {
+    let fs = 48_000.0;
+    let base = plain(ReverbSettings { decay_s: 2.0, lo_mult: 1.0, hi_mult: 1.0, ..ReverbSettings::default() });
+    let mut s = base;
+    s.bands[1] = DecayBand { on: true, freq: 1000.0, mult: 0.4, q: 1.0 };
+    let n = (fs * 2.6) as usize;
+    let [l, r] = render(fs, &s, &impulse(n), 512);
+    let mono: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a + b).collect();
+    for fc in [250.0, 1000.0, 4000.0] {
+        let measured = t60(&octave(&mono, fc, f64::from(fs)), f64::from(fs));
+        let predicted = band_t60(&s, fc, f64::from(fs));
+        assert!((measured / predicted - 1.0).abs() < 0.1, "{fc} Hz: measured {measured:.3} s, decay_at {predicted:.3} s");
+    }
+    let at = decay_at(&s, 1000.0, f64::from(fs));
+    assert!((at / decay_at(&base, 1000.0, f64::from(fs)) - 0.4).abs() < 0.03, "{at}");
+}
+
+/// What an octave band at `fc` should measure from `decay_at`: the band's energy decay is the sum
+/// of its frequencies' (each falling 60 dB per its own T60, weighted by the band-pass), fitted as
+/// `t60` fits a measured one.
+fn band_t60(s: &ReverbSettings, fc: f64, fs: f64) -> f64 {
+    let freqs: Vec<f64> = (0..96).map(|k| fc * 2f64.powf(-1.5 + 3.0 * k as f64 / 95.0)).collect();
+    let weight = |f: f64| {
+        // The test's band-pass, twice: |H|⁴ of a Q √2 second-order band-pass.
+        let x = f / fc - fc / f;
+        let h2 = 1.0 / (1.0 + 2.0 * x * x);
+        h2 * h2 * f
+    };
+    let t: Vec<f64> = freqs.iter().map(|&f| decay_at(s, f, fs)).collect();
+    let n = (fs * 3.0) as usize;
+    let step = 48;
+    let edc: Vec<f64> = (0..n / step).map(|k| {
+        let time = (k * step) as f64 / fs;
+        freqs.iter().zip(&t).map(|(&f, &tt)| weight(f) * 10f64.powf(-6.0 * time / tt)).sum::<f64>()
+    }).collect();
+    let (mut sx, mut sy, mut sxx, mut sxy, mut m) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for (k, e) in edc.iter().enumerate() {
+        let d = 10.0 * (e / edc[0]).log10();
+        if (-25.0..=-5.0).contains(&d) {
+            let time = (k * step) as f64 / fs;
+            sx += time;
+            sy += d;
+            sxx += time * time;
+            sxy += time * d;
+            m += 1.0;
+        }
+    }
+    -60.0 / ((m * sxy - sx * sy) / (m * sxx - sx * sx))
 }

@@ -12,6 +12,7 @@ pub const FACTORY: &[&str] = &[
     include_str!("../presets/init.json"),
     include_str!("../presets/vocal-plate.json"),
     include_str!("../presets/drum-room.json"),
+    include_str!("../presets/tight-booth.json"),
     include_str!("../presets/large-hall.json"),
     include_str!("../presets/ducked-vocal.json"),
     include_str!("../presets/endless.json"),

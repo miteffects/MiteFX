@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::reverb::{decay_at, decay_curve, ReverbSettings};
+use mite_dsp::reverb::{decay_at, decay_curve, ReverbSettings, DECAY_BANDS};
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel};
 use mite_ui::peniko::{Color, Fill};
@@ -66,8 +66,8 @@ const DUCK_GRIP_X: f64 = HIST_W - 38.0;
 const DUCK_GRIP: (f64, f64) = (34.0, 20.0);
 
 /// The dials beside the history.
-const DIAL_D: f64 = 50.0;
-const DIAL_XS: [f64; 5] = [826.0, 898.0, 970.0, 1042.0, 1114.0];
+const DIAL_D: f64 = 46.0;
+const DIAL_XS: [f64; 6] = [820.0, 884.0, 948.0, 1012.0, 1076.0, 1140.0];
 const DIAL_ROWS: [f64; 2] = [HIST_TOP + 46.0, HIST_TOP + 150.0];
 
 const WELLS: [f64; 2] = [1206.0, 1238.0];
@@ -142,7 +142,7 @@ pub fn memory_host() -> mite_ui::MemoryParamHost {
         let id = leak(f[0].to_owned());
         let spec = match f[1] {
             "bool" => index(id, 2, usize::from(f[2] == "true")),
-            _ => spec_for(id).expect("every manifest line has a spec"),
+            _ => ParamSpec { id, ..spec_for(id).expect("every manifest line has a spec") },
         };
         host = host.with(spec);
     }
@@ -166,6 +166,8 @@ pub enum Node {
     Low,
     Mid,
     High,
+    /// A decay bell (from 0), while it is on.
+    Band(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -219,14 +221,16 @@ impl VerbView {
                 FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" },
             ],
         );
-        let dials: [(ParamSpec, &'static str, Option<mite_core::DialCurve>); 9] = [
+        let dials: [(ParamSpec, &'static str, Option<mite_core::DialCurve>); 11] = [
             (SIZE, "SIZE", None),
             (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL)),
             (DIFFUSION, "DIFFUSION", None),
-            (EARLY, "EARLY", None),
             (WIDTH, "WIDTH", None),
             (MOD_DEPTH, "MOD", None),
             (MOD_RATE, "RATE", None),
+            (EARLY, "EARLY", None),
+            (EARLY_SIZE, "E.SIZE", None),
+            (EARLY_SEND, "SEND", None),
             (DUCK, "DUCK", None),
             (DUCK_RELEASE, "RELEASE", None),
         ];
@@ -234,7 +238,7 @@ impl VerbView {
             .into_iter()
             .enumerate()
             .map(|(i, (spec, label, curve))| {
-                let k = Knob::new(spec, label, KnobKind::Unipolar, Point::new(DIAL_XS[i % 5], DIAL_ROWS[i / 5]), DIAL_D);
+                let k = Knob::new(spec, label, KnobKind::Unipolar, Point::new(DIAL_XS[i % 6], DIAL_ROWS[i / 6]), DIAL_D);
                 match curve {
                     Some(c) => k.with_curve(c),
                     None => k,
@@ -299,7 +303,15 @@ impl VerbView {
             Node::Low => f64::from(s.lo_freq),
             Node::High => f64::from(s.hi_freq),
             Node::Mid => (f64::from(s.lo_freq) * f64::from(s.hi_freq)).sqrt(),
+            Node::Band(b) => f64::from(s.bands[b].freq),
         }
+    }
+
+    /// The grips that exist: the three, then each bell that is on.
+    fn nodes(host: &dyn ParamHost) -> Vec<Node> {
+        let mut v = vec![Node::Mid, Node::Low, Node::High];
+        v.extend((0..DECAY_BANDS).filter(|&b| Self::on(host, &band_id(b, D_ON.id))).map(Node::Band));
+        v
     }
 
     pub fn cut_grip(&self, host: &dyn ParamHost, high: bool) -> Rect {
@@ -346,19 +358,23 @@ impl VerbView {
         host.set_normalized(id, host.normalize(id, plain));
     }
 
-    /// The low or high decay multiplier that puts the curve at `target` seconds at `freq`
-    /// (bisection: the curve there rises with the multiplier).
-    fn solve_mult(&self, s: &ReverbSettings, high: bool, freq: f64, target: f64) -> f32 {
-        let spec = if high { HI_MULT } else { LO_MULT };
+    /// The multiplier of `node` (low, high or a bell) that puts the curve at `target` seconds at
+    /// `freq` (bisection: the curve there rises with the multiplier).
+    fn solve_mult(&self, s: &ReverbSettings, node: Node, freq: f64, target: f64) -> f32 {
+        let spec = match node {
+            Node::High => HI_MULT,
+            Node::Band(_) => D_MULT,
+            _ => LO_MULT,
+        };
         let (mut lo, mut hi) = (f64::from(spec.min).ln(), f64::from(spec.max).ln());
         let fs = self.fs();
         for _ in 0..28 {
             let m = 0.5 * (lo + hi);
             let mut t = *s;
-            if high {
-                t.hi_mult = m.exp() as f32;
-            } else {
-                t.lo_mult = m.exp() as f32;
+            match node {
+                Node::High => t.hi_mult = m.exp() as f32,
+                Node::Band(b) => t.bands[b].mult = m.exp() as f32,
+                _ => t.lo_mult = m.exp() as f32,
             }
             if decay_at(&t, freq, fs) < target {
                 lo = m;
@@ -446,9 +462,30 @@ impl VerbView {
             draw_cut_glyph(cx, Point::new(x, CUT_Y), high, if hot { theme.display } else { theme.text_hi });
         }
         // The grips on the curve.
-        for node in [Node::Low, Node::Mid, Node::High] {
+        let s = settings(host);
+        for node in Self::nodes(host) {
             let p = self.node(host, node);
             let hot = self.hot == Some(Hot::Node(node)) || matches!(self.drag, Some(Drag::Node { node: n, .. }) if n == node);
+            if let Node::Band(b) = node {
+                // A bell: its width as a bracket under it (to where it does half its dB), its
+                // number inside.
+                let band = s.bands[b];
+                let bw = 2.0 / std::f64::consts::LN_2 * (1.0 / (2.0 * f64::from(band.q))).asinh();
+                let f = f64::from(band.freq);
+                let (x0, x1) = (freq_x(f * 2f64.powf(-bw / 2.0)), freq_x(f * 2f64.powf(bw / 2.0)));
+                let y = p.y + 16.0;
+                let mut br = BezPath::new();
+                br.move_to((x0, y - 4.0));
+                br.line_to((x0, y));
+                br.line_to((x1, y));
+                br.line_to((x1, y - 4.0));
+                cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, accent.multiply_alpha(if hot { 0.9 } else { 0.45 }), None, &br);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { accent } else { theme.display }, None, &Circle::new(p, GRIP_R));
+                glow_stroke(cx, &Circle::new(p, GRIP_R), 1.6, accent, accent, if hot { 4.0 } else { 2.0 });
+                let num = TextStyle { tabular: true, ..TextStyle::BODY.sized(9.0).weighted(700.0) };
+                cx.text.draw(cx.scene, &format!("{}", b + 1), p.x, p.y - 5.5, num, if hot { theme.display } else { accent }, Align::Center);
+                continue;
+            }
             let r = if node == Node::Mid { GRIP_R + 1.5 } else { GRIP_R };
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { accent } else { theme.display }, None, &Circle::new(p, r));
             glow_stroke(cx, &Circle::new(p, r), 2.0, accent, accent, if hot { 5.0 } else { 3.0 });
@@ -542,6 +579,13 @@ impl VerbView {
             Node::Mid => Help::default().text("Decay ").slot(fmt_s(f64::from(s.decay_s)), "30.00 s").text(" — how long the reverb takes to fall 60 dB in the middle").text(tail),
             Node::Low => Help::default().text("Low decay ").slot(fmt_s(t), "30.00 s").text(" at ").slot(freq(f), "2000 Hz").text(format!(" — under it the decay is ×{:.2} the middle's", s.lo_mult)).text(tail),
             Node::High => Help::default().text("High decay ").slot(fmt_s(t), "30.00 s").text(" at ").slot(freq(f), "16.00 kHz").text(format!(" — over it the decay is ×{:.2} the middle's", s.hi_mult)).text(tail),
+            Node::Band(b) => Help::default()
+                .text(format!("Band {} ", b + 1))
+                .slot(fmt_s(t), "30.00 s")
+                .text(" at ")
+                .slot(freq(f), "16.00 kHz")
+                .text(format!(" — ×{:.2} the decay there; Q {:.2}", s.bands[b].mult, s.bands[b].q))
+                .text(if dragging { " — Shift is fine." } else { " — drag it; wheel: width; double-click removes it." }),
         }
     }
 
@@ -575,7 +619,7 @@ impl VerbView {
         if self.frozen(host) {
             return Help::default().text("Frozen: the tail holds forever and new sound stays out. The dim curve is the decay that returns when you let go.");
         }
-        Help::default().text("The curve is how long the reverb rings at each frequency. Drag its three grips; the cuts on the floor shape the reverb's tone.")
+        Help::default().text("The curve is how long the reverb rings at each frequency. Drag its grips; double-click the curve for a band (four); the cuts on the floor shape the tone.")
     }
 
     // ---- events -----------------------------------------------------------------------------
@@ -585,7 +629,7 @@ impl VerbView {
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
-        for node in [Node::Mid, Node::Low, Node::High] {
+        for node in Self::nodes(host).into_iter().rev() {
             if self.node(host, node).distance(p) < GRIP_HIT {
                 return Some(Hot::Node(node));
             }
@@ -601,19 +645,35 @@ impl VerbView {
         None
     }
 
-    fn node_params(node: Node) -> &'static [&'static str] {
+    fn node_params(node: Node) -> Vec<String> {
         match node {
-            Node::Mid => &["decay"],
-            Node::Low => &["lo_freq", "lo_mult"],
-            Node::High => &["hi_freq", "hi_mult"],
+            Node::Mid => vec![DECAY.id.to_owned()],
+            Node::Low => vec![LO_FREQ.id.to_owned(), LO_MULT.id.to_owned()],
+            Node::High => vec![HI_FREQ.id.to_owned(), HI_MULT.id.to_owned()],
+            Node::Band(b) => vec![band_id(b, D_FREQ.id), band_id(b, D_MULT.id)],
         }
+    }
+
+    /// Double-click on the plot away from the grips: a bell there (the first that is off), the
+    /// curve through the pointer. Whether one was made.
+    fn add_band(&self, host: &dyn ParamHost, at: Point) -> bool {
+        let Some(b) = (0..DECAY_BANDS).find(|&b| !Self::on(host, &band_id(b, D_ON.id))) else { return false };
+        let f = (x_freq(at.x) as f32).clamp(D_FREQ.min, D_FREQ.max);
+        let mut s = settings(host);
+        s.bands[b] = mite_dsp::reverb::DecayBand { on: true, freq: f, mult: 1.0, q: D_Q.default };
+        let target = y_decay(at.y.clamp(DECAY_TOP, DECAY_BOTTOM));
+        let m = self.solve_mult(&s, Node::Band(b), f64::from(f), target);
+        for (id, v) in [(band_id(b, D_FREQ.id), D_FREQ.snap(f)), (band_id(b, D_MULT.id), D_MULT.snap(m.clamp(D_MULT.min, D_MULT.max))), (band_id(b, D_Q.id), D_Q.default), (band_id(b, D_ON.id), 1.0)] {
+            Self::set(host, &id, v);
+        }
+        true
     }
 
     fn press(&mut self, host: &dyn ParamHost, pos: Point) -> bool {
         match self.hot_at(host, pos) {
             Some(Hot::Node(node)) => {
                 for id in Self::node_params(node) {
-                    host.begin_gesture(id);
+                    host.begin_gesture(&id);
                 }
                 self.drag = Some(Drag::Node { node, start: pos, at: self.node(host, node) });
                 true
@@ -636,7 +696,7 @@ impl VerbView {
         match self.drag.take() {
             Some(Drag::Node { node, .. }) => {
                 for id in Self::node_params(node) {
-                    host.end_gesture(id);
+                    host.end_gesture(&id);
                 }
             }
             Some(Drag::Cut { high, .. }) => host.end_gesture(if high { HI_CUT.id } else { LO_CUT.id }),
@@ -657,18 +717,21 @@ impl VerbView {
                 let d = (f64::from(s.decay_s) * target / now) as f32;
                 Self::set_raw(host, DECAY.id, DECAY.snap(d.clamp(DECAY.min, DECAY.max)));
             }
-            Node::Low | Node::High => {
-                let high = node == Node::High;
-                let (fspec, mspec) = if high { (HI_FREQ, HI_MULT) } else { (LO_FREQ, LO_MULT) };
+            Node::Low | Node::High | Node::Band(_) => {
+                let (fspec, mspec, fid, mid) = match node {
+                    Node::High => (HI_FREQ, HI_MULT, HI_FREQ.id.to_owned(), HI_MULT.id.to_owned()),
+                    Node::Band(b) => (D_FREQ, D_MULT, band_id(b, D_FREQ.id), band_id(b, D_MULT.id)),
+                    _ => (LO_FREQ, LO_MULT, LO_FREQ.id.to_owned(), LO_MULT.id.to_owned()),
+                };
                 let f = (x_freq(to.x) as f32).clamp(fspec.min, fspec.max);
-                Self::set_raw(host, fspec.id, fspec.snap(f));
-                if high {
-                    s.hi_freq = f;
-                } else {
-                    s.lo_freq = f;
+                Self::set_raw(host, &fid, fspec.snap(f));
+                match node {
+                    Node::High => s.hi_freq = f,
+                    Node::Band(b) => s.bands[b].freq = f,
+                    _ => s.lo_freq = f,
                 }
-                let m = self.solve_mult(&s, high, f64::from(f), target);
-                Self::set_raw(host, mspec.id, mspec.snap(m.clamp(mspec.min, mspec.max)));
+                let m = self.solve_mult(&s, node, f64::from(f), target);
+                Self::set_raw(host, &mid, mspec.snap(m.clamp(mspec.min, mspec.max)));
             }
         }
     }
@@ -730,10 +793,19 @@ impl VerbView {
                 was
             }
             UiEvent::DoubleClick { pos, .. } => {
+                if let Some(Hot::Node(Node::Band(b))) = self.hot_at(host, pos) {
+                    self.end_drag(host);
+                    Self::set(host, &band_id(b, D_ON.id), 0.0);
+                    return true;
+                }
+                if self.hot_at(host, pos).is_none() && PLOT.contains(pos) && pos.y < CUT_Y - CUT_GRIP.1 {
+                    return self.add_band(host, pos);
+                }
                 let resets: &[ParamSpec] = match self.hot_at(host, pos) {
                     Some(Hot::Node(Node::Mid)) => &[DECAY],
                     Some(Hot::Node(Node::Low)) => &[LO_FREQ, LO_MULT],
                     Some(Hot::Node(Node::High)) => &[HI_FREQ, HI_MULT],
+                    Some(Hot::Node(Node::Band(_))) => &[],
                     Some(Hot::Cut(false)) => &[LO_CUT],
                     Some(Hot::Cut(true)) => &[HI_CUT],
                     Some(Hot::Duck) => &[DUCK_THRESH],
@@ -749,10 +821,16 @@ impl VerbView {
                 true
             }
             UiEvent::Wheel { pos, lines, mods } => {
+                if let Some(Hot::Node(Node::Band(b))) = self.hot_at(host, pos) {
+                    let id = band_id(b, D_Q.id);
+                    Self::set(host, &id, D_Q.wheel(Self::plain(host, &id), lines, mods.fine()));
+                    return true;
+                }
                 let spec = match self.hot_at(host, pos) {
                     Some(Hot::Node(Node::Mid)) => Some(DECAY),
                     Some(Hot::Node(Node::Low)) => Some(LO_MULT),
                     Some(Hot::Node(Node::High)) => Some(HI_MULT),
+                    Some(Hot::Node(Node::Band(_))) => None,
                     Some(Hot::Cut(false)) => Some(LO_CUT),
                     Some(Hot::Cut(true)) => Some(HI_CUT),
                     Some(Hot::Duck) => Some(DUCK_THRESH),
@@ -803,6 +881,8 @@ fn knob_words(id: &str) -> &'static str {
         "mod_rate" => " — how fast that drift moves",
         "duck" => " — how far the reverb is turned down while the input plays (0: off)",
         "duck_release" => " — how fast the reverb comes back after the input stops",
+        "early_size" => " — how long the first reflections take to arrive: the room's walls before its tail",
+        "early_send" => " — how much of the first reflections feeds the tail (more: a tail that grows out of them)",
         _ => "",
     }
 }

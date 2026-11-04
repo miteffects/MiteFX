@@ -19,3 +19,21 @@ duck_release | ms | 20 | 2000 | 300 | Log
 mix | % | 0 | 100 | 30 | Linear
 out_gain | dB | -24 | 24 | 0 | Linear
 bypass | bool | false
+early_size | ms | 2 | 200 | 35 | Log
+early_send | % | 0 | 100 | 0 | Linear
+d1_on | bool | false
+d1_freq | Hz | 50 | 16000 | 150 | Log
+d1_mult | × | 0.1 | 4 | 1 | Log
+d1_q |  | 0.3 | 6 | 1 | Log
+d2_on | bool | false
+d2_freq | Hz | 50 | 16000 | 600 | Log
+d2_mult | × | 0.1 | 4 | 1 | Log
+d2_q |  | 0.3 | 6 | 1 | Log
+d3_on | bool | false
+d3_freq | Hz | 50 | 16000 | 2500 | Log
+d3_mult | × | 0.1 | 4 | 1 | Log
+d3_q |  | 0.3 | 6 | 1 | Log
+d4_on | bool | false
+d4_freq | Hz | 50 | 16000 | 8000 | Log
+d4_mult | × | 0.1 | 4 | 1 | Log
+d4_q |  | 0.3 | 6 | 1 | Log

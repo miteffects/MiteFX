@@ -4,6 +4,7 @@
   "name": "Large Hall",
   "params": {
     "predelay": 30.0, "size": 85.0, "decay": 3.8, "lo_mult": 1.4, "lo_freq": 220.0, "hi_mult": 0.45, "hi_freq": 4000.0,
-    "diffusion": 80.0, "early": 40.0, "mod_depth": 35.0, "mod_rate": 0.4, "width": 120.0, "mix": 30.0
+    "d2_on": 1.0, "d2_freq": 700.0, "d2_mult": 0.8, "diffusion": 80.0, "early": 40.0, "early_size": 70.0,
+    "early_send": 25.0, "mod_depth": 35.0, "mod_rate": 0.4, "width": 120.0, "mix": 30.0
   }
 }

@@ -4,6 +4,6 @@
   "name": "Drum Room",
   "params": {
     "predelay": 2.0, "size": 15.0, "decay": 0.7, "lo_mult": 1.0, "hi_mult": 0.6, "diffusion": 60.0, "early": 80.0,
-    "mod_depth": 10.0, "lo_cut": 80.0, "mix": 25.0
+    "early_size": 18.0, "early_send": 30.0, "mod_depth": 15.0, "lo_cut": 80.0, "mix": 25.0
   }
 }

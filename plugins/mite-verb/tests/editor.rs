@@ -127,3 +127,44 @@ fn freeze_toggles_from_the_footer() {
         assert_eq!(plain(&host, FREEZE.id), want);
     }
 }
+
+#[test]
+fn a_double_click_on_the_plot_makes_a_bell_through_the_pointer_and_another_removes_it() {
+    let (mut view, host) = setup();
+    // Between the low and mid grips, under the curve: a shorter decay at 600 Hz.
+    let x = (view.node(&host, Node::Low).x + view.node(&host, Node::Mid).x) / 2.0;
+    let at = Point::new(x, view.decay_y(0.8));
+    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+    view.event(&UiEvent::DoubleClick { pos: at, mods: MODS }, &host);
+    draw(&mut view, &host);
+    assert_eq!(plain(&host, "d1_on"), 1.0);
+    assert!(plain(&host, "d1_mult") < 0.6, "{}", plain(&host, "d1_mult"));
+    let p = view.node(&host, Node::Band(0));
+    assert!((p.x - at.x).abs() < 2.0 && (p.y - at.y).abs() < 3.0, "{p:?} against {at:?}");
+    // Dragged up: the decay there rises past the base curve.
+    let to = Point::new(p.x + 40.0, view.decay_y(4.0));
+    drag(&mut view, &host, p, to);
+    assert!(plain(&host, "d1_mult") > 1.5, "{}", plain(&host, "d1_mult"));
+    // The wheel narrows it.
+    let p = view.node(&host, Node::Band(0));
+    let q = plain(&host, "d1_q");
+    view.event(&UiEvent::PointerMove { pos: p, mods: MODS }, &host);
+    view.event(&UiEvent::Wheel { pos: p, lines: 3.0, mods: MODS }, &host);
+    assert!(plain(&host, "d1_q") > q);
+    // A double-click on it removes it.
+    view.event(&UiEvent::DoubleClick { pos: p, mods: MODS }, &host);
+    assert_eq!(plain(&host, "d1_on"), 0.0);
+}
+
+#[test]
+fn four_bells_at_most() {
+    let (mut view, host) = setup();
+    for k in 0..5 {
+        let at = Point::new(120.0 + 90.0 * f64::from(k), view.decay_y(1.0));
+        view.event(&UiEvent::DoubleClick { pos: at, mods: MODS }, &host);
+        draw(&mut view, &host);
+    }
+    for b in 1..=4 {
+        assert_eq!(plain(&host, &format!("d{b}_on")), 1.0, "band {b}");
+    }
+}

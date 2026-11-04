@@ -561,6 +561,10 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
   the curve passes through the pointer at that frequency (it stops where 0.25…4×, high 0.1…4×,
   end). Shift is fine (×0.2); the wheel steps the decay or the multiplier; double-click resets
   the grip's parameters. Each drag is one undo step.
+- **Decay bells.** Double-click the plot away from the grips: a bell there (the first of four that
+  is off), the curve through the pointer. Drag: across its frequency, up and down the curve
+  through the pointer. Wheel: its width (Q). Double-click it: removed. Its number in its grip,
+  a bracket under it where it does half its dB.
 - **Cuts.** The two grips on the plot's floor drag across (low cut, high cut on the reverb only);
   what they take off is shaded. Wheel steps, double-click resets.
 - **Ducking threshold.** The dashed line on the history with its grip at the right: up and down

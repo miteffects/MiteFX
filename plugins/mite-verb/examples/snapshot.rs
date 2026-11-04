@@ -3,7 +3,7 @@
 //!
 //!     cargo run -p mite_verb --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, hall (a large dark hall), freeze, duck (ducking on).
+//! SNAPSHOT_VARIANT: default, hall (a large dark hall), bands (two decay bells), freeze, duck.
 //! SNAPSHOT_HOVER=x,y hovers a point.
 
 #[path = "common/music.rs"]
@@ -40,6 +40,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(HI_FREQ.id, 3500.0);
         host.set_plain(HI_CUT.id, 9000.0);
         host.set_plain(LO_CUT.id, 60.0);
+    }
+    if v("bands") {
+        host.set_plain("d2_on", 1.0);
+        host.set_plain("d2_freq", 700.0);
+        host.set_plain("d2_mult", 0.6);
+        host.set_plain("d3_on", 1.0);
+        host.set_plain("d3_freq", 3000.0);
+        host.set_plain("d3_mult", 1.6);
+        host.set_plain("d3_q", 2.0);
     }
     if v("duck") {
         host.set_plain(DUCK.id, 12.0);

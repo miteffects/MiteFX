@@ -5,14 +5,22 @@
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
 use mite_core::{BoolSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::reverb::ReverbSettings;
+use mite_dsp::reverb::{DecayBand, ReverbSettings, DECAY_BANDS};
 use mite_plugin::{bool_param, float_param};
 use nih_plug::prelude::*;
 
 use crate::dsp::Output;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 2 (2026-11-04): the early field's size and send, and the decay EQ's four bells
+///   (`d1…d4_{on,freq,mult,q}`), appended; a version 1 state gets their defaults (bells off).
+///   The algorithm changed the same day (32 lines, diffusers in the loop), so a version 1
+///   state sounds different anyway; nothing to migrate.
+pub const STATE_VERSION: u32 = 2;
+
+/// Version 1 → 2: the new parameters arrive at their defaults.
+pub fn v1_to_v2(_state: &mut nih_plug::wrapper::state::PluginState) {}
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -52,6 +60,28 @@ pub const MIX: ParamSpec = spec("mix", "Mix", "%", 0.0, 100.0, 30.0, ParamScale:
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 
+// ---- State 2: the early field and the decay EQ's bells ---------------------------------------
+
+pub const EARLY_SIZE: ParamSpec = spec("early_size", "Early Size", "ms", 2.0, 200.0, 35.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Time);
+pub const EARLY_SEND: ParamSpec = spec("early_send", "Early Send", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+pub const D_ON: BoolSpec = BoolSpec { id: "on", name: "On", default: false };
+pub const D_FREQ: ParamSpec = spec("freq", "Frequency", "Hz", 50.0, 16_000.0, 1000.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
+pub const D_MULT: ParamSpec = spec("mult", "Decay", "×", 0.1, 4.0, 1.0, ParamScale::Log, 2, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Number);
+pub const D_Q: ParamSpec = spec("q", "Q", "", 0.3, 6.0, 1.0, ParamScale::Log, 2, (1.0 / 12.0, 1.0 / 48.0), ParamDisplay::Number);
+/// The bells' first frequencies (each in its own part of the range).
+pub const D_FREQS: [f32; DECAY_BANDS] = [150.0, 600.0, 2500.0, 8000.0];
+static D_FREQ_SPECS: [ParamSpec; DECAY_BANDS] = [
+    ParamSpec { default: D_FREQS[0], ..D_FREQ },
+    ParamSpec { default: D_FREQS[1], ..D_FREQ },
+    ParamSpec { default: D_FREQS[2], ..D_FREQ },
+    ParamSpec { default: D_FREQS[3], ..D_FREQ },
+];
+
+/// A decay bell's parameter id, e.g. `d2_mult` (`band` from 0).
+pub fn band_id(band: usize, param: &str) -> String {
+    format!("d{}_{param}", band + 1)
+}
+
 /// Dials: common values get more travel.
 pub const PREDELAY_DIAL: DialCurve = DialCurve(&[(0.0, 0.0), (0.4, 20.0), (0.7, 80.0), (1.0, 500.0)]);
 
@@ -63,6 +93,15 @@ pub fn manifest() -> String {
     lines.push(FREEZE.manifest_line());
     lines.extend(CONTINUOUS[14..].iter().map(ParamSpec::manifest_line));
     lines.push(BYPASS.manifest_line());
+    // State 2.
+    lines.extend([EARLY_SIZE, EARLY_SEND].iter().map(ParamSpec::manifest_line));
+    for (b, freq) in D_FREQ_SPECS.iter().enumerate() {
+        let prefix = |line: String| format!("d{}_{line}", b + 1);
+        lines.push(prefix(D_ON.manifest_line()));
+        lines.push(prefix(freq.manifest_line()));
+        lines.push(prefix(D_MULT.manifest_line()));
+        lines.push(prefix(D_Q.manifest_line()));
+    }
     lines.join("\n") + "\n"
 }
 
@@ -82,7 +121,31 @@ pub fn sound_ids() -> Vec<String> {
 
 /// Every continuous spec by its id, for stand-in hosts.
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
-    CONTINUOUS.into_iter().find(|s| s.id == id)
+    if let Some(s) = CONTINUOUS.into_iter().chain([EARLY_SIZE, EARLY_SEND]).find(|s| s.id == id) {
+        return Some(s);
+    }
+    let (slot, short) = id.split_once('_')?;
+    let b: usize = slot.strip_prefix('d')?.parse::<usize>().ok()?.checked_sub(1)?;
+    match short {
+        "freq" => Some(D_FREQ_SPECS[b.min(DECAY_BANDS - 1)]),
+        "mult" => Some(D_MULT),
+        "q" => Some(D_Q),
+        _ => None,
+    }
+}
+
+pub struct BandParams {
+    pub on: BoolParam,
+    pub freq: FloatParam,
+    pub mult: FloatParam,
+    pub q: FloatParam,
+}
+
+impl BandParams {
+    fn new(band: usize) -> Self {
+        let name = |what: &str| format!("Decay Band {} {what}", band + 1);
+        Self { on: bool_param(&D_ON, name("On")), freq: mite_plugin::float_param_named(&D_FREQ_SPECS[band], name("Frequency")), mult: mite_plugin::float_param_named(&D_MULT, name("Decay")), q: mite_plugin::float_param_named(&D_Q, name("Q")) }
+    }
 }
 
 pub struct VerbParams {
@@ -107,6 +170,9 @@ pub struct VerbParams {
     pub mix: FloatParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
+    pub early_size: FloatParam,
+    pub early_send: FloatParam,
+    pub bands: [BandParams; DECAY_BANDS],
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -138,6 +204,9 @@ impl Default for VerbParams {
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: flag(&BYPASS),
+            early_size: float_param(&EARLY_SIZE),
+            early_send: float_param(&EARLY_SEND),
+            bands: std::array::from_fn(BandParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -166,6 +235,9 @@ pub fn reverb_settings(p: impl Fn(&str) -> f32) -> ReverbSettings {
         duck_db: p(DUCK.id),
         duck_thresh_db: p(DUCK_THRESH.id),
         duck_release_ms: p(DUCK_RELEASE.id),
+        early_size_ms: p(EARLY_SIZE.id),
+        early_send: p(EARLY_SEND.id) / 100.0,
+        bands: std::array::from_fn(|b| DecayBand { on: p(&band_id(b, D_ON.id)) >= 0.5, freq: p(&band_id(b, D_FREQ.id)), mult: p(&band_id(b, D_MULT.id)), q: p(&band_id(b, D_Q.id)) }),
     }
 }
 
@@ -191,7 +263,20 @@ impl VerbParams {
             "duck" => f(&self.duck),
             "duck_thresh" => f(&self.duck_thresh),
             "duck_release" => f(&self.duck_release),
-            _ => 0.0,
+            "early_size" => f(&self.early_size),
+            "early_send" => f(&self.early_send),
+            _ => {
+                let Some((slot, short)) = id.split_once('_') else { return 0.0 };
+                let Some(b) = slot.strip_prefix('d').and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)).filter(|&b| b < DECAY_BANDS) else { return 0.0 };
+                let band = &self.bands[b];
+                match short {
+                    "on" => f32::from(u8::from(band.on.value())),
+                    "freq" => f(&band.freq),
+                    "mult" => f(&band.mult),
+                    "q" => f(&band.q),
+                    _ => 0.0,
+                }
+            }
         }
     }
 
@@ -218,7 +303,7 @@ unsafe impl Params for VerbParams {
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
         let p = |id: &str, ptr: ParamPtr, group: &str| (id.to_owned(), ptr, group.to_owned());
-        vec![
+        let mut map = vec![
             p(PREDELAY.id, self.predelay.as_ptr(), "Space"),
             p(SIZE.id, self.size.as_ptr(), "Space"),
             p(DECAY.id, self.decay.as_ptr(), "Decay"),
@@ -240,6 +325,15 @@ unsafe impl Params for VerbParams {
             p(MIX.id, self.mix.as_ptr(), ""),
             p(OUT_GAIN.id, self.out_gain.as_ptr(), ""),
             p(BYPASS.id, self.bypass.as_ptr(), ""),
-        ]
+        ];
+        // State 2.
+        map.push(p(EARLY_SIZE.id, self.early_size.as_ptr(), "Space"));
+        map.push(p(EARLY_SEND.id, self.early_send.as_ptr(), "Space"));
+        for (b, band) in self.bands.iter().enumerate() {
+            for (id, ptr) in [(D_ON.id, band.on.as_ptr()), (D_FREQ.id, band.freq.as_ptr()), (D_MULT.id, band.mult.as_ptr()), (D_Q.id, band.q.as_ptr())] {
+                map.push((band_id(b, id), ptr, "Decay".to_owned()));
+            }
+        }
+        map
     }
 }
