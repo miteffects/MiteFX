@@ -819,6 +819,12 @@ impl BandProcessor {
         self.reset(settings);
     }
 
+    /// How long a change that can't be smoothed (type, slope, on/off) fades out and in (8 ms
+    /// unless set; a band inside a feedback loop wants longer, as every echo hears the fade).
+    pub fn set_structure_fade_ms(&mut self, ms: f32) {
+        self.mix.set_ramp(self.sample_rate as f32, ms);
+    }
+
     /// Jumps to `settings` and clears filter state. Allocation-free.
     pub fn reset(&mut self, settings: &BandSettings) {
         self.active = *settings;

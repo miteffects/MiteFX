@@ -25,3 +25,6 @@ name = "Mite Sat"
 
 [mite_verb]
 name = "Mite Verb"
+
+[mite_delay]
+name = "Mite Delay"

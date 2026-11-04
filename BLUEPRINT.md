@@ -112,6 +112,7 @@ MiteFX/
 | Loudness (BS.1770-4 / R128: M, S, I, LRA) and true peak | `mite_dsp::loudness` (Limit, 2026-11-03) |
 | Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
 | Reverb: modulated 32-line FDN with per-line absorption (decay time per frequency from free decay bands: bell, shelves, tilt), a tone EQ of `mite_dsp::eq` bands on its output, its T60 curve for drawing | `mite_dsp::reverb` (`Reverb`, `decay_at`, `decay_curve`; Verb, 2026-11-04; Delay's diffusion can build on it) |
+| Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
 | Crossover rail: band regions, grips, ghost grips to pull a band in, merging onto a neighbour or off an end, badges with S/M tags, funnels to the cards, the band menu (solo, mute, copy, paste, reset, merge, remove), split/merge/remove/solo on the host's parameters, its help | `mite_ui::widgets::rail` (`Rail<B>`, `RailParams`, `BandMenu`; Shape and Sat, 2026-10-26) |
@@ -274,6 +275,20 @@ Measured against Pro-C 3 feature by feature in [`docs/compare/pro-c-3.md`](docs/
 - A full **modulation matrix** (LFO, envelope follower, MIDI and XY sources), shared with Sat and Filter.
 - **Beyond:** a granular/pitch "smear" stage and per-tap EQ on the spectrum display.
 
+**Status (2026-11-04): slice 1 built** (`docs/design/delay-brief.md`; accent orchid tint; designed
+in-house). Four taps, each its own stereo echo line with feedback (time synced to the host's tempo
+as a note, 1/64…2/1 with dotted and triplets, or free 10 ms…5 s; level, feedback, pan,
+ping-pong); inside every loop a free loop EQ (six of Mite EQ's bands, none by default), the
+machine (Digital: clean, a new time crossfades; Tape: soft saturation, 35 Hz/9 kHz losses, wow and
+flutter, a new time glides with inertia; BBD: darker the longer its time, harder saturation,
+triangle chorus), DRIVE and diffusion, held under a soft safety so nothing blows up; width and
+ducking on the sum. Echo `k` lands at exactly `k × time`; echo 1 matches `loop_gain` (what the
+editor draws) within 0.5 dB in every machine; click-free and block-size invariant (tested).
+Editor: the echo plot (each tap's echoes as stems, left up and right down; a tap's grip is its
+first echo, time and level; its second echo sets the feedback), the loop EQ over the spectra, the
+dials grouped MACHINE / MOD / DUCK / SPACE / TAP. 0.4 % of a core with one tap, 2.2 % with four
+taps and six bands; 120 fps. Next: the modulation matrix, then the smear stage and per-tap EQ.
+
 ### 7. Mite Sat. Rival: FabFilter Saturn 2
 
 - Multiband, up to 6 bands (from Nova Sat).
@@ -435,6 +450,8 @@ FabFilter's strengths:
 ### 7.4 Design status
 
 **Mite Verb designed in-house on 2026-11-04** (`docs/design/verb-brief.md`, interaction.md "Mite Verb"), as Sat, Limit, Gate and Multiband: the decay curve over the spectra is the hero, the history shows the tail; the accent is ice.
+
+**Mite Delay designed in-house on 2026-11-04** (`docs/design/delay-brief.md`, interaction.md "Mite Delay"): the echo plot is the hero (each tap's echoes as stems, left up and right down; the first echo's grip sets time and level, the second's the feedback), the loop EQ under it; the accent is orchid tint.
 
 **Mite Sat designed in-house on 2026-10-26** (`docs/design/sat-brief.md`, interaction.md "Mite Sat"): user decision, no Claude Design pass. Shape's frame with the spectrum on top and a card per band; the transfer square is the hero of the card; the accent is crimson.
 
@@ -680,7 +697,7 @@ Mite Comp, Mite Limit and Mite Multiband. These build the dynamics cell and the 
 
 Mite Verb, Mite Delay and Mite Sat, plus the modulation matrix.
 
-**Status (2026-10-26):** Mite Sat's first slice is built (§6.7), designed in-house.
+**Status (2026-10-26):** Mite Sat's first slice is built (§6.7), designed in-house. Mite Verb (§6.5) and Mite Delay's first slice (§6.6) were built 2026-11-04.
 
 ### Phase 4: The rest
 

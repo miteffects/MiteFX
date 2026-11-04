@@ -1,0 +1,19 @@
+{
+  "plugin": "Mite Delay",
+  "version": 1,
+  "name": "Dotted Eighth",
+  "params": {
+    "t1_note": 10.0,
+    "t1_feedback": 45.0,
+    "t1_level": -2.0,
+    "e1_on": 1.0,
+    "e1_type": 3.0,
+    "e1_freq": 180.0,
+    "e1_slope": 1.0,
+    "e2_on": 1.0,
+    "e2_type": 4.0,
+    "e2_freq": 6500.0,
+    "e2_slope": 1.0,
+    "mix": 25.0
+  }
+}

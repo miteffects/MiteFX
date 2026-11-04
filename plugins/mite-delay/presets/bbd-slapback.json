@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Delay",
+  "version": 1,
+  "name": "BBD Slapback",
+  "params": {
+    "mode": 2.0,
+    "drive": 20.0,
+    "mod_depth": 45.0,
+    "mod_rate": 1.2,
+    "t1_sync": 0.0,
+    "t1_time": 110.0,
+    "t1_feedback": 20.0,
+    "t1_level": -3.0,
+    "mix": 35.0
+  }
+}

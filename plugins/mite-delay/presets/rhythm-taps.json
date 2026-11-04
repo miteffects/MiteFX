@@ -1,0 +1,26 @@
+{
+  "plugin": "Mite Delay",
+  "version": 1,
+  "name": "Rhythm Taps",
+  "params": {
+    "t1_note": 5.0,
+    "t1_feedback": 0.0,
+    "t1_level": -4.0,
+    "t1_pan": -70.0,
+    "t2_on": 1.0,
+    "t2_note": 10.0,
+    "t2_feedback": 0.0,
+    "t2_level": -6.0,
+    "t2_pan": 70.0,
+    "t3_on": 1.0,
+    "t3_note": 11.0,
+    "t3_feedback": 35.0,
+    "t3_level": -3.0,
+    "t4_on": 1.0,
+    "t4_note": 16.0,
+    "t4_feedback": 20.0,
+    "t4_level": -9.0,
+    "t4_pingpong": 1.0,
+    "mix": 30.0
+  }
+}

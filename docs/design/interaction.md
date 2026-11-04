@@ -572,3 +572,24 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
 - **Freeze.** The footer's snowflake. While frozen the curve's line sits at the plot's top (the
   decay is endless), the curve itself dims and dashes (what returns), a snowflake pill lights in
   the plot's corner.
+
+## Mite Delay (in-house design, 2026-11-04; docs/design/delay-brief.md)
+
+- **Echo plot.** Time across from the input (the line at the left), each tap's echoes as stems
+  from the middle line, the left side up and the right side down, as loud as they come out (at
+  1 kHz: the level, the loop's EQ and losses, the feedback, the pan, ping-pong). The time span
+  fits two echoes of the longest tap (0.25…16 s) and holds still while a tap is dragged. While a
+  tap is synced, the beats (bars brighter) are drawn and its note sits over its grip.
+- **Taps** (four; the first on by default). A tap's first echo is its grip: across its time (a
+  synced tap snaps to the nearest note; a free one follows in ms), up and down its level (either
+  half: the distance from the middle). Its second echo is a smaller hollow grip: up and down the
+  feedback, so that echo lands at the pointer. Wheel on a tap: its pan; on its second echo: the
+  feedback. Double-click the plot: a new tap there; double-click a tap: removed; double-click its
+  second echo: the feedback back to 40 %. Right-click a tap: Sync to tempo / Free time (nothing
+  moves when switched), Ping-pong / Straight, Remove. Grabbing a tap selects it: its LEVEL,
+  FEEDBACK and PAN are the dials in the TAP panel, with its SYNC and PING-PONG pills.
+- **Loop EQ** (six bands, none by default), under the echo plot: Mite EQ's bands, every echo
+  passes them once more. As Verb's tone EQ: double-click a bell, right-click any shape, right-click
+  a band for its shape or Remove, drag, wheel its Q (a cut's slope), double-click removes it. The
+  dashed line is the machine's own losses each pass (Tape, BBD).
+- **Machine.** Three pills in the MACHINE panel (DIGITAL, TAPE, BBD) and DRIVE.

@@ -8,8 +8,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   # Every plugin is bundled and validated (packages, and their bundle names in bundler.toml).
-  PACKAGES: -p mite_gain -p mite_eq -p mite_comp -p mite_shape -p mite_sat -p mite_limit -p mite_gate -p mite_multiband -p mite_verb
-  BUNDLES: Mite Gain;Mite EQ;Mite Comp;Mite Shape;Mite Sat;Mite Limit;Mite Gate;Mite Multiband;Mite Verb
+  PACKAGES: -p mite_gain -p mite_eq -p mite_comp -p mite_shape -p mite_sat -p mite_limit -p mite_gate -p mite_multiband -p mite_verb -p mite_delay
+  BUNDLES: Mite Gain;Mite EQ;Mite Comp;Mite Shape;Mite Sat;Mite Limit;Mite Gate;Mite Multiband;Mite Verb;Mite Delay
 
 jobs:
   test:

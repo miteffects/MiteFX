@@ -1,0 +1,23 @@
+{
+  "plugin": "Mite Delay",
+  "version": 1,
+  "name": "Tape Echo",
+  "params": {
+    "mode": 1.0,
+    "drive": 35.0,
+    "mod_depth": 30.0,
+    "mod_rate": 0.7,
+    "t1_note": 11.0,
+    "t1_feedback": 55.0,
+    "e1_on": 1.0,
+    "e1_type": 3.0,
+    "e1_freq": 120.0,
+    "e1_slope": 0.0,
+    "e2_on": 1.0,
+    "e2_type": 0.0,
+    "e2_freq": 1500.0,
+    "e2_gain": 2.5,
+    "e2_q": 0.8,
+    "mix": 30.0
+  }
+}

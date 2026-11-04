@@ -1,0 +1,21 @@
+{
+  "plugin": "Mite Delay",
+  "version": 1,
+  "name": "Wide Ping-Pong",
+  "params": {
+    "t1_note": 8.0,
+    "t1_feedback": 60.0,
+    "t1_pingpong": 1.0,
+    "diffusion": 20.0,
+    "width": 130.0,
+    "e1_on": 1.0,
+    "e1_type": 3.0,
+    "e1_freq": 250.0,
+    "e1_slope": 1.0,
+    "e2_on": 1.0,
+    "e2_type": 4.0,
+    "e2_freq": 5000.0,
+    "e2_slope": 1.0,
+    "mix": 28.0
+  }
+}

@@ -422,39 +422,39 @@ impl DecayModel {
 
 /// A delay line with a power-of-two buffer.
 #[derive(Debug, Clone)]
-struct Delay {
+pub(crate) struct Delay {
     buf: Vec<f32>,
     mask: usize,
     pos: usize,
 }
 
 impl Delay {
-    fn new(max_delay: usize) -> Self {
+    pub(crate) fn new(max_delay: usize) -> Self {
         let len = (max_delay + 4).next_power_of_two();
         Self { buf: vec![0.0; len], mask: len - 1, pos: 0 }
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.buf.iter_mut().for_each(|x| *x = 0.0);
         self.pos = 0;
     }
 
     #[inline]
-    fn write(&mut self, x: f32) {
+    pub(crate) fn write(&mut self, x: f32) {
         self.buf[self.pos] = x;
         self.pos = (self.pos + 1) & self.mask;
     }
 
     /// The sample written `d` samples ago (0: the last one).
     #[inline]
-    fn tap(&self, d: usize) -> f32 {
+    pub(crate) fn tap(&self, d: usize) -> f32 {
         self.buf[(self.pos.wrapping_sub(1 + d)) & self.mask]
     }
 
     /// The signal `d` (≥ 1) samples ago, cubic Lagrange through the four samples around it (the
     /// fraction always between the middle two, where it is passive).
     #[inline]
-    fn read(&self, d: f32) -> f32 {
+    pub(crate) fn read(&self, d: f32) -> f32 {
         let d = d.max(1.0);
         let k = d as usize;
         let f = d - k as f32;
@@ -471,7 +471,7 @@ impl Delay {
 
     /// The signal `d` (≥ 0) samples ago, linearly interpolated (outside any loop: the early taps).
     #[inline]
-    fn read_linear(&self, d: f32) -> f32 {
+    pub(crate) fn read_linear(&self, d: f32) -> f32 {
         let d = d.max(0.0);
         let k = d as usize;
         let f = d - k as f32;
@@ -505,18 +505,18 @@ impl AllpassRead {
 
 /// A Schroeder allpass of a fixed length.
 #[derive(Debug, Clone)]
-struct Allpass {
-    line: Delay,
+pub(crate) struct Allpass {
+    pub(crate) line: Delay,
     len: usize,
 }
 
 impl Allpass {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self { line: Delay::new(len), len: len.max(1) }
     }
 
     #[inline]
-    fn process(&mut self, x: f32, g: f32) -> f32 {
+    pub(crate) fn process(&mut self, x: f32, g: f32) -> f32 {
         let delayed = self.line.tap(self.len - 1);
         let w = x + g * delayed;
         self.line.write(w);
@@ -643,11 +643,11 @@ fn hadamard(v: &mut [f32; LINES]) {
 
 /// A small deterministic random source (xorshift32).
 #[derive(Debug, Clone, Copy)]
-struct Rng(u32);
+pub(crate) struct Rng(pub(crate) u32);
 
 impl Rng {
     #[inline]
-    fn next(&mut self) -> f32 {
+    pub(crate) fn next(&mut self) -> f32 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 17;
         self.0 ^= self.0 << 5;
@@ -658,17 +658,17 @@ impl Rng {
 /// Smoothed random motion: from one random value to the next along a smoothstep, each move
 /// lasting 0.6…1.4 of the period. Never a corner, never periodic.
 #[derive(Debug, Clone, Copy)]
-struct Wander {
+pub(crate) struct Wander {
     rng: Rng,
     from: f32,
     to: f32,
     phase: f32,
-    step: f32,
+    pub(crate) step: f32,
     jitter: f32,
 }
 
 impl Wander {
-    fn new(seed: u32) -> Self {
+    pub(crate) fn new(seed: u32) -> Self {
         let mut rng = Rng(seed.max(1));
         let from = rng.next() * 2.0 - 1.0;
         let to = rng.next() * 2.0 - 1.0;
@@ -677,7 +677,7 @@ impl Wander {
     }
 
     #[inline]
-    fn next(&mut self) -> f32 {
+    pub(crate) fn next(&mut self) -> f32 {
         self.phase += self.step * self.jitter;
         if self.phase >= 1.0 {
             self.phase -= 1.0;

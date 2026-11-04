@@ -1,0 +1,28 @@
+{
+  "plugin": "Mite Delay",
+  "version": 1,
+  "name": "Ducked Vocal",
+  "params": {
+    "t1_note": 11.0,
+    "t1_feedback": 40.0,
+    "t2_on": 1.0,
+    "t2_note": 10.0,
+    "t2_feedback": 30.0,
+    "t2_level": -6.0,
+    "t2_pan": -60.0,
+    "t1_pan": 40.0,
+    "duck": 12.0,
+    "duck_thresh": -30.0,
+    "duck_release": 350.0,
+    "diffusion": 15.0,
+    "e1_on": 1.0,
+    "e1_type": 3.0,
+    "e1_freq": 300.0,
+    "e1_slope": 1.0,
+    "e2_on": 1.0,
+    "e2_type": 4.0,
+    "e2_freq": 7000.0,
+    "e2_slope": 1.0,
+    "mix": 30.0
+  }
+}

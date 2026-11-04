@@ -1,0 +1,249 @@
+{
+  "fields": {
+    "mitefx_state": "1",
+    "preset": "Tape Echo",
+    "snapshots": "{\"active\":0,\"slots\":[{\"diffusion\":0.0,\"drive\":0.3,\"duck\":0.375,\"duck_release\":0.5681164,\"duck_thresh\":0.5,\"e1_freq\":0.4115013,\"e1_gain\":0.5,\"e1_on\":1.0,\"e1_q\":0.44621733,\"e1_slope\":0.375,\"e1_type\":0.33333334,\"e2_freq\":0.5490027,\"e2_gain\":0.5,\"e2_on\":0.0,\"e2_q\":0.44621733,\"e2_slope\":0.375,\"e2_type\":0.0,\"e3_freq\":0.5490027,\"e3_gain\":0.5,\"e3_on\":0.0,\"e3_q\":0.44621733,\"e3_slope\":0.375,\"e3_type\":0.0,\"e4_freq\":0.5490027,\"e4_gain\":0.5,\"e4_on\":0.0,\"e4_q\":0.44621733,\"e4_slope\":0.375,\"e4_type\":0.0,\"e5_freq\":0.5490027,\"e5_gain\":0.5,\"e5_on\":0.0,\"e5_q\":0.44621733,\"e5_slope\":0.375,\"e5_type\":0.0,\"e6_freq\":0.5490027,\"e6_gain\":0.5,\"e6_on\":0.0,\"e6_q\":0.44621733,\"e6_slope\":0.375,\"e6_type\":0.0,\"mix\":0.4,\"mod_depth\":0.0,\"mod_rate\":0.5171511,\"mode\":0.5,\"out_gain\":0.5,\"t1_feedback\":0.55,\"t1_level\":0.8888889,\"t1_note\":0.5263158,\"t1_on\":1.0,\"t1_pan\":0.5,\"t1_pingpong\":0.0,\"t1_sync\":1.0,\"t1_time\":0.60018915,\"t2_feedback\":0.4,\"t2_level\":0.8888889,\"t2_note\":0.57894737,\"t2_on\":1.0,\"t2_pan\":0.5,\"t2_pingpong\":1.0,\"t2_sync\":0.0,\"t2_time\":0.448258,\"t3_feedback\":0.4,\"t3_level\":0.8888889,\"t3_note\":0.57894737,\"t3_on\":0.0,\"t3_pan\":0.5,\"t3_pingpong\":0.0,\"t3_sync\":1.0,\"t3_time\":0.60018915,\"t4_feedback\":0.4,\"t4_level\":0.8888889,\"t4_note\":0.57894737,\"t4_on\":0.0,\"t4_pan\":0.5,\"t4_pingpong\":0.0,\"t4_sync\":1.0,\"t4_time\":0.60018915,\"width\":0.6666667},{\"drive\":0.3},null,null]}"
+  },
+  "params": {
+    "bypass": {
+      "bool": false
+    },
+    "diffusion": {
+      "f32": 0.0
+    },
+    "drive": {
+      "f32": 30.0
+    },
+    "duck": {
+      "f32": 9.0
+    },
+    "duck_release": {
+      "f32": 300.0
+    },
+    "duck_thresh": {
+      "f32": -30.0
+    },
+    "e1_freq": {
+      "f32": 250.0
+    },
+    "e1_gain": {
+      "f32": 0.0
+    },
+    "e1_on": {
+      "bool": true
+    },
+    "e1_q": {
+      "f32": 0.70710677
+    },
+    "e1_slope": {
+      "i32": 3
+    },
+    "e1_type": {
+      "i32": 3
+    },
+    "e2_freq": {
+      "f32": 1000.0
+    },
+    "e2_gain": {
+      "f32": 0.0
+    },
+    "e2_on": {
+      "bool": false
+    },
+    "e2_q": {
+      "f32": 0.70710677
+    },
+    "e2_slope": {
+      "i32": 3
+    },
+    "e2_type": {
+      "i32": 0
+    },
+    "e3_freq": {
+      "f32": 1000.0
+    },
+    "e3_gain": {
+      "f32": 0.0
+    },
+    "e3_on": {
+      "bool": false
+    },
+    "e3_q": {
+      "f32": 0.70710677
+    },
+    "e3_slope": {
+      "i32": 3
+    },
+    "e3_type": {
+      "i32": 0
+    },
+    "e4_freq": {
+      "f32": 1000.0
+    },
+    "e4_gain": {
+      "f32": 0.0
+    },
+    "e4_on": {
+      "bool": false
+    },
+    "e4_q": {
+      "f32": 0.70710677
+    },
+    "e4_slope": {
+      "i32": 3
+    },
+    "e4_type": {
+      "i32": 0
+    },
+    "e5_freq": {
+      "f32": 1000.0
+    },
+    "e5_gain": {
+      "f32": 0.0
+    },
+    "e5_on": {
+      "bool": false
+    },
+    "e5_q": {
+      "f32": 0.70710677
+    },
+    "e5_slope": {
+      "i32": 3
+    },
+    "e5_type": {
+      "i32": 0
+    },
+    "e6_freq": {
+      "f32": 1000.0
+    },
+    "e6_gain": {
+      "f32": 0.0
+    },
+    "e6_on": {
+      "bool": false
+    },
+    "e6_q": {
+      "f32": 0.70710677
+    },
+    "e6_slope": {
+      "i32": 3
+    },
+    "e6_type": {
+      "i32": 0
+    },
+    "mix": {
+      "f32": 40.0
+    },
+    "mod_depth": {
+      "f32": 0.0
+    },
+    "mod_rate": {
+      "f32": 0.8
+    },
+    "mode": {
+      "i32": 1
+    },
+    "out_gain": {
+      "f32": 0.0
+    },
+    "t1_feedback": {
+      "f32": 55.0
+    },
+    "t1_level": {
+      "f32": 0.0
+    },
+    "t1_note": {
+      "i32": 10
+    },
+    "t1_on": {
+      "bool": true
+    },
+    "t1_pan": {
+      "f32": 0.0
+    },
+    "t1_pingpong": {
+      "bool": false
+    },
+    "t1_sync": {
+      "bool": true
+    },
+    "t1_time": {
+      "f32": 500.0
+    },
+    "t2_feedback": {
+      "f32": 40.0
+    },
+    "t2_level": {
+      "f32": 0.0
+    },
+    "t2_note": {
+      "i32": 11
+    },
+    "t2_on": {
+      "bool": true
+    },
+    "t2_pan": {
+      "f32": 0.0
+    },
+    "t2_pingpong": {
+      "bool": true
+    },
+    "t2_sync": {
+      "bool": false
+    },
+    "t2_time": {
+      "f32": 140.0
+    },
+    "t3_feedback": {
+      "f32": 40.0
+    },
+    "t3_level": {
+      "f32": 0.0
+    },
+    "t3_note": {
+      "i32": 11
+    },
+    "t3_on": {
+      "bool": false
+    },
+    "t3_pan": {
+      "f32": 0.0
+    },
+    "t3_pingpong": {
+      "bool": false
+    },
+    "t3_sync": {
+      "bool": true
+    },
+    "t3_time": {
+      "f32": 500.0
+    },
+    "t4_feedback": {
+      "f32": 40.0
+    },
+    "t4_level": {
+      "f32": 0.0
+    },
+    "t4_note": {
+      "i32": 11
+    },
+    "t4_on": {
+      "bool": false
+    },
+    "t4_pan": {
+      "f32": 0.0
+    },
+    "t4_pingpong": {
+      "bool": false
+    },
+    "t4_sync": {
+      "bool": true
+    },
+    "t4_time": {
+      "f32": 500.0
+    },
+    "width": {
+      "f32": 100.0
+    }
+  }
+}

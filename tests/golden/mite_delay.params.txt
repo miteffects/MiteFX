@@ -1,0 +1,80 @@
+mode | choice | Digital, Tape, BBD | 0
+drive | % | 0 | 100 | 0 | Linear
+mod_depth | % | 0 | 100 | 0 | Linear
+mod_rate | Hz | 0.05 | 10 | 0.8 | Log
+diffusion | % | 0 | 100 | 0 | Linear
+width | % | 0 | 150 | 100 | Linear
+duck | dB | 0 | 24 | 0 | Linear
+duck_thresh | dB | -60 | 0 | -30 | Linear
+duck_release | ms | 20 | 2000 | 300 | Log
+mix | % | 0 | 100 | 30 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false
+t1_on | bool | true
+t1_sync | bool | true
+t1_note | choice | 1/64, 1/32T, 1/32, 1/16T, 1/32., 1/16, 1/8T, 1/16., 1/8, 1/4T, 1/8., 1/4, 1/2T, 1/4., 1/2, 1/1T, 1/2., 1/1, 1/1., 2/1 | 11
+t1_time | ms | 10 | 5000 | 500 | Log
+t1_level | dB | -48 | 6 | 0 | Linear
+t1_feedback | % | 0 | 100 | 40 | Linear
+t1_pan | % | -100 | 100 | 0 | Linear
+t1_pingpong | bool | false
+t2_on | bool | false
+t2_sync | bool | true
+t2_note | choice | 1/64, 1/32T, 1/32, 1/16T, 1/32., 1/16, 1/8T, 1/16., 1/8, 1/4T, 1/8., 1/4, 1/2T, 1/4., 1/2, 1/1T, 1/2., 1/1, 1/1., 2/1 | 11
+t2_time | ms | 10 | 5000 | 500 | Log
+t2_level | dB | -48 | 6 | 0 | Linear
+t2_feedback | % | 0 | 100 | 40 | Linear
+t2_pan | % | -100 | 100 | 0 | Linear
+t2_pingpong | bool | false
+t3_on | bool | false
+t3_sync | bool | true
+t3_note | choice | 1/64, 1/32T, 1/32, 1/16T, 1/32., 1/16, 1/8T, 1/16., 1/8, 1/4T, 1/8., 1/4, 1/2T, 1/4., 1/2, 1/1T, 1/2., 1/1, 1/1., 2/1 | 11
+t3_time | ms | 10 | 5000 | 500 | Log
+t3_level | dB | -48 | 6 | 0 | Linear
+t3_feedback | % | 0 | 100 | 40 | Linear
+t3_pan | % | -100 | 100 | 0 | Linear
+t3_pingpong | bool | false
+t4_on | bool | false
+t4_sync | bool | true
+t4_note | choice | 1/64, 1/32T, 1/32, 1/16T, 1/32., 1/16, 1/8T, 1/16., 1/8, 1/4T, 1/8., 1/4, 1/2T, 1/4., 1/2, 1/1T, 1/2., 1/1, 1/1., 2/1 | 11
+t4_time | ms | 10 | 5000 | 500 | Log
+t4_level | dB | -48 | 6 | 0 | Linear
+t4_feedback | % | 0 | 100 | 40 | Linear
+t4_pan | % | -100 | 100 | 0 | Linear
+t4_pingpong | bool | false
+e1_on | bool | false
+e1_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e1_freq | Hz | 20 | 20000 | 1000 | Log
+e1_gain | dB | -24 | 24 | 0 | Linear
+e1_q |  | 0.1 | 10 | 0.70710677 | Log
+e1_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e2_on | bool | false
+e2_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e2_freq | Hz | 20 | 20000 | 1000 | Log
+e2_gain | dB | -24 | 24 | 0 | Linear
+e2_q |  | 0.1 | 10 | 0.70710677 | Log
+e2_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e3_on | bool | false
+e3_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e3_freq | Hz | 20 | 20000 | 1000 | Log
+e3_gain | dB | -24 | 24 | 0 | Linear
+e3_q |  | 0.1 | 10 | 0.70710677 | Log
+e3_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e4_on | bool | false
+e4_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e4_freq | Hz | 20 | 20000 | 1000 | Log
+e4_gain | dB | -24 | 24 | 0 | Linear
+e4_q |  | 0.1 | 10 | 0.70710677 | Log
+e4_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e5_on | bool | false
+e5_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e5_freq | Hz | 20 | 20000 | 1000 | Log
+e5_gain | dB | -24 | 24 | 0 | Linear
+e5_q |  | 0.1 | 10 | 0.70710677 | Log
+e5_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+e6_on | bool | false
+e6_type | choice | Bell, Low Shelf, High Shelf, Low Cut, High Cut, Notch, Band Pass, Tilt Shelf, Flat Tilt, All Pass | 0
+e6_freq | Hz | 20 | 20000 | 1000 | Log
+e6_gain | dB | -24 | 24 | 0 | Linear
+e6_q |  | 0.1 | 10 | 0.70710677 | Log
+e6_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
