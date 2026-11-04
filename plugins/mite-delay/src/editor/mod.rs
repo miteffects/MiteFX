@@ -86,6 +86,8 @@ const SILENT: f32 = -150.0;
 
 /// The loop band menu: every shape, then Remove.
 const BAND_MENU: [&str; 11] = ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf", "Flat Tilt", "All Pass", "Remove"];
+/// The SYNC pill's menu: every note, then free time.
+const NOTE_MENU: [&str; 21] = ["1/64", "1/32T", "1/32", "1/16T", "1/32.", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4", "1/2T", "1/4.", "1/2", "1/1T", "1/2.", "1/1", "1/1.", "2/1", "Free time (ms)"];
 /// A tap's menu, by (synced, ping-pong): its time's kind, its sides, Remove.
 const TAP_MENUS: [[&[&str]; 2]; 2] = [[&["Sync to tempo", "Ping-pong", "Remove"], &["Sync to tempo", "Straight (not ping-pong)", "Remove"]], [&["Free time", "Ping-pong", "Remove"], &["Free time", "Straight (not ping-pong)", "Remove"]]];
 
@@ -230,6 +232,8 @@ enum MenuFor {
     Band(usize),
     /// A new loop band of the picked shape where the plot was right-clicked.
     NewBand(Point),
+    /// The selected tap's note (or free time).
+    Note(usize),
 }
 
 /// A panel of dials that work together.
@@ -774,6 +778,7 @@ impl DelayView {
                 x.move_to(at + (16.0, 6.0));
                 x.line_to(at + (6.0, 16.0));
                 scene.stroke(&Stroke::new(1.6), Affine::IDENTITY, ink, None, &x);
+            } else if matches!(what, MenuFor::Note(_)) {
             } else if band {
                 draw_type_icon(scene, BandType::from_index(i), at + (0.0, 6.0), ink);
             } else {
@@ -806,6 +811,8 @@ impl DelayView {
             let i = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))).map(|k| list.shown[k]);
             return match (i, what) {
                 (Some(i), _) if i == list.items.len() - 1 => Help::default().text("Remove — it stops (its settings are kept for when it comes back)"),
+                (Some(i), MenuFor::Note(_)) if i < NOTES.len() => Help::default().text(format!("{} — the tap's time at the host's tempo ({})", NOTE_MENU[i], fmt_ms(f64::from(note_ms(i, self.tempo()))))),
+                (Some(_), MenuFor::Note(_)) => Help::default().text("Free time — the tap's time in ms, off the tempo (nothing moves)"),
                 (Some(0), MenuFor::Tap(_)) => Help::default().text("The tap's time: a note of the host's tempo, or free in ms (nothing moves when you switch)"),
                 (Some(1), MenuFor::Tap(_)) => Help::default().text("Ping-pong: the echoes alternate left and right (the input summed to mono starts on the left)"),
                 (Some(i), MenuFor::NewBand(_)) => Help::default().text(format!("{} — a new loop band of this shape where you clicked", list.items[i])),
@@ -846,7 +853,7 @@ impl DelayView {
             Some(Hot::Pill(Pill::Mode(Mode::Digital))) => return Help::default().text("Digital — clean echoes; a new time crossfades"),
             Some(Hot::Pill(Pill::Mode(Mode::Tape))) => return Help::default().text("Tape — saturates softly, loses the top and the deep lows each pass, wows and flutters; a new time glides (the pitch bends)"),
             Some(Hot::Pill(Pill::Mode(Mode::Bbd))) => return Help::default().text("BBD — a bucket brigade: darker the longer the time, a harder saturation, a chorus; a new time glides"),
-            Some(Hot::Pill(Pill::Sync)) => return Help::default().text("The selected tap's time: synced to the host's tempo (a note), or free (ms). Click to switch."),
+            Some(Hot::Pill(Pill::Sync)) => return Help::default().text("The selected tap's time — click: pick a note of the host's tempo (or free time); wheel: the next note. Dragging the tap across snaps to notes too."),
             Some(Hot::Pill(Pill::PingPong)) => return Help::default().text("Ping-pong: the selected tap's echoes alternate left and right. Click to switch."),
             _ => {}
         }
@@ -935,7 +942,10 @@ impl DelayView {
         let t = self.selected;
         match pill {
             Pill::Mode(m) => Self::gesture(host, MODE.id, m.index() as f32),
-            Pill::Sync => self.toggle_sync(host, t),
+            Pill::Sync => {
+                let current = if Self::on(host, &tap_id(t, T_SYNC.id)) { Self::plain(host, &tap_id(t, T_NOTE.id)).round() as usize } else { NOTES.len() };
+                self.menu = Some((MenuFor::Note(t), Dropdown::new(self.pill(pill), &NOTE_MENU, current, (DISPLAY_TOP, HELP_TOP)).with_min_width(150.0)));
+            }
             Pill::PingPong => {
                 let id = tap_id(t, T_PINGPONG.id);
                 Self::gesture(host, &id, if Self::on(host, &id) { 0.0 } else { 1.0 });
@@ -1056,6 +1066,17 @@ impl DelayView {
                     }
                     MenuFor::Band(b) if i == remove => Self::set(host, &band_id(b, E_ON.id), 0.0),
                     MenuFor::Band(b) => Self::gesture(host, &band_id(b, E_TYPE.id), i as f32),
+                    MenuFor::Note(t) if i < NOTES.len() => {
+                        Self::gesture(host, &tap_id(t, T_NOTE.id), i as f32);
+                        if !Self::on(host, &tap_id(t, T_SYNC.id)) {
+                            Self::gesture(host, &tap_id(t, T_SYNC.id), 1.0);
+                        }
+                    }
+                    MenuFor::Note(t) => {
+                        if Self::on(host, &tap_id(t, T_SYNC.id)) {
+                            self.toggle_sync(host, t);
+                        }
+                    }
                     MenuFor::Tap(t) if i == remove => Self::set(host, &tap_id(t, T_ON.id), 0.0),
                     MenuFor::Tap(t) if i == 0 => self.toggle_sync(host, t),
                     MenuFor::Tap(t) => {
@@ -1141,6 +1162,16 @@ impl DelayView {
                     Some(Hot::Node(Node::Feedback(t))) => {
                         let id = tap_id(t, T_FEEDBACK.id);
                         Self::set(host, &id, T_FEEDBACK.wheel(Self::plain(host, &id), lines, fine));
+                    }
+                    Some(Hot::Pill(Pill::Sync)) => {
+                        let t = self.selected;
+                        if Self::on(host, &tap_id(t, T_SYNC.id)) {
+                            let id = tap_id(t, T_NOTE.id);
+                            Self::set(host, &id, (Self::plain(host, &id) + lines.signum()).clamp(0.0, (NOTES.len() - 1) as f32));
+                        } else {
+                            let id = tap_id(t, T_TIME.id);
+                            Self::set(host, &id, T_TIME.wheel(Self::plain(host, &id), lines, fine));
+                        }
                     }
                     Some(Hot::Node(Node::Band(b))) => {
                         if BandType::from_index(Self::plain(host, &band_id(b, E_TYPE.id)).round() as usize).has_slope() {

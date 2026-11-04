@@ -178,9 +178,28 @@ fn the_pills_pick_the_machine_and_switch_the_selected_tap() {
     let at = view.pill(Pill::PingPong).center();
     click(&mut view, &host, at, MouseButton::Left);
     assert_eq!(plain(&host, "t1_pingpong"), 1.0);
+    // The SYNC pill lists every note, then free time.
     let at = view.pill(Pill::Sync).center();
     click(&mut view, &host, at, MouseButton::Left);
+    let rows = view.menu_rows();
+    assert_eq!(rows.len(), NOTES.len() + 1);
+    let dotted = NOTES.iter().position(|n| *n == "1/8.").expect("1/8.");
+    click(&mut view, &host, rows[dotted].center(), MouseButton::Left);
+    assert_eq!(plain(&host, "t1_note") as usize, dotted);
+    assert_eq!(settings(&host, DEFAULT_TEMPO).taps[0].time_ms, 375.0);
+    click(&mut view, &host, at, MouseButton::Left);
+    let free = *view.menu_rows().last().expect("rows");
+    click(&mut view, &host, free.center(), MouseButton::Left);
     assert_eq!(plain(&host, "t1_sync"), 0.0);
+    assert!((plain(&host, "t1_time") - 375.0).abs() < 0.5);
+    // Picking a note syncs it again; the wheel steps notes.
+    click(&mut view, &host, at, MouseButton::Left);
+    let rows = view.menu_rows();
+    click(&mut view, &host, rows[QUARTER].center(), MouseButton::Left);
+    assert_eq!(plain(&host, "t1_sync"), 1.0);
+    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+    view.event(&UiEvent::Wheel { pos: at, lines: 1.0, mods: MODS }, &host);
+    assert_eq!(plain(&host, "t1_note") as usize, QUARTER + 1);
 }
 
 #[test]

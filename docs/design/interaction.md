@@ -588,6 +588,8 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
   second echo: the feedback back to 40 %. Right-click a tap: Sync to tempo / Free time (nothing
   moves when switched), Ping-pong / Straight, Remove. Grabbing a tap selects it: its LEVEL,
   FEEDBACK and PAN are the dials in the TAP panel, with its SYNC and PING-PONG pills.
+  Click SYNC: a list of every note and Free time (user, 2026-11-04: "why do i have only 1/4
+  sync": dragging across was the only way to a note); the wheel on it steps notes.
 - **Loop EQ** (six bands, none by default), under the echo plot: Mite EQ's bands, every echo
   passes them once more. As Verb's tone EQ: double-click a bell, right-click any shape, right-click
   a band for its shape or Remove, drag, wheel its Q (a cut's slope), double-click removes it. The
