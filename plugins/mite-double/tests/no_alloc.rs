@@ -19,7 +19,7 @@ fn engine_process_never_allocates() {
         s.pitch_cents = [0.0, 7.0, 25.0][(i / 60) % 3];
         s.chorus = ((i / 30) % 2) as f32;
         s.tone_db = [-6.0, 0.0, 6.0][(i / 45) % 3];
-        let out = Output { bypass: (i / 150) % 4 == 3, gain_db: -1.0 };
+        let out = Output { bypass: (i / 150) % 4 == 3, gain_db: -1.0, auto_gain: i % 2 == 0 };
         for (k, v) in l.iter_mut().enumerate() {
             // Plucks: a burst every 12 blocks.
             let t = (i % 12) * 512 + k;

@@ -26,8 +26,19 @@ const CHORUS_MS: f32 = 3.0;
 const DRIFT_MS: f32 = 6.0;
 /// The line: the longest reading and the reach of the chorus.
 const LINE_MS: f32 = MAX_DELAY_MS + 0.5 * MAX_TIMING_MS + CHORUS_MS + 10.0;
-/// A note's new reading takes over in this long.
+/// A note's new reading takes over in at least this long, and as long as there is room before
+/// the note arrives, up to `SWITCH_MAX_MS` (an equal-gain fade: the two readings are the same
+/// signal a little apart, so an equal-power fade would bump the level).
 const SWITCH_MS: f32 = 3.0;
+const SWITCH_MAX_MS: f32 = 8.0;
+/// The onset is heard this late at most; a switch must be done before the note reaches a reading.
+const ONSET_LAG_MS: f32 = 2.5;
+/// The reading's interpolator: a windowed sinc (Kaiser, β = 8, cut at 0.92 of Nyquist), this many
+/// taps, tabulated at `SINC_PHASES` fractions. As flat at every fraction as it is anywhere, so a
+/// sliding reading (the detune, the chorus) adds no roughness (cubic Lagrange's treble rose and
+/// fell with the fraction: at 10 kHz the slide's junk was only 34 dB under the tone).
+const SINC_TAPS: usize = 32;
+const SINC_PHASES: usize = 512;
 /// Without notes (FOLLOW NOTES off), new readings come every this long (random within).
 const FREE_SECONDS: (f32, f32) = (1.5, 3.0);
 /// Settings glide over this.
@@ -90,6 +101,16 @@ impl Default for DoublerSettings {
     }
 }
 
+/// Auto gain (dB): what keeps the output as loud as the input played on both sides (bypass). The
+/// source and the doubles add as powers (a double is a different take: they don't add in phase),
+/// each placed at constant power, so the output carries the input's power × (source² + Σ
+/// double²) against 2 × for the input on both sides. Held to −12…+6 dB.
+pub fn auto_gain_db(s: &DoublerSettings) -> f32 {
+    let p = |db: f32| crate::db_to_gain(2.0 * db);
+    let total = p(s.source_db) + s.voice.iter().take(s.voices.min(MAX_VOICES)).map(|v| p(v.level_db)).sum::<f32>();
+    (10.0 * (2.0 / total.max(1e-9)).log10()).clamp(-12.0, 6.0)
+}
+
 /// Constant-power pan: the left and right gains (unity at either side, −3 dB at the centre).
 pub fn pan_gains(pan: f32) -> (f32, f32) {
     let th = std::f32::consts::FRAC_PI_4 * (1.0 + pan.clamp(-1.0, 1.0));
@@ -129,6 +150,7 @@ struct Voice {
     /// A switch under way: the old reading (samples, held) and samples left.
     from: f64,
     fade_left: u32,
+    fade_len: u32,
     gain: Glide,
     tilt: Glide,
     lp: f32,
@@ -150,6 +172,7 @@ impl Voice {
             drift: 0.0,
             from: 0.0,
             fade_left: 0,
+            fade_len: 1,
             gain: Glide::default(),
             tilt: Glide::default(),
             lp: 0.0,
@@ -176,6 +199,63 @@ impl Voice {
     }
 }
 
+/// The windowed-sinc reading (see `SINC_TAPS`): coefficients per fraction, each set summing to 1.
+struct Sinc {
+    table: Vec<[f32; SINC_TAPS]>,
+}
+
+impl Sinc {
+    fn new() -> Self {
+        let half = (SINC_TAPS / 2) as f64;
+        let i0 = |x: f64| {
+            // The zeroth-order modified Bessel function, by its series.
+            let (mut sum, mut term) = (1.0, 1.0);
+            for k in 1..32 {
+                term *= (x / 2.0) / k as f64;
+                sum += term * term;
+            }
+            sum
+        };
+        let beta = 8.0;
+        let cut = 0.92;
+        let table = (0..=SINC_PHASES)
+            .map(|p| {
+                let f = p as f64 / SINC_PHASES as f64;
+                let mut c = [0.0f64; SINC_TAPS];
+                for (n, v) in c.iter_mut().enumerate() {
+                    // Tap n reads the sample (n − half + 1) after the whole delay.
+                    let t = n as f64 - (half - 1.0) - f;
+                    let x = std::f64::consts::PI * cut * t;
+                    let sinc = if x.abs() < 1e-12 { 1.0 } else { x.sin() / x };
+                    let r = t / half;
+                    let w = if r.abs() <= 1.0 { i0(beta * (1.0 - r * r).sqrt()) / i0(beta) } else { 0.0 };
+                    *v = sinc * w;
+                }
+                let sum: f64 = c.iter().sum();
+                c.map(|v| (v / sum) as f32)
+            })
+            .collect();
+        Self { table }
+    }
+
+    /// The signal `d` samples ago on `line` (d ≥ SINC_TAPS / 2).
+    #[inline]
+    fn read(&self, line: &Delay, d: f64) -> f32 {
+        let whole = d.floor();
+        let pos = (d - whole) * SINC_PHASES as f64;
+        let p = (pos as usize).min(SINC_PHASES - 1);
+        let a = (pos - p as f64) as f32;
+        let (c0, c1) = (&self.table[p], &self.table[p + 1]);
+        let k = whole as usize;
+        let mut y = 0.0;
+        for n in 0..SINC_TAPS {
+            let c = c0[n] + (c1[n] - c0[n]) * a;
+            y += c * line.tap(k + n + 1 - SINC_TAPS / 2);
+        }
+        y
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DoublerTelemetry {
     /// Each voice's reading at the end of the block, ms, and its detune now, cents.
@@ -190,6 +270,7 @@ pub struct DoublerTelemetry {
 pub struct Doubler {
     fs: f32,
     line: Delay,
+    sinc: Sinc,
     voices: [Voice; MAX_VOICES],
     k_glide: f32,
     switch_len: u32,
@@ -210,7 +291,8 @@ impl Doubler {
     pub fn new(fs: f32) -> Self {
         let mut d = Self {
             fs,
-            line: Delay::new((LINE_MS * 0.001 * fs) as usize + 8),
+            line: Delay::new((LINE_MS * 0.001 * fs) as usize + SINC_TAPS + 8),
+            sinc: Sinc::new(),
             voices: [Voice::new(0x1234_5677), Voice::new(0x8BAD_F00D), Voice::new(0x0DEF_ACED)],
             k_glide: 1.0 - (-1.0 / (GLIDE_MS * 0.001 * fs)).exp(),
             switch_len: ((SWITCH_MS * 0.001 * fs) as u32).max(1),
@@ -289,9 +371,13 @@ impl Doubler {
         let old = self.voices[i].note;
         let from = self.note_delay(base, &old) + self.voices[i].drift;
         let note = self.voices[i].pick(s);
+        // As long as there is room before the note reaches either reading.
+        let room = from.min(self.note_delay(base, &note)) - self.ms(ONSET_LAG_MS);
+        let len = (room as u32).clamp(self.switch_len, (self.ms(SWITCH_MAX_MS) as u32).max(self.switch_len));
         let v = &mut self.voices[i];
         v.from = from;
-        v.fade_left = self.switch_len;
+        v.fade_left = len;
+        v.fade_len = len;
         v.note = note;
         v.drift = 0.0;
     }
@@ -378,12 +464,11 @@ impl Doubler {
                 }
                 let wob = f64::from(chorus * chorus_ms * 0.001 * fs * v.wander.next());
                 let d = (note_delay + v.drift + wob).max(min_read);
-                let mut y = self.line.read(d as f32);
+                let mut y = self.sinc.read(&self.line, d);
                 if v.fade_left > 0 {
-                    let t = 1.0 - v.fade_left as f32 / self.switch_len as f32;
-                    let old = self.line.read((v.from + wob).max(min_read) as f32);
-                    let (ga, gb) = ((std::f32::consts::FRAC_PI_2 * t).cos(), (std::f32::consts::FRAC_PI_2 * t).sin());
-                    y = old * ga + y * gb;
+                    let t = 1.0 - v.fade_left as f32 / v.fade_len as f32;
+                    let old = self.sinc.read(&self.line, (v.from + wob).max(min_read));
+                    y = old + (y - old) * t;
                     v.fade_left -= 1;
                 }
                 v.last_delay = d;

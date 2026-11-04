@@ -2,7 +2,7 @@
 //! place, a new reading at every note within the set spread, each attack arriving whole (the
 //! switch done before it), the detune heard as the pitch, block-size invariance, click-free moves.
 
-use mite_dsp::doubler::{pan_gains, Doubler, DoublerSettings};
+use mite_dsp::doubler::{auto_gain_db, pan_gains, Doubler, DoublerSettings, VoiceSettings};
 use mite_dsp::pitch::{window_len, PitchDetector};
 
 const FS: f32 = 48_000.0;
@@ -204,5 +204,35 @@ fn moving_any_setting_fast_never_clicks() {
         let held = window(&run(false, &after));
         let moving = window(&run(true, &after));
         assert!(moving <= steady.max(held) * 4.0 + 1e-5, "{name}: {moving} after {steady} (held {held})");
+    }
+}
+
+#[test]
+fn auto_gain_keeps_it_as_loud_as_the_input() {
+    // Noise in (both sides in bypass: twice its power); the output with auto gain applied, many
+    // placements and counts.
+    let mut seed = 3u32;
+    let x: Vec<f32> = (0..FS as usize * 4)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            0.3 * (seed as f32 / u32::MAX as f32 - 0.5)
+        })
+        .collect();
+    let power = |v: &[f32]| v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64;
+    let reference = 2.0 * power(&x[24_000..]);
+    let centre = VoiceSettings { pan: 0.0, level_db: 0.0 };
+    for s in [
+        DoublerSettings::default(),
+        DoublerSettings { voices: 3, ..DoublerSettings::default() },
+        DoublerSettings { voices: 2, source_pan: 0.0, voice: [VoiceSettings { pan: -0.6, level_db: 0.0 }, VoiceSettings { pan: 0.6, level_db: 0.0 }, centre], ..DoublerSettings::default() },
+        DoublerSettings { source_db: -6.0, voice: [VoiceSettings { pan: 1.0, level_db: -3.0 }, centre, centre], ..DoublerSettings::default() },
+    ] {
+        let ([l, r], _) = render(&s, &x, 512);
+        let g = f64::from(mite_dsp::db_to_gain(auto_gain_db(&s)));
+        let out = (power(&l[24_000..]) + power(&r[24_000..])) * g * g;
+        let db = 10.0 * (out / reference).log10();
+        assert!(db.abs() < 0.6, "{} doubles, source at {}: {db:+.2} dB", s.voices, s.source_pan);
     }
 }

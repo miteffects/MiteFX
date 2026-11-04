@@ -125,7 +125,7 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::doubler::DoublerSettings {
 
 pub fn output(host: &dyn ParamHost) -> crate::dsp::Output {
     let p = |id: &str| host.plain(id, host.normalized(id));
-    crate::dsp::Output { gain_db: p(OUT_GAIN.id), bypass: p(BYPASS.id) >= 0.5 }
+    crate::dsp::Output { gain_db: p(OUT_GAIN.id), bypass: p(BYPASS.id) >= 0.5, auto_gain: p(AUTO_GAIN.id) >= 0.5 }
 }
 
 /// A puck in the field.
@@ -180,7 +180,10 @@ impl DoubleView {
         let footer = Footer::new(
             FOOTER_TOP,
             (VIEW_W, VIEW_H),
-            vec![FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input alone, as it came" }],
+            vec![
+                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — as loud as the input, however many doubles and wherever they sit (Bypass compares fairly)" },
+                FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input alone, as it came" },
+            ],
             vec![FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" }],
         );
         type Dial = (ParamSpec, &'static str, KnobKind);

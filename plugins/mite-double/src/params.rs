@@ -44,6 +44,9 @@ pub const V_DEFAULTS: [(f32, f32); MAX_VOICES] = [(100.0, 0.0), (-60.0, -3.0), (
 
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
+/// Keep the output as loud as the input, whatever the doubles add (user, 2026-11-05: "give it
+/// auto gain too").
+pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: true };
 
 /// A double's parameter id, e.g. `v2_pan` (`voice` from 0).
 pub fn voice_id(voice: usize, param: &str) -> String {
@@ -73,6 +76,7 @@ pub fn manifest() -> String {
             lines.push(format!("v{}_{}", v + 1, voice_spec(v, p).expect("spec").manifest_line()));
         }
     }
+    lines.push(AUTO_GAIN.manifest_line());
     lines.join("\n") + "\n"
 }
 
@@ -124,6 +128,7 @@ pub struct DoubleParams {
     pub source_level: FloatParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
+    pub auto_gain: BoolParam,
     pub voice: [VoiceParams; MAX_VOICES],
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
@@ -152,6 +157,7 @@ impl Default for DoubleParams {
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()),
+            auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
             voice: std::array::from_fn(|v| VoiceParams {
                 pan: float_param_named(leaked(v, "pan"), format!("Double {} Pan", v + 1)),
                 level: float_param_named(leaked(v, "level"), format!("Double {} Level", v + 1)),
@@ -208,7 +214,7 @@ impl DoubleParams {
     }
 
     pub fn output(&self) -> Output {
-        Output { gain_db: self.out_gain.value(), bypass: self.bypass.value() }
+        Output { gain_db: self.out_gain.value(), bypass: self.bypass.value(), auto_gain: self.auto_gain.value() }
     }
 }
 
@@ -245,6 +251,7 @@ unsafe impl Params for DoubleParams {
             map.push((voice_id(v, "pan"), voice.pan.as_ptr(), "Doubles".to_owned()));
             map.push((voice_id(v, "level"), voice.level.as_ptr(), "Doubles".to_owned()));
         }
+        map.push((AUTO_GAIN.id.to_owned(), self.auto_gain.as_ptr(), String::new()));
         map
     }
 }

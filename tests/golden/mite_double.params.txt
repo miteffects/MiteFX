@@ -17,3 +17,4 @@ v2_pan | % | -100 | 100 | -60 | Linear
 v2_level | dB | -48 | 6 | -3 | Linear
 v3_pan | % | -100 | 100 | 60 | Linear
 v3_level | dB | -48 | 6 | -3 | Linear
+auto_gain | bool | true

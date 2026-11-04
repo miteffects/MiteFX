@@ -19,10 +19,17 @@ louder or softer, brighter or duller, differently every note. So:
 - **Per note, per double:** a timing offset (TIMING: its full spread, the mean of two uniforms so
   most notes land near the middle), a detune (PITCH, cents either way), a level (±2 dB × VARIATION)
   and a tone tilt (±2 dB × VARIATION). Deterministic random (a seed per double).
-- **The switch before the note:** at the onset each double's reading crossfades (3 ms, equal
-  power) from its old reading to the note's new one; both still read the previous note's tail
-  (every reading is ≥ 8 ms), so the new attack arrives whole at its new time (tested: the attack
-  correlates > 0.999 with the input at exactly DELAY + the note's offset).
+- **The switch before the note:** at the onset each double's reading crossfades from its old
+  reading to the note's new one, for as long as there is room before the note reaches either
+  (3…8 ms; equal gain, since the two readings are the same signal a little apart and an
+  equal-power fade bumped the level); both still read the previous note's tail (every reading is
+  ≥ 8 ms), so the new attack arrives whole at its new time (tested: the attack correlates > 0.999
+  with the input at exactly DELAY + the note's offset).
+- **Clean readings** (2026-11-05, user: "can we make it somehow less distorted"): the readings
+  slide (the detune, the chorus), and cubic Lagrange's treble rose and fell with the fraction as
+  it slid, a ~200 Hz roughness on everything bright: on a 10 kHz tone the junk was only 34 dB under
+  it (`examples/doubler_purity`). Now a 32-tap Kaiser-windowed sinc (β 8, cut at 0.92 of Nyquist,
+  512 tabulated fractions): 64 dB under it at 2, 6 and 10 kHz alike.
 - **Detune as playing:** within a note the reading changes at the rate that puts its pitch the
   note's cents off (`d(delay)/dt = 1 − 2^(cents/1200)`), easing off as it nears 6 ms of drift (a
   bent string settling); measured within 1.5 cents of the note's detune.
@@ -34,7 +41,13 @@ louder or softer, brighter or duller, differently every note. So:
   SOURCE pan and level; each double by its own pan and level (constant power). Up to three doubles
   (quad tracking: the source and three).
 
-0.38 % of a core with one double, 0.89 % with three (`examples/doubler_cpu`).
+- **Auto gain** (2026-11-05, user: "give it auto gain too"; on by default): the output kept as
+  loud as the input played on both sides (bypass). The source and the doubles add as powers (a
+  double is another take, not in phase), so the gain is `2 / (source² + Σ double²)` in power, held
+  to −12…+6 dB, from the settings (no measuring, no pumping); tested within 0.6 dB on noise for
+  several placements and counts.
+
+0.43 % of a core with one double, 1.10 % with three (`examples/doubler_cpu`).
 
 ## 2. Main view (1280 × 760)
 
@@ -48,7 +61,7 @@ louder or softer, brighter or duller, differently every note. So:
   heard.
 - **Dials:** TAKE (DELAY, TIMING, PITCH, VARIATION), CHORUS (DEPTH, RATE), DOUBLES (count pills
   1/2/3, NEW TAKE EVERY NOTE / EVERY FEW SECONDS), TONE.
-- **Meters** IN, OUT L/R. **Footer:** Bypass (the input as it came; a mono input on both sides),
+- **Meters** IN, OUT L/R. **Footer:** Auto gain, Bypass (the input as it came; a mono input on both sides),
   OUTPUT.
 
 120 fps in the preview with a riff running (scene 0.21 ms, render 0.58 ms median).
@@ -56,7 +69,8 @@ louder or softer, brighter or duller, differently every note. So:
 ## 3. Parameters (`tests/golden/mite_double.params.txt`)
 
 `delay`, `timing`, `pitch`, `variation`, `chorus`, `chorus_rate`, `tone`, `follow`, `voices`
-(1, 2, 3), `source_pan`, `source_level`, `out_gain`, `bypass`, `v1…v3_{pan, level}` (defaults:
+(1, 2, 3), `source_pan`, `source_level`, `out_gain`, `bypass`, `v1…v3_{pan, level}`, `auto_gain`
+(appended 2026-11-05, before any release: state 1 re-blessed) (defaults:
 the first double hard right against the source hard left, the others at ±60 % and −3 dB).
 Bypass is monitoring. State 1. Presets: Init, Tight Rhythm, Loose Take, Quad Tracked, Wide Lead,
 Classic ADT.
@@ -73,7 +87,8 @@ groups).
 
 ## 5. Slices
 
-1. (done 2026-11-04) Everything above. Not yet heard by the user.
+1. (done 2026-11-04) Everything above. The user: "sounds actually ok".
+1b. (done 2026-11-05) Auto gain; the sinc reading (less distortion); the fade by the room there is.
 2. Ideas: per-double "player" character (a consistently early or late double), a pick-attack
    variation (transient shaping per note), formant-preserving detune for larger spreads, stereo
    input kept as stereo.

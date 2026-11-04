@@ -4,7 +4,7 @@
 //! latency (the source is never delayed).
 
 use mite_core::HistoryTap;
-use mite_dsp::doubler::{Doubler, DoublerSettings, MAX_VOICES};
+use mite_dsp::doubler::{auto_gain_db, Doubler, DoublerSettings, MAX_VOICES};
 use mite_dsp::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`DoubleShared::history`).
@@ -32,6 +32,8 @@ const GLIDE_MS: f32 = 20.0;
 pub struct Output {
     pub gain_db: f32,
     pub bypass: bool,
+    /// Keep the output as loud as the input (`mite_dsp::doubler::auto_gain_db`).
+    pub auto_gain: bool,
 }
 
 pub struct DoubleEngine {
@@ -95,7 +97,7 @@ impl DoubleEngine {
         }
         let len = channels[0].len().min(channels[1].len());
         self.bypass.set_target(if out.bypass { 1.0 } else { 0.0 });
-        self.gain.set_target(db_to_gain(out.gain_db));
+        self.gain.set_target(db_to_gain(out.gain_db + if out.auto_gain { auto_gain_db(s) } else { 0.0 }));
         let mut start = 0;
         while start < len {
             let n = (len - start).min(CHUNK).min(self.slice_len - self.slice_pos);
