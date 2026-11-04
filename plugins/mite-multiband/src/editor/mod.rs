@@ -550,7 +550,7 @@ impl MbView {
     fn response_db(&self, host: &dyn ParamHost, layout: &Layout, freqs: &[f64]) -> Vec<f64> {
         let x: [Option<f32>; CROSSOVERS] = std::array::from_fn(|k| Self::on(host, &cross_id(k, X_ON.id)).then(|| Self::plain(host, &cross_id(k, X_FREQ.id))));
         let heard = mite_dsp::multiband::audible(&settings(host), layout);
-        let power: [f64; BANDS] = std::array::from_fn(|b| if heard[b] { 10f64.powf((f64::from(self.gain[b]) + f64::from(Self::plain(host, &band_id(b, B_GAIN.id)))) / 10.0) } else { 0.0 });
+        let power: [f64; BANDS] = std::array::from_fn(|b| if heard[b] { 10f64.powf((f64::from(self.gain[b]) + if Self::on(host, &band_id(b, B_BYPASS.id)) { 0.0 } else { f64::from(Self::plain(host, &band_id(b, B_GAIN.id))) }) / 10.0) } else { 0.0 });
         freqs
             .iter()
             .map(|&f| {
@@ -632,7 +632,7 @@ impl MbView {
             }
             let stage = Self::stage(cx.host, b);
             for (q, &r) in card.quads.iter().enumerate() {
-                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), stage.on && stage.quadrant as usize == q, theme.accent);
+                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), stage.on && !bypassed && stage.quadrant as usize == q, theme.accent);
                 draw_svg(cx.scene, QUAD_GLYPHS[q], r.center(), 24.0, ink, 1.6);
             }
             for (d, &r) in card.dets.iter().enumerate() {
@@ -702,9 +702,12 @@ impl MbView {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((r.x0, sy(db)), (r.x1, sy(db))));
         }
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_major, None, &Line::new((sx(-SQ_RANGE), sy(-SQ_RANGE)), (sx(0.0), sy(0.0))));
+        // A bypassed band passes untouched: its square is the diagonal, its gain 0 dB.
+        let bypassed = Self::on(cx.host, &band_id(b, B_BYPASS.id));
+        let stage = &Stage { on: stage.on && !bypassed, ..*stage };
         let mut stages = [Stage::default(); STAGES];
         stages[0] = *stage;
-        let gain = Self::plain(cx.host, &band_id(b, B_GAIN.id));
+        let gain = if bypassed { 0.0 } else { Self::plain(cx.host, &band_id(b, B_GAIN.id)) };
         let pts: Vec<Point> = (0..=120)
             .map(|i| {
                 let x = -SQ_RANGE + SQ_RANGE * i as f32 / 120.0;
@@ -764,7 +767,8 @@ impl MbView {
                 let edge = line(&|c| r.y1 - (f64::from(c.high[record::BAND_GAIN + b].max(0.0)) * k).min(r.height()));
                 glow_stroke(cx, &edge, 1.6, theme.gain_up.multiply_alpha(lit), theme.gain_up, 2.4);
             }
-            if stage.detector != Detector::Peak {
+            // A bypassed band's detector is idle: no line for it.
+            if stage.detector != Detector::Peak && stage.on && !Self::on(cx.host, &band_id(b, B_BYPASS.id)) {
                 let det = line(&|c| y(c.high[record::BAND_DET + b]));
                 cx.scene.stroke(&Stroke::new(1.3).with_dashes(0.0, [6.0, 3.0]), Affine::IDENTITY, theme.text_hi.multiply_alpha(0.7 * lit), None, &det);
             }
@@ -873,6 +877,9 @@ impl MbView {
             return h;
         }
         match self.hot {
+            Some(Hot::Square(b) | Hot::Hist(b, _)) if Self::on(host, &band_id(b, B_BYPASS.id)) => {
+                return Help::default().text(format!("Band {} is bypassed — it passes untouched, so nothing here moves. Its power button gives it its dynamics back.", number(b)));
+            }
             Some(Hot::Square(b)) => {
                 let s = Self::stage(host, b);
                 return Help::default().text("Threshold ").slot(format!("{:.1} dB", s.threshold_db), "−60.0 dB").text("  ratio ").slot(format!("{:.1}:1", s.ratio), "100.0:1").text(" — drag across for the threshold, up and down for the ratio; wheel: threshold; double-click resets.");
@@ -897,7 +904,8 @@ impl MbView {
             Some(Hot::EqButton) => return Help::default().text(if self.eq_open { "Sidechain EQ — click to close" } else { "Sidechain EQ — shape the sidechain the external bands hear, over its spectrum" }),
             Some(Hot::EqPanel) => return self.key_eq.help(host).unwrap_or_default(),
             Some(Hot::Rail(RailHot::Region(b))) | Some(Hot::Card(b)) if layout.n > 0 => {
-                return Help::default().slot(format!("Band {}", number(b)), "Band 6").text(" · ").slot(self.rail.range_text(host, &layout, b), "20.0 kHz – 20.0 kHz").text(" — click to edit it; double-click the strip to split; right-click for more");
+                let rest = if Self::on(host, &band_id(b, B_BYPASS.id)) { " — bypassed: it passes untouched; its power button gives it its dynamics back" } else { " — click to edit it; double-click the strip to split; right-click for more" };
+                return Help::default().slot(format!("Band {}", number(b)), "Band 6").text(" · ").slot(self.rail.range_text(host, &layout, b), "20.0 kHz – 20.0 kHz").text(rest);
             }
             _ => {}
         }
@@ -1422,5 +1430,21 @@ mod tests {
         for (f, db) in [30.0, 120.0, 500.0, 2000.0, 9000.0].iter().zip(view.response_db(&host, &layout, &[30.0, 120.0, 500.0, 2000.0, 9000.0])) {
             assert!(db.abs() < 0.05, "{f} Hz: {db}");
         }
+    }
+
+    #[test]
+    fn a_bypassed_bands_gain_is_not_drawn() {
+        // Bypass passes the band untouched (its gain too), so the response stays flat there.
+        let host = memory_host();
+        host.set_plain(&cross_id(0, X_ON.id), 1.0);
+        host.set_plain(&band_id(0, B_GAIN.id), 6.0);
+        host.set_plain(&band_id(0, B_BYPASS.id), 1.0);
+        let view = MbView::new(Arc::new(MbShared::new()));
+        let layout = MbView::layout(&host);
+        let db = view.response_db(&host, &layout, &[30.0])[0];
+        assert!(db.abs() < 0.05, "{db}");
+        host.set_plain(&band_id(0, B_BYPASS.id), 0.0);
+        let db = view.response_db(&host, &layout, &[30.0])[0];
+        assert!((db - 6.0).abs() < 0.2, "{db}");
     }
 }

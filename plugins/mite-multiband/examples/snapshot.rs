@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p mite_multiband --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default (three bands), single, six, solo, delta, eq (the sidechain EQ open,
+//! SNAPSHOT_VARIANT: default (three bands), single, six, solo, bypass (band 1), delta, eq (the sidechain EQ open,
 //! bands keyed from it). SNAPSHOT_SELECT=2 picks a band.
 
 #[path = "common/music.rs"]
@@ -42,6 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     host.set_plain(&band_id(3, B_QUAD.id), 3.0);
     if v("solo") {
         host.set_plain(&band_id(1, B_SOLO.id), 1.0);
+    }
+    if v("bypass") {
+        host.set_plain(&band_id(0, B_BYPASS.id), 1.0);
     }
     if v("delta") {
         host.set_plain(DELTA.id, 1.0);
