@@ -608,4 +608,5 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
   and down the level (Shift ×0.2; one undo step a drag). Wheel: level. Double-click: back to its
   default place. Right-click a double: Reset place, Remove (it and those after it; the first
   stays). A dashed ghost is a double not playing: click it in.
-- **Pills** (DOUBLES): 1 / 2 / 3, and NEW TAKE EVERY NOTE ↔ EVERY FEW SECONDS.
+- **Pills** (DOUBLES): 1 / 2 / 3, and NEW TAKE EVERY NOTE ↔ EVERY FEW SECONDS. MONO BASS (by the
+  mono meter): click on/off, wheel its frequency (also the MONO dial in TONE).

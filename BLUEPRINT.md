@@ -380,7 +380,7 @@ is heard (onset detector) and every double plays it again with its own timing, d
 tone, the switch done in the gap before the note reaches the double so each attack arrives whole
 (tested); the detune is a slow change of the reading that settles like a bent string; chorus, tone
 and up to three doubles; the source and each double placed in a stereo field (pucks), a mono
-correlation strip, TIMING and PITCH lanes showing every note's lag and cents. 2026-11-05 (user: "sounds actually ok … less distorted", "auto gain"): the readings by a 32-tap windowed sinc (the sliding detune no longer roughens the treble: 10 kHz junk −34 → −64 dB), equal-gain switch fades as long as there is room, auto gain from the settings (on by default). 0.4–1.1 % of a core.
+correlation strip, TIMING and PITCH lanes showing every note's lag and cents. 2026-11-05 (user: "sounds actually ok … less distorted", "auto gain"): the readings by a 32-tap windowed sinc (the sliding detune no longer roughens the treble: 10 kHz junk −34 → −64 dB), equal-gain switch fades as long as there is room, auto gain from the settings (on by default; the doubles trimmed as a group so takes 2 and 3 add width, not level), mono bass (under 150 Hz the output is the source's lows on both sides, in phase: the user's "correlation issues" were the doubles' lows cancelling 5–6 dB at moments). 0.5–1.2 % of a core.
 
 ### 15. Mite Amp (later)
 

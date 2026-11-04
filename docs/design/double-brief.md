@@ -41,11 +41,24 @@ louder or softer, brighter or duller, differently every note. So:
   SOURCE pan and level; each double by its own pan and level (constant power). Up to three doubles
   (quad tracking: the source and three).
 
-- **Auto gain** (2026-11-05, user: "give it auto gain too"; on by default): the output kept as
-  loud as the input played on both sides (bypass). The source and the doubles add as powers (a
-  double is another take, not in phase), so the gain is `2 / (source² + Σ double²)` in power, held
-  to −12…+6 dB, from the settings (no measuring, no pumping); tested within 0.6 dB on noise for
-  several placements and counts.
+- **Auto gain** (2026-11-05, user: "give it auto gain too"; on by default; reworked the same day:
+  "auto gain doesnt work at least on takes 2 and 3" — it turned the whole output down, the source
+  with it, so more takes still read as louder doubles). Two parts, both from the settings (no
+  measuring, no pumping): the doubles trimmed together to the loudest one's power (`Σ double²` →
+  `max double²`: a second and third take add width and weight, not level), then the whole kept as
+  loud as the input on both sides (`2 / (source² + max double²)` in power, −12…+6 dB). Measured on
+  a riff: −0.26, −0.09, +0.05 dB with 1, 2, 3 doubles (`examples/mono_check`); tested within
+  0.6 dB on noise for six placements and counts.
+- **Mono bass** (2026-11-05, user: "i get a lot of correlation issues"; on by default, 150 Hz, 40…400):
+  measured, the doubles' own lows cancelled the source's by 5–6 dB at moments in the 63–250 Hz
+  octaves summed to mono (a delayed copy's low end is in and out of phase note by note). Now
+  under the split the output is the source's lows alone, on both sides as the input itself (at the
+  source's level); the source and the doubles keep only their highs (Linkwitz–Riley 4th order, so
+  the source's side rebuilds it exactly: an allpass). The low octave sums in phase (+2.7 dB, as a
+  mono signal), and more takes don't pile up bass. The doubles' highpass sits at 0.7 × the split:
+  the source's lows and a double's highs add as powers and two LR halves at one frequency leave a
+  3 dB hole (it cost 0.6 dB overall), the overlap fills it. A first version lent each double the
+  source's lows instead: three doubles stacked them +1.2 dB.
 
 0.43 % of a core with one double, 1.10 % with three (`examples/doubler_cpu`).
 
@@ -55,7 +68,8 @@ louder or softer, brighter or duller, differently every note. So:
   double, each with a ring breathing at the level it plays; drag to place, wheel for level,
   double-click puts it back, right-click a double: reset or remove; dashed ghosts for doubles not
   playing (click: in). Under it the MONO strip: the output's L/R correlation over the last 300 ms
-  (below 0 in warning: it would thin out summed to mono).
+  (below 0 in warning: it would thin out summed to mono), and beside it the MONO BASS pill (click:
+  on/off; wheel: its frequency, also the MONO dial in TONE).
 - **TIMING and PITCH lanes** (bottom left, 6 s): each double's reading (ms) and detune (cents),
   note by note, the spreads TIMING and PITCH shaded, the mean DELAY dashed, a tick at every note
   heard.
@@ -70,7 +84,7 @@ louder or softer, brighter or duller, differently every note. So:
 
 `delay`, `timing`, `pitch`, `variation`, `chorus`, `chorus_rate`, `tone`, `follow`, `voices`
 (1, 2, 3), `source_pan`, `source_level`, `out_gain`, `bypass`, `v1…v3_{pan, level}`, `auto_gain`
-(appended 2026-11-05, before any release: state 1 re-blessed) (defaults:
+`mono_bass`, `bass_freq` (appended 2026-11-05, before any release: state 1 re-blessed) (defaults:
 the first double hard right against the source hard left, the others at ±60 % and −3 dB).
 Bypass is monitoring. State 1. Presets: Init, Tight Rhythm, Loose Take, Quad Tracked, Wide Lead,
 Classic ADT.
@@ -89,6 +103,7 @@ groups).
 
 1. (done 2026-11-04) Everything above. The user: "sounds actually ok".
 1b. (done 2026-11-05) Auto gain; the sinc reading (less distortion); the fade by the room there is.
+1c. (done 2026-11-05) Auto gain trims the doubles as a group; mono bass.
 2. Ideas: per-double "player" character (a consistently early or late double), a pick-attack
    variation (transient shaping per note), formant-preserving detune for larger spreads, stereo
    input kept as stereo.

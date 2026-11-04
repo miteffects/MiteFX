@@ -80,6 +80,12 @@ pub struct DoublerSettings {
     pub tone_db: f32,
     /// New readings at every note (on) or every few seconds (off).
     pub follow_notes: bool,
+    /// Keep the output as loud as the input (see [`auto_gain_db`], [`doubles_trim_db`]).
+    pub auto_gain: bool,
+    /// Every double's lows (under `bass_hz`) taken from the source, in phase with it: the low end
+    /// stays whole summed to mono (see [`MonoBass`]).
+    pub mono_bass: bool,
+    pub bass_hz: f32,
 }
 
 impl Default for DoublerSettings {
@@ -97,18 +103,134 @@ impl Default for DoublerSettings {
             chorus_rate: 0.6,
             tone_db: 0.0,
             follow_notes: true,
+            auto_gain: true,
+            mono_bass: true,
+            bass_hz: 150.0,
         }
     }
 }
 
-/// Auto gain (dB): what keeps the output as loud as the input played on both sides (bypass). The
-/// source and the doubles add as powers (a double is a different take: they don't add in phase),
-/// each placed at constant power, so the output carries the input's power × (source² + Σ
-/// double²) against 2 × for the input on both sides. Held to −12…+6 dB.
-pub fn auto_gain_db(s: &DoublerSettings) -> f32 {
+/// Auto gain, first part (dB, ≤ 0, applied to every double): the doubles together as loud as the
+/// loudest one alone, so a second and third take add width and weight, not level (user,
+/// 2026-11-05: "auto gain doesnt work at least on takes 2 and 3": it turned everything down
+/// instead, the source with it). Doubles add as powers (each is another take, not in phase).
+pub fn doubles_trim_db(s: &DoublerSettings) -> f32 {
+    if !s.auto_gain {
+        return 0.0;
+    }
     let p = |db: f32| crate::db_to_gain(2.0 * db);
-    let total = p(s.source_db) + s.voice.iter().take(s.voices.min(MAX_VOICES)).map(|v| p(v.level_db)).sum::<f32>();
+    let active = &s.voice[..s.voices.min(MAX_VOICES)];
+    let sum: f32 = active.iter().map(|v| p(v.level_db)).sum();
+    let loudest = active.iter().map(|v| p(v.level_db)).fold(0.0, f32::max);
+    if sum <= 0.0 {
+        0.0
+    } else {
+        (10.0 * (loudest / sum).log10()).min(0.0)
+    }
+}
+
+/// Auto gain, second part (dB, on the whole output): as loud as the input played on both sides
+/// (bypass). The source and the (trimmed) doubles add as powers, each placed at constant power:
+/// the output carries the input's power × (source² + loudest double²) against 2 × for the input on
+/// both sides. Held to −12…+6 dB.
+pub fn auto_gain_db(s: &DoublerSettings) -> f32 {
+    if !s.auto_gain {
+        return 0.0;
+    }
+    let p = |db: f32| crate::db_to_gain(2.0 * db);
+    let loudest = s.voice[..s.voices.min(MAX_VOICES)].iter().map(|v| p(v.level_db)).fold(0.0, f32::max);
+    let total = p(s.source_db) + loudest;
     (10.0 * (2.0 / total.max(1e-9)).log10()).clamp(-12.0, 6.0)
+}
+
+/// A second-order Butterworth section (transposed direct form II).
+#[derive(Debug, Clone, Copy, Default)]
+struct Biquad {
+    b: [f64; 3],
+    a: [f64; 2],
+    z: [f64; 2],
+}
+
+impl Biquad {
+    fn set(&mut self, fc: f64, fs: f64, high: bool) {
+        let w = std::f64::consts::TAU * fc / fs;
+        let (sin, cos) = w.sin_cos();
+        let alpha = sin / std::f64::consts::SQRT_2;
+        let a0 = 1.0 + alpha;
+        let (b0, b1) = if high { ((1.0 + cos) / 2.0, -(1.0 + cos)) } else { ((1.0 - cos) / 2.0, 1.0 - cos) };
+        self.b = [b0 / a0, b1 / a0, b0 / a0];
+        self.a = [-2.0 * cos / a0, (1.0 - alpha) / a0];
+    }
+
+    #[inline]
+    fn process(&mut self, x: f64) -> f64 {
+        let y = self.b[0] * x + self.z[0];
+        self.z[0] = self.b[1] * x - self.a[0] * y + self.z[1];
+        self.z[1] = self.b[2] * x - self.a[1] * y;
+        y
+    }
+}
+
+/// A Linkwitz–Riley crossover (two Butterworth sections each side): its low and high parts sum
+/// to an allpass, so the source, passed through the same split, stays in phase with the lows it
+/// lends the doubles.
+#[derive(Debug, Clone, Copy, Default)]
+struct Lr4 {
+    low: [Biquad; 2],
+    high: [Biquad; 2],
+}
+
+impl Lr4 {
+    fn set(&mut self, fc: f64, fs: f64) {
+        for q in &mut self.low {
+            q.set(fc, fs, false);
+        }
+        for q in &mut self.high {
+            q.set(fc, fs, true);
+        }
+    }
+
+    #[inline]
+    fn low(&mut self, x: f64) -> f64 {
+        let y = self.low[0].process(x);
+        self.low[1].process(y)
+    }
+
+    #[inline]
+    fn high(&mut self, x: f64) -> f64 {
+        let y = self.high[0].process(x);
+        self.high[1].process(y)
+    }
+}
+
+/// Mono bass: under the split the output is the source's lows alone, on both sides as the input
+/// itself (at the source's level, wherever it sits); the source and every double keep only their
+/// highs. So the low end is the input's whatever the doubles do: whole summed to mono, no pile-up
+/// as takes are added (a first design lent each double the source's lows: three doubles stacked
+/// them +1.2 dB), and the side the source sits on rebuilds it exactly (lows + highs: an allpass).
+struct MonoBass {
+    source: Lr4,
+    voices: [Lr4; MAX_VOICES],
+    fc: f64,
+    /// How much of the split is in (0…1, gliding: switching it never clicks).
+    mix: Glide,
+    count: u32,
+}
+
+/// The doubles' highpass sits this far under the split: the source's lows and a double's highs
+/// are different signals, so they add as powers, and two Linkwitz–Riley halves at one frequency
+/// leave a 3 dB hole there (−0.6 dB on noise); a little overlap fills it (the hole −0.45 dB at
+/// worst), the double's leak under the split ≥ 14 dB down an octave below.
+const DOUBLE_HP: f64 = 0.7;
+
+impl MonoBass {
+    fn set(&mut self, fs: f32) {
+        let f = self.fc;
+        self.source.set(f, f64::from(fs));
+        for v in &mut self.voices {
+            v.set(f * DOUBLE_HP, f64::from(fs));
+        }
+    }
 }
 
 /// Constant-power pan: the left and right gains (unity at either side, −3 dB at the centre).
@@ -271,6 +393,10 @@ pub struct Doubler {
     fs: f32,
     line: Delay,
     sinc: Sinc,
+    bass: MonoBass,
+    out_gain: Glide,
+    /// The source's level alone (its lows, under mono bass).
+    src_g: Glide,
     voices: [Voice; MAX_VOICES],
     k_glide: f32,
     switch_len: u32,
@@ -293,6 +419,9 @@ impl Doubler {
             fs,
             line: Delay::new((LINE_MS * 0.001 * fs) as usize + SINC_TAPS + 8),
             sinc: Sinc::new(),
+            bass: MonoBass { source: Lr4::default(), voices: [Lr4::default(); MAX_VOICES], fc: 0.0, mix: Glide::default(), count: 0 },
+            out_gain: Glide { v: 1.0 },
+            src_g: Glide { v: 1.0 },
             voices: [Voice::new(0x1234_5677), Voice::new(0x8BAD_F00D), Voice::new(0x0DEF_ACED)],
             k_glide: 1.0 - (-1.0 / (GLIDE_MS * 0.001 * fs)).exp(),
             switch_len: ((SWITCH_MS * 0.001 * fs) as u32).max(1),
@@ -322,6 +451,10 @@ impl Doubler {
             *v = Voice::new([0x1234_5677, 0x8BAD_F00D, 0x0DEF_ACED][i]);
         }
         self.hp = 0.0;
+        self.bass.source = Lr4::default();
+        self.bass.voices = [Lr4::default(); MAX_VOICES];
+        self.bass.fc = 0.0;
+        self.bass.count = 0;
         self.fast = 0.0;
         self.slow = 0.0;
         self.since_onset = u32::MAX;
@@ -339,6 +472,9 @@ impl Doubler {
 
     /// Jumps every glide to `s` (the first block, so nothing fades in from nothing).
     fn settle(&mut self, s: &DoublerSettings) {
+        self.out_gain.v = crate::db_to_gain(auto_gain_db(s));
+        self.src_g.v = crate::db_to_gain(s.source_db);
+        self.bass.mix.v = f32::from(u8::from(s.mono_bass));
         self.base.v = s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS);
         self.chorus.v = s.chorus.clamp(0.0, 1.0);
         let (l, r) = pan_gains(s.source_pan);
@@ -353,7 +489,7 @@ impl Doubler {
             let (l, r) = pan_gains(s.voice[i].pan);
             v.gl.v = l;
             v.gr.v = r;
-            v.gain.v = crate::db_to_gain(s.voice[i].level_db + note.gain_db);
+            v.gain.v = crate::db_to_gain(s.voice[i].level_db + note.gain_db + doubles_trim_db(s));
             v.tilt.v = s.tone_db + note.tilt_db;
             v.free_left = 0;
         }
@@ -394,6 +530,16 @@ impl Doubler {
         let fs = self.fs;
         let k = self.k_glide;
         let mut tel = DoublerTelemetry::default();
+        // Mono bass: the split's frequency glides on a log scale, redesigned every 32 samples.
+        let fc = f64::from(s.bass_hz.clamp(40.0, 400.0));
+        if self.bass.fc == 0.0 {
+            self.bass.fc = fc;
+            self.bass.set(fs);
+        }
+        let bass_target = f32::from(u8::from(s.mono_bass));
+        let trim = doubles_trim_db(s);
+        let out_target = crate::db_to_gain(auto_gain_db(s));
+        let src_level = crate::db_to_gain(s.source_db);
         let (src_l, src_r) = {
             let (l, r) = pan_gains(s.source_pan);
             let g = crate::db_to_gain(s.source_db);
@@ -432,7 +578,21 @@ impl Doubler {
             let chorus = self.chorus.next(s.chorus.clamp(0.0, 1.0), k);
             let sl = self.src_l.next(src_l, k);
             let sr = self.src_r.next(src_r, k);
-            let (mut l, mut r) = (sl * x, sr * x);
+            self.bass.count = (self.bass.count + 1) % 32;
+            if self.bass.count == 0 && self.bass.fc != fc {
+                let ratio = fc / self.bass.fc;
+                self.bass.fc = if (ratio - 1.0).abs() < 1e-3 { fc } else { self.bass.fc * ratio.powf(0.08) };
+                self.bass.set(fs);
+            }
+            let bass = self.bass.mix.next(bass_target, k);
+            let (low, src) = if bass > 0.0 {
+                let lo = self.bass.source.low(f64::from(x)) as f32;
+                let hi = self.bass.source.high(f64::from(x)) as f32;
+                (lo * bass * self.src_g.next(src_level, k), x + (hi - x) * bass)
+            } else {
+                (0.0, x)
+            };
+            let (mut l, mut r) = (sl * src + low, sr * src + low);
             for i in 0..MAX_VOICES {
                 let on = self.on[i].next(f32::from(u8::from(i < s.voices)), k);
                 if on < 1e-6 && i >= s.voices {
@@ -477,7 +637,9 @@ impl Doubler {
                 v.lp += self.a_tilt * (y - v.lp);
                 let (lo, hi) = (crate::db_to_gain(-0.5 * tilt), crate::db_to_gain(0.5 * tilt));
                 let y = lo * v.lp + hi * (y - v.lp);
-                let g = v.gain.next(crate::db_to_gain(s.voice[i].level_db + v.note.gain_db), k) * on;
+                // Mono bass: the double's highs only.
+                let y = if bass > 0.0 { y + (self.bass.voices[i].high(f64::from(y)) as f32 - y) * bass } else { y };
+                let g = v.gain.next(crate::db_to_gain(s.voice[i].level_db + v.note.gain_db + trim), k) * on;
                 let (pl, pr) = pan_gains(s.voice[i].pan);
                 let (gl, gr) = (v.gl.next(pl, k), v.gr.next(pr, k));
                 let y = y * g;
@@ -485,8 +647,9 @@ impl Doubler {
                 l += gl * y;
                 r += gr * y;
             }
-            ol[j] = l;
-            or[j] = r;
+            let g = self.out_gain.next(out_target, k);
+            ol[j] = l * g;
+            or[j] = r * g;
         }
         for (i, v) in self.voices.iter().enumerate() {
             tel.delay_ms[i] = (v.last_delay / f64::from(fs) * 1000.0) as f32;

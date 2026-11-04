@@ -4,7 +4,7 @@
 //! latency (the source is never delayed).
 
 use mite_core::HistoryTap;
-use mite_dsp::doubler::{auto_gain_db, Doubler, DoublerSettings, MAX_VOICES};
+use mite_dsp::doubler::{Doubler, DoublerSettings, MAX_VOICES};
 use mite_dsp::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`DoubleShared::history`).
@@ -32,8 +32,6 @@ const GLIDE_MS: f32 = 20.0;
 pub struct Output {
     pub gain_db: f32,
     pub bypass: bool,
-    /// Keep the output as loud as the input (`mite_dsp::doubler::auto_gain_db`).
-    pub auto_gain: bool,
 }
 
 pub struct DoubleEngine {
@@ -97,7 +95,7 @@ impl DoubleEngine {
         }
         let len = channels[0].len().min(channels[1].len());
         self.bypass.set_target(if out.bypass { 1.0 } else { 0.0 });
-        self.gain.set_target(db_to_gain(out.gain_db + if out.auto_gain { auto_gain_db(s) } else { 0.0 }));
+        self.gain.set_target(db_to_gain(out.gain_db));
         let mut start = 0;
         while start < len {
             let n = (len - start).min(CHUNK).min(self.slice_len - self.slice_pos);
@@ -181,11 +179,12 @@ mod tests {
 
     #[test]
     fn the_source_is_never_late() {
-        // Source hard left, doubles off: the left is the input, at once.
+        // Source hard left, doubles off: the left is the input, at once (mono bass passes the
+        // source through its split, an allpass of itself: off here, to see it whole).
         let mut x = vec![0.0f32; 4800];
         x[100] = 1.0;
         let history = HistoryTap::new(64);
-        let s = DoublerSettings { voices: 0, ..DoublerSettings::default() };
+        let s = DoublerSettings { voices: 0, mono_bass: false, auto_gain: false, ..DoublerSettings::default() };
         let out = Output::default();
         let mut e = DoubleEngine::new(48_000.0, &out);
         let (mut l, mut r) = (x.clone(), vec![0.0f32; x.len()]);

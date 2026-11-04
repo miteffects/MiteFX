@@ -47,6 +47,10 @@ pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: f
 /// Keep the output as loud as the input, whatever the doubles add (user, 2026-11-05: "give it
 /// auto gain too").
 pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: true };
+/// Every double's lows from the source, in phase (user, 2026-11-05: "i get a lot of correlation
+/// issues").
+pub const MONO_BASS: BoolSpec = BoolSpec { id: "mono_bass", name: "Mono Bass", default: true };
+pub const BASS_FREQ: ParamSpec = spec("bass_freq", "Mono Bass Frequency", "Hz", 40.0, 400.0, 150.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 
 /// A double's parameter id, e.g. `v2_pan` (`voice` from 0).
 pub fn voice_id(voice: usize, param: &str) -> String {
@@ -63,13 +67,13 @@ pub fn voice_spec(voice: usize, param: &str) -> Option<ParamSpec> {
     }
 }
 
-const CONTINUOUS: [ParamSpec; 10] = [DELAY, TIMING, PITCH, VARIATION, CHORUS, CHORUS_RATE, TONE, SOURCE_PAN, SOURCE_LEVEL, OUT_GAIN];
+const CONTINUOUS: [ParamSpec; 11] = [DELAY, TIMING, PITCH, VARIATION, CHORUS, CHORUS_RATE, TONE, SOURCE_PAN, SOURCE_LEVEL, OUT_GAIN, BASS_FREQ];
 
 pub fn manifest() -> String {
     let mut lines: Vec<String> = CONTINUOUS[..7].iter().map(ParamSpec::manifest_line).collect();
     lines.push(FOLLOW.manifest_line());
     lines.push(VOICES.manifest_line());
-    lines.extend(CONTINUOUS[7..].iter().map(ParamSpec::manifest_line));
+    lines.extend(CONTINUOUS[7..10].iter().map(ParamSpec::manifest_line));
     lines.push(BYPASS.manifest_line());
     for v in 0..MAX_VOICES {
         for p in ["pan", "level"] {
@@ -77,6 +81,8 @@ pub fn manifest() -> String {
         }
     }
     lines.push(AUTO_GAIN.manifest_line());
+    lines.push(MONO_BASS.manifest_line());
+    lines.push(BASS_FREQ.manifest_line());
     lines.join("\n") + "\n"
 }
 
@@ -129,6 +135,8 @@ pub struct DoubleParams {
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
     pub auto_gain: BoolParam,
+    pub mono_bass: BoolParam,
+    pub bass_freq: FloatParam,
     pub voice: [VoiceParams; MAX_VOICES],
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
@@ -158,6 +166,8 @@ impl Default for DoubleParams {
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()),
             auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
+            mono_bass: bool_param(&MONO_BASS, MONO_BASS.name.to_owned()),
+            bass_freq: float_param(&BASS_FREQ),
             voice: std::array::from_fn(|v| VoiceParams {
                 pan: float_param_named(leaked(v, "pan"), format!("Double {} Pan", v + 1)),
                 level: float_param_named(leaked(v, "level"), format!("Double {} Level", v + 1)),
@@ -183,6 +193,9 @@ pub fn doubler_settings(p: impl Fn(&str) -> f32) -> DoublerSettings {
         chorus_rate: p(CHORUS_RATE.id),
         tone_db: p(TONE.id),
         follow_notes: p(FOLLOW.id) >= 0.5,
+        auto_gain: p(AUTO_GAIN.id) >= 0.5,
+        mono_bass: p(MONO_BASS.id) >= 0.5,
+        bass_hz: p(BASS_FREQ.id),
     }
 }
 
@@ -201,6 +214,9 @@ impl DoubleParams {
             "voices" => self.voices.value() as f32,
             "source_pan" => f(&self.source_pan),
             "source_level" => f(&self.source_level),
+            "auto_gain" => f32::from(u8::from(self.auto_gain.value())),
+            "mono_bass" => f32::from(u8::from(self.mono_bass.value())),
+            "bass_freq" => f(&self.bass_freq),
             _ => match split_voice(id) {
                 Some((v, "pan")) => f(&self.voice[v].pan),
                 Some((v, "level")) => f(&self.voice[v].level),
@@ -214,7 +230,7 @@ impl DoubleParams {
     }
 
     pub fn output(&self) -> Output {
-        Output { gain_db: self.out_gain.value(), bypass: self.bypass.value(), auto_gain: self.auto_gain.value() }
+        Output { gain_db: self.out_gain.value(), bypass: self.bypass.value() }
     }
 }
 
@@ -252,6 +268,8 @@ unsafe impl Params for DoubleParams {
             map.push((voice_id(v, "level"), voice.level.as_ptr(), "Doubles".to_owned()));
         }
         map.push((AUTO_GAIN.id.to_owned(), self.auto_gain.as_ptr(), String::new()));
+        map.push((MONO_BASS.id.to_owned(), self.mono_bass.as_ptr(), "Doubles".to_owned()));
+        map.push((BASS_FREQ.id.to_owned(), self.bass_freq.as_ptr(), "Doubles".to_owned()));
         map
     }
 }

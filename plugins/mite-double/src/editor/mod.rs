@@ -125,7 +125,7 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::doubler::DoublerSettings {
 
 pub fn output(host: &dyn ParamHost) -> crate::dsp::Output {
     let p = |id: &str| host.plain(id, host.normalized(id));
-    crate::dsp::Output { gain_db: p(OUT_GAIN.id), bypass: p(BYPASS.id) >= 0.5, auto_gain: p(AUTO_GAIN.id) >= 0.5 }
+    crate::dsp::Output { gain_db: p(OUT_GAIN.id), bypass: p(BYPASS.id) >= 0.5 }
 }
 
 /// A puck in the field.
@@ -136,11 +136,12 @@ pub enum Puck {
     Voice(usize),
 }
 
-/// A pill: how many doubles, or whether new readings follow the notes.
+/// A pill: how many doubles, whether new readings follow the notes, mono bass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pill {
     Count(usize),
     Follow,
+    MonoBass,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -181,7 +182,7 @@ impl DoubleView {
             FOOTER_TOP,
             (VIEW_W, VIEW_H),
             vec![
-                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — as loud as the input, however many doubles and wherever they sit (Bypass compares fairly)" },
+                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — the doubles together as loud as the loudest one (more takes add width, not level), and the whole as loud as the input (Bypass compares fairly)" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input alone, as it came" },
             ],
             vec![FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" }],
@@ -198,7 +199,7 @@ impl DoubleView {
                 0.0,
             ),
             ("CHORUS", "a slow drift on top", 0, 1, vec![(CHORUS, "DEPTH", KnobKind::Unipolar), (CHORUS_RATE, "RATE", KnobKind::Unipolar)], 0.0),
-            ("TONE", "the doubles brighter or darker", 1, 1, vec![(TONE, "TONE", KnobKind::Bipolar)], 0.0),
+            ("TONE", "the doubles brighter or darker, and where their lows become the source's", 1, 1, vec![(TONE, "TONE", KnobKind::Bipolar), (BASS_FREQ, "MONO", KnobKind::Unipolar)], 0.0),
         ];
         let mut knobs = Vec::new();
         let mut groups = Vec::new();
@@ -278,6 +279,7 @@ impl DoubleView {
                 Rect::new(x, g.y0 + 46.0, x + 44.0, g.y0 + 46.0 + PILL_H)
             }
             Pill::Follow => Rect::new(g.x0 + 16.0, g.y0 + 96.0, g.x1 - 16.0, g.y0 + 96.0 + PILL_H),
+            Pill::MonoBass => Rect::new(CORR.x1 + 44.0, CORR.center().y - PILL_H / 2.0, CORR.x1 + 214.0, CORR.center().y + PILL_H / 2.0),
         }
     }
 
@@ -479,6 +481,8 @@ impl DoubleView {
         }
         let follow = Self::plain(host, FOLLOW.id) >= 0.5;
         self.draw_pill(cx, Pill::Follow, if follow { "NEW TAKE EVERY NOTE" } else { "NEW TAKE EVERY FEW SECONDS" }, follow);
+        let bass = Self::plain(host, MONO_BASS.id) >= 0.5;
+        self.draw_pill(cx, Pill::MonoBass, &format!("MONO BASS {:.0} Hz", Self::plain(host, BASS_FREQ.id)), bass);
     }
 
     fn draw_meters(&self, cx: &mut DrawCx<'_>) {
@@ -542,6 +546,7 @@ impl DoubleView {
             Some(Hot::Puck(Puck::Voice(v))) if v >= Self::voices(host) => return Help::default().text(format!("Double {} — click to bring it in", v + 1)),
             Some(Hot::Puck(puck)) => return Self::puck_help(host, puck, false),
             Some(Hot::Pill(Pill::Count(n))) => return Help::default().text(format!("{n} double{} — each its own take of every note", if n > 1 { "s" } else { "" })),
+            Some(Hot::Pill(Pill::MonoBass)) => return Help::default().text("Mono bass — every double's lows (under MONO in TONE; the wheel here too) come from your take, in phase: the low end stays solid summed to mono and the correlation stays up. The doubling lives above."),
             Some(Hot::Pill(Pill::Follow)) => return Help::default().text("Every note: each note gets its own timing, pitch, level and tone, switched before the note arrives (a real second take). Every few seconds: a slowly changing double (tape ADT)."),
             None => {}
         }
@@ -574,7 +579,7 @@ impl DoubleView {
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
-        for pill in (1..=MAX_VOICES).map(Pill::Count).chain([Pill::Follow]) {
+        for pill in (1..=MAX_VOICES).map(Pill::Count).chain([Pill::Follow, Pill::MonoBass]) {
             if self.pill(pill).inflate(2.0, 2.0).contains(p) {
                 return Some(Hot::Pill(pill));
             }
@@ -666,6 +671,11 @@ impl DoubleView {
                     Self::gesture(host, FOLLOW.id, if on { 0.0 } else { 1.0 });
                     true
                 }
+                Some(Hot::Pill(Pill::MonoBass)) => {
+                    let on = Self::plain(host, MONO_BASS.id) >= 0.5;
+                    Self::gesture(host, MONO_BASS.id, if on { 0.0 } else { 1.0 });
+                    true
+                }
                 Some(Hot::Puck(Puck::Voice(v))) if v >= Self::voices(host) => {
                     Self::gesture(host, VOICES.id, v as f32);
                     true
@@ -707,6 +717,10 @@ impl DoubleView {
                 _ => false,
             },
             UiEvent::Wheel { pos, lines, mods } => match self.hot_at(host, pos) {
+                Some(Hot::Pill(Pill::MonoBass)) => {
+                    Self::set(host, BASS_FREQ.id, BASS_FREQ.wheel(Self::plain(host, BASS_FREQ.id), lines, mods.fine()));
+                    true
+                }
                 Some(Hot::Puck(puck)) => {
                     let (_, level) = Self::ids(puck);
                     Self::set(host, &level, SOURCE_LEVEL.wheel(Self::plain(host, &level), lines, mods.fine()));
@@ -728,6 +742,7 @@ fn knob_words(id: &str) -> &'static str {
         "chorus" => " — a slow random drift on top (a little: life; a lot: a chorus)",
         "chorus_rate" => " — how fast that drift moves",
         "tone" => " — the doubles brighter or darker than your take (another guitar, another mic)",
+        "bass_freq" => " — under this the doubles' lows are your take's, in phase (MONO BASS on, by the meter)",
         _ => "",
     }
 }

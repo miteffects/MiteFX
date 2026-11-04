@@ -2,7 +2,7 @@
 //! place, a new reading at every note within the set spread, each attack arriving whole (the
 //! switch done before it), the detune heard as the pitch, block-size invariance, click-free moves.
 
-use mite_dsp::doubler::{auto_gain_db, pan_gains, Doubler, DoublerSettings, VoiceSettings};
+use mite_dsp::doubler::{auto_gain_db, doubles_trim_db, pan_gains, Doubler, DoublerSettings, VoiceSettings};
 use mite_dsp::pitch::{window_len, PitchDetector};
 
 const FS: f32 = 48_000.0;
@@ -39,11 +39,13 @@ fn render(s: &DoublerSettings, x: &[f32], block: usize) -> ([Vec<f32>; 2], Vec<[
     ([l, r], offsets)
 }
 
-/// The source hard left, one double hard right: the right is the double alone.
+/// The source hard left, one double hard right: the right is the double alone (its lows its own:
+/// these tests look at the double's reading).
 fn split(s: DoublerSettings) -> DoublerSettings {
     let mut s = s;
     s.source_pan = -1.0;
     s.voice[0].pan = 1.0;
+    s.mono_bass = false;
     s
 }
 
@@ -51,7 +53,7 @@ fn split(s: DoublerSettings) -> DoublerSettings {
 fn the_source_alone_is_the_input_at_its_place() {
     let (x, _) = notes(2);
     for pan in [-1.0, 0.0, 0.4] {
-        let s = DoublerSettings { voices: 0, source_pan: pan, source_db: -6.0, ..DoublerSettings::default() };
+        let s = DoublerSettings { voices: 0, source_pan: pan, source_db: -6.0, mono_bass: false, auto_gain: false, ..DoublerSettings::default() };
         let ([l, r], _) = render(&s, &x, 512);
         let (gl, gr) = pan_gains(pan);
         let g = mite_dsp::db_to_gain(-6.0);
@@ -176,7 +178,10 @@ fn moving_any_setting_fast_never_clicks() {
         f(&mut s);
         s
     };
-    let cases: [(&str, DoublerSettings); 9] = [
+    let cases: [(&str, DoublerSettings); 12] = [
+        ("mono bass off", with(&|s| s.mono_bass = false)),
+        ("bass frequency", with(&|s| s.bass_hz = 300.0)),
+        ("auto gain off", with(&|s| s.auto_gain = false)),
         ("source pan", with(&|s| s.source_pan = 1.0)),
         ("source level", with(&|s| s.source_db = -24.0)),
         ("voice pan", with(&|s| s.voice[0].pan = -1.0)),
@@ -207,32 +212,97 @@ fn moving_any_setting_fast_never_clicks() {
     }
 }
 
-#[test]
-fn auto_gain_keeps_it_as_loud_as_the_input() {
-    // Noise in (both sides in bypass: twice its power); the output with auto gain applied, many
-    // placements and counts.
+fn noise(seconds: f32) -> Vec<f32> {
     let mut seed = 3u32;
-    let x: Vec<f32> = (0..FS as usize * 4)
+    (0..(FS * seconds) as usize)
         .map(|_| {
             seed ^= seed << 13;
             seed ^= seed >> 17;
             seed ^= seed << 5;
             0.3 * (seed as f32 / u32::MAX as f32 - 0.5)
         })
-        .collect();
-    let power = |v: &[f32]| v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64;
+        .collect()
+}
+
+fn power(v: &[f32]) -> f64 {
+    v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64
+}
+
+#[test]
+fn auto_gain_keeps_it_as_loud_as_the_input_and_more_takes_add_no_level() {
+    // Noise in (both sides in bypass: twice its power), the output as it comes, many placements
+    // and counts: all within 0.6 dB of the input.
+    let x = noise(4.0);
     let reference = 2.0 * power(&x[24_000..]);
     let centre = VoiceSettings { pan: 0.0, level_db: 0.0 };
     for s in [
         DoublerSettings::default(),
+        DoublerSettings { voices: 2, ..DoublerSettings::default() },
         DoublerSettings { voices: 3, ..DoublerSettings::default() },
+        DoublerSettings { voices: 3, voice: [centre, VoiceSettings { pan: -1.0, level_db: 4.0 }, VoiceSettings { pan: 1.0, level_db: 0.0 }], ..DoublerSettings::default() },
         DoublerSettings { voices: 2, source_pan: 0.0, voice: [VoiceSettings { pan: -0.6, level_db: 0.0 }, VoiceSettings { pan: 0.6, level_db: 0.0 }, centre], ..DoublerSettings::default() },
         DoublerSettings { source_db: -6.0, voice: [VoiceSettings { pan: 1.0, level_db: -3.0 }, centre, centre], ..DoublerSettings::default() },
     ] {
         let ([l, r], _) = render(&s, &x, 512);
-        let g = f64::from(mite_dsp::db_to_gain(auto_gain_db(&s)));
-        let out = (power(&l[24_000..]) + power(&r[24_000..])) * g * g;
-        let db = 10.0 * (out / reference).log10();
+        let db = 10.0 * ((power(&l[24_000..]) + power(&r[24_000..])) / reference).log10();
         assert!(db.abs() < 0.6, "{} doubles, source at {}: {db:+.2} dB", s.voices, s.source_pan);
     }
+    // The source keeps its level whatever the count: the trim is the doubles'.
+    assert_eq!(auto_gain_db(&DoublerSettings::default()), auto_gain_db(&DoublerSettings { voices: 3, ..DoublerSettings::default() }));
+    assert!((doubles_trim_db(&DoublerSettings { voices: 3, ..DoublerSettings::default() }) + 3.01).abs() < 0.01);
+}
+
+#[test]
+fn mono_bass_keeps_the_low_end_whole_in_mono() {
+    // Plucked notes (110…220 Hz fundamentals), the source hard left and a double hard right, the
+    // split at 300 Hz: summed to mono, the octave about 125 Hz never falls under the two sides'
+    // sum (the lows are in phase), where the double's own lows cancel by several dB at moments.
+    let (x, _) = notes(10);
+    let worst = |mono_bass: bool| {
+        let s = DoublerSettings { mono_bass, bass_hz: 300.0, ..DoublerSettings::default() };
+        let ([l, r], _) = render(&s, &x, 512);
+        let (bl, br) = (octave(&l, 125.0), octave(&r, 125.0));
+        (24_000..x.len() - 2400)
+            .step_by(2400)
+            .filter_map(|i| {
+                let (mut m, mut st) = (0.0, 0.0);
+                for k in i..i + 2400 {
+                    m += (bl[k] + br[k]).powi(2);
+                    st += bl[k].powi(2) + br[k].powi(2);
+                }
+                (st > 1e-9).then(|| 10.0 * (m / st).log10())
+            })
+            .fold(f64::MAX, f64::min)
+    };
+    let (off, on) = (worst(false), worst(true));
+    assert!(off < -2.0, "without it the lows cancel at moments: {off:+.1} dB");
+    assert!(on > -0.5, "with it they never do: {on:+.1} dB");
+    // And the side the source sits on rebuilds it whole (its highs and the lows: an allpass).
+    let n = noise(2.0);
+    let s = DoublerSettings { voices: 0, auto_gain: false, ..DoublerSettings::default() };
+    let ([l, _], _) = render(&s, &n, 512);
+    let db = 10.0 * (power(&l[24_000..]) / power(&n[24_000..])).log10();
+    assert!(db.abs() < 0.1, "{db}");
+}
+
+/// An octave band (two RBJ band-passes) of `x` about `fc`.
+fn octave(x: &[f32], fc: f64) -> Vec<f64> {
+    let w = std::f64::consts::TAU * fc / f64::from(FS);
+    let alpha = w.sin() / (2.0 * std::f64::consts::SQRT_2);
+    let a0 = 1.0 + alpha;
+    let (b0, b2, a1, a2) = (alpha / a0, -alpha / a0, -2.0 * w.cos() / a0, (1.0 - alpha) / a0);
+    let mut y: Vec<f64> = x.iter().map(|&v| f64::from(v)).collect();
+    for _ in 0..2 {
+        let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+        for v in y.iter_mut() {
+            let x0 = *v;
+            let out = b0 * x0 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1;
+            x1 = x0;
+            y2 = y1;
+            y1 = out;
+            *v = out;
+        }
+    }
+    y
 }
