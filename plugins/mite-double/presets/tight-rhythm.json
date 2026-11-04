@@ -1,0 +1,12 @@
+{
+  "plugin": "Mite Double",
+  "version": 1,
+  "name": "Tight Rhythm",
+  "params": {
+    "timing": 7.0,
+    "pitch": 4.0,
+    "variation": 35.0,
+    "chorus": 5.0,
+    "delay": 12.0
+  }
+}

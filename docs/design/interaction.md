@@ -601,3 +601,11 @@ threshold ±1 dB (Shift ±0.1); Esc closes the EQ panel.
 - Nothing to drag: the note, its arrows, the needle and the trace follow the input. Click the
   TUNING pill for the list of tunings (the strings shown; every note is read either way).
   Footer: Mute (silence the output while tuning), A4 (the reference, wheel 0.5 Hz, Shift 0.1).
+
+## Mite Double (in-house design, 2026-11-04; docs/design/double-brief.md)
+
+- **Pucks** in the stereo field: S (the source) and 1–3 (the doubles). Drag: across the pan, up
+  and down the level (Shift ×0.2; one undo step a drag). Wheel: level. Double-click: back to its
+  default place. Right-click a double: Reset place, Remove (it and those after it; the first
+  stays). A dashed ghost is a double not playing: click it in.
+- **Pills** (DOUBLES): 1 / 2 / 3, and NEW TAKE EVERY NOTE ↔ EVERY FEW SECONDS.

@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite Double",
+  "version": 1,
+  "name": "Loose Take",
+  "params": {
+    "timing": 28.0,
+    "pitch": 12.0,
+    "variation": 75.0,
+    "chorus": 20.0,
+    "delay": 22.0,
+    "tone": -1.5
+  }
+}

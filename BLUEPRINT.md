@@ -114,6 +114,7 @@ MiteFX/
 | Reverb: modulated 32-line FDN with per-line absorption (decay time per frequency from free decay bands: bell, shelves, tilt), a tone EQ of `mite_dsp::eq` bands on its output, its T60 curve for drawing | `mite_dsp::reverb` (`Reverb`, `decay_at`, `decay_curve`; Verb, 2026-11-04; Delay's diffusion can build on it) |
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
 | Pitch detection (McLeod pitch method, sub-cent), notes and cents against a reference | `mite_dsp::pitch` (`PitchDetector`, `note_of`, `note_hz`; Tuner, 2026-11-04) |
+| Doubling: per-note timing, detune, level and tone from an onset detector, switched before each note arrives; chorus; placement | `mite_dsp::doubler` (`Doubler`; Double, 2026-11-04) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
 | Crossover rail: band regions, grips, ghost grips to pull a band in, merging onto a neighbour or off an end, badges with S/M tags, funnels to the cards, the band menu (solo, mute, copy, paste, reset, merge, remove), split/merge/remove/solo on the host's parameters, its help | `mite_ui::widgets::rail` (`Rail<B>`, `RailParams`, `BandMenu`; Shape and Sat, 2026-10-26) |
@@ -369,6 +370,17 @@ passes untouched or muted; the editor finds the pitch every 20 ms with the McLeo
 (`mite_dsp::pitch`, refined on a sinc-interpolated NSDF): within 0.2 cent on guitar strings, 0.5
 cent on a bass's lowest (tested). A huge note with its arrows, a ±50-cent strip with a needle, a
 six-second trace of the cents, the tuning's strings (nine tunings), A4 420…460 Hz, Mute.
+
+### 14c. Mite Double (2026-11-04)
+
+- A smart guitar doubler: "as close as possible to a real double take" (user).
+
+**Status (2026-11-04): built** (`docs/design/double-brief.md`; accent rose, new). Each picked note
+is heard (onset detector) and every double plays it again with its own timing, detune, level and
+tone, the switch done in the gap before the note reaches the double so each attack arrives whole
+(tested); the detune is a slow change of the reading that settles like a bent string; chorus, tone
+and up to three doubles; the source and each double placed in a stereo field (pucks), a mono
+correlation strip, TIMING and PITCH lanes showing every note's lag and cents. 0.4–0.9 % of a core.
 
 ### 15. Mite Amp (later)
 

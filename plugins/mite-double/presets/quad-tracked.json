@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Double",
+  "version": 1,
+  "name": "Quad Tracked",
+  "params": {
+    "voices": 2.0,
+    "timing": 16.0,
+    "pitch": 8.0,
+    "v2_pan": -70.0,
+    "v2_level": -2.0,
+    "v3_pan": 70.0,
+    "v3_level": -2.0,
+    "source_pan": -100.0,
+    "v1_pan": 100.0
+  }
+}

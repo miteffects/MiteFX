@@ -31,3 +31,6 @@ name = "Mite Delay"
 
 [mite_tuner]
 name = "Mite Tuner"
+
+[mite_double]
+name = "Mite Double"

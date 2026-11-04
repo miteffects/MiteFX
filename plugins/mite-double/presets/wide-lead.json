@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Double",
+  "version": 1,
+  "name": "Wide Lead",
+  "params": {
+    "source_pan": 0.0,
+    "voices": 1.0,
+    "v1_pan": -80.0,
+    "v1_level": -6.0,
+    "v2_pan": 80.0,
+    "v2_level": -6.0,
+    "timing": 10.0,
+    "pitch": 6.0,
+    "chorus": 25.0
+  }
+}

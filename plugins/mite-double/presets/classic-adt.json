@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Double",
+  "version": 1,
+  "name": "Classic ADT",
+  "params": {
+    "follow": 0.0,
+    "timing": 6.0,
+    "pitch": 3.0,
+    "variation": 0.0,
+    "chorus": 55.0,
+    "chorus_rate": 0.8,
+    "delay": 24.0,
+    "source_pan": -60.0,
+    "v1_pan": 60.0
+  }
+}

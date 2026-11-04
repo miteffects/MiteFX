@@ -1,0 +1,19 @@
+delay | ms | 8 | 60 | 16 | Log
+timing | ms | 0 | 40 | 14 | Linear
+pitch | ct | 0 | 25 | 7 | Linear
+variation | % | 0 | 100 | 50 | Linear
+chorus | % | 0 | 100 | 15 | Linear
+chorus_rate | Hz | 0.1 | 5 | 0.6 | Log
+tone | dB | -6 | 6 | 0 | Linear
+follow | bool | true
+voices | choice | 1, 2, 3 | 0
+source_pan | % | -100 | 100 | -100 | Linear
+source_level | dB | -48 | 6 | 0 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false
+v1_pan | % | -100 | 100 | 100 | Linear
+v1_level | dB | -48 | 6 | 0 | Linear
+v2_pan | % | -100 | 100 | -60 | Linear
+v2_level | dB | -48 | 6 | -3 | Linear
+v3_pan | % | -100 | 100 | 60 | Linear
+v3_level | dB | -48 | 6 | -3 | Linear
