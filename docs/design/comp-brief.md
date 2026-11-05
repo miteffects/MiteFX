@@ -86,7 +86,7 @@ Defaults for stages 2–4 when first made: a leveller (upward compress at −32 
 |---|---|---|---|
 | **Character** | Clean · Punch · FET · Opto · Bus · Vari-Mu · Custom | Clean | 7 choices, each needs a **glyph** |
 | Custom character | attack ×0.1–4, release ×0.1–4, detector drive −6…+12 dB, slow tail %, program dependence %, ratio bend % | as Clean | only with Custom; six dials |
-| **Smart** | Off · Adaptive · Vocal · Master | Off | glyphs needed; Adaptive bends the release to the material; Vocal (2026-11-05, as Pro-C 2's) sets ratio and knee itself (∞:1 over a 36 dB knee, the dials read AUTO) and keeps the sibilance guard (no adaptive release since the same day: ATTACK and RELEASE act as set); with Auto makeup on, Vocal's makeup is Pro-C's Auto Gain: from the settings alone, the curve cancelled at −12 dBFS (louder than the input; the other modes match loudness); Master also slides the whole curve to hold a target |
+| **Smart** | Off · Adaptive · Vocal · Master | Off | glyphs needed; Adaptive bends the release to the material; Vocal (2026-11-05, as Pro-C 2's) sets ratio and knee itself (∞:1 over a 36 dB knee, the dials read AUTO) and keeps the sibilance guard (no adaptive release since the same day: ATTACK and RELEASE act as set); Master also slides the whole curve to hold a target |
 | Target GR | 0 … 24 dB | 6 dB | Master only (Vocal until 2026-11-05): the average gain reduction Smart holds |
 | Smart amount | 0 … 100 % | 70 % | |
 | Sibilance guard | 0 … 100 % | 50 % | Smart: eases the detector off esses |

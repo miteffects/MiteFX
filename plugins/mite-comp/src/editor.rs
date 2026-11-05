@@ -405,7 +405,7 @@ impl CompView {
             FOOTER_TOP,
             (WIDTH, HEIGHT),
             vec![
-                FooterToggle { id: AUTO_MAKEUP.id, glyph: ToggleGlyph::Auto, words: "Auto makeup — follows the curve, so changing it doesn't change the level (never pumps); in Smart · Vocal, as Pro-C's Auto Gain: set from the settings alone, the lower the threshold the louder the voice" },
+                FooterToggle { id: AUTO_MAKEUP.id, glyph: ToggleGlyph::Auto, words: "Auto makeup — follows the curve, so changing it doesn't change the level (never pumps)" },
                 FooterToggle { id: DELTA.id, glyph: ToggleGlyph::Delta, words: "Delta — hear only what the compressor takes away" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the whole compressor, latency kept" },
             ],
@@ -1640,7 +1640,7 @@ impl CompView {
             return Help::default().text(match Self::smart(host) {
                 Smart::Off => "Smart · Off — nothing adapts",
                 Smart::Adaptive => "Smart · Adaptive — bends the release to the material",
-                Smart::Vocal => "Smart · Vocal — automatic ratio and knee (∞:1 over a very soft knee): set the threshold and the voice is brought to the front (with Auto makeup, as loud as Pro-C's Auto Gain makes it); ATTACK and RELEASE act as set; the detector eases off esses (SIBILANCE)",
+                Smart::Vocal => "Smart · Vocal — automatic ratio and knee (∞:1 over a very soft knee): set the threshold and the voice is brought to the front; ATTACK and RELEASE act as set; the detector eases off esses (SIBILANCE)",
                 Smart::Master => "Smart · Master — the curve follows the mix gently to hold the target",
             });
         }
