@@ -270,6 +270,19 @@ pub fn stage_gain_db(s: &Stage, level_db: f32, mu_boost: f32) -> f32 {
     }
 }
 
+/// Smart · Vocal's auto makeup, dB: Pro-C's Auto Gain (2026-11-05, user, against C-3 with Auto
+/// Gain on at −28 dB: "our is getting out really quieter"): FabFilter's works the gain out from
+/// the settings alone, never from the signal (their manual and forum: from Threshold, Ratio, Knee
+/// and Attack; "a signal-dependent version could vary during a session"), and gives generously.
+/// Ours matched the average loudness in and out, so a voice came out no louder than it went in;
+/// matching only its loud moments gave +0.7 dB on a steady voice. Vocal now cancels its curve at
+/// [`AUTO_MAKEUP_REF_DB`]: the lower the threshold, the louder and denser the voice, as Pro-C's
+/// (at −28 dB on a voice at −21 LUFS, about +6 dB out; `examples/vocal_comp level`). The other
+/// modes keep matching the loudness.
+pub fn vocal_makeup_db(stages: &[Stage; STAGES], offset_db: f32) -> f32 {
+    (AUTO_MAKEUP_REF_DB - curve_db(stages, AUTO_MAKEUP_REF_DB, offset_db)).clamp(-24.0, 24.0)
+}
+
 /// The stages' indices in processing order: by threshold, low to high (also the numbers the
 /// editor shows). Stages that are off sort last.
 pub fn order(stages: &[Stage; STAGES]) -> [usize; STAGES] {
@@ -1021,6 +1034,7 @@ impl Compressor {
             self.auto_k = auto_times(self.auto_heard);
         }
         let auto_short_k = 1.0 - coef(AUTO_SHORT_MS, fs);
+        let vocal_makeup = s.smart == Smart::Vocal;
         let heard_step = AUTO_EVERY as f32 / fs;
         // The meters hold mean squares: the floor is a power (it was the amplitude, −35 dB).
         let auto_floor = db_to_gain(AUTO_FLOOR_DB).powi(2);
@@ -1320,7 +1334,11 @@ impl Compressor {
                     self.auto_k = auto_times(self.auto_heard);
                 }
                 let auto_step = self.auto_k.2;
-                if s.auto_makeup && self.auto_level > 0.0 {
+                if s.auto_makeup && vocal_makeup {
+                    // Pro-C's Auto Gain: from the settings alone (see vocal_makeup_db).
+                    self.auto_db = vocal_makeup_db(&s.stages, self.offset_db);
+                    self.auto_trim = 0.0;
+                } else if s.auto_makeup && self.auto_level > 0.0 {
                     // The curve's gain at the music's level, then the trim towards what is measured.
                     let level = 10.0 * self.auto_level.log10();
                     let predicted = level - curve_db(&s.stages, level, self.offset_db);
@@ -1753,6 +1771,30 @@ mod tests {
         assert_eq!(st.played(Smart::Off), st);
         let inert = Stage { ratio: 1.0, ..st };
         assert_eq!(inert.played(Smart::Vocal), inert);
+    }
+
+    #[test]
+    fn smart_vocal_auto_makeup_comes_from_the_settings_like_pro_c_auto_gain() {
+        // The same gain for a quiet voice and a loud one (never from the signal): the curve
+        // cancelled at AUTO_MAKEUP_REF_DB; the lower the threshold, the more it gives.
+        let at = |threshold: f32, level: f32| {
+            let st = Stage { release_ms: 80.0, attack_ms: 5.0, ..stage(Quadrant::Compress, threshold, 4.0) };
+            let s = CompSettings { smart: Smart::Vocal, auto_makeup: true, sibilance: 0.0, ..settings(&[st]) };
+            let mut c = Compressor::new(FS);
+            c.prepare(FS, &s);
+            let x = db_to_gain(level);
+            let mut buf = vec![x; (FS * 2.0) as usize];
+            for b in buf.chunks_mut(512) {
+                c.process(&mut [b], None, &s);
+            }
+            (c.auto_db(), vocal_makeup_db(&s.played().stages, 0.0))
+        };
+        let (quiet, want) = at(-28.0, -40.0);
+        let (loud, _) = at(-28.0, -10.0);
+        assert!((quiet - want).abs() < 1e-4 && (loud - want).abs() < 1e-4, "{quiet:.2} / {loud:.2}, want {want:.2}");
+        // At −28 dB the curve at −12 dB takes 16.1 dB: that much comes back.
+        assert!((want - 16.06).abs() < 0.05, "{want:.2}");
+        assert!(at(-18.0, -20.0).0 < want - 5.0);
     }
 
     #[test]

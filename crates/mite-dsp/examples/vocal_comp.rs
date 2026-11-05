@@ -125,6 +125,41 @@ fn main() {
         }
         return;
     }
+    if std::env::args().nth(1).as_deref() == Some("level") {
+        // Threshold −28 dB (the user's comparison with Pro-C 3, Auto Gain on), auto makeup on: a
+        // line of four phrases sung three times; the last time round is measured (auto makeup
+        // has heard the song by then). Loudness in and out per phrase, and overall.
+        // STEADY=1: a voice that stays at one level.
+        let line = if std::env::var("STEADY").is_ok() { [(6.0, -14.0); 4] } else { [(6.0, -16.0), (6.0, -10.0), (6.0, -20.0), (6.0, -13.0)] };
+        let phrases: Vec<(f32, f32)> = line.iter().cycle().take(12).cloned().collect();
+        let (x, tag) = voice(&phrases);
+        let n = phrases.len();
+        let last = |v: Vec<f64>| v[n - 4..].to_vec();
+        let input = last(phrase_db(&x, &tag, n));
+        let mean = |v: &[f64]| 10.0 * (v.iter().map(|d| 10f64.powf(d / 10.0)).sum::<f64>() / v.len() as f64).log10();
+        let show = |name: &str, v: &[f64]| {
+            let d: Vec<String> = v.iter().map(|d| format!("{d:6.1}")).collect();
+            println!("{name:22} {}   overall {:6.1}  ({:+5.1} dB)", d.join(" "), mean(v), mean(v) - mean(&input));
+        };
+        show("input", &input);
+        let t: f32 = std::env::var("T").ok().and_then(|v| v.parse().ok()).unwrap_or(-28.0);
+        for (name, smart, ratio, knee, auto) in [("vocal, makeup off", Smart::Vocal, 4.0, 6.0, false), ("vocal, auto makeup", Smart::Vocal, 4.0, 6.0, true), ("off 4:1, auto makeup", Smart::Off, 4.0, 6.0, true)] {
+            let mut stages = [Stage::default(); STAGES];
+            stages[0] = Stage { on: true, threshold_db: t, ratio, knee_db: knee, attack_ms: 10.0, release_ms: 120.0, ..Stage::default() };
+            let s = CompSettings { stages, smart, auto_makeup: auto, ..CompSettings::default() };
+            let mut c = Compressor::new(FS);
+            c.prepare(FS, &s);
+            let mut y = x.clone();
+            for b in y.chunks_mut(512) {
+                c.process(&mut [b], None, &s);
+            }
+            show(name, &last(phrase_db(&y, &tag, n)));
+            if auto {
+                println!("{:22} auto makeup now {:+.1} dB", "", c.auto_db());
+            }
+        }
+        return;
+    }
     let phrases = [(6.0, -30.0), (6.0, -20.0), (6.0, -12.0), (6.0, -26.0), (6.0, -16.0), (6.0, -34.0)];
     let (x, tag) = voice(&phrases);
     let n = phrases.len();
