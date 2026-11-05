@@ -245,9 +245,6 @@ impl DeEssView {
         host.plain(id, host.normalized(id))
     }
 
-    fn on(host: &dyn ParamHost, id: &str) -> bool {
-        Self::plain(host, id) >= 0.5
-    }
 
     fn set_raw(host: &dyn ParamHost, id: &str, v: f32) {
         host.set_normalized(id, host.normalize(id, v));
