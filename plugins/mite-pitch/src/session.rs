@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
 
 use mite_core::Handover;
-use mite_dsp::melody::{Analysis, NoteEdit, affected, analyse, render, render_range};
+use mite_dsp::melody::{affected, analyse, detect_key, render, render_range, Analysis, NoteEdit};
 
 /// The longest take a transfer records, s.
 pub const MAX_TAKE_S: f64 = 600.0;
@@ -110,7 +110,59 @@ pub enum Status {
     Problem(String),
 }
 
+/// What a drag snaps pitch to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Snap {
+    #[default]
+    Semitone,
+    Scale,
+    Off,
+}
+
+/// The take's key: its tonic (0 = C), whether minor, and the snapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scale {
+    pub tonic: usize,
+    pub minor: bool,
+    pub snap: Snap,
+}
+
+const MAJOR_STEPS: [bool; 12] = [true, false, true, false, true, true, false, true, false, true, false, true];
+
+impl Scale {
+    /// Whether pitch class `pc` (0 = C) is in the key.
+    pub fn contains(&self, pc: usize) -> bool {
+        // A minor key is its relative major's notes.
+        let major_tonic = if self.minor { (self.tonic + 3) % 12 } else { self.tonic };
+        MAJOR_STEPS[(pc + 12 - major_tonic) % 12]
+    }
+
+    /// The pitch `cents` snaps to (with [`Snap::Off`], itself).
+    pub fn snap(&self, cents: f64, snap: Snap) -> f64 {
+        match snap {
+            Snap::Off => cents,
+            Snap::Semitone => (cents / 100.0).round() * 100.0,
+            Snap::Scale => {
+                let k = (cents / 100.0).round() as i64;
+                // The nearest semitone in the key.
+                (k - 6..=k + 6)
+                    .filter(|&m| self.contains(m.rem_euclid(12) as usize))
+                    .min_by(|a, b| ((*a as f64) * 100.0 - cents).abs().total_cmp(&((*b as f64) * 100.0 - cents).abs()))
+                    .map_or(k as f64 * 100.0, |m| m as f64 * 100.0)
+            }
+        }
+    }
+}
+
+/// What undo keeps: the notes' bounds and the edits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    pub bounds: Vec<(usize, usize)>,
+    pub edits: Vec<NoteEdit>,
+}
+
 pub struct State {
+    pub scale: Scale,
     pub take: Option<TakeInfo>,
     pub audio: Option<Arc<Vec<f32>>>,
     pub analysis: Option<Arc<Analysis>>,
@@ -122,7 +174,7 @@ enum Job {
     /// A recording finished: keep it (file), analyse it, render it.
     Recorded(Vec<f32>, i64, f64),
     /// Read a saved take back, analyse it, render it with these edits.
-    Load(TakeInfo, Vec<NoteEdit>),
+        Load(TakeInfo, Vec<NoteEdit>, Option<Vec<(usize, usize)>>),
     /// Re-render the samples of note `i`'s edit (or everything).
     Render(Option<usize>),
 }
@@ -154,8 +206,7 @@ pub struct Session {
 impl Session {
     pub fn new() -> Arc<Self> {
         let s = Arc::new(Self {
-            state: Mutex::new(State {
-                take: None,
+            state: Mutex::new(State { scale: Scale::default(), take: None,
                 audio: None,
                 analysis: None,
                 edits: Vec::new(),
@@ -322,6 +373,105 @@ impl Session {
         self.send(Job::Render(None));
     }
 
+        /// Several notes' edits at once (one drag over a selection).
+    pub fn set_many(&self, changes: &[(usize, NoteEdit)]) {
+        let changed: Vec<usize> = {
+            let mut st = self.lock();
+            changes
+                .iter()
+                .filter_map(|&(i, e)| {
+                    let slot = st.edits.get_mut(i)?;
+                    (*slot != e).then(|| {
+                        *slot = e;
+                        i
+                    })
+                })
+                .collect()
+        };
+        if changed.is_empty() {
+            return;
+        }
+        self.version.fetch_add(1, Ordering::AcqRel);
+        if changed.len() > 6 {
+            self.send(Job::Render(None));
+        } else {
+            for i in changed {
+                self.send(Job::Render(Some(i)));
+            }
+        }
+    }
+
+    /// The notes and edits now (for undo).
+    pub fn snapshot(&self) -> Option<Snapshot> {
+        let st = self.lock();
+        Some(Snapshot { bounds: st.analysis.as_ref()?.bounds(), edits: st.edits.clone() })
+    }
+
+    /// Back to a snapshot: the notes rebuilt if they were split or merged since, the edits.
+    pub fn restore(&self, snap: &Snapshot) {
+        {
+            let mut st = self.lock();
+            let (Some(a), Some(x)) = (st.analysis.clone(), st.audio.clone()) else { return };
+            if a.bounds() != snap.bounds {
+                let mut b = (*a).clone();
+                if !b.set_bounds(&x, &snap.bounds) {
+                    return;
+                }
+                st.analysis = Some(Arc::new(b));
+            }
+            if st.analysis.as_ref().map_or(0, |a| a.notes.len()) != snap.edits.len() {
+                return;
+            }
+            st.edits = snap.edits.clone();
+        }
+        self.version.fetch_add(1, Ordering::AcqRel);
+        self.send(Job::Render(None));
+    }
+
+    /// Splits note `i` at take sample `at`; both halves keep its edit.
+    pub fn split(&self, i: usize, at: usize) -> bool {
+        {
+            let mut st = self.lock();
+            let (Some(a), Some(x)) = (st.analysis.clone(), st.audio.clone()) else { return false };
+            let mut b = (*a).clone();
+            if !b.split(&x, i, at) {
+                return false;
+            }
+            let e = st.edits[i];
+            st.edits.insert(i + 1, e);
+            st.analysis = Some(Arc::new(b));
+        }
+        self.version.fetch_add(1, Ordering::AcqRel);
+        self.send(Job::Render(None));
+        true
+    }
+
+    /// Joins note `i` and the next; the joined note keeps note `i`'s edit.
+    pub fn merge(&self, i: usize) -> bool {
+        {
+            let mut st = self.lock();
+            let (Some(a), Some(x)) = (st.analysis.clone(), st.audio.clone()) else { return false };
+            let mut b = (*a).clone();
+            if !b.merge(&x, i) {
+                return false;
+            }
+            st.edits.remove(i + 1);
+            st.analysis = Some(Arc::new(b));
+        }
+        self.version.fetch_add(1, Ordering::AcqRel);
+        self.send(Job::Render(None));
+        true
+    }
+
+    pub fn scale(&self) -> Scale {
+        self.lock().scale
+    }
+
+    pub fn set_scale(&self, scale: Scale) {
+        self.lock().scale = scale;
+        self.version.fetch_add(1, Ordering::AcqRel);
+    }
+
     pub fn edits(&self) -> Vec<NoteEdit> {
         self.lock().edits.clone()
     }
@@ -342,17 +492,17 @@ impl Session {
             .edits
             .iter()
             .map(|e| {
-                serde_json::json!([
-                    e.shift_cents,
-                    e.drift,
-                    e.offset,
-                    e.stretch,
-                    e.formant_semitones,
-                    e.gain_db
-                ])
+                serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation])
             })
             .collect();
-        Some(serde_json::json!({"id": t.id, "start": t.start, "fs": t.sample_rate, "len": t.len, "edits": edits}).to_string())
+        let bounds: Vec<[usize; 2]> = st.analysis.as_ref().map(|a| a.bounds().into_iter().map(|(s, e)| [s, e]).collect()).unwrap_or_default();
+        let sc = st.scale;
+        let snap = match sc.snap {
+            Snap::Semitone => 0,
+            Snap::Scale => 1,
+            Snap::Off => 2,
+        };
+        Some(serde_json::json!({"id": t.id, "start": t.start, "fs": t.sample_rate, "len": t.len, "edits": edits, "bounds": bounds, "key": sc.tonic, "minor": sc.minor, "snap": snap}).to_string())
     }
 
     /// Restores what [`Self::to_json`] kept: the take is read back and analysed on the worker.
@@ -382,24 +532,29 @@ impl Session {
                             offset: g(2, 0.0),
                             stretch: g(3, 1.0),
                             formant_semitones: g(4, 0.0),
-                            gain_db: g(5, 0.0),
-                        }
+                            gain_db: g(5, 0.0), modulation: g(6, 1.0) }
                     })
                     .collect()
             })
             .unwrap_or_default();
-        let info = TakeInfo {
-            id: id.to_owned(),
-            start,
-            sample_rate: fs,
-            len: len as usize,
+                let bounds: Option<Vec<(usize, usize)>> = v["bounds"].as_array().map(|a| a.iter().filter_map(|p| Some((p.get(0)?.as_u64()? as usize, p.get(1)?.as_u64()? as usize))).collect());
+        let snap = match v["snap"].as_u64() {
+            Some(1) => Snap::Scale,
+            Some(2) => Snap::Off,
+            _ => Snap::Semitone,
         };
+        let scale = Scale { tonic: v["key"].as_u64().unwrap_or(0) as usize % 12, minor: v["minor"].as_bool().unwrap_or(false), snap };
+        self.lock().scale = scale;
+        let info = TakeInfo { id: id.to_owned(), start, sample_rate: fs, len: len as usize };
         if self.lock().take.as_ref() == Some(&info) {
-            self.set_edits(edits);
+            match bounds {
+                Some(b) => self.restore(&Snapshot { bounds: b, edits }),
+                None => self.set_edits(edits),
+            }
             return;
         }
         self.lock().status = Status::Analysing;
-        self.send(Job::Load(info, edits));
+        self.send(Job::Load(info, edits, bounds));
     }
 }
 
@@ -470,8 +625,10 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                             )
                         })
                         .err();
-                    let a = analyse(&audio, fs);
+                                        let a = analyse(&audio, fs);
+                    let (tonic, minor) = detect_key(&a.notes);
                     let mut st = s.lock();
+                    st.scale = Scale { tonic, minor, snap: st.scale.snap };
                     st.edits = vec![NoteEdit::default(); a.notes.len()];
                     st.take = Some(TakeInfo {
                         id,
@@ -491,13 +648,13 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                     s.version.fetch_add(1, Ordering::AcqRel);
                     render_all = true;
                 }
-                Job::Load(info, edits) => match std::fs::read(take_path(&s.dir(), &info.id)) {
+                Job::Load(info, edits, bounds) => match std::fs::read(take_path(&s.dir(), &info.id)) {
                     Ok(bytes) => {
-                        let audio: Vec<f32> = bytes
-                            .chunks_exact(4)
-                            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                            .collect();
-                        let a = analyse(&audio, info.sample_rate);
+                        let audio: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+                        let mut a = analyse(&audio, info.sample_rate);
+                        if let Some(b) = bounds {
+                            a.set_bounds(&audio, &b);
+                        }
                         let mut st = s.lock();
                         st.edits = if edits.len() == a.notes.len() {
                             edits

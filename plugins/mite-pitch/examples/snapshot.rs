@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..NoteEdit::default()
             },
         );
+        s.set_edit(2, NoteEdit { modulation: 0.3, formant_semitones: 4.0, gain_db: -6.0, ..NoteEdit::default() });
         s.wait_idle(std::time::Duration::from_secs(30));
         common::play(&mut e, &s, &vec![0.0; 40_000], 0, 512);
     }

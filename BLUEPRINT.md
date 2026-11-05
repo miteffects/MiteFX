@@ -465,7 +465,26 @@ a reload reads the file back. An edit re-renders only its stretch (`melody::rend
 sync points before each note: identical to a full render, tested). Editor: note blobs on a
 pitch grid (thickness = level), pitch curves, ghosts where sung, drag = pitch (semitones, Alt
 free), double-click = centre, undo/redo, wheel scroll/zoom, playhead follow. Bypass is the
-only parameter. Next: slice 3 (timing, length, drift, formant, level tools, split/merge).
+only parameter.
+
+**Slice 3 (2026-11-05): the sound fixed, the tools.** User: pitch changes "sound horribly
+broken", and note-by-note moves are not enough (Melodyne fine-tunes). Measured on the user's
+vocal (`examples/melody_quality`: clarity, jitter, pitch error, resynthesis at no shift): output
+grains were laid at tracker-pitch spacing unrelated to the marks, and marks jumped between
+peaks: at no shift the resynthesis error was louder than the voice (−2.8 dB). Now marks follow
+the waveform by normalised cross-correlation, grains are anchored on marks (after unvoiced audio
+and at sync points), each grain's halves are the periods either side of its mark, and the next
+output period is the marked period over the pitch ratio: no shift is 30 dB under the take,
+pitch error after a shift ~1 cent (95 %: 5–7, was 21–32), clarity kept. The drift splits into
+slow (two 220 ms averages: slides, sags) and modulation (vibrato): `NoteEdit::drift` scales the
+slow part, `NoteEdit::modulation` (new, state index 6) the fast. Notes split and merge
+(`Analysis::split/merge/set_bounds`; the state keeps the bounds). The key is found
+(Krumhansl–Kessler). Editor: tools main (pitch / timing by first movement, edges = length,
+double-click = onto the snap), vibrato, drift, formant, level (vertical drags, double-click =
+as sung), split (click = split, click a seam = join); selection by click, Shift, Ctrl, box,
+Ctrl+A; snap semitone / scale / free (Alt inverts, Shift fine, 1/10); key menu; Correct macro
+(Centre: pull onto the snap by %, Drift: take slow drift out by %) on the selection or all;
+undo/redo covers splits. Next: pitch transitions between notes, a waveform lane, ARA 2.
 
 ### 15. Mite Amp (later)
 

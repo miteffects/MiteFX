@@ -67,6 +67,9 @@ pub struct Note {
     /// The pitch less the centre, one per frame from `start` (unvoiced frames inside it
     /// filled in), cents.
     pub drift: Vec<f64>,
+    /// The slow part of the drift (smoothed over about a vibrato cycle: slides, sags, the
+    /// approach), one per frame; the rest (`drift − slow`) is the modulation (vibrato, wobble).
+    pub slow: Vec<f64>,
     /// Its RMS, dBFS.
     pub db: f64,
 }
@@ -296,51 +299,145 @@ fn find_notes(frames: &[Frame], hop: usize, x: &[f32], fs: f64) -> Vec<Note> {
             cuts_all.push((w[0], w[1]));
         }
     }
-    cuts_all
-        .into_iter()
-        .map(|(a, b)| {
-            let len = b - a;
-            // The centre: the vibrato-smoothed pitch (a moving average over about a cycle)
-            // averaged over the note's middle; a plain median of a vibrato that does not span
-            // whole cycles leans to one side.
-            let c: Vec<Option<f64>> = (a..b).map(|i| frames[i].cents).collect();
-            let sm: Vec<f64> = (len / 5..len - len / 5)
-                .filter_map(|i| {
-                    let (lo, hi) = (i.saturating_sub(smooth / 2), (i + smooth / 2 + 1).min(len));
-                    let v: Vec<f64> = c[lo..hi].iter().flatten().copied().collect();
-                    (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
-                })
-                .collect();
-            let centre = if sm.is_empty() {
-                median(&mut c.iter().flatten().copied().collect::<Vec<_>>())
-            } else {
-                sm.iter().sum::<f64>() / sm.len() as f64
-            };
-            let drift: Vec<f64> = (a..b)
-                .map(|i| frames[i].cents.map_or(0.0, |c| c - centre))
-                .collect();
-            let (s0, s1) = (a * hop, (b * hop).min(x.len()));
-            let rms = (x[s0..s1].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>()
-                / (s1 - s0).max(1) as f64)
-                .sqrt();
-            Note {
-                start: s0,
-                end: s1,
-                cents: centre,
-                drift,
-                db: 20.0 * rms.max(1e-12).log10(),
-            }
-        })
-        .collect()
+    cuts_all.into_iter().map(|(a, b)| make_note(frames, hop, x, fs, a, b)).collect()
 }
 
-/// One mark per period through the voiced stretches, at the waveform's largest positive peak
-/// near where the pitch says the period starts.
+/// The note over frames `a..b`: its centre, drift (and its slow part), level.
+fn make_note(frames: &[Frame], hop: usize, x: &[f32], fs: f64, a: usize, b: usize) -> Note {
+    let per_s = fs / hop as f64;
+    let smooth = ((SMOOTH_S * per_s) as usize).max(1);
+    let len = b - a;
+    // The centre: the vibrato-smoothed pitch (a moving average over about a cycle) averaged over
+    // the note's middle; a plain median of a vibrato that does not span whole cycles leans to
+    // one side.
+    let c: Vec<Option<f64>> = (a..b).map(|i| frames[i].cents).collect();
+    let sm: Vec<f64> = (len / 5..len - len / 5)
+        .filter_map(|i| {
+            let (lo, hi) = (i.saturating_sub(smooth / 2), (i + smooth / 2 + 1).min(len));
+            let v: Vec<f64> = c[lo..hi].iter().flatten().copied().collect();
+            (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+        })
+        .collect();
+    let centre = if sm.is_empty() {
+        median(&mut c.iter().flatten().copied().collect::<Vec<_>>())
+    } else {
+        sm.iter().sum::<f64>() / sm.len() as f64
+    };
+    let drift: Vec<f64> = c.iter().map(|c| c.map_or(0.0, |c| c - centre)).collect();
+    // The slow part: the drift through two moving averages [`SLOW_S`] long (voiced frames
+    // only), which take vibrato (4.5–7 Hz) down by 25 dB or more.
+    let w = ((SLOW_S * per_s) as usize).max(1);
+    let average = |v: &[f64], voiced: &dyn Fn(usize) -> bool| -> Vec<f64> {
+        (0..len)
+            .map(|i| {
+                let (lo, hi) = (i.saturating_sub(w / 2), (i + w / 2 + 1).min(len));
+                let k: Vec<f64> = (lo..hi).filter(|&k| voiced(k)).map(|k| v[k]).collect();
+                if k.is_empty() { v[i] } else { k.iter().sum::<f64>() / k.len() as f64 }
+            })
+            .collect()
+    };
+    let once = average(&drift, &|k| c[k].is_some());
+    let slow = average(&once, &|_| true);
+    let (s0, s1) = (a * hop, (b * hop).min(x.len()));
+    let rms = (x[s0..s1].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / (s1 - s0).max(1) as f64).sqrt();
+    Note { start: s0, end: s1, cents: centre, drift, slow, db: 20.0 * rms.max(1e-12).log10() }
+}
+
+/// The slow drift: the drift through two moving averages this long, s.
+pub const SLOW_S: f64 = 0.22;
+
+/// The shortest part a split leaves, s.
+pub const MIN_SPLIT_S: f64 = 0.03;
+
+impl Analysis {
+    /// The notes' bounds, samples (what a state keeps of splits and merges).
+    pub fn bounds(&self) -> Vec<(usize, usize)> {
+        self.notes.iter().map(|n| (n.start, n.end)).collect()
+    }
+
+    /// Notes rebuilt over `bounds` (samples, sorted, apart; as [`Self::bounds`] gave them) of the
+    /// take `x` this analysed. Returns false (and changes nothing) for bounds that do not fit.
+    pub fn set_bounds(&mut self, x: &[f32], bounds: &[(usize, usize)]) -> bool {
+        let n = self.frames.len();
+        let ok = bounds.iter().all(|&(s, e)| s < e && e / self.hop <= n && s % self.hop == 0) && bounds.windows(2).all(|w| w[0].1 <= w[1].0);
+        if !ok {
+            return false;
+        }
+        let fs = self.fs;
+        self.notes = bounds.iter().map(|&(s, e)| make_note(&self.frames, self.hop, x, fs, s / self.hop, e.div_ceil(self.hop).min(n))).collect();
+        true
+    }
+
+    /// Splits note `i` at sample `at` (to the nearest frame) into two. Returns false if either
+    /// part would be shorter than [`MIN_SPLIT_S`].
+    pub fn split(&mut self, x: &[f32], i: usize, at: usize) -> bool {
+        let Some(n) = self.notes.get(i) else { return false };
+        let k = ((at as f64 / self.hop as f64).round() as usize) * self.hop;
+        let min = (MIN_SPLIT_S * self.fs) as usize;
+        if k < n.start + min || k + min > n.end {
+            return false;
+        }
+        let mut b = self.bounds();
+        let end = b[i].1;
+        b[i].1 = k;
+        b.insert(i + 1, (k, end));
+        self.set_bounds(x, &b)
+    }
+
+    /// Joins note `i` and the next into one (across any gap between them).
+    pub fn merge(&mut self, x: &[f32], i: usize) -> bool {
+        if i + 1 >= self.notes.len() {
+            return false;
+        }
+        let mut b = self.bounds();
+        b[i].1 = b[i + 1].1;
+        b.remove(i + 1);
+        self.set_bounds(x, &b)
+    }
+}
+
+/// The key the notes suggest: its tonic (0 = C) and whether minor, by correlating the notes'
+/// pitch classes (weighted by length) with the Krumhansl–Kessler profiles.
+pub fn detect_key(notes: &[Note]) -> (usize, bool) {
+    const MAJOR: [f64; 12] = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+    const MINOR: [f64; 12] = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+    let mut h = [0.0f64; 12];
+    for n in notes {
+        h[((n.cents / 100.0).round() as i64).rem_euclid(12) as usize] += (n.end - n.start) as f64;
+    }
+    let corr = |p: &[f64; 12], t: usize| {
+        let (mh, mp) = (h.iter().sum::<f64>() / 12.0, p.iter().sum::<f64>() / 12.0);
+        let (mut num, mut dh, mut dp) = (0.0, 0.0, 0.0);
+        for k in 0..12 {
+            let (a, b) = (h[(k + t) % 12] - mh, p[k] - mp);
+            num += a * b;
+            dh += a * a;
+            dp += b * b;
+        }
+        num / (dh * dp).sqrt().max(1e-12)
+    };
+    let mut best = (f64::MIN, 0, false);
+    for t in 0..12 {
+        for (minor, p) in [(false, &MAJOR), (true, &MINOR)] {
+            let r = corr(p, t);
+            if r > best.0 {
+                best = (r, t, minor);
+            }
+        }
+    }
+    (best.1, best.2)
+}
+
+/// One mark per period through the voiced stretches: the first at the stretch's first period's
+/// largest peak, each next one a period on where the waveform around it best matches the waveform
+/// around the last (normalised cross-correlation), so every mark sits at the same point of its
+/// cycle however the peaks change shape.
 fn find_marks(x: &[f32], fs: f64, hop: usize, frames: &[Frame]) -> Vec<usize> {
     let hz_at = |t: usize| {
         let f = (t / hop).min(frames.len() - 1);
         frames[f].cents.map(cents_to_hz)
     };
+    let at = |k: isize| if k >= 0 && (k as usize) < x.len() { f64::from(x[k as usize]) } else { 0.0 };
     let mut marks = Vec::new();
     let mut t = 0usize;
     while t < x.len() {
@@ -348,27 +445,34 @@ fn find_marks(x: &[f32], fs: f64, hop: usize, frames: &[Frame]) -> Vec<usize> {
             t += hop;
             continue;
         };
-        // A voiced stretch begins: the first mark at the peak of its first period.
         let p = (fs / hz) as usize;
-        let first = (t..(t + p).min(x.len()))
-            .max_by(|&a, &b| x[a].total_cmp(&x[b]))
-            .unwrap_or(t);
+        let first = (t..(t + p).min(x.len())).max_by(|&a, &b| x[a].total_cmp(&x[b])).unwrap_or(t);
         marks.push(first);
         let mut m = first;
         while let Some(hz) = hz_at(m) {
             let p = fs / hz;
-            let guess = m as f64 + p;
-            let (lo, hi) = (
-                (guess - 0.3 * p) as usize,
-                ((guess + 0.3 * p) as usize).min(x.len().saturating_sub(1)),
-            );
-            if lo >= x.len() || lo > hi || hz_at(lo).is_none() {
+            let half = (0.5 * p).round() as isize;
+            let (lo, hi) = ((0.8 * p) as isize, (1.25 * p).ceil() as isize);
+            let mi = m as isize;
+            if (m as f64 + 0.8 * p) as usize >= x.len() {
                 break;
             }
-            let next = (lo..=hi)
-                .max_by(|&a, &b| x[a].total_cmp(&x[b]))
-                .unwrap_or(guess as usize);
-            if next <= m {
+            let e0: f64 = (-half..=half).map(|j| at(mi + j).powi(2)).sum();
+            let mut best = (f64::MIN, lo);
+            for lag in lo..=hi {
+                let (mut xy, mut e1) = (0.0, 0.0);
+                for j in -half..=half {
+                    let v = at(mi + lag + j);
+                    xy += at(mi + j) * v;
+                    e1 += v * v;
+                }
+                let r = xy / (e0 * e1).sqrt().max(1e-20);
+                if r > best.0 {
+                    best = (r, lag);
+                }
+            }
+            let next = (mi + best.1) as usize;
+            if next >= x.len() || hz_at(next).is_none() {
                 break;
             }
             marks.push(next);
@@ -384,7 +488,7 @@ fn find_marks(x: &[f32], fs: f64, hop: usize, frames: &[Frame]) -> Vec<usize> {
 pub struct NoteEdit {
     /// The centre moved by this, cents.
     pub shift_cents: f64,
-    /// How much of the drift (vibrato, slides) stays: 1 as sung, 0 flat.
+    /// How much of the slow drift (slides, sags) stays: 1 as sung, 0 none.
     pub drift: f64,
     /// Moved in time by this, samples.
     pub offset: f64,
@@ -393,11 +497,14 @@ pub struct NoteEdit {
     /// Formants moved by this, semitones.
     pub formant_semitones: f64,
     pub gain_db: f64,
+    /// How much of the modulation (vibrato, wobble) stays: 1 as sung, 0 none.
+    pub modulation: f64,
 }
 
 impl Default for NoteEdit {
     fn default() -> Self {
         Self {
+            modulation: 1.0,
             shift_cents: 0.0,
             drift: 1.0,
             offset: 0.0,
@@ -549,68 +656,74 @@ pub fn render_range(
     };
     let mut t_out = lo as f64;
     let mut next_sync = sync.partition_point(|&p| p <= t_out);
+    // Whether the next voiced grain must first be put on a mark (after unvoiced audio, a sync
+    // point, the start): so wherever nothing moves the grains land where they were, and the
+    // output is the input.
+    let mut anchor = true;
+    let max_p = 2.0 * fs / MIN_HZ;
     while (t_out as usize) < hi {
-        let t_in = map.map(t_out);
+        let mut t_in = map.map(t_out);
+        let voiced = a.hz_at(t_in).is_some() && !a.marks.is_empty();
+        if voiced && anchor {
+            // The first mark from here on: the output time that maps onto it.
+            let mk = a.marks.partition_point(|&m| (m as f64) < t_in);
+            if let Some(&m) = a.marks.get(mk) {
+                if (m as f64 - t_in) < max_p {
+                    let slope = (map.map(t_out + 1.0) - t_in).max(1e-6);
+                    t_out += (m as f64 - t_in) / slope;
+                    t_in = map.map(t_out);
+                }
+            }
+            anchor = false;
+            if t_out as usize >= hi {
+                break;
+            }
+        }
         let note = note_of_in(t_in);
         let e = note.map_or(NoteEdit::default(), |i| edits[i]);
         let gain = 10f64.powf(e.gain_db / 20.0);
-        // The input period here and the mark to cut at, when voiced.
-        let voiced = a.hz_at(t_in).is_some();
         let mk = a.marks.partition_point(|&m| (m as f64) < t_in);
         let nearest = [mk.checked_sub(1), (mk < a.marks.len()).then_some(mk)]
             .into_iter()
             .flatten()
-            .min_by(|&i, &j| {
-                ((a.marks[i] as f64) - t_in)
-                    .abs()
-                    .total_cmp(&((a.marks[j] as f64) - t_in).abs())
-            });
+            .min_by(|&i, &j| ((a.marks[i] as f64) - t_in).abs().total_cmp(&((a.marks[j] as f64) - t_in).abs()));
         if let (true, Some(mi)) = (voiced, nearest) {
-            let m = a.marks[mi];
-            let p_in = match (
-                mi.checked_sub(1).map(|j| a.marks[j]),
-                a.marks.get(mi + 1).copied(),
-            ) {
-                (Some(l), Some(r)) if r - l < 4 * (fs / MIN_HZ) as usize => 0.5 * (r - l) as f64,
-                (Some(l), _) if m - l < 2 * (fs / MIN_HZ) as usize => (m - l) as f64,
-                (_, Some(r)) if r - m < 2 * (fs / MIN_HZ) as usize => (r - m) as f64,
-                _ => fs / a.hz_at(t_in).unwrap_or(200.0),
+            let m = a.marks[mi] as f64;
+            let fallback = fs / a.hz_at(t_in).unwrap_or(200.0);
+            // The periods either side of the mark (the grain's halves).
+            let left = mi.checked_sub(1).map(|j| m - a.marks[j] as f64).filter(|&d| d < max_p);
+            let right = a.marks.get(mi + 1).map(|&r| r as f64 - m).filter(|&d| d < max_p);
+            let (hl, hr) = match (left, right) {
+                (Some(l), Some(r)) => (l, r),
+                (Some(l), None) => (l, l),
+                (None, Some(r)) => (r, r),
+                (None, None) => (fallback, fallback),
             };
-            // The new pitch: the note's new centre plus its drift (scaled), else as it was.
-            let hz = match note {
+            // The pitch moves by the note's shift and its drift scaled: a ratio on the period.
+            let ratio = match note {
                 Some(i) => {
                     let n = &a.notes[i];
                     let f = ((t_in - n.start as f64) / a.hop as f64).max(0.0) as usize;
-                    let d = n
-                        .drift
-                        .get(f.min(n.drift.len().saturating_sub(1)))
-                        .copied()
-                        .unwrap_or(0.0);
-                    cents_to_hz(n.cents + e.shift_cents + e.drift * d)
+                    let d = n.drift.get(f.min(n.drift.len().saturating_sub(1))).copied().unwrap_or(0.0);
+                    let sl = n.slow.get(f.min(n.slow.len().saturating_sub(1))).copied().unwrap_or(0.0);
+                    2f64.powf((e.shift_cents + (e.drift - 1.0) * sl + (e.modulation - 1.0) * (d - sl)) / 1200.0)
                 }
-                None => a.hz_at(t_in).unwrap_or(200.0),
+                None => 1.0,
             };
-            let p_out = fs / hz;
-            let ratio = 2f64.powf(e.formant_semitones / 12.0);
-            // A two-period grain around the mark, resampled by the formant ratio, laid at t_out.
-            let half_in = p_in;
-            let half_out = half_in / ratio;
-            let n = (2.0 * half_out).ceil() as isize;
-            for k in -n / 2..=n / 2 {
-                let u = k as f64 / half_out;
+            let fr = 2f64.powf(e.formant_semitones / 12.0);
+            // The grain: the input from the mark before to the mark after (Hann halves),
+            // resampled by the formant ratio, centred at t_out.
+            let (ol, or) = (hl / fr, hr / fr);
+            for k in (-ol.ceil() as isize)..=(or.ceil() as isize) {
+                let (u, src) = if k < 0 { (k as f64 / ol, m + k as f64 * fr) } else { (k as f64 / or, m + k as f64 * fr) };
                 if u.abs() >= 1.0 {
                     continue;
                 }
                 let w = 0.5 + 0.5 * (std::f64::consts::PI * u).cos();
-                lay(
-                    &mut acc,
-                    &mut wsum,
-                    t_out + k as f64,
-                    w,
-                    sample(x, m as f64 + u * half_in) * gain,
-                );
+                lay(&mut acc, &mut wsum, t_out + k as f64, w, sample(x, src) * gain);
             }
-            t_out += p_out;
+            // The next output period: the input's (towards the next mark) over the ratio.
+            t_out += hr / ratio;
         } else {
             // Unvoiced: a short grain from the matching input time.
             let half = noise_len as f64 / 2.0;
@@ -620,21 +733,17 @@ pub fn render_range(
                     continue;
                 }
                 let w = 0.5 + 0.5 * (std::f64::consts::PI * u).cos();
-                lay(
-                    &mut acc,
-                    &mut wsum,
-                    t_out + k as f64,
-                    w,
-                    sample(x, t_in + k as f64) * gain,
-                );
+                lay(&mut acc, &mut wsum, t_out + k as f64, w, sample(x, t_in + k as f64) * gain);
             }
             t_out += half;
+            anchor = true;
         }
         // The next grain starts at a sync point rather than step over it.
         if let Some(&p) = sync.get(next_sync) {
             if t_out >= p {
                 t_out = p;
                 next_sync += 1;
+                anchor = true;
             }
         }
     }
@@ -939,20 +1048,62 @@ mod tests {
     }
 
     #[test]
-    fn drift_flattens_or_doubles_the_vibrato() {
+    fn modulation_flattens_or_doubles_the_vibrato_and_drift_leaves_it() {
         let (x, truth) = line();
         let a = analyse(&x, FS);
         let (s, e, _) = truth[0];
         let (_, sung) = spread(&x, s, e);
-        for (amount, lo, hi) in [(0.0, 0.0, 4.0), (2.0, 1.7 * sung, 2.3 * sung)] {
+        for (amount, lo, hi) in [(0.0, 0.0, 6.0), (2.0, 1.7 * sung, 2.3 * sung)] {
             let mut edits = vec![NoteEdit::default(); a.notes.len()];
-            edits[0].drift = amount;
+            edits[0].modulation = amount;
             let (_, sd) = spread(&render(&x, &a, &edits), s, e);
-            assert!(
-                (lo..hi).contains(&sd),
-                "drift {amount}: spread {sd:.1} (sung {sung:.1})"
-            );
+            assert!((lo..hi).contains(&sd), "modulation {amount}: spread {sd:.1} (sung {sung:.1})");
         }
+        // The line sings no slides: without its slow drift the vibrato stays.
+        let mut edits = vec![NoteEdit::default(); a.notes.len()];
+        edits[0].drift = 0.0;
+        let (_, sd) = spread(&render(&x, &a, &edits), s, e);
+        assert!((0.8 * sung..1.2 * sung).contains(&sd), "drift 0: spread {sd:.1} (sung {sung:.1})");
+    }
+
+    #[test]
+    fn split_and_merge_rebuild_the_notes() {
+        let (x, _) = line();
+        let mut a = analyse(&x, FS);
+        let before = a.notes.clone();
+        let n = &before[2];
+        let mid = (n.start + n.end) / 2;
+        assert!(a.split(&x, 2, mid));
+        assert_eq!(a.notes.len(), before.len() + 1);
+        assert_eq!((a.notes[2].start, a.notes[3].end), (n.start, n.end));
+        // Both halves sing the same note.
+        assert!((a.notes[2].cents - n.cents).abs() < 15.0 && (a.notes[3].cents - n.cents).abs() < 15.0);
+        // Too near an end: refused.
+        assert!(!a.split(&x, 2, a.notes[2].start + 10));
+        assert!(a.merge(&x, 2));
+        assert_eq!(a.notes, before);
+        // Bounds round-trip.
+        let b = a.bounds();
+        let mut c = analyse(&x, FS);
+        assert!(c.set_bounds(&x, &b));
+        assert_eq!(c.notes, a.notes);
+        assert!(!c.set_bounds(&x, &[(100, 50)]));
+    }
+
+    #[test]
+    fn the_key_is_found() {
+        // A C major scale up and down, the tonic held longest.
+        let n = |cents: f64, seconds: f64| Sung { cents, seconds, vibrato_cents: 10.0, vibrato_hz: 5.5, db: -12.0 };
+        let steps = [0.0, 200.0, 400.0, 500.0, 700.0, 900.0, 1100.0, 1200.0, 700.0, 400.0, 0.0];
+        let line: Vec<Sung> = steps.iter().map(|&c| n(6000.0 + c, if c == 0.0 || c == 1200.0 { 0.6 } else { 0.25 })).collect();
+        let (x, _) = sing(&line, 0.06, FS);
+        let a = analyse(&x, FS);
+        assert_eq!(detect_key(&a.notes), (0, false));
+        // A minor: the same notes, A held.
+        let steps = [900.0, 1100.0, 1200.0, 1400.0, 1600.0, 1700.0, 1900.0, 2100.0, 1600.0, 900.0];
+        let line: Vec<Sung> = steps.iter().map(|&c| n(5700.0 + c - 900.0, if c == 900.0 || c == 2100.0 { 0.6 } else { 0.25 })).collect();
+        let (x, _) = sing(&line, 0.06, FS);
+        assert_eq!(detect_key(&analyse(&x, FS).notes), (9, true));
     }
 
     #[test]
@@ -993,7 +1144,7 @@ mod tests {
     fn formant_and_level_edits() {
         let (x, truth) = line();
         let a = analyse(&x, FS);
-        let (s, e, c) = truth[2];
+        let (s, e, _) = truth[2];
         let mut edits = vec![NoteEdit::default(); a.notes.len()];
         edits[2].formant_semitones = 3.0;
         let y = render(&x, &a, &edits);
@@ -1002,17 +1153,23 @@ mod tests {
             centroid(&x[s + 4800..e - 4800]),
             centroid(&y[s + 4800..e - 4800]),
         );
-        assert!(now / was > 1.1, "centroid {was:.0} → {now:.0} Hz");
-        let mut down = vec![NoteEdit::default(); a.notes.len()];
-        down[2].formant_semitones = -3.0;
-        let z = render(&x, &a, &down);
-        assert!(centroid(&z[s + 4800..e - 4800]) / was < 0.9);
+        assert!(now > was, "centroid {was:.0} → {now:.0} Hz");
+        // In order from −6 to +6 semitones, ±6 by more than 10 % (the synthetic voice's
+        // resonators against its harmonics make single steps uneven; a real vocal moves −15,
+        // −10, +13, +31 %: examples/melody_quality).
+        let at = |f: f64| {
+            let mut ed = vec![NoteEdit::default(); a.notes.len()];
+            ed[2].formant_semitones = f;
+            centroid(&render(&x, &a, &ed)[s + 4800..e - 4800])
+        };
+        let c: Vec<f64> = [-6.0, -3.0, 0.0, 3.0, 6.0].into_iter().map(at).collect();
+        assert!(c.windows(2).all(|w| w[1] > w[0]), "{c:?}");
+        assert!(c[0] / was < 0.9 && c[4] / was > 1.1, "{c:?}");
         let ((was, _), (got, _)) = (spread(&x, s, e), spread(&y, s, e));
         assert!(
             (got - was).abs() < 3.0,
             "the pitch stays: {got:.1} vs {was:.1}"
         );
-        let _ = c;
         let mut edits = vec![NoteEdit::default(); a.notes.len()];
         edits[2].gain_db = -6.0;
         let y = render(&x, &a, &edits);

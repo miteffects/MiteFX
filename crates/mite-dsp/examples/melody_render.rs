@@ -158,13 +158,14 @@ fn main() -> Result<(), String> {
             "flat",
             each(&|_, _| NoteEdit {
                 drift: 0.0,
+                modulation: 0.0,
                 ..NoteEdit::default()
             }),
         ),
         (
             "wide",
             each(&|_, _| NoteEdit {
-                drift: 2.0,
+                modulation: 2.0,
                 ..NoteEdit::default()
             }),
         ),
