@@ -16,7 +16,7 @@ fn configured_state() -> Vec<u8> {
     let plugin = instance();
     let mut state: Value = serde_json::from_slice(&plugin.save()).expect("JSON");
     let params = state["params"].as_object_mut().expect("params");
-    for (id, v) in [("threshold", json!({"f32": -18.0})), ("reduce", json!({"i32": 1})), ("lo", json!({"f32": 6500.0})), ("hi", json!({"f32": 14000.0})), ("range", json!({"f32": 9.0})), ("lookahead", json!({"bool": false}))] {
+    for (id, v) in [("threshold", json!({"f32": -18.0})), ("reduce", json!({"i32": 1})), ("lo", json!({"f32": 6500.0})), ("hi", json!({"f32": 14000.0})), ("range", json!({"f32": 9.0})), ("lookahead_ms", json!({"f32": 0.0}))] {
         assert!(params.contains_key(id), "no parameter {id}");
         params.insert(id.into(), v);
     }

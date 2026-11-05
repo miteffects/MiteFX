@@ -17,7 +17,11 @@
 //! **Lookahead:** the audio is delayed 3 ms behind the detection (that is the latency); switching
 //! it fades out, changes, fades in (5 ms each). **Listen:** the trigger band alone.
 
-pub const LOOKAHEAD_MS: f32 = 3.0;
+/// The lookahead's reach, ms (user, 2026-11-05: "dynamic lookahead" → a time, not on/off).
+pub const MAX_LOOKAHEAD_MS: f32 = 10.0;
+/// A new lookahead time is put in once it has stayed put this long, ms: turning the dial changes
+/// the latency, and each change is a dip, so it waits for the hand to stop (one dip, not a stutter).
+const LOOK_SETTLE_MS: f32 = 150.0;
 const RMS_MS: f32 = 2.0;
 const ATTACK_MS: f32 = 0.5;
 const KNEE_DB: f32 = 4.0;
@@ -94,7 +98,9 @@ pub struct DeEssSettings {
     pub lo_hz: f32,
     pub hi_hz: f32,
     pub reduce: Reduce,
-    pub lookahead: bool,
+    /// How far the audio runs behind the detector, ms (0…`MAX_LOOKAHEAD_MS`): the reduction is in
+    /// place this long before the sibilant arrives. It is the latency (SPECTRAL has its own).
+    pub lookahead_ms: f32,
     pub listen: bool,
     /// The input as it came (delayed by the lookahead, so switching keeps time).
     pub bypass: bool,
@@ -105,7 +111,7 @@ pub struct DeEssSettings {
 
 impl Default for DeEssSettings {
     fn default() -> Self {
-        Self { threshold_db: -15.0, detection: Detection::Relative, range_db: 12.0, release_ms: 60.0, lo_hz: 5000.0, hi_hz: 12_000.0, reduce: Reduce::Shelf, lookahead: true, listen: false, bypass: false, auto_gain: false }
+        Self { threshold_db: -15.0, detection: Detection::Relative, range_db: 12.0, release_ms: 60.0, lo_hz: 5000.0, hi_hz: 12_000.0, reduce: Reduce::Shelf, lookahead_ms: 3.0, listen: false, bypass: false, auto_gain: false }
     }
 }
 
@@ -308,6 +314,10 @@ pub struct DeEsser {
     pos: usize,
     /// Samples of lookahead in use, and the dip while it changes (gain 1 → 0 → 1).
     look: usize,
+    /// The lookahead asked for, and for how many samples it has been asked (`LOOK_SETTLE_MS`).
+    pending: usize,
+    pending_age: u32,
+    settle: u32,
     dip: f32,
     dip_step: f32,
     dip_dir: f32,
@@ -461,7 +471,7 @@ fn spectral_frame(l: &mut [realfft::num_complex::Complex<f64>], r: &mut [realfft
 
 impl DeEsser {
     pub fn new(fs: f32, s: &DeEssSettings) -> Self {
-        let len = ((LOOKAHEAD_MS * 0.001 * fs) as usize).max(spectral_size(fs)) + 2;
+        let len = ((MAX_LOOKAHEAD_MS * 0.001 * fs).ceil() as usize).max(spectral_size(fs)) + 2;
         let mut d = Self {
             fs,
             band_c: [Coeffs::IDENTITY; 2],
@@ -477,6 +487,9 @@ impl DeEsser {
             delay: [vec![0.0; len], vec![0.0; len]],
             pos: 0,
             look: 0,
+            pending: 0,
+            pending_age: 0,
+            settle: (LOOK_SETTLE_MS * 0.001 * fs) as u32,
             dip: 1.0,
             dip_step: 1.0 / (DIP_MS * 0.001 * fs).max(1.0),
             dip_dir: 0.0,
@@ -501,10 +514,8 @@ impl DeEsser {
     pub fn latency_for(s: &DeEssSettings, fs: f32) -> usize {
         if s.reduce == Reduce::Spectral {
             spectral_size(fs)
-        } else if s.lookahead {
-            (LOOKAHEAD_MS * 0.001 * fs).round() as usize
         } else {
-            0
+            (s.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * fs).round() as usize
         }
     }
 
@@ -525,6 +536,8 @@ impl DeEsser {
         }
         self.pos = 0;
         self.look = Self::latency_for(s, self.fs);
+        self.pending = self.look;
+        self.pending_age = 0;
         self.dip = 1.0;
         self.dip_dir = 0.0;
         self.threshold = s.threshold_db;
@@ -598,7 +611,14 @@ impl DeEsser {
         for i in chunk_start..chunk_end {
             // A latency change (lookahead, or the spectral mode in or out): fade out, switch,
             // fade in.
-            if (want_look != self.look || want_spectral != self.spectral_on) && self.dip_dir == 0.0 {
+            if want_look != self.pending {
+                self.pending = want_look;
+                self.pending_age = 0;
+            } else {
+                self.pending_age = self.pending_age.saturating_add(1);
+            }
+            let settled = self.pending_age >= self.settle;
+            if ((want_look != self.look && settled) || want_spectral != self.spectral_on) && self.dip_dir == 0.0 {
                 self.dip_dir = -1.0;
             }
             if self.dip_dir != 0.0 {

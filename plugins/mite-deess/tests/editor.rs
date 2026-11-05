@@ -93,7 +93,7 @@ fn the_threshold_grip_moves_the_threshold_and_double_click_puts_it_back() {
 }
 
 #[test]
-fn the_pills_set_detection_reduction_and_lookahead() {
+fn the_pills_set_detection_and_reduction() {
     let (mut view, host) = setup();
     let at = view.pill(Pill::Detection(Detection::Absolute)).center();
     click(&mut view, &host, at);
@@ -101,9 +101,6 @@ fn the_pills_set_detection_reduction_and_lookahead() {
     let at = view.pill(Pill::Reduce(Reduce::Band)).center();
     click(&mut view, &host, at);
     assert_eq!(plain(&host, REDUCE.id), 1.0);
-    let at = view.pill(Pill::Lookahead).center();
-    click(&mut view, &host, at);
-    assert_eq!(plain(&host, LOOKAHEAD.id), 0.0);
 }
 
 #[test]
@@ -115,7 +112,8 @@ fn the_dials_and_pills_sit_in_their_groups() {
     assert!(groups[0].1.contains(view.dial(THRESHOLD.id).expect("threshold")));
     assert!(groups[1].1.contains(view.dial(RANGE.id).expect("range")));
     assert!(groups[1].1.contains(view.dial(RELEASE.id).expect("release")));
-    for pill in [Pill::Detection(Detection::Relative), Pill::Lookahead] {
+    assert!(groups[0].1.contains(view.dial(LOOKAHEAD.id).expect("lookahead")));
+    for pill in [Pill::Detection(Detection::Relative), Pill::Detection(Detection::Absolute)] {
         assert!(groups[0].1.contains(view.pill(pill).center()));
     }
     for r in [Reduce::Shelf, Reduce::Band, Reduce::Wide] {

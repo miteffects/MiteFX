@@ -39,9 +39,12 @@
   frame (10.7 ms at 48 kHz; the lookahead is built in): switching in and out goes behind the same
   dip as the lookahead, the host told. The spectral path runs in every mode (warm for the switch:
   +0.35 % of a core).
-- **Lookahead** (on by default): the audio 3 ms behind the detector (the latency; reported, and a
-  switch fades out, changes, fades in over 5 ms each): the reduction is in place when the sibilant
-  arrives (tested: its first ms > 3 dB lower than without).
+- **Lookahead** (a time, 0…10 ms, 3 by default; 2026-11-05, user: "dynamic lookahead" → an
+  adjustable time): the audio that long behind the detector (the latency; reported, and a change
+  fades out, changes, fades in over 5 ms each): the reduction is in place when the sibilant
+  arrives (tested: its first ms > 3 dB lower than without; 6 ms has it ready 3–4 ms before, 2 ms
+  not yet). A new time is put in once the dial has stayed put 150 ms: dragging it is one dip, not
+  a stutter (tested: a 200 ms drag changes the latency once, to the last time).
 - **Listen:** the trigger band alone. **Bypass:** the input, delayed by the lookahead (switching
   keeps time). Both glide 10 ms.
 - **Auto gain** (2026-11-05, user: "also make auto gain for de-ess"; on by default): gives back the
@@ -76,11 +79,13 @@ of a core.
 
 ## 3. Parameters (`tests/golden/mite_deess.params.txt`)
 
-`threshold`, `detection`, `range`, `release`, `lo`, `hi`, `reduce`, `lookahead`, `listen`,
+`threshold`, `detection`, `range`, `release`, `lo`, `hi`, `reduce`, `lookahead_ms`, `listen`,
 `out_gain`, `bypass`, `auto_gain` (state 3). Listen and bypass are monitoring. State 2 (2026-11-05): REDUCE gained
 Spectral; `migrate::v1_to_v2` re-normalises `reduce` in stored snapshots (a choice is stored
 normalised over its count: version 1's Band, 0.5, would have read as Wide). State 3 (2026-11-05):
-AUTO GAIN; `migrate::v2_to_v3` turns it off in older sessions so they sound as they did. Presets: Init, Gentle Vocal,
+AUTO GAIN; `migrate::v2_to_v3` turns it off in older sessions so they sound as they did. State 4
+(2026-11-05): `lookahead` (on/off) became `lookahead_ms`; `migrate::v3_to_v4` makes on 3 ms and off
+0, in the parameters and the snapshots. Presets: Init, Gentle Vocal,
 Strong Vocal, Bright Voice, Low Voice, Keep the Air (band), Cymbal Tamer (absolute).
 
 ## 4. Tests
@@ -101,4 +106,5 @@ pills, double-click, groups).
    block sizes, switching in and out without a click, the snapshot migration.
 2b. (done 2026-11-05) Auto gain (state 3). Tests: the loudness given back within 0.5 dB in every
    mode, nothing given when nothing is reduced (bit for bit), bypass exact with it on, no click.
+2c. (done 2026-11-05) The lookahead as a time, 0…10 ms (state 4).
 3. Mid/side detection.

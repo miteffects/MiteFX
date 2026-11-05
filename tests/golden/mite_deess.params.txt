@@ -5,7 +5,7 @@ release | ms | 10 | 500 | 60 | Log
 lo | Hz | 1000 | 16000 | 5000 | Log
 hi | Hz | 2000 | 20000 | 12000 | Log
 reduce | choice | Shelf, Band, Wide, Spectral | 0
-lookahead | bool | true
+lookahead_ms | ms | 0 | 10 | 3 | Linear
 listen | bool | false
 out_gain | dB | -24 | 24 | 0 | Linear
 bypass | bool | false

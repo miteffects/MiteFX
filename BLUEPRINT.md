@@ -324,7 +324,8 @@ reduction meter. 0.5–1.1 % of a core, 120 fps. Same day, slice 2: the **spectr
 loses only its peak, the hiss beside it stays; 10.7 ms latency) and the **heat-map** (where in
 frequency it turned down, every mode); state 2 migrates snapshots' `reduce`. Then **auto gain**
 (on by default: the reduced signal K-weighted against the input over 3 s, given back 0…+6 dB;
-bypass stays exact; state 3, older sessions keep it off). Next: mid/side detection.
+bypass stays exact; state 3, older sessions keep it off) and the **lookahead as a time** (0…10 ms
+dial, applied once the dial stops; state 4). Next: mid/side detection.
 
 ### 9. Mite Gate. Rival: FabFilter Pro-G
 

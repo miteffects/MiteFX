@@ -149,10 +149,57 @@ fn the_lookahead_has_the_reduction_ready_when_the_sibilant_arrives() {
     let s = DeEssSettings { range_db: 24.0, ..DeEssSettings::default() };
     // The first sibilant's first 1 ms, at the output: already reduced against no lookahead.
     let y = run(&s, &x, 64);
-    let y0 = run(&DeEssSettings { lookahead: false, ..s }, &x, 64);
+    let y0 = run(&DeEssSettings { lookahead_ms: 0.0, ..s }, &x, 64);
     let ahead = band_db(&y, 7000.0, 9600 + look..9600 + look + 96);
     let late = band_db(&y0, 7000.0, 9600..9600 + 96);
     assert!(late - ahead > 3.0, "lookahead {ahead:.1} dB, none {late:.1} dB");
+}
+
+#[test]
+fn the_lookahead_is_a_time_and_the_latency_is_that_time() {
+    // Every time is the latency, and the audio at that latency is the input (nothing reduced).
+    let (x, _) = voice(0.5, -24.0, -90.0);
+    for ms in [0.0, 1.0, 3.0, 6.5, 10.0] {
+        let s = DeEssSettings { lookahead_ms: ms, range_db: 0.0, ..DeEssSettings::default() };
+        let look = DeEsser::latency_for(&s, FS);
+        assert_eq!(look, (ms * 48.0).round() as usize, "{ms} ms");
+        let d = DeEsser::new(FS, &s);
+        assert_eq!(d.latency(), look);
+        let y = run(&s, &x, 128);
+        assert_eq!(&y[look..], &x[..x.len() - look], "{ms} ms");
+    }
+    // A longer lookahead has the reduction ready earlier: 3…4 ms before the sibilant, 6 ms of
+    // lookahead has already turned it down, 2 ms not yet.
+    let (x, _) = voice(1.0, -12.0, -6.0);
+    let before = |ms: f32| {
+        let s = DeEssSettings { lookahead_ms: ms, range_db: 24.0, ..DeEssSettings::default() };
+        let look = DeEsser::latency_for(&s, FS);
+        let y = run(&s, &x, 64);
+        // The vowel's air just before the sibilant (the shelf reaches down to it).
+        band_db(&y, 7000.0, 9600 + look - 192..9600 + look - 144) - band_db(&x, 7000.0, 9600 - 192..9600 - 144)
+    };
+    assert!(before(6.0) < before(2.0) - 1.0, "6 ms: {:.1} dB, 2 ms: {:.1} dB", before(6.0), before(2.0));
+}
+
+#[test]
+fn turning_the_lookahead_dial_changes_the_latency_once_when_it_stops() {
+    // A drag: a new time every 10 ms for 200 ms, then still. The latency stays until the hand
+    // has stopped (150 ms), then moves once, to the last time.
+    let x = vec![0.0f32; 48_000];
+    let mut s = DeEssSettings::default();
+    let mut d = DeEsser::new(FS, &s);
+    let mut seen = vec![d.latency()];
+    for (k, c) in x.chunks(480).enumerate() {
+        if k < 20 {
+            s.lookahead_ms = 3.0 + 0.3 * k as f32;
+        }
+        let mut b = c.to_vec();
+        d.process(&mut [&mut b], &s);
+        if seen.last() != Some(&d.latency()) {
+            seen.push(d.latency());
+        }
+    }
+    assert_eq!(seen, vec![144, (s.lookahead_ms * 48.0).round() as usize]);
 }
 
 #[test]
@@ -174,7 +221,7 @@ fn moving_any_setting_never_clicks() {
         ("range", DeEssSettings { range_db: 0.0, ..base }),
         ("band", DeEssSettings { lo_hz: 3000.0, hi_hz: 16_000.0, ..base }),
         ("reduce", DeEssSettings { reduce: Reduce::Band, ..base }),
-        ("lookahead", DeEssSettings { lookahead: false, ..base }),
+        ("lookahead", DeEssSettings { lookahead_ms: 0.0, ..base }),
         ("auto gain", DeEssSettings { auto_gain: true, ..base }),
         ("detection", DeEssSettings { detection: Detection::Absolute, threshold_db: -30.0, ..base }),
     ];

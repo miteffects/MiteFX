@@ -133,7 +133,6 @@ pub fn out_gain(host: &dyn ParamHost) -> f32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pill {
     Detection(Detection),
-    Lookahead,
     Reduce(Reduce),
 }
 
@@ -198,7 +197,8 @@ impl DeEssView {
         let meter = Rect::new(GROUP_COLS[1].0, GROUP_ROWS[0].0, GROUP_COLS[1].1, GROUP_ROWS[1].1);
         let dy = 108.0;
         let knobs = vec![
-            Knob::new(THRESHOLD, "THRESH", KnobKind::Unipolar, Point::new(detect.center().x, detect.y0 + dy), DIAL_D),
+            Knob::new(THRESHOLD, "THRESH", KnobKind::Unipolar, Point::new(detect.x0 + detect.width() * 0.3, detect.y0 + dy), DIAL_D),
+            Knob::new(LOOKAHEAD, "LOOKAHEAD", KnobKind::Unipolar, Point::new(detect.x0 + detect.width() * 0.7, detect.y0 + dy), DIAL_D),
             Knob::new(RANGE, "RANGE", KnobKind::Unipolar, Point::new(reduce.x0 + reduce.width() * 0.3, reduce.y0 + dy), DIAL_D),
             Knob::new(RELEASE, "RELEASE", KnobKind::Unipolar, Point::new(reduce.x0 + reduce.width() * 0.7, reduce.y0 + dy), DIAL_D),
         ];
@@ -265,9 +265,8 @@ impl DeEssView {
 
     pub fn pill(&self, pill: Pill) -> Rect {
         let (row, k, n) = match pill {
-            Pill::Detection(Detection::Relative) => (0, 0, 3),
-            Pill::Detection(Detection::Absolute) => (0, 1, 3),
-            Pill::Lookahead => (0, 2, 3),
+            Pill::Detection(Detection::Relative) => (0, 0, 2),
+            Pill::Detection(Detection::Absolute) => (0, 1, 2),
             Pill::Reduce(r) => (1, r.index(), 4),
         };
         let x0 = GROUP_COLS[0].0 + 14.0;
@@ -514,7 +513,6 @@ impl DeEssView {
         }
         self.draw_pill(cx, Pill::Detection(Detection::Relative), "RELATIVE", s.detection == Detection::Relative);
         self.draw_pill(cx, Pill::Detection(Detection::Absolute), "ABSOLUTE", s.detection == Detection::Absolute);
-        self.draw_pill(cx, Pill::Lookahead, "LOOKAHEAD", s.lookahead);
         for r in [Reduce::Shelf, Reduce::Band, Reduce::Wide, Reduce::Spectral] {
             self.draw_pill(cx, Pill::Reduce(r), &Reduce::NAMES[r.index()].to_uppercase(), s.reduce == r);
         }
@@ -587,11 +585,10 @@ impl DeEssView {
         match self.hot {
             Some(Hot::Pill(Pill::Detection(Detection::Relative))) => return Help::default().text("Relative — a sibilant is the top of the voice loud against the voice itself: the same de-essing loud or quiet (smart, the default)"),
             Some(Hot::Pill(Pill::Detection(Detection::Absolute))) => return Help::default().text("Absolute — the top past a level (dBFS): for cymbals and anything not a voice"),
-            Some(Hot::Pill(Pill::Lookahead)) => return Help::default().text("Lookahead — the audio 3 ms behind the detector, so the reduction is in place when the sibilant arrives (3 ms of latency; SPECTRAL has its own)"),
             Some(Hot::Pill(Pill::Reduce(Reduce::Shelf))) => return Help::default().text("Shelf — everything above the band's low edge turned down (the classic split de-esser)"),
             Some(Hot::Pill(Pill::Reduce(Reduce::Band))) => return Help::default().text("Band — only the trigger band turned down; the air above it stays"),
             Some(Hot::Pill(Pill::Reduce(Reduce::Wide))) => return Help::default().text("Wide — the whole signal turned down while a sibilant sounds"),
-            Some(Hot::Pill(Pill::Reduce(Reduce::Spectral))) => return Help::default().text("Spectral — every frequency of the band on its own: only what pokes over comes down (a whistly s loses its whistle, the hiss beside it stays). 11 ms of latency; LOOKAHEAD is built in."),
+            Some(Hot::Pill(Pill::Reduce(Reduce::Spectral))) => return Help::default().text("Spectral — every frequency of the band on its own: only what pokes over comes down (a whistly s loses its whistle, the hiss beside it stays). 11 ms of latency; the LOOKAHEAD dial does not apply."),
             _ => {}
         }
         if let Some(h) = self.footer.help(host) {
@@ -603,6 +600,7 @@ impl DeEssView {
                 "threshold" => " — how far a sibilant may poke (under the voice in RELATIVE, a level in ABSOLUTE); also the grip on the history",
                 "range" => " — the most it will turn down",
                 "release" => " — how fast it lets go after a sibilant",
+                "lookahead_ms" => " — how long before a sibilant the reduction is already in place (it is the latency; 0: none, the s's first edge slips through; SPECTRAL has its own)",
                 _ => "",
             };
             return Help::default().text(format!("{} ", k.spec.name)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(words);
@@ -629,7 +627,7 @@ impl DeEssView {
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
-        let pills = [Pill::Detection(Detection::Relative), Pill::Detection(Detection::Absolute), Pill::Lookahead, Pill::Reduce(Reduce::Shelf), Pill::Reduce(Reduce::Band), Pill::Reduce(Reduce::Wide), Pill::Reduce(Reduce::Spectral)];
+        let pills = [Pill::Detection(Detection::Relative), Pill::Detection(Detection::Absolute), Pill::Reduce(Reduce::Shelf), Pill::Reduce(Reduce::Band), Pill::Reduce(Reduce::Wide), Pill::Reduce(Reduce::Spectral)];
         for pill in pills {
             if self.pill(pill).inflate(2.0, 2.0).contains(p) {
                 return Some(Hot::Pill(pill));
@@ -710,7 +708,6 @@ impl DeEssView {
                 Some(Hot::Pill(pill)) => {
                     match pill {
                         Pill::Detection(d) => Self::gesture(host, DETECTION.id, if d == Detection::Absolute { 1.0 } else { 0.0 }),
-                        Pill::Lookahead => Self::gesture(host, LOOKAHEAD.id, if Self::on(host, LOOKAHEAD.id) { 0.0 } else { 1.0 }),
                         Pill::Reduce(r) => Self::gesture(host, REDUCE.id, r.index() as f32),
                     }
                     true

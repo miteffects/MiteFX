@@ -15,7 +15,9 @@ use nih_plug::prelude::*;
 ///   choice in stored snapshots.
 /// - 3 (2026-11-05): AUTO GAIN (on by default); [`crate::migrate::v2_to_v3`] turns it off in
 ///   sessions saved before it, so they sound as they did.
-pub const STATE_VERSION: u32 = 3;
+/// - 4 (2026-11-05): LOOKAHEAD is a time (0…10 ms, `lookahead_ms`), not on/off;
+///   [`crate::migrate::v3_to_v4`] turns on into 3 ms (what it was) and off into 0.
+pub const STATE_VERSION: u32 = 4;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -29,14 +31,14 @@ pub const RELEASE: ParamSpec = spec("release", "Release", "ms", 10.0, 500.0, 60.
 pub const LO: ParamSpec = spec("lo", "Band Low", "Hz", 1000.0, 16_000.0, 5000.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 pub const HI: ParamSpec = spec("hi", "Band High", "Hz", 2000.0, 20_000.0, 12_000.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 pub const REDUCE: ChoiceSpec = ChoiceSpec { id: "reduce", name: "Reduce", choices: &Reduce::NAMES, default: 0 };
-pub const LOOKAHEAD: BoolSpec = BoolSpec { id: "lookahead", name: "Lookahead", default: true };
+pub const LOOKAHEAD: ParamSpec = spec("lookahead_ms", "Lookahead", "ms", 0.0, mite_dsp::deess::MAX_LOOKAHEAD_MS, 3.0, ParamScale::Linear, 1, (0.25, 0.05), ParamDisplay::Time);
 pub const LISTEN: BoolSpec = BoolSpec { id: "listen", name: "Listen", default: false };
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 /// Give back the loudness the reduction took (user, 2026-11-05: "also make auto gain for de-ess").
 pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: true };
 
-const CONTINUOUS: [ParamSpec; 6] = [THRESHOLD, RANGE, RELEASE, LO, HI, OUT_GAIN];
+const CONTINUOUS: [ParamSpec; 7] = [THRESHOLD, RANGE, RELEASE, LO, HI, OUT_GAIN, LOOKAHEAD];
 
 pub fn manifest() -> String {
     [
@@ -82,7 +84,7 @@ pub struct DeEssParams {
     pub lo: FloatParam,
     pub hi: FloatParam,
     pub reduce: IntParam,
-    pub lookahead: BoolParam,
+    pub lookahead: FloatParam,
     pub listen: BoolParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
@@ -101,7 +103,7 @@ impl Default for DeEssParams {
             lo: float_param(&LO),
             hi: float_param(&HI),
             reduce: choice_param(&REDUCE, REDUCE.name.to_owned()),
-            lookahead: bool_param(&LOOKAHEAD, LOOKAHEAD.name.to_owned()),
+            lookahead: float_param(&LOOKAHEAD),
             listen: bool_param(&LISTEN, LISTEN.name.to_owned()),
             out_gain: float_param(&OUT_GAIN),
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
@@ -125,7 +127,7 @@ pub fn deess_settings(p: impl Fn(&str) -> f32) -> DeEssSettings {
         lo_hz: p(LO.id),
         hi_hz: p(HI.id),
         reduce: Reduce::from_index(index(p(REDUCE.id))),
-        lookahead: p(LOOKAHEAD.id) >= 0.5,
+        lookahead_ms: p(LOOKAHEAD.id),
         listen: p(LISTEN.id) >= 0.5,
         bypass: p(BYPASS.id) >= 0.5,
         auto_gain: p(AUTO_GAIN.id) >= 0.5,
@@ -143,7 +145,7 @@ impl DeEssParams {
             "lo" => self.lo.value(),
             "hi" => self.hi.value(),
             "reduce" => self.reduce.value() as f32,
-            "lookahead" => flag(&self.lookahead),
+            "lookahead_ms" => self.lookahead.value(),
             "listen" => flag(&self.listen),
             "bypass" => flag(&self.bypass),
             "auto_gain" => flag(&self.auto_gain),

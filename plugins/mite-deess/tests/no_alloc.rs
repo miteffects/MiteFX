@@ -17,7 +17,7 @@ fn engine_process_never_allocates() {
     for i in 0..1200 {
         s.detection = if (i / 70) % 2 == 0 { Detection::Relative } else { Detection::Absolute };
         s.reduce = Reduce::from_index((i / 40) % 4);
-        s.lookahead = (i / 90) % 3 != 2;
+        s.lookahead_ms = [3.0, 10.0, 0.0][(i / 90) % 3];
         s.listen = (i / 130) % 4 == 3;
         s.bypass = (i / 150) % 5 == 4;
         s.lo_hz = [3000.0, 5000.0, 9000.0][(i / 33) % 3];
