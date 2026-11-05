@@ -111,3 +111,25 @@ timing and length edits move and stretch notes to the sample; drift 0 flattens v
 spread under 3 cents), 200 % doubles it; formant shift moves the envelope by its ratio; level
 edits within 0.1 dB; an unedited render nulls against the input (within −60 dB); no clicks at
 note edges.
+
+### 1c. REAPER and ARA over CLAP (traced 2026-11-05)
+
+REAPER 7 (Linux) binds over CLAP (`com.celemony.ara.plugin_extension.draft/1`) and then crashes
+in its own code, about two seconds in, both ways:
+
+- **Track FX:** REAPER makes the instance in context 1 and assigns roles 6 (no playback
+  renderer). It links the instance to the track's record, but the clip's record never gets
+  linked, and the unchecked add-region path (0xa68db2 → 0xa6102f) dereferences the missing
+  renderer.
+- **Take FX:** context 2, roles 5; a record in REAPER's list at document +0x178 has no link, and
+  0xa6784c dereferences it.
+
+REAPER picks the roles from a context global (0x12d51c0: bit 0 adds the editor renderer, bit 1
+the playback renderer, bit 2 removes the view). The fixes on our side (every role's interface
+filled, readers made and destroyed on the model thread, notifications only from
+notifyModelUpdates) were needed, but they don't stop it. How to trace: a private copy of the
+REAPER config folder, `-cfgfile`, a `__startup.lua` that adds the FX, gdb with breakpoints at
+the addresses above.
+
+ARA over CLAP is now off unless `MITE_PITCH_CLAP_ARA` is set. Next: A6, ARA over VST3 (REAPER's
+mature ARA path), and report the CLAP crash to Cockos.

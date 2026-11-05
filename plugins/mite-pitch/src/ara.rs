@@ -74,12 +74,25 @@ pub fn log(what: &str) {
 
 /// `ClapPlugin::clap_factory`.
 pub fn clap_factory(id: &CStr) -> *const c_void {
+    if !offered() {
+        return std::ptr::null();
+    }
     // SAFETY: `id` is a valid C string.
     if unsafe { mite_ara::clap::is_one_of(id.as_ptr(), &FACTORY_IDS) } { &CLAP_FACTORY as *const _ as *const c_void } else { std::ptr::null() }
 }
 
+/// Whether ARA is offered over CLAP. Off unless `MITE_PITCH_CLAP_ARA` is set: REAPER 7 (Linux)
+/// binds over CLAP and then crashes in its own code (an ARA record it never links to an
+/// instance, as a track FX and as a take FX; traced 2026-11-05, docs/design/pitch-brief.md §1a).
+pub fn offered() -> bool {
+    std::env::var_os("MITE_PITCH_CLAP_ARA").is_some()
+}
+
 /// `ClapPlugin::clap_extension`.
 pub fn clap_extension(id: &CStr) -> *const c_void {
+    if !offered() {
+        return std::ptr::null();
+    }
     // SAFETY: as above.
     if unsafe { mite_ara::clap::is_one_of(id.as_ptr(), &PLUGIN_EXTENSION_IDS) } { &CLAP_EXTENSION as *const _ as *const c_void } else { std::ptr::null() }
 }

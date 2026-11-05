@@ -137,7 +137,7 @@ impl ClapPlugin for MitePitch {
         ClapFeature::AudioEffect,
         ClapFeature::Stereo,
         ClapFeature::Mono,
-        ClapFeature::PitchCorrection, ClapFeature::Custom("ara:supported")];
+        ClapFeature::PitchCorrection];
 
     fn clap_factory(id: &std::ffi::CStr) -> *const std::ffi::c_void {
         ara::clap_factory(id)
