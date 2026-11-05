@@ -111,7 +111,19 @@ pub struct DeEssSettings {
 
 impl Default for DeEssSettings {
     fn default() -> Self {
-        Self { threshold_db: -15.0, detection: Detection::Relative, range_db: 12.0, release_ms: 60.0, lo_hz: 5000.0, hi_hz: 12_000.0, reduce: Reduce::Shelf, lookahead_ms: 3.0, listen: false, bypass: false, auto_gain: false }
+        Self {
+            threshold_db: -15.0,
+            detection: Detection::Relative,
+            range_db: 12.0,
+            release_ms: 60.0,
+            lo_hz: 5000.0,
+            hi_hz: 12_000.0,
+            reduce: Reduce::Shelf,
+            lookahead_ms: 3.0,
+            listen: false,
+            bypass: false,
+            auto_gain: false,
+        }
     }
 }
 
@@ -133,15 +145,25 @@ pub struct Coeffs {
 }
 
 impl Coeffs {
-    const IDENTITY: Self = Self { b: [1.0, 0.0, 0.0], a: [0.0, 0.0] };
+    const IDENTITY: Self = Self {
+        b: [1.0, 0.0, 0.0],
+        a: [0.0, 0.0],
+    };
 
     fn butter(fc: f64, fs: f64, high: bool) -> Self {
         let w = std::f64::consts::TAU * fc / fs;
         let (sin, cos) = w.sin_cos();
         let alpha = sin / std::f64::consts::SQRT_2;
         let a0 = 1.0 + alpha;
-        let (b0, b1) = if high { ((1.0 + cos) / 2.0, -(1.0 + cos)) } else { ((1.0 - cos) / 2.0, 1.0 - cos) };
-        Self { b: [b0 / a0, b1 / a0, b0 / a0], a: [-2.0 * cos / a0, (1.0 - alpha) / a0] }
+        let (b0, b1) = if high {
+            ((1.0 + cos) / 2.0, -(1.0 + cos))
+        } else {
+            ((1.0 - cos) / 2.0, 1.0 - cos)
+        };
+        Self {
+            b: [b0 / a0, b1 / a0, b0 / a0],
+            a: [-2.0 * cos / a0, (1.0 - alpha) / a0],
+        }
     }
 
     /// RBJ high shelf (S = 1) of `gain_db` at `fc`: the identity at 0 dB, exactly.
@@ -153,8 +175,15 @@ impl Coeffs {
         let sa = 2.0 * a.sqrt() * alpha;
         let a0 = (a + 1.0) - (a - 1.0) * cos + sa;
         Self {
-            b: [a * ((a + 1.0) + (a - 1.0) * cos + sa) / a0, -2.0 * a * ((a - 1.0) + (a + 1.0) * cos) / a0, a * ((a + 1.0) + (a - 1.0) * cos - sa) / a0],
-            a: [2.0 * ((a - 1.0) - (a + 1.0) * cos) / a0, ((a + 1.0) - (a - 1.0) * cos - sa) / a0],
+            b: [
+                a * ((a + 1.0) + (a - 1.0) * cos + sa) / a0,
+                -2.0 * a * ((a - 1.0) + (a + 1.0) * cos) / a0,
+                a * ((a + 1.0) + (a - 1.0) * cos - sa) / a0,
+            ],
+            a: [
+                2.0 * ((a - 1.0) - (a + 1.0) * cos) / a0,
+                ((a + 1.0) - (a - 1.0) * cos - sa) / a0,
+            ],
         }
     }
 
@@ -167,7 +196,14 @@ impl Coeffs {
         let (sin, cos) = w.sin_cos();
         let alpha = sin * (std::f64::consts::LN_2 / 2.0 * octaves * w / sin).sinh();
         let a0 = 1.0 + alpha / a;
-        Self { b: [(1.0 + alpha * a) / a0, -2.0 * cos / a0, (1.0 - alpha * a) / a0], a: [-2.0 * cos / a0, (1.0 - alpha / a) / a0] }
+        Self {
+            b: [
+                (1.0 + alpha * a) / a0,
+                -2.0 * cos / a0,
+                (1.0 - alpha * a) / a0,
+            ],
+            a: [-2.0 * cos / a0, (1.0 - alpha / a) / a0],
+        }
     }
 
     /// Its magnitude at `freq`, dB.
@@ -175,8 +211,14 @@ impl Coeffs {
         let w = std::f64::consts::TAU * freq / fs;
         let z1 = (w.cos(), -w.sin());
         let z2 = ((2.0 * w).cos(), -(2.0 * w).sin());
-        let num = (self.b[0] + self.b[1] * z1.0 + self.b[2] * z2.0, self.b[1] * z1.1 + self.b[2] * z2.1);
-        let den = (1.0 + self.a[0] * z1.0 + self.a[1] * z2.0, self.a[0] * z1.1 + self.a[1] * z2.1);
+        let num = (
+            self.b[0] + self.b[1] * z1.0 + self.b[2] * z2.0,
+            self.b[1] * z1.1 + self.b[2] * z2.1,
+        );
+        let den = (
+            1.0 + self.a[0] * z1.0 + self.a[1] * z2.0,
+            self.a[0] * z1.1 + self.a[1] * z2.1,
+        );
         10.0 * ((num.0 * num.0 + num.1 * num.1) / (den.0 * den.0 + den.1 * den.1)).log10()
     }
 }
@@ -201,7 +243,12 @@ pub fn reduction_filter(s: &DeEssSettings, gr_db: f32, fs: f32) -> [Coeffs; BAND
             for (k, sec) in c.iter_mut().enumerate() {
                 let centre = lo * 2f64.powf(third * (k as f64 + 0.5));
                 let half = 0.5 * third * 1.2;
-                *sec = Coeffs::bell(centre * 2f64.powf(-half), centre * 2f64.powf(half), fs, g * BAND_SHARE);
+                *sec = Coeffs::bell(
+                    centre * 2f64.powf(-half),
+                    centre * 2f64.powf(half),
+                    fs,
+                    g * BAND_SHARE,
+                );
             }
         }
         Reduce::Wide | Reduce::Spectral => {}
@@ -215,7 +262,10 @@ pub fn response_db(s: &DeEssSettings, gr_db: f32, freq: f64, fs: f32) -> f64 {
         Reduce::Wide => -f64::from(gr_db.max(0.0)),
         // Per frequency, as it happens: the editor draws `DeEsser::spectral_gains`.
         Reduce::Spectral => 0.0,
-        _ => reduction_filter(s, gr_db, fs).iter().map(|c| c.response_db(freq, f64::from(fs))).sum(),
+        _ => reduction_filter(s, gr_db, fs)
+            .iter()
+            .map(|c| c.response_db(freq, f64::from(fs)))
+            .sum(),
     }
 }
 
@@ -336,7 +386,9 @@ pub struct DeEsser {
 
 /// The spectral mode's frame: 512 samples at 48 kHz (scaled with the rate), a quarter hop.
 pub fn spectral_size(fs: f32) -> usize {
-    ((512.0 * fs / 48_000.0) as usize).next_power_of_two().clamp(256, 4096)
+    ((512.0 * fs / 48_000.0) as usize)
+        .next_power_of_two()
+        .clamp(256, 4096)
 }
 
 /// The spectral reduction: the input in frames (`Stft`: 512 samples at 48 kHz, 94 Hz a bin, a
@@ -420,15 +472,30 @@ struct FrameParams {
 }
 
 #[allow(clippy::too_many_arguments)] // the frame's parts, borrowed apart from the STFT
-fn spectral_frame(l: &mut [realfft::num_complex::Complex<f64>], r: &mut [realfft::num_complex::Complex<f64>], gain_db: &mut [f64], target: &mut [f64], power: &mut [f64], weight: &[f64], p: FrameParams, gr_out: &mut f32) {
+fn spectral_frame(
+    l: &mut [realfft::num_complex::Complex<f64>],
+    r: &mut [realfft::num_complex::Complex<f64>],
+    gain_db: &mut [f64],
+    target: &mut [f64],
+    power: &mut [f64],
+    weight: &[f64],
+    p: FrameParams,
+    gr_out: &mut f32,
+) {
     let bins = l.len().min(r.len()).min(gain_db.len());
     for k in 0..bins {
-        power[k] = if k > 0 && k < bins - 1 { (l[k].norm_sqr() + r[k].norm_sqr()) / (2.0 * p.full_scale_sq) } else { 0.0 };
+        power[k] = if k > 0 && k < bins - 1 {
+            (l[k].norm_sqr() + r[k].norm_sqr()) / (2.0 * p.full_scale_sq)
+        } else {
+            0.0
+        };
     }
     let whole: f64 = power[..bins].iter().sum();
     let n_band: f64 = weight[..bins].iter().sum::<f64>().max(1.0);
     let gate = 10f64.powf(f64::from(GATE_DB) / 10.0);
-    let reference = 10.0 * (whole.max(1e-30) / n_band).log10() * (1.0 - p.absolute) + 10.0 * (1.0 / n_band).log10() * p.absolute + p.threshold_db;
+    let reference = 10.0 * (whole.max(1e-30) / n_band).log10() * (1.0 - p.absolute)
+        + 10.0 * (1.0 / n_band).log10() * p.absolute
+        + p.threshold_db;
     let level = |k: usize| 10.0 * power[k].max(1e-30).log10();
     for k in 0..bins {
         target[k] = 0.0;
@@ -455,7 +522,11 @@ fn spectral_frame(l: &mut [realfft::num_complex::Complex<f64>], r: &mut [realfft
                 *g = 0.0;
             }
         }
-        let lin = if *g > 0.0 { 10f64.powf(-*g / 20.0) } else { 1.0 };
+        let lin = if *g > 0.0 {
+            10f64.powf(-*g / 20.0)
+        } else {
+            1.0
+        };
         if *g > 0.0 {
             l[k] *= lin;
             r[k] *= lin;
@@ -563,7 +634,10 @@ impl DeEsser {
         let band = s.band(self.fs);
         if band != self.designed {
             let fs = f64::from(self.fs);
-            self.band_c = [Coeffs::butter(f64::from(band.0), fs, true), Coeffs::butter(f64::from(band.1), fs, false)];
+            self.band_c = [
+                Coeffs::butter(f64::from(band.0), fs, true),
+                Coeffs::butter(f64::from(band.1), fs, false),
+            ];
             self.designed = band;
         }
     }
@@ -572,7 +646,12 @@ impl DeEsser {
     #[allow(clippy::needless_range_loop)] // the sides' parallel state, by sample and side
     pub fn process(&mut self, channels: &mut [&mut [f32]], s: &DeEssSettings) -> DeEssTelemetry {
         let n_ch = channels.len().min(2);
-        let mut tel = DeEssTelemetry { gr_db: 0.0, band_db: -200.0, whole_db: -200.0, auto_db: 0.0 };
+        let mut tel = DeEssTelemetry {
+            gr_db: 0.0,
+            band_db: -200.0,
+            whole_db: -200.0,
+            auto_db: 0.0,
+        };
         if n_ch == 0 {
             return tel;
         }
@@ -597,126 +676,164 @@ impl DeEsser {
                     threshold_db: f64::from(self.threshold),
                     absolute: f64::from(self.absolute),
                     range_db: f64::from(s.range_db.max(0.0)),
-                    k_rel: 1.0 - (-(self.spectral.stft.hop() as f64) / (f64::from(s.release_ms.max(1.0)) * 0.001 * f64::from(fs))).exp(),
+                    k_rel: 1.0
+                        - (-(self.spectral.stft.hop() as f64)
+                            / (f64::from(s.release_ms.max(1.0)) * 0.001 * f64::from(fs)))
+                        .exp(),
                     full_scale_sq: self.spectral.stft.full_scale().powi(2),
                 };
-                let Spectral { stft, buf, gain_db, target, power, weight, gr_db, .. } = &mut self.spectral;
+                let Spectral {
+                    stft,
+                    buf,
+                    gain_db,
+                    target,
+                    power,
+                    weight,
+                    gr_db,
+                    ..
+                } = &mut self.spectral;
                 let [bl, br] = buf;
                 bl[..n].copy_from_slice(&channels[0][chunk_start..chunk_end]);
                 br[..n].copy_from_slice(&channels[n_ch - 1][chunk_start..chunk_end]);
-                stft.process(&mut bl[..n], &mut br[..n], &mut |a, b| spectral_frame(a, b, gain_db, target, power, weight, p, gr_db));
+                stft.process(&mut bl[..n], &mut br[..n], &mut |a, b| {
+                    spectral_frame(a, b, gain_db, target, power, weight, p, gr_db)
+                });
                 spec_gr = spec_gr.max(*gr_db);
                 *gr_db = 0.0;
             }
-        for i in chunk_start..chunk_end {
-            // A latency change (lookahead, or the spectral mode in or out): fade out, switch,
-            // fade in.
-            if want_look != self.pending {
-                self.pending = want_look;
-                self.pending_age = 0;
-            } else {
-                self.pending_age = self.pending_age.saturating_add(1);
-            }
-            let settled = self.pending_age >= self.settle;
-            if ((want_look != self.look && settled) || want_spectral != self.spectral_on) && self.dip_dir == 0.0 {
-                self.dip_dir = -1.0;
-            }
-            if self.dip_dir != 0.0 {
-                self.dip += self.dip_dir * self.dip_step;
-                if self.dip <= 0.0 {
-                    self.dip = 0.0;
-                    self.look = want_look;
-                    self.spectral_on = want_spectral;
-                    self.dip_dir = 1.0;
-                } else if self.dip >= 1.0 {
-                    self.dip = 1.0;
-                    self.dip_dir = 0.0;
+            for i in chunk_start..chunk_end {
+                // A latency change (lookahead, or the spectral mode in or out): fade out, switch,
+                // fade in.
+                if want_look != self.pending {
+                    self.pending = want_look;
+                    self.pending_age = 0;
+                } else {
+                    self.pending_age = self.pending_age.saturating_add(1);
                 }
-            }
-            self.threshold += (s.threshold_db - self.threshold) * self.k_glide;
-            self.absolute += (f32::from(u8::from(s.detection == Detection::Absolute)) - self.absolute) * self.k_glide;
-            let snap = |v: &mut f32, on: bool, k: f32| {
-                let t = f32::from(u8::from(on));
-                *v += (t - *v) * k;
-                if (*v - t).abs() < 1e-6 {
-                    *v = t;
+                let settled = self.pending_age >= self.settle;
+                if ((want_look != self.look && settled) || want_spectral != self.spectral_on)
+                    && self.dip_dir == 0.0
+                {
+                    self.dip_dir = -1.0;
                 }
-            };
-            snap(&mut self.listen, s.listen, self.k_switch);
-            snap(&mut self.bypass, s.bypass, self.k_switch);
-            snap(&mut self.auto.on, s.auto_gain, self.k_switch);
-            // Detection, linked: the louder side's.
-            let mut over = f32::MIN;
-            let mut nearest = f32::MIN;
-            let mut band_out = [0.0f32; 2];
-            for c in 0..n_ch {
-                let x = f64::from(channels[c][i]);
-                let st = &mut self.band_s[c];
-                let mut b = st[0].run(&self.band_c[0], x);
-                b = st[1].run(&self.band_c[0], b);
-                b = st[2].run(&self.band_c[1], b);
-                b = st[3].run(&self.band_c[1], b);
-                band_out[c] = b as f32;
-                self.band_pow[c] += (b * b - self.band_pow[c]) * self.k_rms;
-                self.whole_pow[c] += (x * x - self.whole_pow[c]) * self.k_rms;
-                let (bp, wp) = (self.band_pow[c].max(1e-20), self.whole_pow[c].max(1e-20));
-                let band_db = (10.0 * bp.log10()) as f32;
-                let whole_db = (10.0 * wp.log10()) as f32;
-                tel.band_db = tel.band_db.max(band_db);
-                tel.whole_db = tel.whole_db.max(whole_db);
-                if wp < gate {
-                    continue;
+                if self.dip_dir != 0.0 {
+                    self.dip += self.dip_dir * self.dip_step;
+                    if self.dip <= 0.0 {
+                        self.dip = 0.0;
+                        self.look = want_look;
+                        self.spectral_on = want_spectral;
+                        self.dip_dir = 1.0;
+                    } else if self.dip >= 1.0 {
+                        self.dip = 1.0;
+                        self.dip_dir = 0.0;
+                    }
                 }
-                let level = band_db - whole_db * (1.0 - self.absolute);
-                over = over.max(over_db(level, self.threshold));
-                nearest = nearest.max(level - self.threshold);
-            }
-            let target = if over == f32::MIN { 0.0 } else { over.clamp(0.0, s.range_db.max(0.0)) };
-            let below = if nearest == f32::MIN { 30.0 } else { (-nearest).max(0.0) };
-            let k_down = 1.0 - (1.0 - k_rel).powf(1.0 + below / SMART_DB);
-            self.gr += (target - self.gr) * if target > self.gr { self.k_att } else { k_down };
-            if self.gr < 1e-6 {
-                self.gr = 0.0;
-            }
-            if !self.spectral_on {
-                tel.gr_db = tel.gr_db.max(self.gr);
-            }
-            let coeffs = reduction_filter(s, self.gr, fs);
-            let wide = if s.reduce == Reduce::Wide { crate::db_to_gain(-self.gr) } else { 1.0 };
-            let sounding = nearest != f32::MIN;
-            let makeup = self.auto.now();
-            let (mut e_in, mut e_out) = (0.0f64, 0.0f64);
-            for c in 0..n_ch {
-                let x = channels[c][i];
-                let d = &mut self.delay[c];
-                d[self.pos] = x;
-                let xd = d[(self.pos + size - self.look) % size];
-                // At no reduction the filter is the identity: the input as it was.
-                let mut y = f64::from(xd);
-                for (st, co) in self.filt[c].iter_mut().zip(&coeffs) {
-                    y = st.run(co, y);
+                self.threshold += (s.threshold_db - self.threshold) * self.k_glide;
+                self.absolute += (f32::from(u8::from(s.detection == Detection::Absolute))
+                    - self.absolute)
+                    * self.k_glide;
+                let snap = |v: &mut f32, on: bool, k: f32| {
+                    let t = f32::from(u8::from(on));
+                    *v += (t - *v) * k;
+                    if (*v - t).abs() < 1e-6 {
+                        *v = t;
+                    }
+                };
+                snap(&mut self.listen, s.listen, self.k_switch);
+                snap(&mut self.bypass, s.bypass, self.k_switch);
+                snap(&mut self.auto.on, s.auto_gain, self.k_switch);
+                // Detection, linked: the louder side's.
+                let mut over = f32::MIN;
+                let mut nearest = f32::MIN;
+                let mut band_out = [0.0f32; 2];
+                for c in 0..n_ch {
+                    let x = f64::from(channels[c][i]);
+                    let st = &mut self.band_s[c];
+                    let mut b = st[0].run(&self.band_c[0], x);
+                    b = st[1].run(&self.band_c[0], b);
+                    b = st[2].run(&self.band_c[1], b);
+                    b = st[3].run(&self.band_c[1], b);
+                    band_out[c] = b as f32;
+                    self.band_pow[c] += (b * b - self.band_pow[c]) * self.k_rms;
+                    self.whole_pow[c] += (x * x - self.whole_pow[c]) * self.k_rms;
+                    let (bp, wp) = (self.band_pow[c].max(1e-20), self.whole_pow[c].max(1e-20));
+                    let band_db = (10.0 * bp.log10()) as f32;
+                    let whole_db = (10.0 * wp.log10()) as f32;
+                    tel.band_db = tel.band_db.max(band_db);
+                    tel.whole_db = tel.whole_db.max(whole_db);
+                    if wp < gate {
+                        continue;
+                    }
+                    let level = band_db - whole_db * (1.0 - self.absolute);
+                    over = over.max(over_db(level, self.threshold));
+                    nearest = nearest.max(level - self.threshold);
                 }
-                let y = if self.spectral_on { self.spectral.buf[c.min(1)][i - chunk_start] } else { y as f32 * wide };
-                // Auto gain meters the reduction alone (before its own gain: no loop), and gives
-                // back to the processed signal only (bypass and listen stay as they are).
-                let (ki, ko) = (self.auto.k_in[c].run(xd), self.auto.k_out[c].run(y));
-                e_in += ki * ki;
-                e_out += ko * ko;
-                let y = y * makeup;
-                // Each blend as a·(1 − t) + b·t, so its ends are exact (bypass gives the input).
-                let y = y * (1.0 - self.listen) + band_out[c] * self.listen;
-                let y = y * (1.0 - self.bypass) + xd * self.bypass;
-                channels[c][i] = y * self.dip;
+                let target = if over == f32::MIN {
+                    0.0
+                } else {
+                    over.clamp(0.0, s.range_db.max(0.0))
+                };
+                let below = if nearest == f32::MIN {
+                    30.0
+                } else {
+                    (-nearest).max(0.0)
+                };
+                let k_down = 1.0 - (1.0 - k_rel).powf(1.0 + below / SMART_DB);
+                self.gr += (target - self.gr) * if target > self.gr { self.k_att } else { k_down };
+                if self.gr < 1e-6 {
+                    self.gr = 0.0;
+                }
+                if !self.spectral_on {
+                    tel.gr_db = tel.gr_db.max(self.gr);
+                }
+                let coeffs = reduction_filter(s, self.gr, fs);
+                let wide = if s.reduce == Reduce::Wide {
+                    crate::db_to_gain(-self.gr)
+                } else {
+                    1.0
+                };
+                let sounding = nearest != f32::MIN;
+                let makeup = self.auto.now();
+                let (mut e_in, mut e_out) = (0.0f64, 0.0f64);
+                for c in 0..n_ch {
+                    let x = channels[c][i];
+                    let d = &mut self.delay[c];
+                    d[self.pos] = x;
+                    let xd = d[(self.pos + size - self.look) % size];
+                    // At no reduction the filter is the identity: the input as it was.
+                    let mut y = f64::from(xd);
+                    for (st, co) in self.filt[c].iter_mut().zip(&coeffs) {
+                        y = st.run(co, y);
+                    }
+                    let y = if self.spectral_on {
+                        self.spectral.buf[c.min(1)][i - chunk_start]
+                    } else {
+                        y as f32 * wide
+                    };
+                    // Auto gain meters the reduction alone (before its own gain: no loop), and gives
+                    // back to the processed signal only (bypass and listen stay as they are).
+                    let (ki, ko) = (self.auto.k_in[c].run(xd), self.auto.k_out[c].run(y));
+                    e_in += ki * ki;
+                    e_out += ko * ko;
+                    let y = y * makeup;
+                    // Each blend as a·(1 − t) + b·t, so its ends are exact (bypass gives the input).
+                    let y = y * (1.0 - self.listen) + band_out[c] * self.listen;
+                    let y = y * (1.0 - self.bypass) + xd * self.bypass;
+                    channels[c][i] = y * self.dip;
+                }
+                self.pos = (self.pos + 1) % size;
+                let a = &mut self.auto;
+                if sounding {
+                    a.p_in += (e_in - a.p_in) * a.k_meter;
+                    a.p_out += (e_out - a.p_out) * a.k_meter;
+                }
+                let target = if a.p_out > 1e-14 && a.p_in > 1e-14 {
+                    ((a.p_in / a.p_out).sqrt() as f32).clamp(1.0, crate::db_to_gain(AUTO_MAX_DB))
+                } else {
+                    1.0
+                };
+                a.gain += (target - a.gain) * a.k_glide;
             }
-            self.pos = (self.pos + 1) % size;
-            let a = &mut self.auto;
-            if sounding {
-                a.p_in += (e_in - a.p_in) * a.k_meter;
-                a.p_out += (e_out - a.p_out) * a.k_meter;
-            }
-            let target = if a.p_out > 1e-14 && a.p_in > 1e-14 { ((a.p_in / a.p_out).sqrt() as f32).clamp(1.0, crate::db_to_gain(AUTO_MAX_DB)) } else { 1.0 };
-            a.gain += (target - a.gain) * a.k_glide;
-        }
             chunk_start = chunk_end;
         }
         if self.spectral_on {
@@ -733,7 +850,13 @@ mod tests {
 
     #[test]
     fn the_filters_are_the_identity_at_no_reduction() {
-        for s in [DeEssSettings::default(), DeEssSettings { reduce: Reduce::Band, ..DeEssSettings::default() }] {
+        for s in [
+            DeEssSettings::default(),
+            DeEssSettings {
+                reduce: Reduce::Band,
+                ..DeEssSettings::default()
+            },
+        ] {
             for c in reduction_filter(&s, 0.0, 48_000.0) {
                 assert_eq!(c.b[0], 1.0);
                 assert_eq!((c.b[1], c.b[2]), (c.a[0], c.a[1]));
@@ -747,7 +870,10 @@ mod tests {
         let shelf = DeEssSettings::default();
         assert!((response_db(&shelf, 10.0, 16_000.0, fs) + 10.0).abs() < 0.5);
         assert!(response_db(&shelf, 10.0, 500.0, fs).abs() < 0.1);
-        let band = DeEssSettings { reduce: Reduce::Band, ..shelf };
+        let band = DeEssSettings {
+            reduce: Reduce::Band,
+            ..shelf
+        };
         assert!((response_db(&band, 10.0, (5000.0f64 * 12_000.0).sqrt(), fs) + 10.0).abs() < 0.5);
         assert!(response_db(&band, 10.0, 16_000.0, fs) > -1.5);
         assert!(response_db(&band, 10.0, 3000.0, fs) > -1.5);

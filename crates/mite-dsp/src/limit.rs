@@ -52,12 +52,48 @@ pub struct Style {
 
 /// The styles in their frozen order (append only): Transparent, Punch, Dense, Bus, Safe, Custom.
 pub const STYLES: [Style; 6] = [
-    Style { attack: 1.0, release: 1.0, slow: 0.3, slow_ratio: 4.0, program: 0.3 },
-    Style { attack: 0.6, release: 0.6, slow: 0.6, slow_ratio: 6.0, program: 0.4 },
-    Style { attack: 0.4, release: 0.35, slow: 0.85, slow_ratio: 8.0, program: 0.9 },
-    Style { attack: 1.5, release: 1.8, slow: 0.6, slow_ratio: 4.0, program: 0.5 },
-    Style { attack: 2.0, release: 2.5, slow: 0.5, slow_ratio: 4.0, program: 0.2 },
-    Style { attack: 1.0, release: 1.0, slow: 0.5, slow_ratio: 6.0, program: 0.5 },
+    Style {
+        attack: 1.0,
+        release: 1.0,
+        slow: 0.3,
+        slow_ratio: 4.0,
+        program: 0.3,
+    },
+    Style {
+        attack: 0.6,
+        release: 0.6,
+        slow: 0.6,
+        slow_ratio: 6.0,
+        program: 0.4,
+    },
+    Style {
+        attack: 0.4,
+        release: 0.35,
+        slow: 0.85,
+        slow_ratio: 8.0,
+        program: 0.9,
+    },
+    Style {
+        attack: 1.5,
+        release: 1.8,
+        slow: 0.6,
+        slow_ratio: 4.0,
+        program: 0.5,
+    },
+    Style {
+        attack: 2.0,
+        release: 2.5,
+        slow: 0.5,
+        slow_ratio: 4.0,
+        program: 0.2,
+    },
+    Style {
+        attack: 1.0,
+        release: 1.0,
+        slow: 0.5,
+        slow_ratio: 6.0,
+        program: 0.5,
+    },
 ];
 /// The style whose slow share is the `slow` dial.
 pub const CUSTOM: usize = 5;
@@ -76,7 +112,14 @@ struct SlidingMin {
 impl SlidingMin {
     fn new(max_window: usize) -> Self {
         let cap = max_window + 2;
-        Self { val: vec![ONE; cap], pos: vec![0; cap], head: 0, count: 0, t: 0, window: 1 }
+        Self {
+            val: vec![ONE; cap],
+            pos: vec![0; cap],
+            head: 0,
+            count: 0,
+            t: 0,
+            window: 1,
+        }
     }
 
     fn reset(&mut self, window: usize) {
@@ -118,7 +161,13 @@ struct BoxAvg {
 
 impl BoxAvg {
     fn new(max_window: usize) -> Self {
-        Self { buf: vec![ONE; max_window + 1], w: 0, n: 0, sum: 0, window: 1 }
+        Self {
+            buf: vec![ONE; max_window + 1],
+            w: 0,
+            n: 0,
+            sum: 0,
+            window: 1,
+        }
     }
 
     fn reset(&mut self, window: usize) {
@@ -172,7 +221,13 @@ impl ReleaseCoeffs {
     fn new(style: &Style, attack_ms: f32, release_ms: f32, slow: f32, rate: f32) -> Self {
         let coef = |ms: f32| 1.0 - (-1.0 / (0.001 * ms.max(0.01) * rate)).exp();
         let rel = release_ms * style.release;
-        Self { fast: coef(rel), slow_up: coef(rel * style.slow_ratio), slow_down: coef(attack_ms * style.attack), slow, program: style.program }
+        Self {
+            fast: coef(rel),
+            slow_up: coef(rel * style.slow_ratio),
+            slow_down: coef(attack_ms * style.attack),
+            slow,
+            program: style.program,
+        }
     }
 }
 
@@ -187,7 +242,11 @@ impl Release {
         } else {
             self.fast = (self.fast + (s_db - self.fast) * c.fast * scale).min(s_db);
         }
-        let k = if s_db < self.slow { c.slow_down } else { c.slow_up * scale };
+        let k = if s_db < self.slow {
+            c.slow_down
+        } else {
+            c.slow_up * scale
+        };
         self.slow = (self.slow + (s_db - self.slow) * k).min(0.0);
         // The deeper of the two reductions, without a corner where they cross: a smooth maximum
         // that rounds only within half the shallower depth of the crossing (exact elsewhere, 0 at
@@ -195,7 +254,11 @@ impl Release {
         // under the guaranteed one.
         let (a, b) = (-self.fast, -(c.slow * self.slow));
         let (deep, gap, w) = (a.max(b), (a - b).abs(), 0.5 * a.min(b));
-        let round = if gap < w { (w - gap) * (w - gap) / (4.0 * w) } else { 0.0 };
+        let round = if gap < w {
+            (w - gap) * (w - gap) / (4.0 * w)
+        } else {
+            0.0
+        };
         -(deep + round)
     }
 
@@ -213,7 +276,10 @@ struct Delay {
 
 impl Delay {
     fn new(max: usize) -> Self {
-        Self { buf: vec![0.0; max + 1], w: 0 }
+        Self {
+            buf: vec![0.0; max + 1],
+            w: 0,
+        }
     }
 
     fn reset(&mut self) {
@@ -249,7 +315,14 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { attack_ms: 30.0, release_ms: 100.0, style: 0, slow: 0.5, link_transients: 1.0, link_release: 1.0 }
+        Self {
+            attack_ms: 30.0,
+            release_ms: 100.0,
+            style: 0,
+            slow: 0.5,
+            link_transients: 1.0,
+            link_release: 1.0,
+        }
     }
 }
 
@@ -289,9 +362,18 @@ impl Limiter {
             box1: [BoxAvg::new(l), BoxAvg::new(l)],
             box2: [BoxAvg::new(l), BoxAvg::new(l)],
             release: [Release::default(); 2],
-            coeffs: ReleaseCoeffs::new(&STYLES[0], settings.attack_ms, settings.release_ms, 0.0, rate),
+            coeffs: ReleaseCoeffs::new(
+                &STYLES[0],
+                settings.attack_ms,
+                settings.release_ms,
+                0.0,
+                rate,
+            ),
             settings,
-            delay: [Delay::new(l + TruePeak::DELAY + 1), Delay::new(l + TruePeak::DELAY + 1)],
+            delay: [
+                Delay::new(l + TruePeak::DELAY + 1),
+                Delay::new(l + TruePeak::DELAY + 1),
+            ],
         };
         lim.configure(1, false, settings);
         lim
@@ -343,7 +425,11 @@ impl Limiter {
     fn release_coeffs(&self, s: &Settings) -> ReleaseCoeffs {
         let i = s.style.min(STYLES.len() - 1);
         let style = &STYLES[i];
-        let slow = if i == CUSTOM { s.slow.clamp(0.0, 1.0) } else { style.slow };
+        let slow = if i == CUSTOM {
+            s.slow.clamp(0.0, 1.0)
+        } else {
+            style.slow
+        };
         ReleaseCoeffs::new(style, s.attack_ms, s.release_ms, slow, self.rate)
     }
 
@@ -380,7 +466,11 @@ impl Limiter {
         }
         let mut s = [1.0f32; 2];
         for c in 0..chans {
-            let g = if v[c] > 1.0 { ((ONE_F / v[c]) as u32).min(ONE) } else { ONE };
+            let g = if v[c] > 1.0 {
+                ((ONE_F / v[c]) as u32).min(ONE)
+            } else {
+                ONE
+            };
             let m = self.min[c].push(g);
             let b = self.box2[c].push(self.box1[c].push(m));
             s[c] = b as f32 / ONE_F;
@@ -433,7 +523,11 @@ pub fn probe(settings: &Settings, lookahead_ms: f32, rate: f32) -> Vec<(f32, f32
     let total = pre + burst + tail + lim.latency();
     let mut out = Vec::with_capacity(total);
     for n in 0..total {
-        let x = if n >= pre && n < pre + burst { loud } else { quiet };
+        let x = if n >= pre && n < pre + burst {
+            loud
+        } else {
+            quiet
+        };
         let (_, g) = lim.process([x, x], false);
         if let Some(input_n) = n.checked_sub(lim.latency()) {
             out.push((ms(input_n) - ms(pre), crate::gain_to_db(g[0])));
@@ -478,8 +572,14 @@ mod tests {
                 let (l, r) = match kind {
                     0 => (rng.unit() * 2.0 - 1.0, rng.unit() * 2.0 - 1.0),
                     1 => ((t * 0.01).sin(), (t * 0.013).sin()),
-                    2 => (if k % 97 == 0 { 1.0 } else { 0.0 }, if k % 89 == 0 { -1.0 } else { 0.0 }),
-                    3 => ((t * std::f32::consts::PI * (0.9 + 0.1 * f)).sin(), (t * std::f32::consts::TAU * f).cos()),
+                    2 => (
+                        if k % 97 == 0 { 1.0 } else { 0.0 },
+                        if k % 89 == 0 { -1.0 } else { 0.0 },
+                    ),
+                    3 => (
+                        (t * std::f32::consts::PI * (0.9 + 0.1 * f)).sin(),
+                        (t * std::f32::consts::TAU * f).cos(),
+                    ),
                     _ => (0.0, 0.0),
                 };
                 out[i + k] = [l * level, r * level * (0.3 + rng.unit())];
@@ -510,7 +610,12 @@ mod tests {
             for (k, f) in x.iter().enumerate() {
                 // Attack, release, style and links move mid-stream.
                 if k == 3000 {
-                    let s = Settings { attack_ms: 0.1 + rng.unit() * 100.0, release_ms: 1.0 + rng.unit() * 300.0, style: rng.range(0, 5), ..settings };
+                    let s = Settings {
+                        attack_ms: 0.1 + rng.unit() * 100.0,
+                        release_ms: 1.0 + rng.unit() * 300.0,
+                        style: rng.range(0, 5),
+                        ..settings
+                    };
                     lim.set(s);
                 }
                 let (y, _) = lim.process(*f, true);
@@ -518,7 +623,10 @@ mod tests {
             }
         }
         assert!(worst <= 1.0 + 1e-6, "peak {worst}");
-        assert!(worst > 0.99, "the material should reach the ceiling: {worst}");
+        assert!(
+            worst > 0.99,
+            "the material should reach the ceiling: {worst}"
+        );
     }
 
     #[test]
@@ -544,7 +652,14 @@ mod tests {
         let lookahead = 120;
         let attack = lookahead;
         let mut lim = Limiter::new(48000.0, 256, 1);
-        lim.configure(lookahead, false, Settings { release_ms: 50.0, ..Settings::default() });
+        lim.configure(
+            lookahead,
+            false,
+            Settings {
+                release_ms: 50.0,
+                ..Settings::default()
+            },
+        );
         let mut gains = Vec::new();
         for i in 0..1000 {
             let x = if i >= 500 { 2.0 } else { 0.5 };
@@ -554,17 +669,33 @@ mod tests {
         assert!((gains[step_out] - 0.5).abs() < 1e-6, "{}", gains[step_out]);
         assert_eq!(gains[step_out - attack], 1.0);
         // S-shaped: slow at both ends, fastest in the middle, never rising.
-        let d: Vec<f32> = (step_out - attack..step_out).map(|i| gains[i] - gains[i + 1]).collect();
+        let d: Vec<f32> = (step_out - attack..step_out)
+            .map(|i| gains[i] - gains[i + 1])
+            .collect();
         assert!(d.iter().all(|&v| v >= 0.0));
         let mid = d[attack / 2];
-        assert!(d[2] < 0.2 * mid && d[attack - 3] < 0.2 * mid, "{} {} {}", d[2], mid, d[attack - 3]);
+        assert!(
+            d[2] < 0.2 * mid && d[attack - 3] < 0.2 * mid,
+            "{} {} {}",
+            d[2],
+            mid,
+            d[attack - 3]
+        );
     }
 
     #[test]
     fn link_holds_the_image_and_unlinked_channels_are_independent() {
         let mut lim = Limiter::new(48000.0, 64, 1);
         let mut run = |link: f32| {
-            lim.configure(32, false, Settings { link_transients: link, link_release: link, ..Settings::default() });
+            lim.configure(
+                32,
+                false,
+                Settings {
+                    link_transients: link,
+                    link_release: link,
+                    ..Settings::default()
+                },
+            );
             let mut last = ([0.0; 2], [0.0; 2]);
             for _ in 0..2000 {
                 last = lim.process([2.0, 0.5], true);
@@ -583,7 +714,15 @@ mod tests {
         let rate = 48000.0;
         let recover = |style: usize| {
             let mut lim = Limiter::new(rate, 256, 1);
-            lim.configure(96, false, Settings { style, release_ms: 100.0, ..Settings::default() });
+            lim.configure(
+                96,
+                false,
+                Settings {
+                    style,
+                    release_ms: 100.0,
+                    ..Settings::default()
+                },
+            );
             // 2 s at +12 dB, then quiet: how long until the gain is within 0.5 dB of unity.
             for _ in 0..96000 {
                 lim.process([4.0, 4.0], false);
@@ -619,7 +758,12 @@ mod tests {
             // The meter runs over the whole output; only the steady part counts (a slice's cut
             // would be a step, and its overshoot is not the limiter's).
             let mut meter = TruePeak::new(4);
-            let tp = y.iter().enumerate().map(|(i, &v)| (i, meter.push(v))).filter(|&(i, _)| i > 4000 && i + 100 < y.len()).fold(0.0f32, |m, (_, p)| m.max(p));
+            let tp = y
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| (i, meter.push(v)))
+                .filter(|&(i, _)| i > 4000 && i + 100 < y.len())
+                .fold(0.0f32, |m, (_, p)| m.max(p));
             let tp = crate::gain_to_db(tp);
             assert!(tp < 0.01, "{f} of the rate: {tp} dBTP");
         }
@@ -628,18 +772,41 @@ mod tests {
     #[test]
     fn the_probe_ramps_over_the_lookahead_holds_the_burst_and_comes_back() {
         let rate = 48000.0;
-        let s = Settings { release_ms: 50.0, ..Settings::default() };
+        let s = Settings {
+            release_ms: 50.0,
+            ..Settings::default()
+        };
         let shape = probe(&s, 2.0, rate);
-        let at = |t: f32| shape.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map_or(0.0, |p| p.1);
+        let at = |t: f32| {
+            shape
+                .iter()
+                .min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs()))
+                .map_or(0.0, |p| p.1)
+        };
         // Untouched before the lookahead, down by the excess on the burst, back after it.
         assert!(at(-2.2).abs() < 1e-3, "{}", at(-2.2));
         assert!(at(-1.0) < -0.5 && at(-1.0) > -5.5, "{}", at(-1.0));
         assert!((at(0.0) + PROBE_OVER_DB).abs() < 0.05, "{}", at(0.0));
         assert!((at(40.0) + PROBE_OVER_DB).abs() < 0.05);
-        assert!(at(PROBE_BURST_MS + 2000.0) > -0.2, "{}", at(PROBE_BURST_MS + 2000.0));
+        assert!(
+            at(PROBE_BURST_MS + 2000.0) > -0.2,
+            "{}",
+            at(PROBE_BURST_MS + 2000.0)
+        );
         // A longer release comes back later.
-        let slow = probe(&Settings { release_ms: 400.0, ..s }, 2.0, rate);
-        let slow_at = |t: f32| slow.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).map_or(0.0, |p| p.1);
+        let slow = probe(
+            &Settings {
+                release_ms: 400.0,
+                ..s
+            },
+            2.0,
+            rate,
+        );
+        let slow_at = |t: f32| {
+            slow.iter()
+                .min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs()))
+                .map_or(0.0, |p| p.1)
+        };
         assert!(slow_at(PROBE_BURST_MS + 100.0) < at(PROBE_BURST_MS + 100.0) - 1.0);
         // No lookahead: no ramp, the gain drops on the burst itself.
         let none = probe(&s, 0.0, rate);

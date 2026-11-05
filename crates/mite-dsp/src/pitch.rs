@@ -57,7 +57,18 @@ impl PitchDetector {
         let fwd = planner.plan_fft_forward(2 * len);
         let inv = planner.plan_fft_inverse(2 * len);
         let (scratch_f, scratch_i) = (fwd.make_scratch_vec(), inv.make_scratch_vec());
-        Self { len, x: vec![0.0; len], padded: vec![0.0; 2 * len], spec: fwd.make_output_vec(), acf: vec![0.0; 2 * len], nsdf: vec![0.0; len], fwd, inv, scratch_f, scratch_i }
+        Self {
+            len,
+            x: vec![0.0; len],
+            padded: vec![0.0; 2 * len],
+            spec: fwd.make_output_vec(),
+            acf: vec![0.0; 2 * len],
+            nsdf: vec![0.0; len],
+            fwd,
+            inv,
+            scratch_f,
+            scratch_i,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -87,11 +98,15 @@ impl PitchDetector {
         // Autocorrelation by FFT (zero-padded to 2n: no wrap).
         self.padded[..n].copy_from_slice(&self.x);
         self.padded[n..].iter_mut().for_each(|v| *v = 0.0);
-        self.fwd.process_with_scratch(&mut self.padded, &mut self.spec, &mut self.scratch_f).ok()?;
+        self.fwd
+            .process_with_scratch(&mut self.padded, &mut self.spec, &mut self.scratch_f)
+            .ok()?;
         for c in &mut self.spec {
             *c = Complex::new(c.norm_sqr(), 0.0);
         }
-        self.inv.process_with_scratch(&mut self.spec, &mut self.acf, &mut self.scratch_i).ok()?;
+        self.inv
+            .process_with_scratch(&mut self.spec, &mut self.acf, &mut self.scratch_i)
+            .ok()?;
         let scale = 1.0 / (2 * n) as f64;
         // NSDF: n(τ) = 2 r(τ) / m(τ), m(τ) = Σ x[j]² + x[j+τ]² over the overlap.
         let mut m = 2.0 * energy;
@@ -101,7 +116,11 @@ impl PitchDetector {
             if tau > 0 {
                 m -= self.x[tau - 1] * self.x[tau - 1] + self.x[n - tau] * self.x[n - tau];
             }
-            self.nsdf[tau] = if m > 1e-12 { 2.0 * self.acf[tau] * scale / m } else { 0.0 };
+            self.nsdf[tau] = if m > 1e-12 {
+                2.0 * self.acf[tau] * scale / m
+            } else {
+                0.0
+            };
         }
         // Key maxima: the highest point between each positive-going zero crossing and the next
         // negative-going one.
@@ -134,9 +153,17 @@ impl PitchDetector {
         let &(k, _) = keys[..count].iter().find(|k| k.1 >= KEY * highest)?;
         let (a, b, c) = (self.nsdf[k - 1], self.nsdf[k], self.nsdf[k + 1]);
         let den = a - 2.0 * b + c;
-        let shift = if den.abs() > 1e-12 { (0.5 * (a - c) / den).clamp(-0.5, 0.5) } else { 0.0 };
+        let shift = if den.abs() > 1e-12 {
+            (0.5 * (a - c) / den).clamp(-0.5, 0.5)
+        } else {
+            0.0
+        };
         let (tau, clarity) = self.refine(k as f64 + shift, b);
-        Some(Pitch { hz: fs / tau, clarity, level_db })
+        Some(Pitch {
+            hz: fs / tau,
+            clarity,
+            level_db,
+        })
     }
 
     /// The NSDF at a fractional lag, the window read between samples by a windowed sinc.
@@ -164,11 +191,7 @@ impl PitchDetector {
             r += self.x[j] * y;
             m += self.x[j] * self.x[j] + y * y;
         }
-        if m > 1e-12 {
-            2.0 * r / m
-        } else {
-            0.0
-        }
+        if m > 1e-12 { 2.0 * r / m } else { 0.0 }
     }
 
     /// The peak of the NSDF near `tau` (golden-section over ±0.6 samples) and its value.
@@ -224,8 +247,14 @@ mod tests {
                 let t = i as f64 / fs;
                 let mut v = 0.0;
                 for k in 1..12 {
-                    let a = if strong_second && k == 2 { 1.6 } else { 1.0 / k as f64 };
-                    v += a * (std::f64::consts::TAU * hz * k as f64 * t + 0.3 * k as f64).sin() * (-t * (0.6 + 0.4 * k as f64)).exp();
+                    let a = if strong_second && k == 2 {
+                        1.6
+                    } else {
+                        1.0 / k as f64
+                    };
+                    v += a
+                        * (std::f64::consts::TAU * hz * k as f64 * t + 0.3 * k as f64).sin()
+                        * (-t * (0.6 + 0.4 * k as f64)).exp();
                 }
                 seed ^= seed << 13;
                 seed ^= seed >> 17;
@@ -240,13 +269,28 @@ mod tests {
         for fs in [44_100.0, 48_000.0, 96_000.0] {
             let mut d = PitchDetector::new(window_len(fs));
             // A low B (bass), E2…E4 on a guitar, a few detuned, and high on the neck.
-            for hz in [30.87, 41.2, 82.41, 110.0 * 1.003, 146.83, 196.0, 246.94 / 1.002, 329.63, 659.26, 1046.5] {
+            for hz in [
+                30.87,
+                41.2,
+                82.41,
+                110.0 * 1.003,
+                146.83,
+                196.0,
+                246.94 / 1.002,
+                329.63,
+                659.26,
+                1046.5,
+            ] {
                 let x = string(hz, fs, d.len() + 1000, false);
                 let p = d.detect(&x, fs).expect("a pitch");
                 let cents = 1200.0 * (p.hz / hz).log2();
                 // A decaying string biases the peak a little; least where there are fewest periods.
                 let tolerance = if hz < 60.0 { 0.5 } else { 0.2 };
-                assert!(cents.abs() < tolerance, "{hz} Hz at {fs}: {} Hz ({cents:+.3} cents)", p.hz);
+                assert!(
+                    cents.abs() < tolerance,
+                    "{hz} Hz at {fs}: {} Hz ({cents:+.3} cents)",
+                    p.hz
+                );
                 assert!(p.clarity > 0.9);
             }
         }
@@ -257,7 +301,9 @@ mod tests {
         let fs = 48_000.0;
         let mut d = PitchDetector::new(window_len(fs));
         for hz in [82.41, 110.0, 196.0] {
-            let p = d.detect(&string(hz, fs, d.len(), true), fs).expect("a pitch");
+            let p = d
+                .detect(&string(hz, fs, d.len(), true), fs)
+                .expect("a pitch");
             assert!((1200.0 * (p.hz / hz).log2()).abs() < 1.0, "{hz}: {}", p.hz);
         }
     }

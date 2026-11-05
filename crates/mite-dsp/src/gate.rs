@@ -17,9 +17,9 @@
 //! [`transfer_db`] is the static curve the editor's square draws. Nothing allocates outside
 //! [`Gate::new`].
 
-use crate::eq::{design, BandSettings, Sections, MAX_SECTIONS};
+use crate::eq::{BandSettings, MAX_SECTIONS, Sections, design};
 use crate::filter::Tdf2;
-use crate::{db_to_gain, gain_to_db, MINUS_INFINITY_DB};
+use crate::{MINUS_INFINITY_DB, db_to_gain, gain_to_db};
 
 /// Key EQ bands: Comp's three, then three more (state 2, 2026-11-03: a custom sidechain EQ).
 pub const KEY_BANDS: usize = 6;
@@ -59,7 +59,11 @@ impl Detector {
     pub const NAMES: [&'static str; 2] = ["Peak", "RMS"];
 
     pub fn from_index(i: usize) -> Self {
-        if i == 1 { Detector::Rms } else { Detector::Peak }
+        if i == 1 {
+            Detector::Rms
+        } else {
+            Detector::Peak
+        }
     }
 }
 
@@ -109,7 +113,11 @@ impl Default for GateSettings {
 /// The expander's gain (dB, ≤ 0) at key level `l`: `(l − T)(ratio − 1)` below `T`, capped at the
 /// range, with a quadratic knee `H` wide ending at `T` (so 0 dB from `T` up, no corner).
 pub fn expander_gain_db(s: &GateSettings, l: f32) -> f32 {
-    let (t, k, slope) = (s.threshold_db, s.hysteresis_db.max(0.0), s.ratio.max(1.0) - 1.0);
+    let (t, k, slope) = (
+        s.threshold_db,
+        s.hysteresis_db.max(0.0),
+        s.ratio.max(1.0) - 1.0,
+    );
     let g = if l >= t {
         0.0
     } else if k > 0.0 && l > t - k {
@@ -143,10 +151,18 @@ fn soft_floor(g: f32, range: f32) -> f32 {
 pub fn transfer_db(s: &GateSettings, l: f32, open: bool) -> f32 {
     l + match s.mode {
         Mode::Gate => {
-            if open { 0.0 } else { s.range_db.min(0.0) }
+            if open {
+                0.0
+            } else {
+                s.range_db.min(0.0)
+            }
         }
         Mode::Ducker => {
-            if open { s.range_db.min(0.0) } else { 0.0 }
+            if open {
+                s.range_db.min(0.0)
+            } else {
+                0.0
+            }
         }
         Mode::Expander => expander_gain_db(s, l),
     }
@@ -205,7 +221,16 @@ struct Channel {
 
 impl Channel {
     fn new(len: usize) -> Self {
-        Self { key: [[Tdf2::default(); MAX_SECTIONS]; KEY_BANDS], peak: 0.0, ms: 0.0, active: false, hold: 0, held_db: 0.0, stages: [1.0; 2], delay: vec![0.0; len] }
+        Self {
+            key: [[Tdf2::default(); MAX_SECTIONS]; KEY_BANDS],
+            peak: 0.0,
+            ms: 0.0,
+            active: false,
+            hold: 0,
+            held_db: 0.0,
+            stages: [1.0; 2],
+            delay: vec![0.0; len],
+        }
     }
 
     fn reset(&mut self, rest: f32) {
@@ -236,7 +261,13 @@ impl Gate {
     /// Allocates (the delay lines).
     pub fn new(sample_rate: f32) -> Self {
         let len = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 2;
-        let mut g = Self { sample_rate, chans: [Channel::new(len), Channel::new(len)], sections: [Sections::default(); KEY_BANDS], designed: [BandSettings::default(); KEY_BANDS], write: 0 };
+        let mut g = Self {
+            sample_rate,
+            chans: [Channel::new(len), Channel::new(len)],
+            sections: [Sections::default(); KEY_BANDS],
+            designed: [BandSettings::default(); KEY_BANDS],
+            write: 0,
+        };
         g.design(&GateSettings::default(), true);
         g
     }
@@ -280,7 +311,12 @@ impl Gate {
     /// Processes `channels` (one or two) in place; `key` is the sidechain (used when
     /// `s.external_key`; silent without it).
     #[allow(clippy::needless_range_loop)] // channels and their state indexed together
-    pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &GateSettings) -> GateTelemetry {
+    pub fn process(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        key: Option<&[&[f32]]>,
+        s: &GateSettings,
+    ) -> GateTelemetry {
         let mut t = GateTelemetry::default();
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
@@ -380,15 +416,33 @@ impl Gate {
                     }
                 };
                 if ch.active != was && c == 0 && t.event_count < MAX_EVENTS {
-                    t.events[t.event_count] = GateEvent { offset: i, on: ch.active, level_db: l };
+                    t.events[t.event_count] = GateEvent {
+                        offset: i,
+                        on: ch.active,
+                        level_db: l,
+                    };
                     t.event_count += 1;
                 }
                 // Two stages: attack towards the active state, release back. For the Ducker the
                 // active state is down.
-                let towards_active = |from: f32, to: f32| if s.mode == Mode::Ducker { to < from } else { to > from };
-                let k1 = if towards_active(ch.stages[0], target) { att } else { rel };
+                let towards_active = |from: f32, to: f32| {
+                    if s.mode == Mode::Ducker {
+                        to < from
+                    } else {
+                        to > from
+                    }
+                };
+                let k1 = if towards_active(ch.stages[0], target) {
+                    att
+                } else {
+                    rel
+                };
                 ch.stages[0] += (target - ch.stages[0]) * k1;
-                let k2 = if towards_active(ch.stages[1], ch.stages[0]) { att } else { rel };
+                let k2 = if towards_active(ch.stages[1], ch.stages[0]) {
+                    att
+                } else {
+                    rel
+                };
                 ch.stages[1] += (ch.stages[0] - ch.stages[1]) * k2;
                 let g = if range >= 0.0 { 1.0 } else { ch.stages[1] };
                 gain_min[c] = gain_min[c].min(g);
@@ -426,13 +480,20 @@ mod tests {
     }
 
     fn run(g: &mut Gate, s: &GateSettings, x: &mut [f32]) -> Vec<GateTelemetry> {
-        x.chunks_mut(64).map(|c| g.process(&mut [c], None, s)).collect()
+        x.chunks_mut(64)
+            .map(|c| g.process(&mut [c], None, s))
+            .collect()
     }
 
     #[test]
     fn range_zero_is_the_input_delayed_bit_for_bit() {
         for mode in Mode::ALL {
-            let s = GateSettings { mode, range_db: 0.0, lookahead_ms: 2.0, ..GateSettings::default() };
+            let s = GateSettings {
+                mode,
+                range_db: 0.0,
+                lookahead_ms: 2.0,
+                ..GateSettings::default()
+            };
             let mut g = Gate::new(FS);
             g.reset(&s);
             let x = tone(8000, -50.0);
@@ -448,7 +509,14 @@ mod tests {
 
     #[test]
     fn the_gate_opens_over_the_threshold_closes_under_the_hysteresis_and_holds() {
-        let s = GateSettings { threshold_db: -30.0, hysteresis_db: 6.0, hold_ms: 20.0, attack_ms: 0.1, release_ms: 5.0, ..GateSettings::default() };
+        let s = GateSettings {
+            threshold_db: -30.0,
+            hysteresis_db: 6.0,
+            hold_ms: 20.0,
+            attack_ms: 0.1,
+            release_ms: 5.0,
+            ..GateSettings::default()
+        };
         let mut g = Gate::new(FS);
         g.reset(&s);
         // Quiet (closed), loud (opens), then −33 dB: inside the hysteresis band, it stays open.
@@ -472,7 +540,12 @@ mod tests {
     #[test]
     fn the_motion_has_no_corner() {
         // The opening: the gain's slope starts at 0 and rises smoothly (two stages).
-        let s = GateSettings { attack_ms: 5.0, range_db: -40.0, hold_ms: 0.0, ..GateSettings::default() };
+        let s = GateSettings {
+            attack_ms: 5.0,
+            range_db: -40.0,
+            hold_ms: 0.0,
+            ..GateSettings::default()
+        };
         let mut g = Gate::new(FS);
         g.reset(&s);
         let mut gains = Vec::new();
@@ -492,7 +565,14 @@ mod tests {
 
     #[test]
     fn the_expander_curve_is_continuous_and_capped() {
-        let s = GateSettings { mode: Mode::Expander, threshold_db: -30.0, ratio: 3.0, hysteresis_db: 6.0, range_db: -40.0, ..GateSettings::default() };
+        let s = GateSettings {
+            mode: Mode::Expander,
+            threshold_db: -30.0,
+            ratio: 3.0,
+            hysteresis_db: 6.0,
+            range_db: -40.0,
+            ..GateSettings::default()
+        };
         let mut prev = expander_gain_db(&s, 0.0);
         assert_eq!(prev, 0.0);
         for k in 1..=900 {
@@ -509,7 +589,16 @@ mod tests {
 
     #[test]
     fn the_ducker_ducks_on_the_key() {
-        let s = GateSettings { mode: Mode::Ducker, threshold_db: -30.0, range_db: -12.0, external_key: true, attack_ms: 1.0, release_ms: 20.0, hold_ms: 0.0, ..GateSettings::default() };
+        let s = GateSettings {
+            mode: Mode::Ducker,
+            threshold_db: -30.0,
+            range_db: -12.0,
+            external_key: true,
+            attack_ms: 1.0,
+            release_ms: 20.0,
+            hold_ms: 0.0,
+            ..GateSettings::default()
+        };
         let mut g = Gate::new(FS);
         g.reset(&s);
         let key_loud = tone(4800, -10.0);
@@ -518,7 +607,11 @@ mod tests {
         for (a, k) in audio.chunks_mut(64).zip(key_loud.chunks(64)) {
             last = g.process(&mut [a], Some(&[k]), &s);
         }
-        assert!(last.active && (last.gain_db[0] + 12.0).abs() < 0.1, "{:?}", last.gain_db);
+        assert!(
+            last.active && (last.gain_db[0] + 12.0).abs() < 0.1,
+            "{:?}",
+            last.gain_db
+        );
         let quiet = vec![0.0f32; 9600];
         let mut audio = tone(9600, -20.0);
         for (a, k) in audio.chunks_mut(64).zip(quiet.chunks(64)) {
@@ -529,7 +622,10 @@ mod tests {
 
     #[test]
     fn openings_and_closings_are_reported_where_they_happen() {
-        let s = GateSettings { hold_ms: 0.0, ..GateSettings::default() };
+        let s = GateSettings {
+            hold_ms: 0.0,
+            ..GateSettings::default()
+        };
         let mut g = Gate::new(FS);
         g.reset(&s);
         // The peak detector lets go over 10 ms, so the closing comes about 2000 samples later.

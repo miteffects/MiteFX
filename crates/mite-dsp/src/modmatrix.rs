@@ -19,7 +19,24 @@ pub const SMOOTH_MS: f32 = 2.0;
 /// The envelope reads its level over this range (dBFS, after its gain): −60 dB is 0, 0 dB is 1.
 pub const ENV_FLOOR_DB: f32 = -60.0;
 /// Each division's length, quarter notes (the `lfo{N}_div` order).
-pub const DIV_QUARTERS: [f64; 16] = [0.125, 1.0 / 6.0, 0.25, 0.375, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5, 4.0 / 3.0, 2.0, 3.0, 4.0, 8.0, 16.0];
+pub const DIV_QUARTERS: [f64; 16] = [
+    0.125,
+    1.0 / 6.0,
+    0.25,
+    0.375,
+    1.0 / 3.0,
+    0.5,
+    0.75,
+    2.0 / 3.0,
+    1.0,
+    1.5,
+    4.0 / 3.0,
+    2.0,
+    3.0,
+    4.0,
+    8.0,
+    16.0,
+];
 
 /// An LFO's shape. The index is saved state (append only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -35,7 +52,15 @@ pub enum LfoShape {
 }
 
 impl LfoShape {
-    pub const ALL: [LfoShape; 7] = [Self::Sine, Self::Triangle, Self::SawUp, Self::SawDown, Self::Square, Self::SmoothRandom, Self::SampleHold];
+    pub const ALL: [LfoShape; 7] = [
+        Self::Sine,
+        Self::Triangle,
+        Self::SawUp,
+        Self::SawDown,
+        Self::Square,
+        Self::SmoothRandom,
+        Self::SampleHold,
+    ];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -81,7 +106,13 @@ pub struct LfoSettings {
 
 impl Default for LfoSettings {
     fn default() -> Self {
-        Self { rate_hz: 1.0, sync: false, division: 8, shape: LfoShape::Sine, phase: 0.0 }
+        Self {
+            rate_hz: 1.0,
+            sync: false,
+            division: 8,
+            shape: LfoShape::Sine,
+            phase: 0.0,
+        }
     }
 }
 
@@ -96,7 +127,12 @@ pub struct EnvSettings {
 
 impl Default for EnvSettings {
     fn default() -> Self {
-        Self { attack_ms: 10.0, release_ms: 200.0, gain_db: 0.0, sidechain: false }
+        Self {
+            attack_ms: 10.0,
+            release_ms: 200.0,
+            gain_db: 0.0,
+            sidechain: false,
+        }
     }
 }
 
@@ -119,13 +155,16 @@ pub struct MatrixSettings {
 impl MatrixSettings {
     /// Whether any slot moves anything.
     pub fn active(&self) -> bool {
-        self.slots.iter().any(|s| s.source != Source::Off && s.target != 0 && s.amount != 0.0)
+        self.slots
+            .iter()
+            .any(|s| s.source != Source::Off && s.target != 0 && s.amount != 0.0)
     }
 }
 
 /// A random value per cycle, −1…1, from the cycle's number (the same on every run).
 fn cycle_value(k: i64, seed: u64) -> f32 {
-    let mut h = (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ seed.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    let mut h =
+        (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ seed.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     h ^= h >> 29;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^= h >> 32;
@@ -168,7 +207,9 @@ pub fn lfo_at(shape: LfoShape, p: f64, seed: u64) -> f32 {
 /// An LFO's rate, Hz (synced to `tempo` when asked and known).
 pub fn lfo_rate(s: &LfoSettings, tempo: Option<f64>) -> f64 {
     match (s.sync, tempo) {
-        (true, Some(bpm)) if bpm > 0.0 => bpm / 60.0 / DIV_QUARTERS[s.division.min(DIV_QUARTERS.len() - 1)],
+        (true, Some(bpm)) if bpm > 0.0 => {
+            bpm / 60.0 / DIV_QUARTERS[s.division.min(DIV_QUARTERS.len() - 1)]
+        }
         _ => f64::from(s.rate_hz.clamp(0.01, 100.0)),
     }
 }
@@ -195,7 +236,14 @@ pub struct Matrix {
 
 impl Matrix {
     pub fn new(fs: f32) -> Self {
-        Self { fs, phase: [0.0; LFOS], env: 0.0, smooth: [0.0; 3], smooth_k: 1.0 - (-(CONTROL as f32) / (SMOOTH_MS * 0.001 * fs)).exp(), pos: 0 }
+        Self {
+            fs,
+            phase: [0.0; LFOS],
+            env: 0.0,
+            smooth: [0.0; 3],
+            smooth_k: 1.0 - (-(CONTROL as f32) / (SMOOTH_MS * 0.001 * fs)).exp(),
+            pos: 0,
+        }
     }
 
     pub fn sample_rate(&self) -> f32 {
@@ -211,9 +259,19 @@ impl Matrix {
 
     /// The sources now (before smoothing).
     fn raw(&self, s: &MatrixSettings) -> [f32; 3] {
-        let lfo = |i: usize| lfo_at(s.lfos[i].shape, self.phase[i] + f64::from(s.lfos[i].phase), 0x5EED + i as u64);
+        let lfo = |i: usize| {
+            lfo_at(
+                s.lfos[i].shape,
+                self.phase[i] + f64::from(s.lfos[i].phase),
+                0x5EED + i as u64,
+            )
+        };
         let db = 20.0 * self.env.max(1e-9).log10() + s.env.gain_db;
-        [lfo(0), lfo(1), ((db - ENV_FLOOR_DB) / -ENV_FLOOR_DB).clamp(0.0, 1.0)]
+        [
+            lfo(0),
+            lfo(1),
+            ((db - ENV_FLOOR_DB) / -ENV_FLOOR_DB).clamp(0.0, 1.0),
+        ]
     }
 
     /// Each target's offset from the smoothed sources (`offsets[0]`, "none", stays 0).
@@ -237,7 +295,15 @@ impl Matrix {
     /// one per target) and calls `step` with the step's sample range; after it, moves the LFOs
     /// on and follows `level(i)` (the envelope's input, a sample's absolute level) over it.
     /// When nothing is routed the whole stretch is one call with every offset 0.
-    pub fn steps(&mut self, s: &MatrixSettings, transport: &Transport, len: usize, offsets: &mut [f32], level: impl Fn(usize) -> f32, mut step: impl FnMut(std::ops::Range<usize>, &[f32])) -> MatrixReadings {
+    pub fn steps(
+        &mut self,
+        s: &MatrixSettings,
+        transport: &Transport,
+        len: usize,
+        offsets: &mut [f32],
+        level: impl Fn(usize) -> f32,
+        mut step: impl FnMut(std::ops::Range<usize>, &[f32]),
+    ) -> MatrixReadings {
         let fsd = f64::from(self.fs);
         let active = s.active();
         if !active {
@@ -246,7 +312,10 @@ impl Matrix {
         }
         let att = (-1.0 / (s.env.attack_ms.max(0.01) * 0.001 * self.fs)).exp();
         let rel = (-1.0 / (s.env.release_ms.max(0.01) * 0.001 * self.fs)).exp();
-        let rates = [lfo_rate(&s.lfos[0], transport.tempo), lfo_rate(&s.lfos[1], transport.tempo)];
+        let rates = [
+            lfo_rate(&s.lfos[0], transport.tempo),
+            lfo_rate(&s.lfos[1], transport.tempo),
+        ];
         let mut start = 0;
         while start < len {
             let n = (CONTROL - self.pos).min(len - start);
@@ -290,7 +359,11 @@ impl Matrix {
             self.pos = (self.pos + n) % CONTROL;
             start += n;
         }
-        MatrixReadings { sources: self.smooth, phases: self.phase, rates }
+        MatrixReadings {
+            sources: self.smooth,
+            phases: self.phase,
+            rates,
+        }
     }
 }
 
@@ -302,7 +375,11 @@ mod tests {
 
     fn routed(source: Source, target: usize, amount: f32) -> MatrixSettings {
         let mut s = MatrixSettings::default();
-        s.slots[0] = Slot { source, target, amount };
+        s.slots[0] = Slot {
+            source,
+            target,
+            amount,
+        };
         s
     }
 
@@ -314,7 +391,14 @@ mod tests {
         let mut done = 0;
         while done < len {
             let n = block.min(len - done);
-            m.steps(s, &Transport::default(), n, &mut offsets, |_| level, |r, o| out.push((done + r.start, o[1])));
+            m.steps(
+                s,
+                &Transport::default(),
+                n,
+                &mut offsets,
+                |_| level,
+                |r, o| out.push((done + r.start, o[1])),
+            );
             done += n;
         }
         out
@@ -353,12 +437,21 @@ mod tests {
         // 1 Hz sine at 50 %: the offset reaches ±0.5 over a second.
         let s = routed(Source::Lfo1, 1, 0.5);
         let t = trace(&s, 48_000, 512, 0.0);
-        let (lo, hi) = t.iter().fold((f32::MAX, f32::MIN), |(a, b), (_, o)| (a.min(*o), b.max(*o)));
-        assert!((hi - 0.5).abs() < 0.01 && (lo + 0.5).abs() < 0.01, "{lo} … {hi}");
+        let (lo, hi) = t.iter().fold((f32::MAX, f32::MIN), |(a, b), (_, o)| {
+            (a.min(*o), b.max(*o))
+        });
+        assert!(
+            (hi - 0.5).abs() < 0.01 && (lo + 0.5).abs() < 0.01,
+            "{lo} … {hi}"
+        );
         // The envelope at −20 dBFS reads 2/3 (of −60…0 dB) once it has risen.
         let s = routed(Source::Envelope, 1, 1.0);
         let t = trace(&s, 24_000, 512, 0.1);
-        assert!((t.last().expect("t").1 - 2.0 / 3.0).abs() < 0.01, "{:?}", t.last());
+        assert!(
+            (t.last().expect("t").1 - 2.0 / 3.0).abs() < 0.01,
+            "{:?}",
+            t.last()
+        );
         // Negative amounts move the other way.
         let s = routed(Source::Envelope, 1, -0.5);
         assert!((trace(&s, 24_000, 512, 0.1).last().expect("t").1 + 1.0 / 3.0).abs() < 0.01);
@@ -372,21 +465,35 @@ mod tests {
                 assert!((-1.0..=1.0).contains(&v), "{shape:?}: {v}");
             }
         }
-        assert_eq!(lfo_at(LfoShape::SampleHold, 3.2, 1), lfo_at(LfoShape::SampleHold, 3.9, 1));
-        assert_ne!(lfo_at(LfoShape::SampleHold, 3.2, 1), lfo_at(LfoShape::SampleHold, 4.2, 1));
+        assert_eq!(
+            lfo_at(LfoShape::SampleHold, 3.2, 1),
+            lfo_at(LfoShape::SampleHold, 3.9, 1)
+        );
+        assert_ne!(
+            lfo_at(LfoShape::SampleHold, 3.2, 1),
+            lfo_at(LfoShape::SampleHold, 4.2, 1)
+        );
     }
 
     #[test]
     fn a_synced_lfo_locks_to_the_song() {
         // 120 BPM, a quarter-note cycle: playing from beat 6, the phase settles on the beat.
         let mut s = routed(Source::Lfo1, 1, 1.0);
-        s.lfos[0] = LfoSettings { sync: true, division: 8, ..LfoSettings::default() };
+        s.lfos[0] = LfoSettings {
+            sync: true,
+            division: 8,
+            ..LfoSettings::default()
+        };
         let mut m = Matrix::new(FS);
         let mut offsets = [0.0f32; 4];
         let mut beats = 6.3;
         let mut r = MatrixReadings::default();
         for _ in 0..400 {
-            let t = Transport { tempo: Some(120.0), beats: Some(beats), playing: true };
+            let t = Transport {
+                tempo: Some(120.0),
+                beats: Some(beats),
+                playing: true,
+            };
             r = m.steps(&s, &t, 512, &mut offsets, |_| 0.0, |_, _| {});
             beats += 512.0 / f64::from(FS) * 2.0;
         }

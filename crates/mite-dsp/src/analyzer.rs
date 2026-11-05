@@ -54,7 +54,14 @@ impl Analyzer {
         let scale = 2.0 / window.iter().sum::<f32>();
         let spectrum = fft.make_output_vec();
         let scratch = fft.make_scratch_vec();
-        Self { fft, window, input: vec![0.0; size], spectrum, scratch, scale }
+        Self {
+            fft,
+            window,
+            input: vec![0.0; size],
+            spectrum,
+            scratch,
+            scale,
+        }
     }
 
     pub fn size(&self) -> usize {
@@ -81,7 +88,9 @@ impl Analyzer {
             *x = s * w;
         }
         // The buffers are sized by the planner, so this cannot fail.
-        let _ = self.fft.process_with_scratch(&mut self.input, &mut self.spectrum, &mut self.scratch);
+        let _ =
+            self.fft
+                .process_with_scratch(&mut self.input, &mut self.spectrum, &mut self.scratch);
         let scale_sq = self.scale * self.scale;
         for (o, c) in out_power.iter_mut().zip(&self.spectrum) {
             *o = c.norm_sqr() * scale_sq;
@@ -122,7 +131,10 @@ impl LogSpectrum {
                 let f = spectrum_point_freq(i);
                 let tilt = 10f64.powf(tilt_db(f) / 10.0) as f32;
                 let start = weights.len();
-                let (lo, hi) = (f * 2f64.powf(-half) * size / sample_rate, f * 2f64.powf(half) * size / sample_rate);
+                let (lo, hi) = (
+                    f * 2f64.powf(-half) * size / sample_rate,
+                    f * 2f64.powf(half) * size / sample_rate,
+                );
                 let (a, b) = ((lo.ceil() as usize).max(1), (hi.floor() as usize).min(last));
                 if b >= a + 2 {
                     let mut sum = 0.0;
@@ -135,7 +147,12 @@ impl LogSpectrum {
                     for w in &mut weights[start..] {
                         w.1 /= sum as f32;
                     }
-                    Point { start, end: weights.len(), tilt, cubic: false }
+                    Point {
+                        start,
+                        end: weights.len(),
+                        tilt,
+                        cubic: false,
+                    }
                 } else {
                     // Fewer bins than the window needs (low frequencies): a cubic through the
                     // four bins around the point. Linear interpolation in power bows outwards in
@@ -148,11 +165,20 @@ impl LogSpectrum {
                     weights.push((k0, 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0)));
                     weights.push((k0 + 1, 0.5 * (-3.0 * t3 + 4.0 * t2 + t)));
                     weights.push((k0 + 2, 0.5 * (t3 - t2)));
-                    Point { start, end: weights.len(), tilt, cubic: true }
+                    Point {
+                        start,
+                        end: weights.len(),
+                        tilt,
+                        cubic: true,
+                    }
                 }
             })
             .collect();
-        Self { points, weights, sample_rate }
+        Self {
+            points,
+            weights,
+            sample_rate,
+        }
     }
 
     pub fn sample_rate(&self) -> f64 {
@@ -193,7 +219,9 @@ mod tests {
         let fs = 48_000.0_f32;
         // Exactly on bin 256 so there is no scalloping.
         let freq = 256.0 * fs / n as f32;
-        let samples: Vec<f32> = (0..n).map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / fs).sin()).collect();
+        let samples: Vec<f32> = (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / fs).sin())
+            .collect();
         let mut a = Analyzer::new(n);
         let mut out = vec![0.0; a.bins()];
         a.analyze(&samples, &mut out);

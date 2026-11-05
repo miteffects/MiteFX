@@ -42,7 +42,19 @@ fn watched(f: impl FnOnce()) -> usize {
 #[test]
 fn convolver_processes_and_swaps_kernels_without_allocating() {
     let block = 128;
-    let kernel = |g: f64| Box::new(KernelSet::new(block, KernelLayout::Matrix, &[vec![g; 1000], vec![0.1; 1000], vec![0.1; 1000], vec![g; 1000]], 500));
+    let kernel = |g: f64| {
+        Box::new(KernelSet::new(
+            block,
+            KernelLayout::Matrix,
+            &[
+                vec![g; 1000],
+                vec![0.1; 1000],
+                vec![0.1; 1000],
+                vec![g; 1000],
+            ],
+            500,
+        ))
+    };
     let mut conv = Convolver::new(block, 4096, 512);
     conv.replace(kernel(1.0));
     let (first, second) = (kernel(0.5), kernel(0.25));

@@ -60,9 +60,16 @@ impl KernelSet {
     /// Partitions and transforms `kernels` (all the same length; 1, 2 or 4 of them for
     /// [`KernelLayout::Shared`], `Diagonal` or `Matrix`). Allocates.
     pub fn new(block: usize, layout: KernelLayout, kernels: &[Vec<f64>], delay: usize) -> Self {
-        assert_eq!(kernels.len(), layout.kernels(), "kernel count must match the layout");
+        assert_eq!(
+            kernels.len(),
+            layout.kernels(),
+            "kernel count must match the layout"
+        );
         let len = kernels[0].len();
-        assert!(kernels.iter().all(|k| k.len() == len), "kernels must have equal lengths");
+        assert!(
+            kernels.iter().all(|k| k.len() == len),
+            "kernels must have equal lengths"
+        );
         let partitions = len.div_ceil(block).max(1);
         let bins = block + 1;
         let fft = RealFftPlanner::<f64>::new().plan_fft_forward(2 * block);
@@ -77,11 +84,18 @@ impl KernelSet {
                 let start = p * block;
                 let end = (start + block).min(len);
                 frame[..end - start].copy_from_slice(&kernel[start..end]);
-                fft.process_with_scratch(&mut frame, &mut spectrum, &mut scratch).expect("buffers sized by the planner");
+                fft.process_with_scratch(&mut frame, &mut spectrum, &mut scratch)
+                    .expect("buffers sized by the planner");
                 spectra.extend(spectrum.iter().map(|c| c * norm));
             }
         }
-        Self { block, partitions, layout, spectra, delay }
+        Self {
+            block,
+            partitions,
+            layout,
+            spectra,
+            delay,
+        }
     }
 
     pub fn block(&self) -> usize {
@@ -162,7 +176,10 @@ impl Convolver {
             time: vec![0.0; 2 * block],
             acc: vec![Complex::default(); bins],
             prev: [zeros(), zeros()],
-            fdl: [vec![Complex::default(); max_partitions * bins], vec![Complex::default(); max_partitions * bins]],
+            fdl: [
+                vec![Complex::default(); max_partitions * bins],
+                vec![Complex::default(); max_partitions * bins],
+            ],
             head: 0,
             input: [zeros(), zeros()],
             out_new: [zeros(), zeros()],
@@ -195,7 +212,11 @@ impl Convolver {
     /// Installs `kernel`, crossfading from the current one. Refused (handed back) while a swap is
     /// still fading or a retired kernel has not been collected. Allocation-free.
     pub fn offer(&mut self, kernel: Box<KernelSet>) -> Result<(), Box<KernelSet>> {
-        if self.outgoing.is_some() || self.retired.is_some() || kernel.block != self.block || kernel.partitions > self.max_partitions {
+        if self.outgoing.is_some()
+            || self.retired.is_some()
+            || kernel.block != self.block
+            || kernel.partitions > self.max_partitions
+        {
             return Err(kernel);
         }
         match self.current.replace(kernel) {
@@ -216,7 +237,10 @@ impl Convolver {
     /// Installs `kernel` at once, without a crossfade (for `prepare`, or behind a mute). The kernel
     /// it replaces is returned. Allocation-free.
     pub fn replace(&mut self, kernel: Box<KernelSet>) -> Option<Box<KernelSet>> {
-        assert!(kernel.block == self.block && kernel.partitions <= self.max_partitions, "kernel does not fit this convolver");
+        assert!(
+            kernel.block == self.block && kernel.partitions <= self.max_partitions,
+            "kernel does not fit this convolver"
+        );
         if let Some(old) = self.outgoing.take() {
             self.retired.get_or_insert(old);
         }
@@ -257,7 +281,10 @@ impl Convolver {
                     self.fade += 1;
                 }
                 let mix = |new: f64, old: f64| old + w * (new - old);
-                (mix(self.out_new[0][i], self.out_old[0][i]), mix(self.out_new[1][i], self.out_old[1][i]))
+                (
+                    mix(self.out_new[0][i], self.out_old[0][i]),
+                    mix(self.out_new[1][i], self.out_old[1][i]),
+                )
             } else {
                 (self.out_new[0][i], self.out_new[1][i])
             };
@@ -290,7 +317,9 @@ impl Convolver {
             let slot = &mut self.fdl[c][self.head * bins..(self.head + 1) * bins];
             // Buffers are sized by the planner, so the only possible error is about input values;
             // the transform still runs, and the audio thread must never panic.
-            let _ = self.r2c.process_with_scratch(&mut self.frame, slot, &mut self.fwd_scratch);
+            let _ = self
+                .r2c
+                .process_with_scratch(&mut self.frame, slot, &mut self.fwd_scratch);
         }
         if let Some(k) = self.current.take() {
             self.convolve(&k, true);
@@ -325,8 +354,14 @@ impl Convolver {
             }
             // As above: never panic here. (It could only object to non-zero imaginary parts at DC
             // or Nyquist, which it ignores anyway.)
-            let _ = self.c2r.process_with_scratch(&mut self.acc, &mut self.time, &mut self.inv_scratch);
-            let dest = if new { &mut self.out_new[out] } else { &mut self.out_old[out] };
+            let _ =
+                self.c2r
+                    .process_with_scratch(&mut self.acc, &mut self.time, &mut self.inv_scratch);
+            let dest = if new {
+                &mut self.out_new[out]
+            } else {
+                &mut self.out_old[out]
+            };
             dest.copy_from_slice(&self.time[block..]);
         }
     }
@@ -349,7 +384,15 @@ mod tests {
     }
 
     fn direct(x: &[f32], h: &[f64]) -> Vec<f64> {
-        (0..x.len()).map(|n| h.iter().enumerate().filter(|(k, _)| *k <= n).map(|(k, &hk)| hk * f64::from(x[n - k])).sum()).collect()
+        (0..x.len())
+            .map(|n| {
+                h.iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k <= n)
+                    .map(|(k, &hk)| hk * f64::from(x[n - k]))
+                    .sum()
+            })
+            .collect()
     }
 
     /// Runs `x` through in host-sized chunks of `chunk` samples.
@@ -366,7 +409,12 @@ mod tests {
         let block = 64;
         let h: Vec<f64> = noise(300, 7).iter().map(|&v| f64::from(v)).collect();
         let mut conv = Convolver::new(block, 512, 256);
-        conv.replace(Box::new(KernelSet::new(block, KernelLayout::Shared, std::slice::from_ref(&h), 0)));
+        conv.replace(Box::new(KernelSet::new(
+            block,
+            KernelLayout::Shared,
+            std::slice::from_ref(&h),
+            0,
+        )));
         assert_eq!(conv.latency(), block);
         let (l, r) = (noise(2000, 1), noise(2000, 2));
         // Odd host block sizes must not matter.
@@ -389,7 +437,12 @@ mod tests {
         };
         let kernels = [delta(0, 0.0), delta(3, 1.0), delta(0, 0.5), delta(0, 1.0)];
         let mut conv = Convolver::new(block, 64, 64);
-        conv.replace(Box::new(KernelSet::new(block, KernelLayout::Matrix, &kernels, 0)));
+        conv.replace(Box::new(KernelSet::new(
+            block,
+            KernelLayout::Matrix,
+            &kernels,
+            0,
+        )));
         let (l, r) = (noise(400, 3), noise(400, 4));
         let (yl, yr) = run(&mut conv, &l, &r, 50);
         for n in 10..400 - block {
@@ -402,7 +455,12 @@ mod tests {
     fn non_finite_input_is_silenced_instead_of_poisoning_the_output() {
         let block = 32;
         let mut conv = Convolver::new(block, 64, 64);
-        conv.replace(Box::new(KernelSet::new(block, KernelLayout::Shared, &[vec![1.0; 40]], 0)));
+        conv.replace(Box::new(KernelSet::new(
+            block,
+            KernelLayout::Shared,
+            &[vec![1.0; 40]],
+            0,
+        )));
         let mut l = vec![0.25f32; 512];
         l[10] = f32::NAN;
         l[11] = f32::INFINITY;
@@ -421,10 +479,16 @@ mod tests {
         let (y, _) = run(&mut conv, &ones, &ones, 64);
         assert!((y[200] - 1.0).abs() < 1e-6);
         assert!(conv.offer(gain(0.0)).is_ok());
-        assert!(conv.offer(gain(0.5)).is_err(), "a second swap must wait for the fade");
+        assert!(
+            conv.offer(gain(0.5)).is_err(),
+            "a second swap must wait for the fade"
+        );
         let (y, _) = run(&mut conv, &ones, &ones, 64);
         // Smooth: never jumps, ends at the new gain.
-        let jump = y.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        let jump = y
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
         assert!(jump < 0.03, "step {jump}");
         assert!(y[1000].abs() < 1e-6);
         assert!(conv.retired().is_some());

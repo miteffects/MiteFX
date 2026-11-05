@@ -10,11 +10,11 @@
 //! with short cosine ends, and the target is pre-compensated: each pass adds back what the
 //! windowed kernel still misses, measured on a grid finer than the kernel.
 
-use realfft::num_complex::Complex;
 use realfft::RealFftPlanner;
+use realfft::num_complex::Complex;
 
 use crate::conv::{KernelDesign, KernelLayout};
-use crate::eq::{linear_phase_response_db, BandSettings, Placement};
+use crate::eq::{BandSettings, Placement, linear_phase_response_db};
 
 /// A 2×2 real matrix in the L/R basis: `[ll, lr, rl, rr]`.
 type Matrix = [f64; 4];
@@ -29,7 +29,12 @@ const PASSES: usize = 4;
 const OVERSAMPLE: usize = 2;
 
 fn multiply(a: Matrix, b: Matrix) -> Matrix {
-    [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3]]
+    [
+        a[0] * b[0] + a[1] * b[2],
+        a[0] * b[1] + a[1] * b[3],
+        a[2] * b[0] + a[3] * b[2],
+        a[2] * b[1] + a[3] * b[3],
+    ]
 }
 
 /// One band's matrix for a linear gain `g`.
@@ -47,7 +52,10 @@ fn band_matrix(placement: Placement, g: f64) -> Matrix {
 
 /// The EQ's linear-phase kernels, `len` samples long (a power of two), at `sample_rate`.
 pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDesign {
-    assert!(len.is_power_of_two() && len >= 4, "kernel length must be a power of two");
+    assert!(
+        len.is_power_of_two() && len >= 4,
+        "kernel length must be a power of two"
+    );
     let half = len / 2;
     let fine = OVERSAMPLE * len;
     let bins = fine / 2 + 1;
@@ -57,11 +65,17 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDes
         for (k, m) in response.iter_mut().enumerate() {
             let f = k as f64 * sample_rate / fine as f64;
             let db = linear_phase_response_db(s, f);
-            let g = if db.is_finite() { 10f64.powf(db / 20.0) } else { 0.0 };
+            let g = if db.is_finite() {
+                10f64.powf(db / 20.0)
+            } else {
+                0.0
+            };
             *m = multiply(band_matrix(s.placement, g), *m);
         }
     }
-    let off_diagonal = response.iter().any(|m| m[1].abs() > 1e-12 || m[2].abs() > 1e-12);
+    let off_diagonal = response
+        .iter()
+        .any(|m| m[1].abs() > 1e-12 || m[2].abs() > 1e-12);
     let unequal = response.iter().any(|m| (m[0] - m[3]).abs() > 1e-12);
     let (layout, entries): (KernelLayout, &[usize]) = if off_diagonal {
         (KernelLayout::Matrix, &[0, 1, 2, 3])
@@ -100,7 +114,8 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDes
                 for (c, &t) in spectrum.iter_mut().zip(&target) {
                     *c = Complex::new(t, 0.0);
                 }
-                ifft.process_with_scratch(&mut spectrum, &mut time, &mut scratch).expect("buffers sized by the planner");
+                ifft.process_with_scratch(&mut spectrum, &mut time, &mut scratch)
+                    .expect("buffers sized by the planner");
                 // Centre the zero-phase response at `half` and window it: the kernel is exactly
                 // symmetric about `half`.
                 for (n, k) in kernel.iter_mut().enumerate() {
@@ -114,7 +129,8 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDes
                 for (n, &k) in kernel.iter().enumerate() {
                     time[(n + fine - half) % fine] = k;
                 }
-                fft.process_with_scratch(&mut time, &mut achieved, &mut fft_scratch).expect("buffers sized by the planner");
+                fft.process_with_scratch(&mut time, &mut achieved, &mut fft_scratch)
+                    .expect("buffers sized by the planner");
                 for ((t, d), a) in target.iter_mut().zip(&desired).zip(&achieved) {
                     *t += d - a.re;
                 }
@@ -122,7 +138,11 @@ pub fn design(bands: &[BandSettings], sample_rate: f64, len: usize) -> KernelDes
             kernel
         })
         .collect();
-    KernelDesign { layout, kernels, delay: half }
+    KernelDesign {
+        layout,
+        kernels,
+        delay: half,
+    }
 }
 
 #[cfg(test)]
@@ -131,13 +151,23 @@ mod tests {
     use crate::eq::BandType;
 
     fn band(kind: BandType, freq: f64, gain_db: f64, q: f64, placement: Placement) -> BandSettings {
-        BandSettings { enabled: true, kind, freq, gain_db, q, placement, ..Default::default() }
+        BandSettings {
+            enabled: true,
+            kind,
+            freq,
+            gain_db,
+            q,
+            placement,
+            ..Default::default()
+        }
     }
 
     /// The kernel's magnitude at `f`, dB.
     fn magnitude_db(h: &[f64], f: f64, fs: f64) -> f64 {
         let w = 2.0 * std::f64::consts::PI * f / fs;
-        let (re, im) = h.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &v)| (re + v * (w * n as f64).cos(), im - v * (w * n as f64).sin()));
+        let (re, im) = h.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &v)| {
+            (re + v * (w * n as f64).cos(), im - v * (w * n as f64).sin())
+        });
         10.0 * (re * re + im * im).log10()
     }
 
@@ -154,17 +184,26 @@ mod tests {
 
     #[test]
     fn kernels_are_symmetric_and_follow_the_analog_curve() {
-        let bands = [band(BandType::Bell, 1000.0, 6.0, 1.0, Placement::Stereo), band(BandType::HighShelf, 6000.0, -4.0, 0.7, Placement::Stereo)];
+        let bands = [
+            band(BandType::Bell, 1000.0, 6.0, 1.0, Placement::Stereo),
+            band(BandType::HighShelf, 6000.0, -4.0, 0.7, Placement::Stereo),
+        ];
         let fs = 48_000.0;
         let k = design(&bands, fs, 4096);
         let h = &k.kernels[0];
         for i in 1..2048 {
-            assert!((h[2048 - i] - h[2048 + i]).abs() < 1e-12, "asymmetric at ±{i}");
+            assert!(
+                (h[2048 - i] - h[2048 + i]).abs() < 1e-12,
+                "asymmetric at ±{i}"
+            );
         }
         for f in [200.0, 1000.0, 3000.0, 10_000.0, 18_000.0] {
             let want: f64 = bands.iter().map(|b| linear_phase_response_db(b, f)).sum();
             let got = magnitude_db(h, f, fs);
-            assert!((got - want).abs() < 0.1, "{f} Hz: {got:.3} dB, analog {want:.3} dB");
+            assert!(
+                (got - want).abs() < 0.1,
+                "{f} Hz: {got:.3} dB, analog {want:.3} dB"
+            );
         }
     }
 
@@ -177,9 +216,25 @@ mod tests {
         let k = design(&[mid], fs, 1024);
         assert_eq!(k.layout, KernelLayout::Matrix);
         // A mid boost leaves the side alone: L − R passes unchanged.
-        let side_gain = magnitude_db(&k.kernels[0].iter().zip(&k.kernels[1]).map(|(a, b)| a - b).collect::<Vec<_>>(), 1000.0, fs);
+        let side_gain = magnitude_db(
+            &k.kernels[0]
+                .iter()
+                .zip(&k.kernels[1])
+                .map(|(a, b)| a - b)
+                .collect::<Vec<_>>(),
+            1000.0,
+            fs,
+        );
         assert!(side_gain.abs() < 0.05, "side moved by {side_gain} dB");
-        let mid_gain = magnitude_db(&k.kernels[0].iter().zip(&k.kernels[1]).map(|(a, b)| a + b).collect::<Vec<_>>(), 1000.0, fs);
+        let mid_gain = magnitude_db(
+            &k.kernels[0]
+                .iter()
+                .zip(&k.kernels[1])
+                .map(|(a, b)| a + b)
+                .collect::<Vec<_>>(),
+            1000.0,
+            fs,
+        );
         assert!((mid_gain - 6.0).abs() < 0.1, "mid {mid_gain} dB");
     }
 }

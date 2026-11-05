@@ -8,7 +8,9 @@ use mite_dsp::reverb::{Reverb, ReverbSettings};
 
 /// The absorption the first engine had built in: low ×1.2 below 250 Hz, high ×0.5 over 5 kHz.
 const ROOM: ((f32, f32), (f32, f32)) = ((250.0, 1.2), (5000.0, 0.5));
-use mite_dsp::reverb_quality::{dense_after, highpass, peakiness, peaks, periodic_lags, periodicity};
+use mite_dsp::reverb_quality::{
+    dense_after, highpass, peakiness, peaks, periodic_lags, periodicity,
+};
 
 fn ir(s: &ReverbSettings, fs: f32, seconds: f32) -> [Vec<f32>; 2] {
     let n = (fs * seconds) as usize;
@@ -24,8 +26,18 @@ fn ir(s: &ReverbSettings, fs: f32, seconds: f32) -> [Vec<f32>; 2] {
 
 fn report(name: &str, l: &[f32], r: &[f32], fs: f64) {
     let (l, r) = (&highpass(l, 150.0, fs)[..], &highpass(r, 150.0, fs)[..]);
-    let dot: f64 = l.iter().zip(r).skip((0.08 * fs) as usize).map(|(a, b)| f64::from(*a) * f64::from(*b)).sum();
-    let e = |v: &[f32]| v.iter().skip((0.08 * fs) as usize).map(|a| f64::from(*a).powi(2)).sum::<f64>();
+    let dot: f64 = l
+        .iter()
+        .zip(r)
+        .skip((0.08 * fs) as usize)
+        .map(|(a, b)| f64::from(*a) * f64::from(*b))
+        .sum();
+    let e = |v: &[f32]| {
+        v.iter()
+            .skip((0.08 * fs) as usize)
+            .map(|a| f64::from(*a).powi(2))
+            .sum::<f64>()
+    };
     let corr = dot / (e(l) * e(r)).sqrt();
     println!(
         "{name:28} dense after {:5.0} ms   periodicity {:.3}   peaky {:6.3} % (late {:6.3} %)   L/R ρ {:+.2}",
@@ -36,9 +48,15 @@ fn report(name: &str, l: &[f32], r: &[f32], fs: f64) {
         corr
     );
     if std::env::var_os("VERB_LAGS").is_some() {
-        let lags: Vec<String> = periodic_lags(l, fs, 0.15, 0.65, 5).iter().map(|(ms, c)| format!("{ms:.2} ms {c:+.3}")).collect();
+        let lags: Vec<String> = periodic_lags(l, fs, 0.15, 0.65, 5)
+            .iter()
+            .map(|(ms, c)| format!("{ms:.2} ms {c:+.3}"))
+            .collect();
         println!("    lags: {}", lags.join(", "));
-        let pk: Vec<String> = peaks(l, fs, 0.1, 0.9, 12).iter().map(|(f, d)| format!("{f:.0} Hz {d:+.1}")).collect();
+        let pk: Vec<String> = peaks(l, fs, 0.1, 0.9, 12)
+            .iter()
+            .map(|(f, d)| format!("{f:.0} Hz {d:+.1}"))
+            .collect();
         println!("    peaks: {}", pk.join(", "));
     }
 }
@@ -69,21 +87,83 @@ fn main() {
     let fs = 48_000.0;
     let wav = std::env::var("VERB_WAV").ok();
     let cases = [
-        ("size 0, 1.0 s", ReverbSettings { size: 0.0, decay_s: 1.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
-        ("size 0, 2.0 s", ReverbSettings { size: 0.0, decay_s: 2.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
-        ("size 0, 1.0 s, flat", ReverbSettings { size: 0.0, decay_s: 1.0, ..ReverbSettings::default() }),
-        ("size 0, 2.0 s, no mod", ReverbSettings { size: 0.0, decay_s: 2.0, mod_depth: 0.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
-        ("size 25, 1.2 s", ReverbSettings { size: 0.25, decay_s: 1.2, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
-        ("default (50, 2 s)", ReverbSettings::default().with_shelves(ROOM.0, ROOM.1)),
+        (
+            "size 0, 1.0 s",
+            ReverbSettings {
+                size: 0.0,
+                decay_s: 1.0,
+                ..ReverbSettings::default()
+            }
+            .with_shelves(ROOM.0, ROOM.1),
+        ),
+        (
+            "size 0, 2.0 s",
+            ReverbSettings {
+                size: 0.0,
+                decay_s: 2.0,
+                ..ReverbSettings::default()
+            }
+            .with_shelves(ROOM.0, ROOM.1),
+        ),
+        (
+            "size 0, 1.0 s, flat",
+            ReverbSettings {
+                size: 0.0,
+                decay_s: 1.0,
+                ..ReverbSettings::default()
+            },
+        ),
+        (
+            "size 0, 2.0 s, no mod",
+            ReverbSettings {
+                size: 0.0,
+                decay_s: 2.0,
+                mod_depth: 0.0,
+                ..ReverbSettings::default()
+            }
+            .with_shelves(ROOM.0, ROOM.1),
+        ),
+        (
+            "size 25, 1.2 s",
+            ReverbSettings {
+                size: 0.25,
+                decay_s: 1.2,
+                ..ReverbSettings::default()
+            }
+            .with_shelves(ROOM.0, ROOM.1),
+        ),
+        (
+            "default (50, 2 s)",
+            ReverbSettings::default().with_shelves(ROOM.0, ROOM.1),
+        ),
         ("50, 2 s, flat decay", ReverbSettings::default()),
-        ("size 0, 2 s, flat decay", ReverbSettings { size: 0.0, ..ReverbSettings::default() }),
-        ("size 100, 4 s", ReverbSettings { size: 1.0, decay_s: 4.0, ..ReverbSettings::default() }.with_shelves(ROOM.0, ROOM.1)),
+        (
+            "size 0, 2 s, flat decay",
+            ReverbSettings {
+                size: 0.0,
+                ..ReverbSettings::default()
+            },
+        ),
+        (
+            "size 100, 4 s",
+            ReverbSettings {
+                size: 1.0,
+                decay_s: 4.0,
+                ..ReverbSettings::default()
+            }
+            .with_shelves(ROOM.0, ROOM.1),
+        ),
     ];
     for (name, s) in cases {
         let [l, r] = ir(&s, fs, 2.0);
         report(name, &l, &r, f64::from(fs));
         if let Some(dir) = &wav {
-            write_wav(&format!("{dir}/{}.wav", name.replace([' ', ',', '(', ')', '.'], "_")), &l, &r, fs as u32);
+            write_wav(
+                &format!("{dir}/{}.wav", name.replace([' ', ',', '(', ')', '.'], "_")),
+                &l,
+                &r,
+                fs as u32,
+            );
         }
     }
     // The reference: Gaussian-ish noise under a 1 s exponential decay.
@@ -99,7 +179,11 @@ fn main() {
         s
     };
     let n = (fs * 2.0) as usize;
-    let l: Vec<f32> = (0..n).map(|i| noise() * (-6.9 * i as f32 / fs).exp()).collect();
-    let r: Vec<f32> = (0..n).map(|i| noise() * (-6.9 * i as f32 / fs).exp()).collect();
+    let l: Vec<f32> = (0..n)
+        .map(|i| noise() * (-6.9 * i as f32 / fs).exp())
+        .collect();
+    let r: Vec<f32> = (0..n)
+        .map(|i| noise() * (-6.9 * i as f32 / fs).exp())
+        .collect();
     report("reference: noise, 1 s", &l, &r, f64::from(fs));
 }

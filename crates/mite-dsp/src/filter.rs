@@ -25,11 +25,17 @@ pub struct Analog {
 
 impl Analog {
     pub const fn second(n2: f64, n1: f64, n0: f64, d2: f64, d1: f64, d0: f64) -> Self {
-        Self { n: [n0, n1, n2], d: [d0, d1, d2] }
+        Self {
+            n: [n0, n1, n2],
+            d: [d0, d1, d2],
+        }
     }
 
     pub const fn first(n1: f64, n0: f64, d1: f64, d0: f64) -> Self {
-        Self { n: [n0, n1, 0.0], d: [d0, d1, 0.0] }
+        Self {
+            n: [n0, n1, 0.0],
+            d: [d0, d1, 0.0],
+        }
     }
 
     pub fn is_first_order(&self) -> bool {
@@ -45,7 +51,11 @@ impl Analog {
             re * re + im * im
         };
         let den = poly(&self.d);
-        if den == 0.0 { f64::INFINITY } else { poly(&self.n) / den }
+        if den == 0.0 {
+            f64::INFINITY
+        } else {
+            poly(&self.n) / den
+        }
     }
 
     /// H(jx), magnitude and phase, at normalised frequency `x = Ω/Ω0`.
@@ -66,7 +76,13 @@ pub struct Coeffs {
 }
 
 impl Coeffs {
-    pub const IDENTITY: Self = Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
+    pub const IDENTITY: Self = Self {
+        b0: 1.0,
+        b1: 0.0,
+        b2: 0.0,
+        a1: 0.0,
+        a2: 0.0,
+    };
 
     /// |H(e^jω)|² of the digital section.
     pub fn magnitude_sq(&self, w: f64) -> f64 {
@@ -74,9 +90,12 @@ impl Coeffs {
         let phi1 = s * s;
         let phi0 = 1.0 - phi1;
         let phi2 = 4.0 * phi0 * phi1;
-        let num = (self.b0 + self.b1 + self.b2).powi(2) * phi0 + (self.b0 - self.b1 + self.b2).powi(2) * phi1
+        let num = (self.b0 + self.b1 + self.b2).powi(2) * phi0
+            + (self.b0 - self.b1 + self.b2).powi(2) * phi1
             - 4.0 * self.b0 * self.b2 * phi2;
-        let den = (1.0 + self.a1 + self.a2).powi(2) * phi0 + (1.0 - self.a1 + self.a2).powi(2) * phi1 - 4.0 * self.a2 * phi2;
+        let den = (1.0 + self.a1 + self.a2).powi(2) * phi0
+            + (1.0 - self.a1 + self.a2).powi(2) * phi1
+            - 4.0 * self.a2 * phi2;
         num / den
     }
 
@@ -96,7 +115,11 @@ const MAX_MATCH_W: f64 = 0.9 * PI;
 /// Designs the digital section matching `proto` centred at `w0` = 2π·f0/fs (radians/sample).
 /// `w0` may exceed π (a band above Nyquist); the section then tracks the in-band skirt.
 pub fn matched(proto: &Analog, w0: f64) -> Coeffs {
-    if proto.is_first_order() { matched_first(proto, w0) } else { matched_second(proto, w0) }
+    if proto.is_first_order() {
+        matched_first(proto, w0)
+    } else {
+        matched_second(proto, w0)
+    }
 }
 
 fn matched_first(p: &Analog, w0: f64) -> Coeffs {
@@ -108,8 +131,16 @@ fn matched_first(p: &Analog, w0: f64) -> Coeffs {
     // high-pass). For a tilt it is the band frequency; a flat tilt's pairs sit elsewhere, and
     // matching them at the band frequency left the middle of the spectrum unconstrained.
     let pole = p.d[0] / p.d[1];
-    let zero = if p.n[1] != 0.0 && p.n[0] != 0.0 { p.n[0] / p.n[1] } else { pole };
-    let corner = if pole > 0.0 && zero > 0.0 { (pole * zero).sqrt() } else { 1.0 };
+    let zero = if p.n[1] != 0.0 && p.n[0] != 0.0 {
+        p.n[0] / p.n[1]
+    } else {
+        pole
+    };
+    let corner = if pole > 0.0 && zero > 0.0 {
+        (pole * zero).sqrt()
+    } else {
+        1.0
+    };
     let wm = (w0 * corner).min(MAX_MATCH_W);
     let hm2 = p.magnitude_sq(wm / w0);
     let s = (wm * 0.5).sin();
@@ -127,7 +158,13 @@ fn matched_first(p: &Analog, w0: f64) -> Coeffs {
     // |N|² at DC = (b0+b1)² = dc²·(1+a1)²; at Nyquist (b0−b1)² = ny²·(1−a1)².
     let sum = dc * (1.0 + a1);
     let diff = ny * (1.0 - a1);
-    Coeffs { b0: 0.5 * (sum + diff), b1: 0.5 * (sum - diff), b2: 0.0, a1, a2: 0.0 }
+    Coeffs {
+        b0: 0.5 * (sum + diff),
+        b1: 0.5 * (sum - diff),
+        b2: 0.0,
+        a1,
+        a2: 0.0,
+    }
 }
 
 fn matched_second(p: &Analog, w0: f64) -> Coeffs {
@@ -155,12 +192,24 @@ fn matched_second(p: &Analog, w0: f64) -> Coeffs {
     // All-pass: the numerator mirrors the denominator, so the level stays exactly 1 and only the
     // phase turns (matching magnitudes would give a flat section with no rotation at all).
     if p.n[2] == p.d[2] && p.n[0] == p.d[0] && p.n[1] == -p.d[1] {
-        return Coeffs { b0: a2, b1: a1, b2: 1.0, a1, a2 };
+        return Coeffs {
+            b0: a2,
+            b1: a1,
+            b2: 1.0,
+            a1,
+            a2,
+        };
     }
     // Notch: zeros exactly on the unit circle at the centre, so the notch is infinitely deep.
     if p.n[1] == 0.0 && p.n[0] == p.n[2] && w0 < PI {
         let g = p.magnitude_sq(0.0).sqrt() * (1.0 + a1 + a2) / (2.0 - 2.0 * w0.cos());
-        return Coeffs { b0: g, b1: -2.0 * w0.cos() * g, b2: g, a1, a2 };
+        return Coeffs {
+            b0: g,
+            b1: -2.0 * w0.cos() * g,
+            b2: g,
+            a1,
+            a2,
+        };
     }
     let with_match = |wm: f64| zeros_for(p, w0, a1, a2, wm);
     let centre = w0.min(MAX_MATCH_W);
@@ -189,7 +238,8 @@ fn den_sq(a1: f64, a2: f64, w: f64) -> (f64, f64, f64) {
     let s = (w * 0.5).sin();
     let phi1 = s * s;
     let phi0 = 1.0 - phi1;
-    let d = (1.0 + a1 + a2).powi(2) * phi0 + (1.0 - a1 + a2).powi(2) * phi1 - 4.0 * a2 * 4.0 * phi0 * phi1;
+    let d = (1.0 + a1 + a2).powi(2) * phi0 + (1.0 - a1 + a2).powi(2) * phi1
+        - 4.0 * a2 * 4.0 * phi0 * phi1;
     (d, phi0, phi1)
 }
 
@@ -201,7 +251,13 @@ fn lowpass_zeros(p: &Analog, w0: f64, a1: f64, a2: f64) -> Coeffs {
     let b1s = ((p.magnitude_sq(wm / w0) * dm - b0s * phi0) / phi1).max(0.0);
     let (r0, r1) = (b0s.sqrt(), b1s.sqrt());
     let b0 = 0.5 * (r0 + r1);
-    Coeffs { b0, b1: r0 - b0, b2: 0.0, a1, a2 }
+    Coeffs {
+        b0,
+        b1: r0 - b0,
+        b2: 0.0,
+        a1,
+        a2,
+    }
 }
 
 /// High-pass: double zero at DC, gain matched at Nyquist. The passband of a high-pass is the top
@@ -210,7 +266,13 @@ fn lowpass_zeros(p: &Analog, w0: f64, a1: f64, a2: f64) -> Coeffs {
 fn highpass_zeros(p: &Analog, w0: f64, a1: f64, a2: f64) -> Coeffs {
     // |1 − z⁻¹|² = 4 and |A| = 1 − a1 + a2 at Nyquist.
     let g = p.magnitude_sq(PI / w0).sqrt() * (1.0 - a1 + a2) / 4.0;
-    Coeffs { b0: g, b1: -2.0 * g, b2: g, a1, a2 }
+    Coeffs {
+        b0: g,
+        b1: -2.0 * g,
+        b2: g,
+        a1,
+        a2,
+    }
 }
 
 /// Numerator matching |H|² at DC, Nyquist and `wm`, for the poles `a1`, `a2`.
@@ -261,14 +323,23 @@ impl Coeffs {
     /// numerator is factored with |b2| ≤ b0, keeping its zeros inside the unit circle.
     pub fn inverse(&self) -> Self {
         let g = self.b0;
-        Self { b0: 1.0 / g, b1: self.a1 / g, b2: self.a2 / g, a1: self.b1 / g, a2: self.b2 / g }
+        Self {
+            b0: 1.0 / g,
+            b1: self.a1 / g,
+            b2: self.a2 / g,
+            a1: self.b1 / g,
+            a2: self.b2 / g,
+        }
     }
 }
 
 impl Analog {
     /// 1/H: swaps numerator and denominator.
     pub fn inverse(&self) -> Self {
-        Self { n: self.d, d: self.n }
+        Self {
+            n: self.d,
+            d: self.n,
+        }
     }
 }
 
@@ -276,7 +347,11 @@ impl Analog {
 /// the matched *boost* and inverted, so boost and cut are exact mirror images as in analog EQs
 /// and the cut never hits an unrealisable match.
 pub fn matched_symmetric(proto: &Analog, w0: f64, is_cut: bool) -> Coeffs {
-    if is_cut { matched(&proto.inverse(), w0).inverse() } else { matched(proto, w0) }
+    if is_cut {
+        matched(&proto.inverse(), w0).inverse()
+    } else {
+        matched(proto, w0)
+    }
 }
 
 /// Transposed direct form II state for one channel of one section.
@@ -302,7 +377,10 @@ impl Tdf2 {
     /// `ka`·self + `kb`·other: the state a section would hold had it run on that mix of the two
     /// inputs (the sections are linear), e.g. to carry filters across an L/R ↔ M/S switch.
     pub fn combine(&self, other: &Self, ka: f64, kb: f64) -> Self {
-        Self { s1: ka * self.s1 + kb * other.s1, s2: ka * self.s2 + kb * other.s2 }
+        Self {
+            s1: ka * self.s1 + kb * other.s1,
+            s2: ka * self.s2 + kb * other.s2,
+        }
     }
 }
 
@@ -339,7 +417,12 @@ mod tests {
 
     #[test]
     fn low_and_mid_bells_match_analog_within_a_tenth_of_a_db() {
-        for (f0, g, q) in [(60.0, 12.0, 1.0), (1000.0, -12.0, 0.5), (3000.0, 9.0, 4.0), (3000.0, -9.0, 4.0)] {
+        for (f0, g, q) in [
+            (60.0, 12.0, 1.0),
+            (1000.0, -12.0, 0.5),
+            (3000.0, 9.0, 4.0),
+            (3000.0, -9.0, 4.0),
+        ] {
             let err = worst_error(&bell(g, q), f0, 44_100.0, 20_000.0, g < 0.0);
             assert!(err < 0.1, "bell {f0} Hz {g} dB Q{q}: {err:.3} dB");
         }
@@ -390,8 +473,14 @@ mod tests {
         let hp = Analog::second(1.0, 0.0, 0.0, 1.0, 1.0 / q, 1.0);
         // Same Nyquist limit as the high bells for corners above ~0.3·π.
         for (f0, limit) in [(100.0, 0.1), (2000.0, 0.1), (12000.0, 1.0)] {
-            assert!(worst_error(&lp, f0, 48_000.0, 20_000.0, false) < limit, "lp {f0}");
-            assert!(worst_error(&hp, f0, 48_000.0, 20_000.0, false) < limit, "hp {f0}");
+            assert!(
+                worst_error(&lp, f0, 48_000.0, 20_000.0, false) < limit,
+                "lp {f0}"
+            );
+            assert!(
+                worst_error(&hp, f0, 48_000.0, 20_000.0, false) < limit,
+                "hp {f0}"
+            );
         }
     }
 
@@ -402,16 +491,30 @@ mod tests {
         // A first-order digital section must reach a finite value at Nyquist while the analog one
         // keeps falling, so high corners deviate where the slope is already ~20 dB down.
         for (f0, limit) in [(50.0, 0.1), (1000.0, 1.0), (10000.0, 1.0)] {
-            assert!(worst_error(&lp1, f0, 48_000.0, 20_000.0, false) < limit, "lp1 {f0}");
-            assert!(worst_error(&hp1, f0, 48_000.0, 20_000.0, false) < limit, "hp1 {f0}");
+            assert!(
+                worst_error(&lp1, f0, 48_000.0, 20_000.0, false) < limit,
+                "lp1 {f0}"
+            );
+            assert!(
+                worst_error(&hp1, f0, 48_000.0, 20_000.0, false) < limit,
+                "hp1 {f0}"
+            );
         }
     }
 
     #[test]
     fn tdf2_impulse_matches_coefficients() {
-        let c = Coeffs { b0: 0.5, b1: 0.2, b2: 0.1, a1: -0.3, a2: 0.05 };
+        let c = Coeffs {
+            b0: 0.5,
+            b1: 0.2,
+            b2: 0.1,
+            a1: -0.3,
+            a2: 0.05,
+        };
         let mut s = Tdf2::default();
-        let y: Vec<f64> = (0..4).map(|n| s.process(&c, if n == 0 { 1.0 } else { 0.0 })).collect();
+        let y: Vec<f64> = (0..4)
+            .map(|n| s.process(&c, if n == 0 { 1.0 } else { 0.0 }))
+            .collect();
         let expected0 = 0.5;
         let expected1 = 0.2 - (-0.3) * expected0;
         let expected2 = 0.1 - (-0.3) * expected1 - 0.05 * expected0;
@@ -420,5 +523,3 @@ mod tests {
         assert!((y[2] - expected2).abs() < 1e-12);
     }
 }
-
-

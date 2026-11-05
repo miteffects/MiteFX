@@ -126,8 +126,18 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub const NAMES: [&'static str; 7] = ["Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato", "Rotary", "Micro"];
-    pub const ALL: [Mode; 7] = [Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato, Mode::Rotary, Mode::Micro];
+    pub const NAMES: [&'static str; 7] = [
+        "Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato", "Rotary", "Micro",
+    ];
+    pub const ALL: [Mode; 7] = [
+        Mode::Chorus,
+        Mode::Ensemble,
+        Mode::Flanger,
+        Mode::Phaser,
+        Mode::Vibrato,
+        Mode::Rotary,
+        Mode::Micro,
+    ];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -174,8 +184,22 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const NAMES: [&'static str; 6] = ["Sine", "Triangle", "Ramp Up", "Ramp Down", "Square", "Random"];
-    pub const ALL: [Shape; 6] = [Shape::Sine, Shape::Triangle, Shape::RampUp, Shape::RampDown, Shape::Square, Shape::Random];
+    pub const NAMES: [&'static str; 6] = [
+        "Sine",
+        "Triangle",
+        "Ramp Up",
+        "Ramp Down",
+        "Square",
+        "Random",
+    ];
+    pub const ALL: [Shape; 6] = [
+        Shape::Sine,
+        Shape::Triangle,
+        Shape::RampUp,
+        Shape::RampDown,
+        Shape::Square,
+        Shape::Random,
+    ];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -284,14 +308,17 @@ impl Default for ModSettings {
 /// The LFO's rate, Hz (synced to `tempo` when asked and known).
 pub fn rate_hz(s: &ModSettings, tempo: Option<f64>) -> f64 {
     match (s.sync, tempo) {
-        (true, Some(bpm)) if bpm > 0.0 => bpm / 60.0 / DIVISIONS[s.division.min(DIVISIONS.len() - 1)].1,
+        (true, Some(bpm)) if bpm > 0.0 => {
+            bpm / 60.0 / DIVISIONS[s.division.min(DIVISIONS.len() - 1)].1
+        }
         _ => f64::from(s.rate_hz.clamp(0.01, 40.0)),
     }
 }
 
 /// A random value per cycle for Random, −1…1, from the cycle's number.
 fn cycle_value(k: i64, seed: u32) -> f32 {
-    let mut h = (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(seed).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    let mut h = (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ u64::from(seed).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     h ^= h >> 29;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^= h >> 32;
@@ -303,7 +330,13 @@ fn cycle_value(k: i64, seed: u32) -> f32 {
 pub fn shape_at(shape: Shape, p: f64) -> f32 {
     let f = p.rem_euclid(1.0) as f32;
     let tau = std::f32::consts::TAU;
-    let ramp = |f: f32| if f < 0.9 { -1.0 + 2.0 * f / 0.9 } else { (std::f32::consts::PI * (f - 0.9) / 0.1).cos() };
+    let ramp = |f: f32| {
+        if f < 0.9 {
+            -1.0 + 2.0 * f / 0.9
+        } else {
+            (std::f32::consts::PI * (f - 0.9) / 0.1).cos()
+        }
+    };
     match shape {
         Shape::Sine => (tau * f).sin(),
         Shape::Triangle => {
@@ -322,7 +355,10 @@ pub fn shape_at(shape: Shape, p: f64) -> f32 {
             // A random height each cycle, on alternate sides of the middle (so it never stalls:
             // two near values in a row would hold still for a whole cycle).
             let k = p.floor() as i64;
-            let at = |k: i64| (0.25 + 0.75 * cycle_value(k, 0x5EED).abs()) * if k.rem_euclid(2) == 0 { 1.0 } else { -1.0 };
+            let at = |k: i64| {
+                (0.25 + 0.75 * cycle_value(k, 0x5EED).abs())
+                    * if k.rem_euclid(2) == 0 { 1.0 } else { -1.0 }
+            };
             let (a, b) = (at(k), at(k + 1));
             let t = f * f * (3.0 - 2.0 * f);
             a + (b - a) * t
@@ -332,7 +368,8 @@ pub fn shape_at(shape: Shape, p: f64) -> f32 {
 
 /// A chorus voice's delay, ms, for an LFO value (−1…1).
 pub fn chorus_delay_ms(s: &ModSettings, voice: usize, lfo: f32) -> f32 {
-    let base = s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS) * VOICE_DELAY[voice.min(MAX_VOICES - 1)];
+    let base =
+        s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS) * VOICE_DELAY[voice.min(MAX_VOICES - 1)];
     base + chorus_sweep_ms(s, base) * lfo
 }
 
@@ -344,7 +381,8 @@ pub fn chorus_sweep_ms(s: &ModSettings, base: f32) -> f32 {
 /// An ensemble voice's delay, ms, from the slow LFO's value and the fast shimmer's.
 pub fn ensemble_delay_ms(s: &ModSettings, slow: f32, fast: f32) -> f32 {
     let d = s.depth.clamp(0.0, 1.0);
-    s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS).max(2.5) + d * (ENSEMBLE_SLOW_MS * slow + ENSEMBLE_FAST_MS * fast)
+    s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS).max(2.5)
+        + d * (ENSEMBLE_SLOW_MS * slow + ENSEMBLE_FAST_MS * fast)
 }
 
 /// The flanger's delay between the wet and the dry, ms (negative: the wet ahead, through zero).
@@ -458,8 +496,15 @@ impl Biquad {
         let (sin, cos) = w.sin_cos();
         let alpha = sin / std::f64::consts::SQRT_2;
         let a0 = 1.0 + alpha;
-        let (b0, b1) = if high { ((1.0 + cos) / 2.0, -(1.0 + cos)) } else { ((1.0 - cos) / 2.0, 1.0 - cos) };
-        Self { b: [b0 / a0, b1 / a0, b0 / a0], a: [-2.0 * cos / a0, (1.0 - alpha) / a0] }
+        let (b0, b1) = if high {
+            ((1.0 + cos) / 2.0, -(1.0 + cos))
+        } else {
+            ((1.0 - cos) / 2.0, 1.0 - cos)
+        };
+        Self {
+            b: [b0 / a0, b1 / a0, b0 / a0],
+            a: [-2.0 * cos / a0, (1.0 - alpha) / a0],
+        }
     }
 
     /// The response at `f` Hz.
@@ -467,8 +512,14 @@ impl Biquad {
         let w = std::f64::consts::TAU * f / fs;
         let z1 = (w.cos(), -w.sin());
         let z2 = ((2.0 * w).cos(), -(2.0 * w).sin());
-        let num = (self.b[0] + self.b[1] * z1.0 + self.b[2] * z2.0, self.b[1] * z1.1 + self.b[2] * z2.1);
-        let den = (1.0 + self.a[0] * z1.0 + self.a[1] * z2.0, self.a[0] * z1.1 + self.a[1] * z2.1);
+        let num = (
+            self.b[0] + self.b[1] * z1.0 + self.b[2] * z2.0,
+            self.b[1] * z1.1 + self.b[2] * z2.1,
+        );
+        let den = (
+            1.0 + self.a[0] * z1.0 + self.a[1] * z2.0,
+            self.a[0] * z1.1 + self.a[1] * z2.1,
+        );
         cdiv(num, den)
     }
 }
@@ -507,7 +558,10 @@ pub struct Tone(pub Biquad, pub Biquad);
 
 impl Tone {
     pub fn of(s: &ModSettings, fs: f64) -> Self {
-        Self(Biquad::butter(f64::from(s.low_cut_hz), fs, true), Biquad::butter(f64::from(s.high_cut_hz), fs, false))
+        Self(
+            Biquad::butter(f64::from(s.low_cut_hz), fs, true),
+            Biquad::butter(f64::from(s.high_cut_hz), fs, false),
+        )
     }
 
     fn response(&self, f: f64, fs: f64) -> (f64, f64) {
@@ -527,9 +581,17 @@ pub fn flanger_response_with(s: &ModSettings, tone: &Tone, tau_ms: f32, f: f64, 
     let m = f64::from(s.mix.clamp(0.0, 1.0));
     let fb = f64::from(s.feedback.clamp(-0.95, 0.95));
     // The dry's delay and the feedback loop's, s.
-    let lat = if s.thru_zero { tz_latency(fs as f32) as f64 / fs } else { 0.0 };
+    let lat = if s.thru_zero {
+        tz_latency(fs as f32) as f64 / fs
+    } else {
+        0.0
+    };
     let tau = f64::from(tau_ms) * 0.001;
-    let lp = if s.thru_zero { lat + tau } else { tau.max(2.0 / fs) };
+    let lp = if s.thru_zero {
+        lat + tau
+    } else {
+        tau.max(2.0 / fs)
+    };
     let dry = cexp(-w * lat);
     let e = cexp(-w * lp);
     let wet = cdiv(e, (1.0 - fb * e.0, -fb * e.1));
@@ -718,14 +780,22 @@ impl Mod {
             ap: [[[0.0; 2]; MAX_STAGES]; 2],
             ap_out: [0.0; 2],
             tone: [[[BiquadState::default(); 2]; 2]; PROGRAMS],
-            tone_c: [Biquad::butter(20.0, f64::from(fs), true), Biquad::butter(20_000.0, f64::from(fs), false)],
+            tone_c: [
+                Biquad::butter(20.0, f64::from(fs), true),
+                Biquad::butter(20_000.0, f64::from(fs), false),
+            ],
             tone_for: (0.0, 0.0),
             phase: 0.0,
             fast_phase: 0.0,
             vib_last: [0.0; 2],
-            rot_split: [Biquad::butter(f64::from(ROT_SPLIT_HZ), f64::from(fs), false), Biquad::butter(f64::from(ROT_SPLIT_HZ), f64::from(fs), true)],
+            rot_split: [
+                Biquad::butter(f64::from(ROT_SPLIT_HZ), f64::from(fs), false),
+                Biquad::butter(f64::from(ROT_SPLIT_HZ), f64::from(fs), true),
+            ],
             rot_split_z: [[BiquadState::default(); 2]; 2],
-            rot_line: mk(((ROT_BASE_MS + ROT_REFLECT_MS + 2.0 * HORN_DOPPLER_MS) * 0.001 * fs) as usize + 64),
+            rot_line: mk(
+                ((ROT_BASE_MS + ROT_REFLECT_MS + 2.0 * HORN_DOPPLER_MS) * 0.001 * fs) as usize + 64,
+            ),
             rot_beam: [0.0; 2],
             rot_beam_k: 1.0 - (-std::f32::consts::TAU * HORN_BEAM_HZ / fs).exp(),
             rot_angle: [0.0, 0.3],
@@ -782,7 +852,11 @@ impl Mod {
     }
 
     pub fn reset(&mut self, s: &ModSettings) {
-        for d in self.clean.iter_mut().chain(self.flange.iter_mut().flatten()) {
+        for d in self
+            .clean
+            .iter_mut()
+            .chain(self.flange.iter_mut().flatten())
+        {
             d.reset();
         }
         self.flange_wet = [[0.0; 2]; 2];
@@ -834,7 +908,8 @@ impl Mod {
     fn reset_micro(&mut self, s: &ModSettings) {
         let ms = 0.001 * f64::from(self.fs);
         for c in 0..2 {
-            self.micro_tap[c] = (f64::from(micro_delay_ms(s, c)) + 0.5 * f64::from(MICRO_WINDOW_MS)) * ms;
+            self.micro_tap[c] =
+                (f64::from(micro_delay_ms(s, c)) + 0.5 * f64::from(MICRO_WINDOW_MS)) * ms;
         }
         self.micro_fade = [1.0; 2];
     }
@@ -881,7 +956,10 @@ impl Mod {
 
     fn design_tone(&mut self) {
         let fs = f64::from(self.fs);
-        self.tone_c = [Biquad::butter(f64::from(self.low_cut.v.exp2()), fs, true), Biquad::butter(f64::from(self.high_cut.v.exp2()), fs, false)];
+        self.tone_c = [
+            Biquad::butter(f64::from(self.low_cut.v.exp2()), fs, true),
+            Biquad::butter(f64::from(self.high_cut.v.exp2()), fs, false),
+        ];
         self.tone_for = (self.low_cut.v, self.high_cut.v);
     }
 
@@ -914,9 +992,24 @@ impl Mod {
 
     /// Processes `input` (one side, or two) into `out` (two sides). `stereo_in` false: the left
     /// holds a mono input. Never allocates.
-    pub fn process(&mut self, input: [&[f32]; 2], out: [&mut [f32]; 2], stereo_in: bool, s: &ModSettings, transport: &Transport) -> ModTelemetry {
+    pub fn process(
+        &mut self,
+        input: [&[f32]; 2],
+        out: [&mut [f32]; 2],
+        stereo_in: bool,
+        s: &ModSettings,
+        transport: &Transport,
+    ) -> ModTelemetry {
         let [ol, or] = out;
-        let len = input[0].len().min(ol.len()).min(or.len()).min(if stereo_in { input[1].len() } else { usize::MAX });
+        let len = input[0]
+            .len()
+            .min(ol.len())
+            .min(or.len())
+            .min(if stereo_in {
+                input[1].len()
+            } else {
+                usize::MAX
+            });
         let fs = self.fs;
         let fsd = f64::from(fs);
         let rate = rate_hz(s, transport.tempo);
@@ -963,21 +1056,51 @@ impl Mod {
             let mix = self.mix.next(s.mix.clamp(0.0, 1.0), k);
             let width = self.width.next(s.width.clamp(0.0, 2.0), k);
             let balance = self.balance.next(s.balance.clamp(-1.0, 1.0), k);
-            let detune = self.detune.next(s.detune_cents.clamp(0.0, MICRO_MAX_CENTS), k);
-            let delay = self.delay.next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), kd);
-            let manual = self.manual.next(s.manual_ms.clamp(MIN_MANUAL_MS, TZ_MAX_MS), kd);
-            let centre = self.centre.next(s.centre_hz.clamp(50.0, 8000.0).log2(), kd).exp2();
+            let detune = self
+                .detune
+                .next(s.detune_cents.clamp(0.0, MICRO_MAX_CENTS), k);
+            let delay = self
+                .delay
+                .next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), kd);
+            let manual = self
+                .manual
+                .next(s.manual_ms.clamp(MIN_MANUAL_MS, TZ_MAX_MS), kd);
+            let centre = self
+                .centre
+                .next(s.centre_hz.clamp(50.0, 8000.0).log2(), kd)
+                .exp2();
             let vib_amp = self.vib_amp.next(vib_target, kd);
-            self.low_cut.next(s.low_cut_hz.clamp(10.0, 20_000.0).log2(), self.k_tone);
-            self.high_cut.next(s.high_cut_hz.clamp(200.0, 22_000.0).log2(), self.k_tone);
+            self.low_cut
+                .next(s.low_cut_hz.clamp(10.0, 20_000.0).log2(), self.k_tone);
+            self.high_cut
+                .next(s.high_cut_hz.clamp(200.0, 22_000.0).log2(), self.k_tone);
             if (self.low_cut.v, self.high_cut.v) != self.tone_for {
                 self.design_tone();
             }
             for (v, g) in self.voice_gain.iter_mut().enumerate() {
-                g.next(if v < s.voices.clamp(1, MAX_VOICES) { 1.0 } else { 0.0 }, k);
+                g.next(
+                    if v < s.voices.clamp(1, MAX_VOICES) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    k,
+                );
             }
             // The settings as they play this sample (glided), for the readings' functions.
-            let now = ModSettings { depth, spread, feedback, mix, width, balance, detune_cents: detune, delay_ms: delay, manual_ms: manual, centre_hz: centre, ..*s };
+            let now = ModSettings {
+                depth,
+                spread,
+                feedback,
+                mix,
+                width,
+                balance,
+                detune_cents: detune,
+                delay_ms: delay,
+                manual_ms: manual,
+                centre_hz: centre,
+                ..*s
+            };
             let offsets = [0.0, 0.5 * f64::from(spread)];
             let lfo = [self.lfo(self.phase), self.lfo(self.phase + offsets[1])];
             let mut y = self.play(self.cur, &now, lfo, offsets, vib_amp, ms, [xl, xr]);
@@ -1001,7 +1124,11 @@ impl Mod {
                 self.stage_fade = (self.stage_fade + self.switch_step).min(1.0);
             }
         }
-        ModTelemetry { phase: self.phase, rate, values: self.values }
+        ModTelemetry {
+            phase: self.phase,
+            rate,
+            values: self.values,
+        }
     }
 
     /// A program comes in: from rest.
@@ -1041,7 +1168,16 @@ impl Mod {
     /// One sample of program `p`: the output, both sides.
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    fn play(&mut self, p: Program, s: &ModSettings, lfo: [f32; 2], offsets: [f64; 2], vib_amp: f32, ms: f64, x: [f32; 2]) -> [f32; 2] {
+    fn play(
+        &mut self,
+        p: Program,
+        s: &ModSettings,
+        lfo: [f32; 2],
+        offsets: [f64; 2],
+        vib_amp: f32,
+        ms: f64,
+        x: [f32; 2],
+    ) -> [f32; 2] {
         let mix = s.mix;
         match p {
             Program::Chorus => {
@@ -1062,7 +1198,10 @@ impl Mod {
                 }
                 let norm = 1.0 / power.max(1e-6).sqrt();
                 let w = self.finish(p, [wet[0] * norm, wet[1] * norm], s.width);
-                [x[0] * (1.0 - mix) + w[0] * mix, x[1] * (1.0 - mix) + w[1] * mix]
+                [
+                    x[0] * (1.0 - mix) + w[0] * mix,
+                    x[1] * (1.0 - mix) + w[1] * mix,
+                ]
             }
             Program::Ensemble => {
                 let mut wet = [0.0f32; 2];
@@ -1070,7 +1209,8 @@ impl Mod {
                     let third = v as f64 / 3.0;
                     for c in 0..2 {
                         let slow = self.lfo(self.phase + offsets[c] + third);
-                        let fast = (std::f64::consts::TAU * (self.fast_phase + offsets[c] + third)).sin() as f32;
+                        let fast = (std::f64::consts::TAU * (self.fast_phase + offsets[c] + third))
+                            .sin() as f32;
                         let d = ensemble_delay_ms(s, slow, fast);
                         wet[c] += Self::read(&self.sinc, &self.clean[c], f64::from(d) * ms);
                         self.values[v + 3 * c] = d;
@@ -1078,7 +1218,10 @@ impl Mod {
                 }
                 let n = 1.0 / 3f32.sqrt();
                 let w = self.finish(p, [wet[0] * n, wet[1] * n], s.width);
-                [x[0] * (1.0 - mix) + w[0] * mix, x[1] * (1.0 - mix) + w[1] * mix]
+                [
+                    x[0] * (1.0 - mix) + w[0] * mix,
+                    x[1] * (1.0 - mix) + w[1] * mix,
+                ]
             }
             Program::Flanger | Program::FlangerTz => {
                 let tz = p == Program::FlangerTz;
@@ -1087,7 +1230,13 @@ impl Mod {
                 let mut wet = [0.0f32; 2];
                 let mut dry = x;
                 for c in 0..2 {
-                    let tau = flanger_tau_ms(&ModSettings { thru_zero: tz, ..*s }, lfo[c]);
+                    let tau = flanger_tau_ms(
+                        &ModSettings {
+                            thru_zero: tz,
+                            ..*s
+                        },
+                        lfo[c],
+                    );
                     self.values[c] = tau;
                     // Its delay from the input, samples (the loop's), at least 2.
                     let d = (lat as f64 + f64::from(tau) * ms).max(2.0);
@@ -1101,7 +1250,10 @@ impl Mod {
                 }
                 self.flange_wet[k] = wet;
                 let w = self.finish(p, wet, s.width);
-                [dry[0] * (1.0 - mix) + w[0] * mix, dry[1] * (1.0 - mix) + w[1] * mix]
+                [
+                    dry[0] * (1.0 - mix) + w[0] * mix,
+                    dry[1] * (1.0 - mix) + w[1] * mix,
+                ]
             }
             Program::Phaser => {
                 let fsd = f64::from(self.fs);
@@ -1131,7 +1283,10 @@ impl Mod {
                     wet[c] = y as f32;
                 }
                 let w = self.finish(p, wet, s.width);
-                [x[0] * (1.0 - mix) + w[0] * mix, x[1] * (1.0 - mix) + w[1] * mix]
+                [
+                    x[0] * (1.0 - mix) + w[0] * mix,
+                    x[1] * (1.0 - mix) + w[1] * mix,
+                ]
             }
             Program::Vibrato => {
                 let centre = f64::from(VIB_CENTER_MS) * ms;
@@ -1166,8 +1321,13 @@ impl Mod {
                         self.micro_next[c] += slide;
                     } else if self.micro_tap[c] < lo || self.micro_tap[c] > hi {
                         // Out of its window: a new tap from the other end, where it matches.
-                        let to = if self.micro_tap[c] < lo { hi - search } else { lo + search };
-                        self.micro_next[c] = Self::best_match(&self.clean[c], self.micro_tap[c], to, self.fs);
+                        let to = if self.micro_tap[c] < lo {
+                            hi - search
+                        } else {
+                            lo + search
+                        };
+                        self.micro_next[c] =
+                            Self::best_match(&self.clean[c], self.micro_tap[c], to, self.fs);
                         self.micro_fade[c] = 0.0;
                     }
                     let old = Self::read(&self.sinc, &self.clean[c], self.micro_tap[c]);
@@ -1186,7 +1346,10 @@ impl Mod {
                     };
                 }
                 let w = self.finish(p, wet, s.width);
-                [x[0] * (1.0 - mix) + w[0] * mix, x[1] * (1.0 - mix) + w[1] * mix]
+                [
+                    x[0] * (1.0 - mix) + w[0] * mix,
+                    x[1] * (1.0 - mix) + w[1] * mix,
+                ]
             }
             Program::Rotary => {
                 let fs = self.fs;
@@ -1196,7 +1359,8 @@ impl Mod {
                     let up = target > self.rot_speed[w];
                     let k = 1.0 - (-1.0 / (rotor_time_s(w, up, s.inertia) * fs)).exp();
                     self.rot_speed[w] += (target - self.rot_speed[w]) * k;
-                    self.rot_angle[w] = (self.rot_angle[w] + f64::from(self.rot_speed[w]) / f64::from(fs)).fract();
+                    self.rot_angle[w] =
+                        (self.rot_angle[w] + f64::from(self.rot_speed[w]) / f64::from(fs)).fract();
                 }
                 // Mono into the cabinet, split (Linkwitz–Riley: two Butterworths each way).
                 let mono = f64::from(0.5 * (x[0] + x[1]));
@@ -1224,21 +1388,34 @@ impl Mod {
                     // The horn's highs beam: facing away, they drop further than its body.
                     self.rot_beam[c] += (direct - self.rot_beam[c]) * self.rot_beam_k;
                     let body = self.rot_beam[c];
-                    let horn = (body + (direct - body) * (1.0 - HORN_BEAM * depth * away)) * (1.0 - HORN_AM * depth * away);
+                    let horn = (body + (direct - body) * (1.0 - HORN_BEAM * depth * away))
+                        * (1.0 - HORN_AM * depth * away);
                     // Off the back wall: the side facing away, a little later.
-                    let dr = base + f64::from(ROT_REFLECT_MS) * ms + f64::from(HORN_DOPPLER_MS * depth * facing) * ms;
-                    let back = Self::read(&self.sinc, &self.rot_line[0], dr) * (1.0 - HORN_AM * depth * (1.0 - away));
+                    let dr = base
+                        + f64::from(ROT_REFLECT_MS) * ms
+                        + f64::from(HORN_DOPPLER_MS * depth * facing) * ms;
+                    let back = Self::read(&self.sinc, &self.rot_line[0], dr)
+                        * (1.0 - HORN_AM * depth * (1.0 - away));
                     let horn = (horn + ROT_REFLECT_GAIN * back) / (1.0 + ROT_REFLECT_GAIN);
                     let facing_d = (tau * (self.rot_angle[1] - mics[c])).cos() as f32;
                     let dd = base - f64::from(DRUM_DOPPLER_MS * depth * facing_d) * ms;
-                    let drum = Self::read(&self.sinc, &self.rot_line[1], dd) * (1.0 - DRUM_AM * depth * 0.5 * (1.0 - facing_d));
+                    let drum = Self::read(&self.sinc, &self.rot_line[1], dd)
+                        * (1.0 - DRUM_AM * depth * 0.5 * (1.0 - facing_d));
                     wet[c] = g_horn * horn + g_drum * drum;
                 }
-                self.values[..4].copy_from_slice(&[self.rot_angle[0] as f32, self.rot_angle[1] as f32, self.rot_speed[0], self.rot_speed[1]]);
+                self.values[..4].copy_from_slice(&[
+                    self.rot_angle[0] as f32,
+                    self.rot_angle[1] as f32,
+                    self.rot_speed[0],
+                    self.rot_speed[1],
+                ]);
                 let lat = rotary_latency(fs);
                 let dry = [self.clean[0].tap(lat), self.clean[1].tap(lat)];
                 let w = self.finish(p, wet, s.width);
-                [dry[0] * (1.0 - mix) + w[0] * mix, dry[1] * (1.0 - mix) + w[1] * mix]
+                [
+                    dry[0] * (1.0 - mix) + w[0] * mix,
+                    dry[1] * (1.0 - mix) + w[1] * mix,
+                ]
             }
         }
     }

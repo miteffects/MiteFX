@@ -15,7 +15,10 @@ impl PeakMeter {
     pub const DEFAULT_RELEASE_DB_PER_S: f32 = 20.0;
 
     pub fn new(sample_rate: f32) -> Self {
-        let mut m = Self { level_db: MINUS_INFINITY_DB, fall_per_sample: 0.0 };
+        let mut m = Self {
+            level_db: MINUS_INFINITY_DB,
+            fall_per_sample: 0.0,
+        };
         m.set_release(sample_rate, Self::DEFAULT_RELEASE_DB_PER_S);
         m
     }

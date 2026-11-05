@@ -33,13 +33,19 @@ pub struct Stft {
 impl Stft {
     /// Frames of `size` samples (a power of two, at least 16). Allocates.
     pub fn new(size: usize) -> Self {
-        assert!(size.is_power_of_two() && size >= 16, "STFT size must be a power of two");
+        assert!(
+            size.is_power_of_two() && size >= 16,
+            "STFT size must be a power of two"
+        );
         let hop = size / 4;
         let mut planner = RealFftPlanner::<f64>::new();
         let r2c = planner.plan_fft_forward(size);
         let c2r = planner.plan_fft_inverse(size);
-        let window: Vec<f64> =
-            (0..size).map(|n| (0.5 - 0.5 * (2.0 * std::f64::consts::PI * n as f64 / size as f64).cos()).sqrt()).collect();
+        let window: Vec<f64> = (0..size)
+            .map(|n| {
+                (0.5 - 0.5 * (2.0 * std::f64::consts::PI * n as f64 / size as f64).cos()).sqrt()
+            })
+            .collect();
         // Hann copies at a quarter-frame hop sum to 2; the inverse FFT scales by `size`.
         let norm = 1.0 / (2.0 * size as f64);
         let zeros = |n: usize| vec![0.0; n];
@@ -103,7 +109,12 @@ impl Stft {
 
     /// Runs a stereo buffer through, calling `frame` with each frame's left and right spectra to
     /// change in place. Allocation- and lock-free (as long as `frame` is).
-    pub fn process(&mut self, left: &mut [f32], right: &mut [f32], frame: &mut impl FnMut(&mut [Complex<f64>], &mut [Complex<f64>])) {
+    pub fn process(
+        &mut self,
+        left: &mut [f32],
+        right: &mut [f32],
+        frame: &mut impl FnMut(&mut [Complex<f64>], &mut [Complex<f64>]),
+    ) {
         let base = self.size - self.hop;
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
             let finite = |x: f32| if x.is_finite() { f64::from(x) } else { 0.0 };
@@ -125,7 +136,11 @@ impl Stft {
                 *f = x * w;
             }
             // Buffers are sized by the planner; never panic on the audio thread.
-            let _ = self.r2c.process_with_scratch(&mut self.frame, &mut self.spectra[c], &mut self.fwd_scratch);
+            let _ = self.r2c.process_with_scratch(
+                &mut self.frame,
+                &mut self.spectra[c],
+                &mut self.fwd_scratch,
+            );
         }
         let [left, right] = &mut self.spectra;
         frame(left, right);
@@ -134,7 +149,11 @@ impl Stft {
             let last = self.spectra[c].len() - 1;
             self.spectra[c][0].im = 0.0;
             self.spectra[c][last].im = 0.0;
-            let _ = self.c2r.process_with_scratch(&mut self.spectra[c], &mut self.frame, &mut self.inv_scratch);
+            let _ = self.c2r.process_with_scratch(
+                &mut self.spectra[c],
+                &mut self.frame,
+                &mut self.inv_scratch,
+            );
             for ((a, f), w) in self.acc[c].iter_mut().zip(&self.frame).zip(&self.window) {
                 *a += f * w * self.norm;
             }
@@ -174,7 +193,9 @@ mod tests {
         }
         let d = stft.latency();
         // Once the first frames have filled in, the output is the input delayed by `size`.
-        let worst = (2 * d..20_000).map(|n| (l[n] - l0[n - d]).abs().max((r[n] - r0[n - d]).abs())).fold(0.0f32, f32::max);
+        let worst = (2 * d..20_000)
+            .map(|n| (l[n] - l0[n - d]).abs().max((r[n] - r0[n - d]).abs()))
+            .fold(0.0f32, f32::max);
         assert!(worst < 1e-6, "residual {worst}");
     }
 
@@ -183,7 +204,12 @@ mod tests {
         let size = 1024;
         let mut stft = Stft::new(size);
         let bin = 64;
-        let tone: Vec<f32> = (0..20_000).map(|n| (0.5 * (2.0 * std::f64::consts::PI * bin as f64 * n as f64 / size as f64).sin()) as f32).collect();
+        let tone: Vec<f32> = (0..20_000)
+            .map(|n| {
+                (0.5 * (2.0 * std::f64::consts::PI * bin as f64 * n as f64 / size as f64).sin())
+                    as f32
+            })
+            .collect();
         let (mut l, mut r) = (tone.clone(), tone.clone());
         // Halve the tone's bin and its neighbours (a square-root Hann window spreads a sine wide).
         stft.process(&mut l, &mut r, &mut |a, b| {
@@ -201,7 +227,11 @@ mod tests {
         let size = 1024;
         let mut stft = Stft::new(size);
         let bin = 100;
-        let tone: Vec<f32> = (0..8192).map(|n| (2.0 * std::f64::consts::PI * bin as f64 * n as f64 / size as f64).sin() as f32).collect();
+        let tone: Vec<f32> = (0..8192)
+            .map(|n| {
+                (2.0 * std::f64::consts::PI * bin as f64 * n as f64 / size as f64).sin() as f32
+            })
+            .collect();
         let (mut l, mut r) = (tone.clone(), tone.clone());
         let mut seen = 0.0;
         let full = stft.full_scale();

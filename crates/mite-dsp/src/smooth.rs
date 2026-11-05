@@ -17,7 +17,13 @@ pub struct LinearSmoother {
 impl LinearSmoother {
     /// A smoother sitting at `value` with a zero-length ramp. Call [`Self::set_ramp`] before use.
     pub const fn new(value: f32) -> Self {
-        Self { current: value, start: value, target: value, remaining: 0, ramp_samples: 0 }
+        Self {
+            current: value,
+            start: value,
+            target: value,
+            remaining: 0,
+            ramp_samples: 0,
+        }
     }
 
     /// Sets the ramp length from a sample rate and a time in milliseconds. Does not move the value.
@@ -111,7 +117,11 @@ mod tests {
         let mut prev = s.current();
         while s.is_smoothing() {
             let v = s.next_value();
-            assert!(v >= prev && v - prev <= max_step, "step {} too big", v - prev);
+            assert!(
+                v >= prev && v - prev <= max_step,
+                "step {} too big",
+                v - prev
+            );
             prev = v;
         }
     }

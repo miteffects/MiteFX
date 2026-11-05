@@ -17,12 +17,12 @@
 //!
 //! Nothing allocates outside [`Multiband::new`].
 
-use crate::crossover::{Cross, Layout, Split, FREQ_MAX, FREQ_MIN};
+use crate::crossover::{Cross, FREQ_MAX, FREQ_MIN, Layout, Split};
 use crate::dynamics::{CompSettings, Compressor, Stage, Style};
-use crate::eq::{design, BandSettings, Sections, MAX_SECTIONS};
+use crate::eq::{BandSettings, MAX_SECTIONS, Sections, design};
 use crate::filter::Tdf2;
 use crate::output::DryDelay;
-use crate::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
+use crate::{LinearSmoother, MINUS_INFINITY_DB, db_to_gain, gain_to_db};
 
 pub const BANDS: usize = 6;
 pub const CROSSOVERS: usize = BANDS - 1;
@@ -53,7 +53,15 @@ pub struct MbBand {
 
 impl Default for MbBand {
     fn default() -> Self {
-        Self { stage: Stage::default(), gain_db: 0.0, bypass: false, mute: false, solo: false, external: false, delta: false }
+        Self {
+            stage: Stage::default(),
+            gain_db: 0.0,
+            bypass: false,
+            mute: false,
+            solo: false,
+            external: false,
+            delta: false,
+        }
     }
 }
 
@@ -81,7 +89,19 @@ pub struct MbSettings {
 
 impl Default for MbSettings {
     fn default() -> Self {
-        Self { crossovers: [None; CROSSOVERS], bands: [MbBand::default(); BANDS], lookahead_ms: 0.0, link: 1.0, key_eq: [BandSettings::default(); KEY_BANDS], mix: 1.0, out_db: 0.0, delta: false, bypass: false, listen: false, auto_gain: false }
+        Self {
+            crossovers: [None; CROSSOVERS],
+            bands: [MbBand::default(); BANDS],
+            lookahead_ms: 0.0,
+            link: 1.0,
+            key_eq: [BandSettings::default(); KEY_BANDS],
+            mix: 1.0,
+            out_db: 0.0,
+            delta: false,
+            bypass: false,
+            listen: false,
+            auto_gain: false,
+        }
     }
 }
 
@@ -103,7 +123,14 @@ pub struct MbTelemetry {
 
 impl Default for MbTelemetry {
     fn default() -> Self {
-        Self { in_peak_db: [MINUS_INFINITY_DB; 2], out_peak_db: [MINUS_INFINITY_DB; 2], band_in_db: [MINUS_INFINITY_DB; BANDS], band_gain_db: [0.0; BANDS], band_det_db: [MINUS_INFINITY_DB; BANDS], band_auto_db: [0.0; BANDS] }
+        Self {
+            in_peak_db: [MINUS_INFINITY_DB; 2],
+            out_peak_db: [MINUS_INFINITY_DB; 2],
+            band_in_db: [MINUS_INFINITY_DB; BANDS],
+            band_gain_db: [0.0; BANDS],
+            band_det_db: [MINUS_INFINITY_DB; BANDS],
+            band_auto_db: [0.0; BANDS],
+        }
     }
 }
 
@@ -111,7 +138,14 @@ impl Default for MbTelemetry {
 pub fn audible(s: &MbSettings, layout: &Layout<BANDS>) -> [bool; BANDS] {
     let live = |b: usize| layout.position(b).is_some();
     let any_solo = (0..BANDS).any(|b| live(b) && s.bands[b].solo);
-    std::array::from_fn(|b| live(b) && if any_solo { s.bands[b].solo } else { !s.bands[b].mute })
+    std::array::from_fn(|b| {
+        live(b)
+            && if any_solo {
+                s.bands[b].solo
+            } else {
+                !s.bands[b].mute
+            }
+    })
 }
 
 /// The band's compressor settings: its stage (off while bypassed), its gain as makeup.
@@ -122,7 +156,10 @@ fn comp_settings(s: &MbSettings, b: usize) -> CompSettings {
 fn comp_settings_at(s: &MbSettings, b: usize, lookahead_ms: f32) -> CompSettings {
     let band = &s.bands[b];
     let mut stages = [Stage::default(); crate::dynamics::STAGES];
-    stages[0] = Stage { on: band.stage.on && !band.bypass, ..band.stage };
+    stages[0] = Stage {
+        on: band.stage.on && !band.bypass,
+        ..band.stage
+    };
     CompSettings {
         stages,
         style: Style::default(),
@@ -181,8 +218,12 @@ impl Multiband {
             key_sections: [Sections::default(); KEY_BANDS],
             key_designed: [BandSettings::default(); KEY_BANDS],
             key_filters: [[[Tdf2::default(); MAX_SECTIONS]; KEY_BANDS]; 2],
-            band: (0..BANDS).map(|_| [vec![0.0; CHUNK], vec![0.0; CHUNK]]).collect(),
-            key: (0..BANDS).map(|_| [vec![0.0; CHUNK], vec![0.0; CHUNK]]).collect(),
+            band: (0..BANDS)
+                .map(|_| [vec![0.0; CHUNK], vec![0.0; CHUNK]])
+                .collect(),
+            key: (0..BANDS)
+                .map(|_| [vec![0.0; CHUNK], vec![0.0; CHUNK]])
+                .collect(),
             dry_ap: DryDelay::new(max, CHUNK),
             dry_in: DryDelay::new(max, CHUNK),
             dry_band: (0..BANDS).map(|_| DryDelay::new(max, CHUNK)).collect(),
@@ -270,7 +311,12 @@ impl Multiband {
 
     /// Processes `channels` (one or two) in place; `key` is the sidechain (silent without it).
     #[allow(clippy::needless_range_loop)] // channels, slots and positions indexed together
-    pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &MbSettings) -> MbTelemetry {
+    pub fn process(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        key: Option<&[&[f32]]>,
+        s: &MbSettings,
+    ) -> MbTelemetry {
         let mut t = MbTelemetry::default();
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
@@ -293,19 +339,31 @@ impl Multiband {
             // lookahead's length.
             for slot in 1..BANDS {
                 if self.layout.position(slot).is_some() && layout.position(slot).is_none() {
-                    let to = layout.band_at(&s.crossovers, (self.log_freq[slot - 1].exp() * 1.001) as f32);
+                    let to = layout.band_at(
+                        &s.crossovers,
+                        (self.log_freq[slot - 1].exp() * 1.001) as f32,
+                    );
                     if to != slot {
                         let (lo, hi) = self.comps.split_at_mut(slot.max(to));
-                        let (dst, src) = if to < slot { (&mut lo[to], &hi[0]) } else { (&mut hi[0], &lo[slot]) };
+                        let (dst, src) = if to < slot {
+                            (&mut lo[to], &hi[0])
+                        } else {
+                            (&mut hi[0], &lo[slot])
+                        };
                         dst.absorb_delayed(src);
                         let (lo, hi) = self.dry_band.split_at_mut(slot.max(to));
-                        let (dst, src) = if to < slot { (&mut lo[to], &hi[0]) } else { (&mut hi[0], &lo[slot]) };
+                        let (dst, src) = if to < slot {
+                            (&mut lo[to], &hi[0])
+                        } else {
+                            (&mut hi[0], &lo[slot])
+                        };
                         dst.absorb(src);
                     }
                 }
             }
             let parents = self.split.restructure(&self.layout, &layout, &s.crossovers);
-            self.key_split.restructure(&self.layout, &layout, &s.crossovers);
+            self.key_split
+                .restructure(&self.layout, &layout, &s.crossovers);
             // A new band starts from rest, its delays empty (the band it came from plays out the
             // whole region it had delayed).
             for (slot, parent) in parents.iter().enumerate() {
@@ -317,7 +375,8 @@ impl Multiband {
             self.layout = layout;
         }
         let heard = audible(s, &layout);
-        let any_external = s.listen || (0..BANDS).any(|b| layout.position(b).is_some() && s.bands[b].external);
+        let any_external =
+            s.listen || (0..BANDS).any(|b| layout.position(b).is_some() && s.bands[b].external);
         let any_delta = (0..BANDS).any(|b| heard[b] && s.bands[b].delta);
         let key_len = key.map_or(0, |k| k.iter().map(|c| c.len()).min().unwrap_or(0));
         self.mix.set_target(s.mix);
@@ -350,7 +409,11 @@ impl Multiband {
                         let target = f64::from(f.clamp(FREQ_MIN, FREQ_MAX)).ln();
                         let d = target - self.log_freq[k];
                         if d.abs() > 1e-6 {
-                            self.log_freq[k] = if d.abs() < 1e-4 { target } else { self.log_freq[k] + GLIDE * d };
+                            self.log_freq[k] = if d.abs() < 1e-4 {
+                                target
+                            } else {
+                                self.log_freq[k] + GLIDE * d
+                            };
                             self.cross[k] = Cross::new(self.log_freq[k].exp(), self.fs);
                         }
                     }
@@ -359,7 +422,8 @@ impl Multiband {
                 for c in 0..n_ch {
                     let x = channels[c][start + i];
                     peak_in[c] = peak_in[c].max(x.abs());
-                    self.split.process(c, f64::from(x), &layout, &self.cross, &mut sig);
+                    self.split
+                        .process(c, f64::from(x), &layout, &self.cross, &mut sig);
                     let mut sum = 0.0f64;
                     for p in 0..=layout.n {
                         let slot = layout.owners[p];
@@ -370,12 +434,16 @@ impl Multiband {
                     self.sum_scratch[c][i] = sum as f32;
                     if any_external {
                         let kx = match key {
-                            Some(k) if !k.is_empty() && start + i < key_len => k[c.min(k.len() - 1)][start + i],
+                            Some(k) if !k.is_empty() && start + i < key_len => {
+                                k[c.min(k.len() - 1)][start + i]
+                            }
                             _ => 0.0,
                         };
                         let mut y = f64::from(kx);
                         for (b, sections) in self.key_sections.iter().enumerate() {
-                            for (st, coeffs) in self.key_filters[c][b].iter_mut().zip(sections.as_slice()) {
+                            for (st, coeffs) in
+                                self.key_filters[c][b].iter_mut().zip(sections.as_slice())
+                            {
                                 y = st.process(coeffs, y);
                             }
                         }
@@ -389,8 +457,14 @@ impl Multiband {
                     }
                 }
             }
-            self.dry_ap.write(&self.sum_scratch[0][..n], (n_ch == 2).then(|| &self.sum_scratch[1][..n]));
-            self.dry_in.write(&channels[0][start..end], (n_ch == 2).then(|| &channels[1][start..end]));
+            self.dry_ap.write(
+                &self.sum_scratch[0][..n],
+                (n_ch == 2).then(|| &self.sum_scratch[1][..n]),
+            );
+            self.dry_in.write(
+                &channels[0][start..end],
+                (n_ch == 2).then(|| &channels[1][start..end]),
+            );
             // Every live band's dry path stays current (a Delta switched on, or a merge, reads it).
             for p in 0..=layout.n {
                 let slot = layout.owners[p];
@@ -405,8 +479,13 @@ impl Multiband {
                 let mut parts: [&mut [f32]; 2] = [&mut a[..n], &mut b[..n]];
                 let [ka, kb] = &self.key[slot];
                 let keys: [&[f32]; 2] = [&ka[..n], &kb[..n]];
-                let tel = self.comps[slot].process(&mut parts[..n_ch], cs.external_key.then_some(&keys[..n_ch]), &cs);
-                t.band_det_db[slot] = t.band_det_db[slot].max(tel.detector_levels_db[s.bands[slot].stage.detector as usize]);
+                let tel = self.comps[slot].process(
+                    &mut parts[..n_ch],
+                    cs.external_key.then_some(&keys[..n_ch]),
+                    &cs,
+                );
+                t.band_det_db[slot] = t.band_det_db[slot]
+                    .max(tel.detector_levels_db[s.bands[slot].stage.detector as usize]);
                 t.band_auto_db[slot] = self.comps[slot].auto_db();
                 for c in 0..n_ch {
                     let (cut, lift) = (tel.cut_db[c], tel.lift_db[c]);
@@ -418,7 +497,11 @@ impl Multiband {
             }
             // 3. The sum of what is heard, then mix, Delta and bypass against the dry paths.
             for i in 0..n {
-                let (mix, delta, bypass) = (self.mix.next_value(), self.delta.next_value(), self.bypass.next_value());
+                let (mix, delta, bypass) = (
+                    self.mix.next_value(),
+                    self.delta.next_value(),
+                    self.bypass.next_value(),
+                );
                 let out = self.out.next_value() * self.dip.next_value();
                 for c in 0..n_ch {
                     let mut wet = 0.0f32;
@@ -504,7 +587,10 @@ mod tests {
 
     #[test]
     fn one_band_and_neutral_is_the_input_delayed_bit_for_bit() {
-        let s = MbSettings { lookahead_ms: 2.0, ..MbSettings::default() };
+        let s = MbSettings {
+            lookahead_ms: 2.0,
+            ..MbSettings::default()
+        };
         let mut m = Multiband::new(FS);
         m.reset(&s);
         let x = noise(9600, -12.0);
@@ -520,7 +606,10 @@ mod tests {
     fn inert_bands_sum_flat_and_mix_never_combs() {
         // Neutral bands: the allpass sum. Its spectrum is flat, so its power equals the input's.
         for mix in [1.0, 0.5, 0.0] {
-            let s = MbSettings { mix, ..three_bands() };
+            let s = MbSettings {
+                mix,
+                ..three_bands()
+            };
             let mut m = Multiband::new(FS);
             m.reset(&s);
             let x = noise(48000, -12.0);
@@ -536,19 +625,48 @@ mod tests {
         // Compress the middle band hard (slot 1: crossover slot 0 owns band slot 1); a low tone
         // (band slot 0) passes, a 1 kHz tone drops.
         let mut s = three_bands();
-        s.bands[1].stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -40.0, ratio: 20.0, knee_db: 0.0, range_db: 60.0, ..Stage::default() };
-        let tone = |f: f32| -> Vec<f32> { (0..48000).map(|i| 0.3 * (std::f32::consts::TAU * f * i as f32 / FS).sin()).collect() };
-        let level = |v: &[f32]| 10.0 * (v[24000..].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / 24000.0).log10();
+        s.bands[1].stage = Stage {
+            on: true,
+            quadrant: Quadrant::Compress,
+            threshold_db: -40.0,
+            ratio: 20.0,
+            knee_db: 0.0,
+            range_db: 60.0,
+            ..Stage::default()
+        };
+        let tone = |f: f32| -> Vec<f32> {
+            (0..48000)
+                .map(|i| 0.3 * (std::f32::consts::TAU * f * i as f32 / FS).sin())
+                .collect()
+        };
+        let level = |v: &[f32]| {
+            10.0 * (v[24000..]
+                .iter()
+                .map(|s| f64::from(*s).powi(2))
+                .sum::<f64>()
+                / 24000.0)
+                .log10()
+        };
         let mut m = Multiband::new(FS);
         m.reset(&s);
         let low = tone(60.0);
         let y = run(&mut m, &s, &low, 256);
-        assert!((level(&y) - level(&low)).abs() < 0.3, "the low band is untouched: {} vs {}", level(&y), level(&low));
+        assert!(
+            (level(&y) - level(&low)).abs() < 0.3,
+            "the low band is untouched: {} vs {}",
+            level(&y),
+            level(&low)
+        );
         let mut m = Multiband::new(FS);
         m.reset(&s);
         let mid = tone(1000.0);
         let y = run(&mut m, &s, &mid, 256);
-        assert!(level(&y) < level(&mid) - 10.0, "the middle band is compressed: {} vs {}", level(&y), level(&mid));
+        assert!(
+            level(&y) < level(&mid) - 10.0,
+            "the middle band is compressed: {} vs {}",
+            level(&y),
+            level(&mid)
+        );
     }
 
     #[test]
@@ -556,16 +674,28 @@ mod tests {
         let mut s = three_bands();
         s.bands[0].solo = true;
         let layout = Layout::new(&s.crossovers);
-        assert_eq!(audible(&s, &layout), [true, false, false, false, false, false]);
+        assert_eq!(
+            audible(&s, &layout),
+            [true, false, false, false, false, false]
+        );
         s.bands[0].solo = false;
         s.bands[1].mute = true;
-        assert_eq!(audible(&s, &layout), [true, false, true, false, false, false]);
+        assert_eq!(
+            audible(&s, &layout),
+            [true, false, true, false, false, false]
+        );
     }
 
     #[test]
     fn bypass_is_the_input_and_delta_is_what_changed() {
         let mut s = three_bands();
-        s.bands[0].stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -30.0, ratio: 4.0, ..Stage::default() };
+        s.bands[0].stage = Stage {
+            on: true,
+            quadrant: Quadrant::Compress,
+            threshold_db: -30.0,
+            ratio: 4.0,
+            ..Stage::default()
+        };
         let x = noise(24000, -6.0);
         let mut m = Multiband::new(FS);
         m.reset(&MbSettings { bypass: true, ..s });
@@ -579,7 +709,10 @@ mod tests {
         let d = run(&mut m, &MbSettings { delta: true, ..s }, &x, 256);
         // Delta + the allpass dry = the wet signal.
         let mut m = Multiband::new(FS);
-        let neutral = MbSettings { bands: [MbBand::default(); BANDS], ..s };
+        let neutral = MbSettings {
+            bands: [MbBand::default(); BANDS],
+            ..s
+        };
         m.reset(&neutral);
         let dry = run(&mut m, &neutral, &x, 256);
         for i in 0..x.len() {
@@ -593,7 +726,13 @@ mod tests {
         // other bands' Delta off they are not heard.
         let mut s = three_bands();
         s.lookahead_ms = 1.0;
-        s.bands[0].stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -40.0, ratio: 8.0, ..Stage::default() };
+        s.bands[0].stage = Stage {
+            on: true,
+            quadrant: Quadrant::Compress,
+            threshold_db: -40.0,
+            ratio: 8.0,
+            ..Stage::default()
+        };
         let x = noise(24000, -6.0);
         let mut m = Multiband::new(FS);
         m.reset(&s);
@@ -612,14 +751,25 @@ mod tests {
         m.reset(&delta);
         let d = run(&mut m, &delta, &x, 256);
         for i in 0..x.len() {
-            assert!((d[i] - (wet[i] - dry[i])).abs() < 1e-5, "sample {i}: {} vs {}", d[i], wet[i] - dry[i]);
+            assert!(
+                (d[i] - (wet[i] - dry[i])).abs() < 1e-5,
+                "sample {i}: {} vs {}",
+                d[i],
+                wet[i] - dry[i]
+            );
         }
-        assert!(d.iter().any(|v| v.abs() > 1e-3), "the band does change something");
+        assert!(
+            d.iter().any(|v| v.abs() > 1e-3),
+            "the band does change something"
+        );
     }
 
     #[test]
     fn listen_plays_the_eqd_key() {
-        let s = MbSettings { listen: true, ..three_bands() };
+        let s = MbSettings {
+            listen: true,
+            ..three_bands()
+        };
         let mut m = Multiband::new(FS);
         m.reset(&s);
         let (mut l, mut r) = (vec![0.0f32; 4800], vec![0.0f32; 4800]);
@@ -627,7 +777,10 @@ mod tests {
         let k: [&[f32]; 2] = [&key, &key];
         m.process(&mut [&mut l, &mut r], Some(&k), &s);
         let p = |v: &[f32]| v[2400..].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>();
-        assert!((10.0 * (p(&l) / p(&key)).log10()).abs() < 0.3, "the key's level, through the allpass");
+        assert!(
+            (10.0 * (p(&l) / p(&key)).log10()).abs() < 0.3,
+            "the key's level, through the allpass"
+        );
     }
 
     #[test]
@@ -651,16 +804,34 @@ mod tests {
         // sum, and a tone alone in one band, come out as loud as they went in.
         let mut s = three_bands();
         for b in &mut s.bands {
-            b.stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -36.0, ratio: 6.0, ..Stage::default() };
+            b.stage = Stage {
+                on: true,
+                quadrant: Quadrant::Compress,
+                threshold_db: -36.0,
+                ratio: 6.0,
+                ..Stage::default()
+            };
         }
-        let level = |v: &[f32]| 10.0 * (v[v.len() / 2..].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / (v.len() / 2) as f64).log10();
+        let level = |v: &[f32]| {
+            10.0 * (v[v.len() / 2..]
+                .iter()
+                .map(|s| f64::from(*s).powi(2))
+                .sum::<f64>()
+                / (v.len() / 2) as f64)
+                .log10()
+        };
         let x = noise(6 * 48000, -12.0);
-        let tone: Vec<f32> = (0..6 * 48000).map(|i| 0.3 * (std::f32::consts::TAU * 80.0 * i as f32 / FS).sin()).collect();
+        let tone: Vec<f32> = (0..6 * 48000)
+            .map(|i| 0.3 * (std::f32::consts::TAU * 80.0 * i as f32 / FS).sin())
+            .collect();
         for (name, sig) in [("noise", &x), ("80 Hz tone", &tone)] {
             let mut m = Multiband::new(FS);
             m.reset(&s);
             let off = run(&mut m, &s, sig, 256);
-            let on_s = MbSettings { auto_gain: true, ..s };
+            let on_s = MbSettings {
+                auto_gain: true,
+                ..s
+            };
             let mut m = Multiband::new(FS);
             m.reset(&on_s);
             let on = run(&mut m, &on_s, sig, 256);
@@ -673,8 +844,17 @@ mod tests {
 
     #[test]
     fn auto_gain_leaves_a_bypassed_band_alone_and_reports_the_makeup() {
-        let mut s = MbSettings { auto_gain: true, ..three_bands() };
-        s.bands[0].stage = Stage { on: true, quadrant: Quadrant::Compress, threshold_db: -60.0, ratio: 6.0, ..Stage::default() };
+        let mut s = MbSettings {
+            auto_gain: true,
+            ..three_bands()
+        };
+        s.bands[0].stage = Stage {
+            on: true,
+            quadrant: Quadrant::Compress,
+            threshold_db: -60.0,
+            ratio: 6.0,
+            ..Stage::default()
+        };
         s.bands[1].bypass = true;
         let mut m = Multiband::new(FS);
         m.reset(&s);
@@ -684,7 +864,11 @@ mod tests {
         for (a, b) in l.chunks_mut(256).zip(r.chunks_mut(256)) {
             t = m.process(&mut [a, b], None, &s);
         }
-        assert!(t.band_auto_db[0] > 3.0, "band 1 made up: {}", t.band_auto_db[0]);
+        assert!(
+            t.band_auto_db[0] > 3.0,
+            "band 1 made up: {}",
+            t.band_auto_db[0]
+        );
         assert_eq!(t.band_auto_db[1], 0.0, "bypassed");
     }
 
@@ -709,7 +893,10 @@ mod tests {
         // to the band that takes its region (no gap for the lookahead's length).
         for look in [5.0, 20.0] {
             for delta in [false, true] {
-                let mut s = MbSettings { lookahead_ms: look, ..MbSettings::default() };
+                let mut s = MbSettings {
+                    lookahead_ms: look,
+                    ..MbSettings::default()
+                };
                 if delta {
                     // Every band's Delta with a fixed gain: the tone times (g − 1), through the
                     // bands' dry paths.
@@ -721,7 +908,9 @@ mod tests {
                 let mut m = Multiband::new(FS);
                 m.reset(&s);
                 let a = 0.25f32;
-                let x: Vec<f32> = (0..48000).map(|i| a * (2.0 * std::f32::consts::PI * 2000.0 * i as f32 / FS).sin()).collect();
+                let x: Vec<f32> = (0..48000)
+                    .map(|i| a * (2.0 * std::f32::consts::PI * 2000.0 * i as f32 / FS).sin())
+                    .collect();
                 let (mut l, mut r) = (x.clone(), x.clone());
                 for (k, (bl, br)) in l.chunks_mut(256).zip(r.chunks_mut(256)).enumerate() {
                     // Split at 300 Hz from block 40 to 100, then merged back.
@@ -730,7 +919,10 @@ mod tests {
                 }
                 let gain = if delta { db_to_gain(6.0) - 1.0 } else { 1.0 };
                 let (lo, hi) = window_levels(&l, 9600, a * gain);
-                assert!(lo > 0.94 && hi < 1.06, "look {look} delta {delta}: windows {lo}…{hi}");
+                assert!(
+                    lo > 0.94 && hi < 1.06,
+                    "look {look} delta {delta}: windows {lo}…{hi}"
+                );
             }
         }
     }

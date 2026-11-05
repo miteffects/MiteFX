@@ -1,7 +1,7 @@
 //! An effect's output stage: the latency-aligned dry path (for mix, delta and bypass), output
 //! balance, band solo (listening to one band's region) and loudness-based gain compensation.
 
-use crate::eq::{analog_response_db, BandSettings, BandType, Placement};
+use crate::eq::{BandSettings, BandType, Placement, analog_response_db};
 
 /// The dry signal, delayed by the effect's latency so it lines up with the wet signal.
 /// Sized once; writing and reading never allocate.
@@ -16,7 +16,12 @@ impl DryDelay {
     /// A delay that can hold `max_delay` samples behind blocks of up to `max_block`. Allocates.
     pub fn new(max_delay: usize, max_block: usize) -> Self {
         let len = (max_delay + max_block + 1).next_power_of_two();
-        Self { rings: [vec![0.0; len], vec![0.0; len]], mask: len - 1, write: 0, delay: 0 }
+        Self {
+            rings: [vec![0.0; len], vec![0.0; len]],
+            mask: len - 1,
+            write: 0,
+            delay: 0,
+        }
     }
 
     pub fn reset(&mut self) {
@@ -57,7 +62,8 @@ impl DryDelay {
         let d = self.delay.min(other.delay);
         for (dst, src) in self.rings.iter_mut().zip(&other.rings) {
             for j in 1..=d {
-                dst[self.write.wrapping_sub(j) & self.mask] += src[other.write.wrapping_sub(j) & other.mask];
+                dst[self.write.wrapping_sub(j) & self.mask] +=
+                    src[other.write.wrapping_sub(j) & other.mask];
             }
         }
     }
@@ -75,7 +81,8 @@ pub fn balance(pan: f32) -> (f32, f32) {
         return (1.0, 1.0);
     }
     // The far side: √2·sin of the remaining quarter turn, which is 1 at the centre.
-    let far = (std::f32::consts::SQRT_2 * ((1.0 - pan.abs()) * std::f32::consts::FRAC_PI_4).sin()).min(1.0);
+    let far = (std::f32::consts::SQRT_2 * ((1.0 - pan.abs()) * std::f32::consts::FRAC_PI_4).sin())
+        .min(1.0);
     if pan > 0.0 { (far, 1.0) } else { (1.0, far) }
 }
 
@@ -84,15 +91,30 @@ pub fn balance(pan: f32) -> (f32, f32) {
 /// cut takes away), or `None` where the band has no region (a tilt reaches everything).
 pub fn solo_filter(s: &BandSettings) -> Option<BandSettings> {
     let (kind, slope) = match s.kind {
-        BandType::Bell | BandType::Notch | BandType::BandPass | BandType::AllPass => (BandType::BandPass, s.slope),
+        BandType::Bell | BandType::Notch | BandType::BandPass | BandType::AllPass => {
+            (BandType::BandPass, s.slope)
+        }
         BandType::LowShelf => (BandType::HighCut, 1),
         BandType::HighShelf => (BandType::LowCut, 1),
         BandType::LowCut => (BandType::HighCut, s.slope),
         BandType::HighCut => (BandType::LowCut, s.slope),
         BandType::TiltShelf | BandType::FlatTilt => return None,
     };
-    let q = if kind == BandType::BandPass { s.q } else { std::f64::consts::FRAC_1_SQRT_2 };
-    Some(BandSettings { enabled: true, kind, slope, q, gain_db: 0.0, placement: Placement::Stereo, dynamics: Default::default(), ..*s })
+    let q = if kind == BandType::BandPass {
+        s.q
+    } else {
+        std::f64::consts::FRAC_1_SQRT_2
+    };
+    Some(BandSettings {
+        enabled: true,
+        kind,
+        slope,
+        q,
+        gain_db: 0.0,
+        placement: Placement::Stereo,
+        dynamics: Default::default(),
+        ..*s
+    })
 }
 
 /// Keeps only the part of a stereo pair that a band on `placement` processes (the left channel,
@@ -127,7 +149,8 @@ pub fn loudness_change_db(bands: &[BandSettings], mono: bool) -> f64 {
     for i in 0..LOUDNESS_POINTS {
         let f = 20.0 * 1000f64.powf(i as f64 / (LOUDNESS_POINTS - 1) as f64);
         let hp = (f / 38.0).powi(4);
-        let k = hp / (1.0 + hp) * (1.0 + (10f64.powf(0.4) - 1.0) * f * f / (f * f + 1500.0 * 1500.0));
+        let k =
+            hp / (1.0 + hp) * (1.0 + (10f64.powf(0.4) - 1.0) * f * f / (f * f + 1500.0 * 1500.0));
         let (mut left, mut right, mut mid, mut side, mut all) = (0.0, 0.0, 0.0, 0.0, 0.0);
         for s in bands.iter().filter(|s| s.enabled) {
             let db = analog_response_db(s, f);
@@ -186,28 +209,73 @@ mod tests {
     fn auto_gain_reads_the_curve_not_the_signal() {
         let flat = [BandSettings::default(); 4];
         assert!(loudness_change_db(&flat, false).abs() < 1e-9);
-        let boost = BandSettings { enabled: true, kind: BandType::Bell, freq: 2000.0, gain_db: 6.0, q: 1.0, ..Default::default() };
+        let boost = BandSettings {
+            enabled: true,
+            kind: BandType::Bell,
+            freq: 2000.0,
+            gain_db: 6.0,
+            q: 1.0,
+            ..Default::default()
+        };
         let up = loudness_change_db(&[boost], false);
         assert!(up > 0.5 && up < 6.0, "{up}");
         // A mirror-image cut takes away about as much.
-        let down = loudness_change_db(&[BandSettings { gain_db: -6.0, ..boost }], false);
+        let down = loudness_change_db(
+            &[BandSettings {
+                gain_db: -6.0,
+                ..boost
+            }],
+            false,
+        );
         assert!(down < -0.5 && (up + down).abs() < 0.6 * up, "{up} {down}");
         // A boost on one channel counts for less than one on both.
-        let left = loudness_change_db(&[BandSettings { placement: Placement::Left, ..boost }], false);
+        let left = loudness_change_db(
+            &[BandSettings {
+                placement: Placement::Left,
+                ..boost
+            }],
+            false,
+        );
         assert!(left > 0.0 && left < up, "{left} {up}");
         // A sub-sonic boost barely counts (K weighting).
-        let sub = loudness_change_db(&[BandSettings { freq: 20.0, ..boost }], false);
+        let sub = loudness_change_db(
+            &[BandSettings {
+                freq: 20.0,
+                ..boost
+            }],
+            false,
+        );
         assert!(sub < 0.25 * up, "{sub}");
     }
 
     #[test]
     fn a_solo_listens_to_the_band_region() {
-        let bell = BandSettings { enabled: true, kind: BandType::Bell, freq: 500.0, gain_db: -6.0, q: 4.0, ..Default::default() };
+        let bell = BandSettings {
+            enabled: true,
+            kind: BandType::Bell,
+            freq: 500.0,
+            gain_db: -6.0,
+            q: 4.0,
+            ..Default::default()
+        };
         let f = solo_filter(&bell).expect("bells have a region");
-        assert_eq!((f.kind, f.freq, f.q, f.gain_db), (BandType::BandPass, 500.0, 4.0, 0.0));
-        let shelf = solo_filter(&BandSettings { kind: BandType::HighShelf, ..bell }).expect("region");
+        assert_eq!(
+            (f.kind, f.freq, f.q, f.gain_db),
+            (BandType::BandPass, 500.0, 4.0, 0.0)
+        );
+        let shelf = solo_filter(&BandSettings {
+            kind: BandType::HighShelf,
+            ..bell
+        })
+        .expect("region");
         assert_eq!(shelf.kind, BandType::LowCut);
-        assert!(solo_filter(&BandSettings { kind: BandType::TiltShelf, ..bell }).is_none());
+        assert!(
+            solo_filter(&BandSettings {
+                kind: BandType::TiltShelf,
+                ..bell
+            })
+            .is_none()
+        );
         assert_eq!(isolate(Placement::Side, 1.0, 0.0), (0.5, -0.5));
         assert_eq!(isolate(Placement::Right, 1.0, 2.0), (0.0, 2.0));
     }

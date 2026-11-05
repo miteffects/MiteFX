@@ -119,7 +119,11 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
         let c = k * hop;
         for (i, b) in buf.iter_mut().enumerate() {
             let t = c as isize - (win / 2) as isize + i as isize;
-            *b = if t >= 0 && (t as usize) < x.len() { x[t as usize] } else { 0.0 };
+            *b = if t >= 0 && (t as usize) < x.len() {
+                x[t as usize]
+            } else {
+                0.0
+            };
         }
     };
     // The levels first: the voicing gate is relative to the take's loud level.
@@ -133,25 +137,52 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
     let gate = {
         let mut sorted: Vec<f64> = levels.iter().copied().filter(|d| *d > FLOOR_DB).collect();
         sorted.sort_by(f64::total_cmp);
-        let loud = sorted.get(sorted.len() * 95 / 100).copied().unwrap_or(FLOOR_DB);
+        let loud = sorted
+            .get(sorted.len() * 95 / 100)
+            .copied()
+            .unwrap_or(FLOOR_DB);
         (loud - VOICED_RANGE_DB).max(FLOOR_DB)
     };
     let mut frames: Vec<Frame> = (0..n_frames)
         .map(|k| {
             fill(&mut buf, k);
             let db = levels[k];
-            let p = if db > gate { det.detect(&buf, fs) } else { None };
+            let p = if db > gate {
+                det.detect(&buf, fs)
+            } else {
+                None
+            };
             match p {
-                Some(p) if p.clarity >= VOICED_CLARITY && (MIN_HZ..=MAX_HZ).contains(&p.hz) => Frame { cents: Some(hz_to_cents(p.hz)), clarity: p.clarity, db },
-                Some(p) => Frame { cents: None, clarity: p.clarity, db },
-                None => Frame { cents: None, clarity: 0.0, db },
+                Some(p) if p.clarity >= VOICED_CLARITY && (MIN_HZ..=MAX_HZ).contains(&p.hz) => {
+                    Frame {
+                        cents: Some(hz_to_cents(p.hz)),
+                        clarity: p.clarity,
+                        db,
+                    }
+                }
+                Some(p) => Frame {
+                    cents: None,
+                    clarity: p.clarity,
+                    db,
+                },
+                None => Frame {
+                    cents: None,
+                    clarity: 0.0,
+                    db,
+                },
             }
         })
         .collect();
     clean_pitch(&mut frames);
     let notes = find_notes(&frames, hop, x, fs);
     let marks = find_marks(x, fs, hop, &frames);
-    Analysis { fs, hop, frames, notes, marks }
+    Analysis {
+        fs,
+        hop,
+        frames,
+        notes,
+        marks,
+    }
 }
 
 /// Octave slips folded back (a frame an octave off both neighbours), lone voiced or unvoiced
@@ -159,7 +190,9 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
 fn clean_pitch(frames: &mut [Frame]) {
     let n = frames.len();
     for i in 1..n.saturating_sub(1) {
-        if let (Some(a), Some(c), Some(b)) = (frames[i - 1].cents, frames[i].cents, frames[i + 1].cents) {
+        if let (Some(a), Some(c), Some(b)) =
+            (frames[i - 1].cents, frames[i].cents, frames[i + 1].cents)
+        {
             let around = 0.5 * (a + b);
             for k in [-2400.0, -1200.0, 1200.0, 2400.0] {
                 if (c + k - around).abs() < 150.0 && (c - around).abs() > 900.0 {
@@ -172,7 +205,9 @@ fn clean_pitch(frames: &mut [Frame]) {
         let (prev, next) = (frames[i - 1].cents, frames[i + 1].cents);
         match (prev, frames[i].cents, next) {
             (None, Some(_), None) => frames[i].cents = None,
-            (Some(a), None, Some(b)) if frames[i].db > FLOOR_DB && (a - b).abs() < 100.0 => frames[i].cents = Some(0.5 * (a + b)),
+            (Some(a), None, Some(b)) if frames[i].db > FLOOR_DB && (a - b).abs() < 100.0 => {
+                frames[i].cents = Some(0.5 * (a + b))
+            }
             _ => {}
         }
     }
@@ -206,13 +241,24 @@ fn find_notes(frames: &[Frame], hop: usize, x: &[f32], fs: f64) -> Vec<Note> {
         // Vibrato-smoothed pitch: a moving average over about one cycle.
         let sm: Vec<f64> = (0..c.len())
             .map(|i| {
-                let (a, b) = (i.saturating_sub(smooth / 2), (i + smooth / 2 + 1).min(c.len()));
+                let (a, b) = (
+                    i.saturating_sub(smooth / 2),
+                    (i + smooth / 2 + 1).min(c.len()),
+                );
                 c[a..b].iter().sum::<f64>() / (b - a) as f64
             })
             .collect();
         let mut cuts = vec![s];
         // Pitch steps: where the smoothed pitch moves most over a span, past the threshold.
-        let mv: Vec<f64> = (0..c.len()).map(|i| if i >= span / 2 && i + span / 2 < c.len() { (sm[i + span / 2] - sm[i - span / 2]).abs() } else { 0.0 }).collect();
+        let mv: Vec<f64> = (0..c.len())
+            .map(|i| {
+                if i >= span / 2 && i + span / 2 < c.len() {
+                    (sm[i + span / 2] - sm[i - span / 2]).abs()
+                } else {
+                    0.0
+                }
+            })
+            .collect();
         for i in 1..c.len().saturating_sub(1) {
             if mv[i] > STEP_CENTS && mv[i] >= mv[i - 1] && mv[i] > mv[i + 1] {
                 cuts.push(s + i);
@@ -223,7 +269,10 @@ fn find_notes(frames: &[Frame], hop: usize, x: &[f32], fs: f64) -> Vec<Note> {
         let reach = (0.08 * per_s) as usize;
         for i in reach..lv.len().saturating_sub(reach) {
             let left = lv[i - reach..i].iter().cloned().fold(f64::MIN, f64::max);
-            let right = lv[i + 1..=i + reach].iter().cloned().fold(f64::MIN, f64::max);
+            let right = lv[i + 1..=i + reach]
+                .iter()
+                .cloned()
+                .fold(f64::MIN, f64::max);
             let local_min = lv[i - 1] >= lv[i] && lv[i + 1] > lv[i];
             if local_min && left - lv[i] > DIP_DB && right - lv[i] > DIP_DB {
                 cuts.push(s + i);
@@ -262,11 +311,25 @@ fn find_notes(frames: &[Frame], hop: usize, x: &[f32], fs: f64) -> Vec<Note> {
                     (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
                 })
                 .collect();
-            let centre = if sm.is_empty() { median(&mut c.iter().flatten().copied().collect::<Vec<_>>()) } else { sm.iter().sum::<f64>() / sm.len() as f64 };
-            let drift: Vec<f64> = (a..b).map(|i| frames[i].cents.map_or(0.0, |c| c - centre)).collect();
+            let centre = if sm.is_empty() {
+                median(&mut c.iter().flatten().copied().collect::<Vec<_>>())
+            } else {
+                sm.iter().sum::<f64>() / sm.len() as f64
+            };
+            let drift: Vec<f64> = (a..b)
+                .map(|i| frames[i].cents.map_or(0.0, |c| c - centre))
+                .collect();
             let (s0, s1) = (a * hop, (b * hop).min(x.len()));
-            let rms = (x[s0..s1].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / (s1 - s0).max(1) as f64).sqrt();
-            Note { start: s0, end: s1, cents: centre, drift, db: 20.0 * rms.max(1e-12).log10() }
+            let rms = (x[s0..s1].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>()
+                / (s1 - s0).max(1) as f64)
+                .sqrt();
+            Note {
+                start: s0,
+                end: s1,
+                cents: centre,
+                drift,
+                db: 20.0 * rms.max(1e-12).log10(),
+            }
         })
         .collect()
 }
@@ -287,17 +350,24 @@ fn find_marks(x: &[f32], fs: f64, hop: usize, frames: &[Frame]) -> Vec<usize> {
         };
         // A voiced stretch begins: the first mark at the peak of its first period.
         let p = (fs / hz) as usize;
-        let first = (t..(t + p).min(x.len())).max_by(|&a, &b| x[a].total_cmp(&x[b])).unwrap_or(t);
+        let first = (t..(t + p).min(x.len()))
+            .max_by(|&a, &b| x[a].total_cmp(&x[b]))
+            .unwrap_or(t);
         marks.push(first);
         let mut m = first;
         while let Some(hz) = hz_at(m) {
             let p = fs / hz;
             let guess = m as f64 + p;
-            let (lo, hi) = ((guess - 0.3 * p) as usize, ((guess + 0.3 * p) as usize).min(x.len().saturating_sub(1)));
+            let (lo, hi) = (
+                (guess - 0.3 * p) as usize,
+                ((guess + 0.3 * p) as usize).min(x.len().saturating_sub(1)),
+            );
             if lo >= x.len() || lo > hi || hz_at(lo).is_none() {
                 break;
             }
-            let next = (lo..=hi).max_by(|&a, &b| x[a].total_cmp(&x[b])).unwrap_or(guess as usize);
+            let next = (lo..=hi)
+                .max_by(|&a, &b| x[a].total_cmp(&x[b]))
+                .unwrap_or(guess as usize);
             if next <= m {
                 break;
             }
@@ -327,7 +397,14 @@ pub struct NoteEdit {
 
 impl Default for NoteEdit {
     fn default() -> Self {
-        Self { shift_cents: 0.0, drift: 1.0, offset: 0.0, stretch: 1.0, formant_semitones: 0.0, gain_db: 0.0 }
+        Self {
+            shift_cents: 0.0,
+            drift: 1.0,
+            offset: 0.0,
+            stretch: 1.0,
+            formant_semitones: 0.0,
+            gain_db: 0.0,
+        }
     }
 }
 
@@ -376,7 +453,10 @@ impl TimeMap {
     }
 
     pub fn map(&self, out: f64) -> f64 {
-        let i = self.anchors.partition_point(|a| a.0 <= out).clamp(1, self.anchors.len() - 1);
+        let i = self
+            .anchors
+            .partition_point(|a| a.0 <= out)
+            .clamp(1, self.anchors.len() - 1);
         let (a, b) = (self.anchors[i - 1], self.anchors[i]);
         if b.0 <= a.0 {
             return a.1;
@@ -390,18 +470,86 @@ impl TimeMap {
     }
 }
 
-/// Renders the take with `edits` (one per note).
+/// Renders the take with `edits` (one per note), the whole of it.
 pub fn render(x: &[f32], a: &Analysis, edits: &[NoteEdit]) -> Vec<f32> {
+    let out_len = TimeMap::new(&a.notes, edits, x.len()).out_len();
+    render_range(x, a, edits, 0..out_len)
+}
+
+/// The output samples an edit of note `i` can change (from the note before it to the note after
+/// it, with the grains and crossfades around them), as the take's samples.
+pub fn affected(a: &Analysis, i: usize, len: usize) -> std::ops::Range<usize> {
+    let margin = affect_margin(a.fs);
+    let lo = i
+        .checked_sub(1)
+        .and_then(|j| a.notes.get(j))
+        .map_or(0, |n| n.start)
+        .saturating_sub(margin);
+    let hi = a
+        .notes
+        .get(i + 1)
+        .map_or(len, |n| n.end)
+        .saturating_add(margin)
+        .min(len);
+    lo..hi
+}
+
+fn affect_margin(fs: f64) -> usize {
+    (2.0 * fs / MIN_HZ) as usize + ((FADE_S * fs) as usize) * 2
+}
+
+/// Output times the grains are laid at whatever came before (a note's start, less
+/// [`affect_margin`]), so a render begun at one of them lays the same grains as the whole render.
+fn sync_points(a: &Analysis) -> Vec<f64> {
+    let m = affect_margin(a.fs);
+    let mut s: Vec<f64> = std::iter::once(0.0)
+        .chain(a.notes.iter().map(|n| n.start.saturating_sub(m) as f64))
+        .collect();
+    s.sort_by(f64::total_cmp);
+    s.dedup();
+    s
+}
+
+/// Renders output samples `range` of the take with `edits` (the rest of the output is not
+/// worked out): for re-rendering only what an edit changes.
+pub fn render_range(
+    x: &[f32],
+    a: &Analysis,
+    edits: &[NoteEdit],
+    range: std::ops::Range<usize>,
+) -> Vec<f32> {
     let fs = a.fs;
     let map = TimeMap::new(&a.notes, edits, x.len());
-    let out_len = map.out_len();
-    let mut acc = vec![0.0f64; out_len + 1];
-    let mut wsum = vec![0.0f64; out_len + 1];
-    // Which note (if any) an output sample belongs to, by the input time it maps to.
-    let note_of_in = |t: f64| a.notes.iter().position(|n| t >= n.start as f64 && t < n.end as f64);
+    // Grains reach this far (a two-period grain, the formant down an octave): work out a little
+    // more on either side, from a sync point.
+    let margin = (5.0 * fs / MIN_HZ) as usize + 8;
+    let sync = sync_points(a);
+    let lo = sync
+        .iter()
+        .rev()
+        .find(|&&p| p <= range.start.saturating_sub(margin) as f64)
+        .copied()
+        .unwrap_or(0.0) as usize;
+    let hi = range.end + margin;
+    let span = hi - lo;
+    let mut acc = vec![0.0f64; span + 1];
+    let mut wsum = vec![0.0f64; span + 1];
+    // Which note (if any) an input sample belongs to (the notes are sorted and apart).
+    let note_of_in = |t: f64| {
+        let i = a.notes.partition_point(|n| (n.start as f64) <= t);
+        i.checked_sub(1).filter(|&j| t < a.notes[j].end as f64)
+    };
     let noise_len = ((NOISE_GRAIN_S * fs) as usize).max(8);
-    let mut t_out = 0.0f64;
-    while (t_out as usize) < out_len {
+    let lay = |acc: &mut [f64], wsum: &mut [f64], o: f64, w: f64, v: f64| {
+        if o >= lo as f64 && (o as usize) < hi {
+            let oi = o as usize - lo;
+            acc[oi] += w * v;
+            wsum[oi] += w;
+        }
+    };
+    let mut t_out = lo as f64;
+    let mut next_sync = sync.partition_point(|&p| p <= t_out);
+    while (t_out as usize) < hi {
         let t_in = map.map(t_out);
         let note = note_of_in(t_in);
         let e = note.map_or(NoteEdit::default(), |i| edits[i]);
@@ -409,10 +557,20 @@ pub fn render(x: &[f32], a: &Analysis, edits: &[NoteEdit]) -> Vec<f32> {
         // The input period here and the mark to cut at, when voiced.
         let voiced = a.hz_at(t_in).is_some();
         let mk = a.marks.partition_point(|&m| (m as f64) < t_in);
-        let nearest = [mk.checked_sub(1), (mk < a.marks.len()).then_some(mk)].into_iter().flatten().min_by(|&i, &j| ((a.marks[i] as f64) - t_in).abs().total_cmp(&((a.marks[j] as f64) - t_in).abs()));
+        let nearest = [mk.checked_sub(1), (mk < a.marks.len()).then_some(mk)]
+            .into_iter()
+            .flatten()
+            .min_by(|&i, &j| {
+                ((a.marks[i] as f64) - t_in)
+                    .abs()
+                    .total_cmp(&((a.marks[j] as f64) - t_in).abs())
+            });
         if let (true, Some(mi)) = (voiced, nearest) {
             let m = a.marks[mi];
-            let p_in = match (mi.checked_sub(1).map(|j| a.marks[j]), a.marks.get(mi + 1).copied()) {
+            let p_in = match (
+                mi.checked_sub(1).map(|j| a.marks[j]),
+                a.marks.get(mi + 1).copied(),
+            ) {
                 (Some(l), Some(r)) if r - l < 4 * (fs / MIN_HZ) as usize => 0.5 * (r - l) as f64,
                 (Some(l), _) if m - l < 2 * (fs / MIN_HZ) as usize => (m - l) as f64,
                 (_, Some(r)) if r - m < 2 * (fs / MIN_HZ) as usize => (r - m) as f64,
@@ -423,7 +581,11 @@ pub fn render(x: &[f32], a: &Analysis, edits: &[NoteEdit]) -> Vec<f32> {
                 Some(i) => {
                     let n = &a.notes[i];
                     let f = ((t_in - n.start as f64) / a.hop as f64).max(0.0) as usize;
-                    let d = n.drift.get(f.min(n.drift.len().saturating_sub(1))).copied().unwrap_or(0.0);
+                    let d = n
+                        .drift
+                        .get(f.min(n.drift.len().saturating_sub(1)))
+                        .copied()
+                        .unwrap_or(0.0);
                     cents_to_hz(n.cents + e.shift_cents + e.drift * d)
                 }
                 None => a.hz_at(t_in).unwrap_or(200.0),
@@ -435,79 +597,95 @@ pub fn render(x: &[f32], a: &Analysis, edits: &[NoteEdit]) -> Vec<f32> {
             let half_out = half_in / ratio;
             let n = (2.0 * half_out).ceil() as isize;
             for k in -n / 2..=n / 2 {
-                let o = t_out + k as f64;
-                if o < 0.0 || o as usize >= out_len {
-                    continue;
-                }
-                let u = k as f64 / half_out; // −1…1
+                let u = k as f64 / half_out;
                 if u.abs() >= 1.0 {
                     continue;
                 }
                 let w = 0.5 + 0.5 * (std::f64::consts::PI * u).cos();
-                let src = m as f64 + u * half_in;
-                let v = sample(x, src);
-                let oi = o as usize;
-                acc[oi] += w * v * gain;
-                wsum[oi] += w;
+                lay(
+                    &mut acc,
+                    &mut wsum,
+                    t_out + k as f64,
+                    w,
+                    sample(x, m as f64 + u * half_in) * gain,
+                );
             }
             t_out += p_out;
         } else {
             // Unvoiced: a short grain from the matching input time.
             let half = noise_len as f64 / 2.0;
             for k in -(half as isize)..=(half as isize) {
-                let o = t_out + k as f64;
-                if o < 0.0 || o as usize >= out_len {
-                    continue;
-                }
                 let u = k as f64 / half;
                 if u.abs() >= 1.0 {
                     continue;
                 }
                 let w = 0.5 + 0.5 * (std::f64::consts::PI * u).cos();
-                let v = sample(x, t_in + k as f64);
-                let oi = o as usize;
-                acc[oi] += w * v * gain;
-                wsum[oi] += w;
+                lay(
+                    &mut acc,
+                    &mut wsum,
+                    t_out + k as f64,
+                    w,
+                    sample(x, t_in + k as f64) * gain,
+                );
             }
             t_out += half;
         }
+        // The next grain starts at a sync point rather than step over it.
+        if let Some(&p) = sync.get(next_sync) {
+            if t_out >= p {
+                t_out = p;
+                next_sync += 1;
+            }
+        }
     }
-    let rendered: Vec<f64> = acc.iter().zip(&wsum).take(out_len).map(|(a, w)| if *w > 1e-3 { a / w.max(0.5) } else { 0.0 }).collect();
-    // Wherever nothing is edited, the input itself, crossfaded into what is.
+    // Wherever nothing is edited, the input itself, crossfaded into what is (decided over the
+    // whole span, so the fades are the same however the range is cut).
     let fade = ((FADE_S * fs) as usize).max(1);
-    let neutral: Vec<bool> = (0..out_len)
+    let time_moved: Vec<(f64, f64)> = edits
+        .iter()
+        .zip(&a.notes)
+        .filter(|(e, _)| e.moves_time())
+        .map(|(_, n)| (n.start as f64 - fade as f64, n.end as f64 + fade as f64))
+        .collect();
+    let neutral: Vec<bool> = (lo..hi)
         .map(|o| {
-            if !map.identity_at(o as f64) {
+            let t = o as f64;
+            if !map.identity_at(t) {
                 return false;
             }
-            match note_of_in(o as f64) {
+            match note_of_in(t) {
                 Some(i) => edits[i].is_neutral(),
-                None => !edits.iter().zip(&a.notes).any(|(e, n)| e.moves_time() && (o as f64) >= n.start as f64 - fade as f64 && (o as f64) < n.end as f64 + fade as f64),
+                None => !time_moved.iter().any(|&(s, e)| t >= s && t < e),
             }
         })
         .collect();
-    // The crossfade weight: 1 where edited, ramping over `fade` samples either side.
-    let mut edited = vec![0.0f64; out_len];
+    let mut edited = vec![0.0f64; span];
     let mut last_edit: Option<usize> = None;
-    for o in 0..out_len {
+    for o in 0..span {
         if !neutral[o] {
             last_edit = Some(o);
         }
         edited[o] = last_edit.map_or(0.0, |l| (1.0 - (o - l) as f64 / fade as f64).max(0.0));
     }
     let mut next_edit: Option<usize> = None;
-    for o in (0..out_len).rev() {
+    for o in (0..span).rev() {
         if !neutral[o] {
             next_edit = Some(o);
         }
         let w = next_edit.map_or(0.0, |n| (1.0 - (n - o) as f64 / fade as f64).max(0.0));
         edited[o] = edited[o].max(w);
     }
-    (0..out_len)
+    range
         .map(|o| {
-            let w = edited[o];
+            let k = o - lo;
+            let w = edited[k];
             let dry = if o < x.len() { f64::from(x[o]) } else { 0.0 };
-            (dry * (1.0 - w) + rendered[o] * w) as f32
+            let wet = if wsum[k] > 1e-3 {
+                acc[k] / wsum[k].max(0.5)
+            } else {
+                0.0
+            };
+            (dry * (1.0 - w) + wet * w) as f32
         })
         .collect()
 }
@@ -516,7 +694,13 @@ pub fn render(x: &[f32], a: &Analysis, edits: &[NoteEdit]) -> Vec<f32> {
 fn sample(x: &[f32], t: f64) -> f64 {
     let i = t.floor() as isize;
     let f = t - i as f64;
-    let at = |k: isize| if k >= 0 && (k as usize) < x.len() { f64::from(x[k as usize]) } else { 0.0 };
+    let at = |k: isize| {
+        if k >= 0 && (k as usize) < x.len() {
+            f64::from(x[k as usize])
+        } else {
+            0.0
+        }
+    };
     let (y0, y1, y2, y3) = (at(i - 1), at(i), at(i + 1), at(i + 2));
     let c1 = 0.5 * (y2 - y0);
     let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
@@ -556,7 +740,13 @@ pub mod voice {
             let r = (-std::f64::consts::PI * bw / fs).exp();
             let a1 = -2.0 * r * (std::f64::consts::TAU * f / fs).cos();
             let a2 = r * r;
-            Self { a1, a2, g: 1.0 - r, y1: 0.0, y2: 0.0 }
+            Self {
+                a1,
+                a2,
+                g: 1.0 - r,
+                y1: 0.0,
+                y2: 0.0,
+            }
         }
 
         fn run(&mut self, x: f64) -> f64 {
@@ -577,13 +767,20 @@ pub mod voice {
             seed ^= seed << 5;
             f64::from(seed) / f64::from(u32::MAX) * 2.0 - 1.0
         };
-        let mut res: Vec<Reson> = FORMANTS.iter().map(|&(f, b)| Reson::new(f, b, fs)).collect();
+        let mut res: Vec<Reson> = FORMANTS
+            .iter()
+            .map(|&(f, b)| Reson::new(f, b, fs))
+            .collect();
         let mut phase = 0.0f64;
         for n in notes {
             // A breathy consonant (filtered noise) in the gap before the note.
             let gap = (gap_s * fs) as usize;
             for i in 0..gap {
-                let env = if i > gap / 2 { (1.0 - (i - gap / 2) as f64 / (gap / 2) as f64) * 0.5 + 0.5 } else { i as f64 / (gap / 2) as f64 };
+                let env = if i > gap / 2 {
+                    (1.0 - (i - gap / 2) as f64 / (gap / 2) as f64) * 0.5 + 0.5
+                } else {
+                    i as f64 / (gap / 2) as f64
+                };
                 let v = noise() * 0.02 * env * if i > gap / 3 { 1.0 } else { 0.0 };
                 x.push(v as f32);
             }
@@ -592,17 +789,23 @@ pub mod voice {
             let amp = 10f64.powf(n.db / 20.0);
             for i in 0..len {
                 let t = i as f64 / fs;
-                let c = n.cents + n.vibrato_cents * (std::f64::consts::TAU * n.vibrato_hz * t).sin();
+                let c =
+                    n.cents + n.vibrato_cents * (std::f64::consts::TAU * n.vibrato_hz * t).sin();
                 phase += cents_to_hz(c) / fs;
                 // A glottal pulse once a period: a smooth bump, then the formants ring.
                 let p = phase.fract();
-                let pulse = if p < 0.4 { (std::f64::consts::PI * p / 0.4).sin().powi(2) } else { 0.0 };
+                let pulse = if p < 0.4 {
+                    (std::f64::consts::PI * p / 0.4).sin().powi(2)
+                } else {
+                    0.0
+                };
                 let excite = pulse - 0.4 * 0.5;
                 let mut y = 0.0;
                 for r in &mut res {
                     y += r.run(excite);
                 }
-                let env = (i as f64 / (0.02 * fs)).min(1.0) * ((len - i) as f64 / (0.03 * fs)).min(1.0);
+                let env =
+                    (i as f64 / (0.02 * fs)).min(1.0) * ((len - i) as f64 / (0.03 * fs)).min(1.0);
                 x.push((y * amp * env * 4.0 + 0.002 * noise()) as f32);
             }
             truth.push((start, start + len, n.cents));
@@ -614,41 +817,88 @@ pub mod voice {
 
 #[cfg(test)]
 mod tests {
-    use super::voice::{sing, Sung};
+    use super::voice::{Sung, sing};
     use super::*;
 
     const FS: f64 = 48_000.0;
 
     fn line() -> (Vec<f32>, Vec<(usize, usize, f64)>) {
-        let n = |cents: f64, seconds: f64| Sung { cents, seconds, vibrato_cents: 35.0, vibrato_hz: 5.5, db: -12.0 };
-        sing(&[n(5700.0, 0.5), n(5940.0, 0.4), n(6200.0, 0.6), n(5900.0, 0.45)], 0.08, FS)
+        let n = |cents: f64, seconds: f64| Sung {
+            cents,
+            seconds,
+            vibrato_cents: 35.0,
+            vibrato_hz: 5.5,
+            db: -12.0,
+        };
+        sing(
+            &[
+                n(5700.0, 0.5),
+                n(5940.0, 0.4),
+                n(6200.0, 0.6),
+                n(5900.0, 0.45),
+            ],
+            0.08,
+            FS,
+        )
     }
 
     /// The pitch spread (standard deviation, cents) over a note's steady middle in a take.
     fn spread(x: &[f32], s: usize, e: usize) -> (f64, f64) {
         let a = analyse(x, FS);
-        let (f0, f1) = (s / a.hop + (e - s) / a.hop / 4, e / a.hop - (e - s) / a.hop / 4);
-        let c: Vec<f64> = (f0..f1).filter_map(|f| a.frames.get(f).and_then(|fr| fr.cents)).collect();
+        let (f0, f1) = (
+            s / a.hop + (e - s) / a.hop / 4,
+            e / a.hop - (e - s) / a.hop / 4,
+        );
+        let c: Vec<f64> = (f0..f1)
+            .filter_map(|f| a.frames.get(f).and_then(|fr| fr.cents))
+            .collect();
         let m = c.iter().sum::<f64>() / c.len().max(1) as f64;
-        (m, (c.iter().map(|v| (v - m).powi(2)).sum::<f64>() / c.len().max(1) as f64).sqrt())
+        (
+            m,
+            (c.iter().map(|v| (v - m).powi(2)).sum::<f64>() / c.len().max(1) as f64).sqrt(),
+        )
     }
 
     #[test]
     fn analysis_finds_the_notes_of_a_sung_line() {
         let (x, truth) = line();
         let a = analyse(&x, FS);
-        assert_eq!(a.notes.len(), truth.len(), "{:?}", a.notes.iter().map(|n| (n.start, n.end, n.cents as i64)).collect::<Vec<_>>());
+        assert_eq!(
+            a.notes.len(),
+            truth.len(),
+            "{:?}",
+            a.notes
+                .iter()
+                .map(|n| (n.start, n.end, n.cents as i64))
+                .collect::<Vec<_>>()
+        );
         for (n, (s, e, c)) in a.notes.iter().zip(&truth) {
-            assert!((n.start as f64 - *s as f64).abs() < 0.015 * FS, "start {} vs {s}", n.start);
-            assert!((n.end as f64 - *e as f64).abs() < 0.03 * FS, "end {} vs {e}", n.end);
+            assert!(
+                (n.start as f64 - *s as f64).abs() < 0.015 * FS,
+                "start {} vs {s}",
+                n.start
+            );
+            assert!(
+                (n.end as f64 - *e as f64).abs() < 0.03 * FS,
+                "end {} vs {e}",
+                n.end
+            );
             assert!((n.cents - c).abs() < 5.0, "centre {:.1} vs {c}", n.cents);
         }
         // Marks a period apart through the first note.
         let p = FS / cents_to_hz(5700.0);
-        let marks: Vec<usize> = a.marks.iter().copied().filter(|&m| m > truth[0].0 + 2000 && m < truth[0].1 - 2000).collect();
+        let marks: Vec<usize> = a
+            .marks
+            .iter()
+            .copied()
+            .filter(|&m| m > truth[0].0 + 2000 && m < truth[0].1 - 2000)
+            .collect();
         for w in marks.windows(2) {
             let d = (w[1] - w[0]) as f64;
-            assert!((d / p - 1.0).abs() < 0.08, "mark spacing {d} vs period {p:.1}");
+            assert!(
+                (d / p - 1.0).abs() < 0.08,
+                "mark spacing {d} vs period {p:.1}"
+            );
         }
     }
 
@@ -669,11 +919,21 @@ mod tests {
         let y = render(&x, &a, &edits);
         let (s, e, _) = truth[2];
         let ((was, _), (got, _)) = (spread(&x, s, e), spread(&y, s, e));
-        assert!((got - was - 300.0).abs() < 3.0, "moved {:.1} cents", got - was);
+        assert!(
+            (got - was - 300.0).abs() < 3.0,
+            "moved {:.1} cents",
+            got - was
+        );
         // The formants stay: the spectral centroid moves under 6 % (a resampling shift of three
         // semitones moves it 19 %).
-        let (was, now) = (centroid(&x[s + 4800..e - 4800]), centroid(&y[s + 4800..e - 4800]));
-        assert!((now / was - 1.0).abs() < 0.06, "centroid {was:.0} → {now:.0} Hz");
+        let (was, now) = (
+            centroid(&x[s + 4800..e - 4800]),
+            centroid(&y[s + 4800..e - 4800]),
+        );
+        assert!(
+            (now / was - 1.0).abs() < 0.06,
+            "centroid {was:.0} → {now:.0} Hz"
+        );
         // Other notes untouched.
         assert_eq!(&y[..truth[1].1], &x[..truth[1].1]);
     }
@@ -688,7 +948,10 @@ mod tests {
             let mut edits = vec![NoteEdit::default(); a.notes.len()];
             edits[0].drift = amount;
             let (_, sd) = spread(&render(&x, &a, &edits), s, e);
-            assert!((lo..hi).contains(&sd), "drift {amount}: spread {sd:.1} (sung {sung:.1})");
+            assert!(
+                (lo..hi).contains(&sd),
+                "drift {amount}: spread {sd:.1} (sung {sung:.1})"
+            );
         }
     }
 
@@ -701,12 +964,29 @@ mod tests {
         edits[1].stretch = 1.4;
         let y = render(&x, &a, &edits);
         let b = analyse(&y, FS);
-        let n = b.notes.iter().min_by(|p, q| (p.cents - truth[1].2).abs().total_cmp(&(q.cents - truth[1].2).abs())).expect("the note");
+        let n = b
+            .notes
+            .iter()
+            .min_by(|p, q| {
+                (p.cents - truth[1].2)
+                    .abs()
+                    .total_cmp(&(q.cents - truth[1].2).abs())
+            })
+            .expect("the note");
         let (s, e, c) = truth[1];
         assert!((n.cents - c).abs() < 5.0);
-        assert!((n.start as f64 - (s as f64 + 0.03 * FS)).abs() < 0.02 * FS, "start {} vs {}", n.start, s as f64 + 0.03 * FS);
+        assert!(
+            (n.start as f64 - (s as f64 + 0.03 * FS)).abs() < 0.02 * FS,
+            "start {} vs {}",
+            n.start,
+            s as f64 + 0.03 * FS
+        );
         let want = (e - s) as f64 * 1.4;
-        assert!(((n.end - n.start) as f64 / want - 1.0).abs() < 0.12, "length {} vs {want}", n.end - n.start);
+        assert!(
+            ((n.end - n.start) as f64 / want - 1.0).abs() < 0.12,
+            "length {} vs {want}",
+            n.end - n.start
+        );
     }
 
     #[test]
@@ -718,21 +998,54 @@ mod tests {
         edits[2].formant_semitones = 3.0;
         let y = render(&x, &a, &edits);
         // The formants move up (the centroid with them, held back by the harmonics that stay).
-        let (was, now) = (centroid(&x[s + 4800..e - 4800]), centroid(&y[s + 4800..e - 4800]));
+        let (was, now) = (
+            centroid(&x[s + 4800..e - 4800]),
+            centroid(&y[s + 4800..e - 4800]),
+        );
         assert!(now / was > 1.1, "centroid {was:.0} → {now:.0} Hz");
         let mut down = vec![NoteEdit::default(); a.notes.len()];
         down[2].formant_semitones = -3.0;
         let z = render(&x, &a, &down);
         assert!(centroid(&z[s + 4800..e - 4800]) / was < 0.9);
         let ((was, _), (got, _)) = (spread(&x, s, e), spread(&y, s, e));
-        assert!((got - was).abs() < 3.0, "the pitch stays: {got:.1} vs {was:.1}");
+        assert!(
+            (got - was).abs() < 3.0,
+            "the pitch stays: {got:.1} vs {was:.1}"
+        );
         let _ = c;
         let mut edits = vec![NoteEdit::default(); a.notes.len()];
         edits[2].gain_db = -6.0;
         let y = render(&x, &a, &edits);
-        let rms = |v: &[f32]| (v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+        let rms = |v: &[f32]| {
+            (v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+        };
         let d = 20.0 * (rms(&y[s + 4800..e - 4800]) / rms(&x[s + 4800..e - 4800])).log10();
         assert!((d + 6.0).abs() < 0.3, "{d:.2} dB");
+    }
+
+    #[test]
+    fn a_range_renders_what_the_whole_does_there() {
+        let (x, _) = line();
+        let a = analyse(&x, FS);
+        for i in 1..a.notes.len() {
+            let mut edits = vec![NoteEdit::default(); a.notes.len()];
+            edits[i].shift_cents = if i % 2 == 0 { -150.0 } else { 150.0 };
+            edits[i].drift = 0.5;
+            edits[i].formant_semitones = -3.0;
+            let whole = render(&x, &a, &edits);
+            let r = affected(&a, i, x.len());
+            let part = render_range(&x, &a, &edits, r.clone());
+            // From a sync point the same grains: the same, sample for sample.
+            let worst = part
+                .iter()
+                .zip(&whole[r.clone()])
+                .map(|(p, w)| (p - w).abs())
+                .fold(0.0f32, f32::max);
+            assert!(worst < 1e-4, "{worst}");
+            // Outside the affected range nothing changed.
+            assert_eq!(&whole[..r.start], &x[..r.start]);
+            assert_eq!(&whole[r.end..x.len()], &x[r.end..]);
+        }
     }
 
     #[test]
@@ -743,7 +1056,11 @@ mod tests {
         edits[1].shift_cents = -200.0;
         edits[3].gain_db = 4.0;
         let y = render(&x, &a, &edits);
-        let d2 = |v: &[f32]| v.windows(3).map(|w| (w[2] - 2.0 * w[1] + w[0]).abs()).fold(0.0f32, f32::max);
+        let d2 = |v: &[f32]| {
+            v.windows(3)
+                .map(|w| (w[2] - 2.0 * w[1] + w[0]).abs())
+                .fold(0.0f32, f32::max)
+        };
         assert!(d2(&y) < 2.5 * d2(&x), "{} vs {}", d2(&y), d2(&x));
     }
 

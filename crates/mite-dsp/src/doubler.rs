@@ -92,7 +92,20 @@ impl Default for DoublerSettings {
     fn default() -> Self {
         Self {
             voices: 1,
-            voice: [VoiceSettings { pan: 1.0, level_db: 0.0 }, VoiceSettings { pan: -0.6, level_db: -3.0 }, VoiceSettings { pan: 0.6, level_db: -3.0 }],
+            voice: [
+                VoiceSettings {
+                    pan: 1.0,
+                    level_db: 0.0,
+                },
+                VoiceSettings {
+                    pan: -0.6,
+                    level_db: -3.0,
+                },
+                VoiceSettings {
+                    pan: 0.6,
+                    level_db: -3.0,
+                },
+            ],
             source_pan: -1.0,
             source_db: 0.0,
             delay_ms: 16.0,
@@ -138,7 +151,10 @@ pub fn auto_gain_db(s: &DoublerSettings) -> f32 {
         return 0.0;
     }
     let p = |db: f32| crate::db_to_gain(2.0 * db);
-    let loudest = s.voice[..s.voices.min(MAX_VOICES)].iter().map(|v| p(v.level_db)).fold(0.0, f32::max);
+    let loudest = s.voice[..s.voices.min(MAX_VOICES)]
+        .iter()
+        .map(|v| p(v.level_db))
+        .fold(0.0, f32::max);
     let total = p(s.source_db) + loudest;
     (10.0 * (2.0 / total.max(1e-9)).log10()).clamp(-12.0, 6.0)
 }
@@ -157,7 +173,11 @@ impl Biquad {
         let (sin, cos) = w.sin_cos();
         let alpha = sin / std::f64::consts::SQRT_2;
         let a0 = 1.0 + alpha;
-        let (b0, b1) = if high { ((1.0 + cos) / 2.0, -(1.0 + cos)) } else { ((1.0 - cos) / 2.0, 1.0 - cos) };
+        let (b0, b1) = if high {
+            ((1.0 + cos) / 2.0, -(1.0 + cos))
+        } else {
+            ((1.0 - cos) / 2.0, 1.0 - cos)
+        };
         self.b = [b0 / a0, b1 / a0, b0 / a0];
         self.a = [-2.0 * cos / a0, (1.0 - alpha) / a0];
     }
@@ -350,7 +370,11 @@ impl Sinc {
                     let x = std::f64::consts::PI * cut * t;
                     let sinc = if x.abs() < 1e-12 { 1.0 } else { x.sin() / x };
                     let r = t / half;
-                    let w = if r.abs() <= 1.0 { i0(beta * (1.0 - r * r).sqrt()) / i0(beta) } else { 0.0 };
+                    let w = if r.abs() <= 1.0 {
+                        i0(beta * (1.0 - r * r).sqrt()) / i0(beta)
+                    } else {
+                        0.0
+                    };
                     *v = sinc * w;
                 }
                 let sum: f64 = c.iter().sum();
@@ -419,10 +443,20 @@ impl Doubler {
             fs,
             line: Delay::new((LINE_MS * 0.001 * fs) as usize + SINC_TAPS + 8),
             sinc: Sinc::new(),
-            bass: MonoBass { source: Lr4::default(), voices: [Lr4::default(); MAX_VOICES], fc: 0.0, mix: Glide::default(), count: 0 },
+            bass: MonoBass {
+                source: Lr4::default(),
+                voices: [Lr4::default(); MAX_VOICES],
+                fc: 0.0,
+                mix: Glide::default(),
+                count: 0,
+            },
             out_gain: Glide { v: 1.0 },
             src_g: Glide { v: 1.0 },
-            voices: [Voice::new(0x1234_5677), Voice::new(0x8BAD_F00D), Voice::new(0x0DEF_ACED)],
+            voices: [
+                Voice::new(0x1234_5677),
+                Voice::new(0x8BAD_F00D),
+                Voice::new(0x0DEF_ACED),
+            ],
             k_glide: 1.0 - (-1.0 / (GLIDE_MS * 0.001 * fs)).exp(),
             switch_len: ((SWITCH_MS * 0.001 * fs) as u32).max(1),
             base: Glide::default(),
@@ -509,7 +543,10 @@ impl Doubler {
         let note = self.voices[i].pick(s);
         // As long as there is room before the note reaches either reading.
         let room = from.min(self.note_delay(base, &note)) - self.ms(ONSET_LAG_MS);
-        let len = (room as u32).clamp(self.switch_len, (self.ms(SWITCH_MAX_MS) as u32).max(self.switch_len));
+        let len = (room as u32).clamp(
+            self.switch_len,
+            (self.ms(SWITCH_MAX_MS) as u32).max(self.switch_len),
+        );
         let v = &mut self.voices[i];
         v.from = from;
         v.fade_left = len;
@@ -520,9 +557,23 @@ impl Doubler {
 
     /// Writes the source and the doubles of `input` (one or two channels, summed) into `out`
     /// (left and right). Never allocates.
-    pub fn process(&mut self, input: [&[f32]; 2], out: [&mut [f32]; 2], stereo_in: bool, s: &DoublerSettings) -> DoublerTelemetry {
+    pub fn process(
+        &mut self,
+        input: [&[f32]; 2],
+        out: [&mut [f32]; 2],
+        stereo_in: bool,
+        s: &DoublerSettings,
+    ) -> DoublerTelemetry {
         let [ol, or] = out;
-        let n = input[0].len().min(ol.len()).min(or.len()).min(if stereo_in { input[1].len() } else { usize::MAX });
+        let n = input[0]
+            .len()
+            .min(ol.len())
+            .min(or.len())
+            .min(if stereo_in {
+                input[1].len()
+            } else {
+                usize::MAX
+            });
         if !self.started {
             self.settle(s);
             self.started = true;
@@ -561,7 +612,11 @@ impl Doubler {
         let min_read = self.ms(2.0);
         let chorus_reach = self.ms(chorus_ms);
         for j in 0..n {
-            let x = if stereo_in { 0.5 * (input[0][j] + input[1][j]) } else { input[0][j] };
+            let x = if stereo_in {
+                0.5 * (input[0][j] + input[1][j])
+            } else {
+                input[0][j]
+            };
             self.line.write(x);
             // The onset detector, on the input's top (a pick's attack).
             self.hp += a_hp * (x - self.hp);
@@ -569,26 +624,38 @@ impl Doubler {
             self.fast += (top - self.fast) * if top > self.fast { att_fast } else { rel_fast };
             self.slow += (self.fast - self.slow) * k_slow;
             self.since_onset = self.since_onset.saturating_add(1);
-            let onset = s.follow_notes && self.fast > gate && self.fast > ONSET_RATIO * self.slow && self.since_onset > refractory;
+            let onset = s.follow_notes
+                && self.fast > gate
+                && self.fast > ONSET_RATIO * self.slow
+                && self.since_onset > refractory;
             if onset {
                 self.since_onset = 0;
                 tel.onset = true;
             }
-            let base = self.base.next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), k);
+            let base = self
+                .base
+                .next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), k);
             let chorus = self.chorus.next(s.chorus.clamp(0.0, 1.0), k);
             let sl = self.src_l.next(src_l, k);
             let sr = self.src_r.next(src_r, k);
             self.bass.count = (self.bass.count + 1) % 32;
             if self.bass.count == 0 && self.bass.fc != fc {
                 let ratio = fc / self.bass.fc;
-                self.bass.fc = if (ratio - 1.0).abs() < 1e-3 { fc } else { self.bass.fc * ratio.powf(0.08) };
+                self.bass.fc = if (ratio - 1.0).abs() < 1e-3 {
+                    fc
+                } else {
+                    self.bass.fc * ratio.powf(0.08)
+                };
                 self.bass.set(fs);
             }
             let bass = self.bass.mix.next(bass_target, k);
             let (low, src) = if bass > 0.0 {
                 let lo = self.bass.source.low(f64::from(x)) as f32;
                 let hi = self.bass.source.high(f64::from(x)) as f32;
-                (lo * bass * self.src_g.next(src_level, k), x + (hi - x) * bass)
+                (
+                    lo * bass * self.src_g.next(src_level, k),
+                    x + (hi - x) * bass,
+                )
             } else {
                 (0.0, x)
             };
@@ -635,11 +702,21 @@ impl Doubler {
                 // Tone: a tilt about 900 Hz (the low part down as the high part goes up).
                 let tilt = v.tilt.next(s.tone_db + v.note.tilt_db, k);
                 v.lp += self.a_tilt * (y - v.lp);
-                let (lo, hi) = (crate::db_to_gain(-0.5 * tilt), crate::db_to_gain(0.5 * tilt));
+                let (lo, hi) = (
+                    crate::db_to_gain(-0.5 * tilt),
+                    crate::db_to_gain(0.5 * tilt),
+                );
                 let y = lo * v.lp + hi * (y - v.lp);
                 // Mono bass: the double's highs only.
-                let y = if bass > 0.0 { y + (self.bass.voices[i].high(f64::from(y)) as f32 - y) * bass } else { y };
-                let g = v.gain.next(crate::db_to_gain(s.voice[i].level_db + v.note.gain_db + trim), k) * on;
+                let y = if bass > 0.0 {
+                    y + (self.bass.voices[i].high(f64::from(y)) as f32 - y) * bass
+                } else {
+                    y
+                };
+                let g = v.gain.next(
+                    crate::db_to_gain(s.voice[i].level_db + v.note.gain_db + trim),
+                    k,
+                ) * on;
                 let (pl, pr) = pan_gains(s.voice[i].pan);
                 let (gl, gr) = (v.gl.next(pl, k), v.gr.next(pr, k));
                 let y = y * g;
@@ -653,7 +730,12 @@ impl Doubler {
         }
         for (i, v) in self.voices.iter().enumerate() {
             tel.delay_ms[i] = (v.last_delay / f64::from(fs) * 1000.0) as f32;
-            tel.cents[i] = v.note.cents * if v.drift.abs() >= drift_max * 0.999 { 0.0 } else { 1.0 };
+            tel.cents[i] = v.note.cents
+                * if v.drift.abs() >= drift_max * 0.999 {
+                    0.0
+                } else {
+                    1.0
+                };
             tel.peak[i] = v.peak;
         }
         tel

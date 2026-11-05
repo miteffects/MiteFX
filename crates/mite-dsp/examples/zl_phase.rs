@@ -2,13 +2,21 @@
 //! against the analog prototype, worst magnitude and phase error 20 Hz–20 kHz where the curve is
 //! within 30 dB of its peak (`cargo run -p mite-dsp --example zl_phase`).
 
-use mite_dsp::eq::{analog_response, design, BandSettings, BandType};
-use mite_dsp::min_phase::{zero_latency_correction, TAPS_48K};
+use mite_dsp::eq::{BandSettings, BandType, analog_response, design};
+use mite_dsp::min_phase::{TAPS_48K, zero_latency_correction};
 use realfft::num_complex::Complex;
 
 fn main() {
     let fs = 44_100.0;
-    let b = |kind, freq, gain_db, q, slope| BandSettings { enabled: true, kind, freq, gain_db, q, slope, ..Default::default() };
+    let b = |kind, freq, gain_db, q, slope| BandSettings {
+        enabled: true,
+        kind,
+        freq,
+        gain_db,
+        q,
+        slope,
+        ..Default::default()
+    };
     let cases = [
         ("Bell 1k", b(BandType::Bell, 1000.0, 12.0, 1.0, 3)),
         ("Bell 10k", b(BandType::Bell, 10_000.0, 12.0, 2.0, 3)),
@@ -29,24 +37,43 @@ fn main() {
         let fir = zero_latency_correction(
             &[s],
             fs,
-            &std::env::var("ZL_TAPS").ok().map(|v| v.split(",").map(|t| t.parse::<usize>().unwrap()).collect::<Vec<_>>()).unwrap_or(TAPS_48K.to_vec()),
-            std::env::var("ZL_FFT").ok().map(|v| v.parse().unwrap()).unwrap_or(8192),
+            &std::env::var("ZL_TAPS")
+                .ok()
+                .map(|v| {
+                    v.split(",")
+                        .map(|t| t.parse::<usize>().unwrap())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or(TAPS_48K.to_vec()),
+            std::env::var("ZL_FFT")
+                .ok()
+                .map(|v| v.parse().unwrap())
+                .unwrap_or(8192),
             false,
         )
         .map(|c| c.lr[0].clone())
         .unwrap_or_else(|| vec![1.0]);
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         let sec = design(&s, fs);
-        let freqs: Vec<f64> = (0..240).map(|i| 20.0 * 1000f64.powf(i as f64 / 239.0)).collect();
+        let freqs: Vec<f64> = (0..240)
+            .map(|i| 20.0 * 1000f64.powf(i as f64 / 239.0))
+            .collect();
         let resp: Vec<(Complex<f64>, Complex<f64>)> = freqs
             .iter()
             .map(|&f| {
                 let w = std::f64::consts::TAU * f / fs;
-                let h: Complex<f64> = fir.iter().enumerate().map(|(n, &v)| Complex::from_polar(f64::from(v), -w * n as f64)).sum();
+                let h: Complex<f64> = fir
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &v)| Complex::from_polar(f64::from(v), -w * n as f64))
+                    .sum();
                 (h * sec.response(w), analog_response(&s, f))
             })
             .collect();
-        let top = resp.iter().map(|(_, a)| 20.0 * a.norm().log10()).fold(f64::MIN, f64::max);
+        let top = resp
+            .iter()
+            .map(|(_, a)| 20.0 * a.norm().log10())
+            .fold(f64::MIN, f64::max);
         let (mut mag, mut ph, mut at) = (0.0f64, 0.0f64, 0.0);
         for (&f, (d, a)) in freqs.iter().zip(&resp) {
             if 20.0 * a.norm().log10() > top - 30.0 {
@@ -72,6 +99,9 @@ fn main() {
                 );
             }
         }
-        println!("{name:14} mag {mag:5.2} dB  phase {ph:6.1}° @{at:6.0}  taps {:4}  {ms:.1} ms", fir.len());
+        println!(
+            "{name:14} mag {mag:5.2} dB  phase {ph:6.1}° @{at:6.0}  taps {:4}  {ms:.1} ms",
+            fir.len()
+        );
     }
 }

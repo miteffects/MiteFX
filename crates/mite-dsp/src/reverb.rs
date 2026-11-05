@@ -82,7 +82,15 @@ pub struct Topology {
 impl Topology {
     pub fn new() -> Self {
         let mut rng = Rng(0x6A09_E667);
-        let mut t = Self { main_ms: [0.0; LINES], ap_ms: [[0.0; 2]; LINES], in_sign: [0.0; LINES], out: [[0.0; LINES]; 2], out_at: [[0.0; LINES]; 2], mix_sign: [0.0; LINES], mix_perm: [0; LINES] };
+        let mut t = Self {
+            main_ms: [0.0; LINES],
+            ap_ms: [[0.0; 2]; LINES],
+            in_sign: [0.0; LINES],
+            out: [[0.0; LINES]; 2],
+            out_at: [[0.0; LINES]; 2],
+            mix_sign: [0.0; LINES],
+            mix_perm: [0; LINES],
+        };
         let ratio = MAIN_MS.1 / MAIN_MS.0;
         for i in 0..LINES {
             let p = (i as f32 + 0.5 + 0.6 * (rng.next() - 0.5)) / LINES as f32;
@@ -105,7 +113,8 @@ impl Topology {
             t.mix_perm.swap(i, j);
         }
         // Gram–Schmidt: right orthogonal to left, both of unit length.
-        let dot = |a: &[f32; LINES], b: &[f32; LINES]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>();
+        let dot =
+            |a: &[f32; LINES], b: &[f32; LINES]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>();
         let norm = |a: &mut [f32; LINES]| {
             let n = dot(a, a).sqrt();
             a.iter_mut().for_each(|x| *x /= n);
@@ -113,7 +122,10 @@ impl Topology {
         norm(&mut t.out[0]);
         let k = dot(&t.out[1], &t.out[0]);
         let left = t.out[0];
-        t.out[1].iter_mut().zip(&left).for_each(|(r, l)| *r -= k * l);
+        t.out[1]
+            .iter_mut()
+            .zip(&left)
+            .for_each(|(r, l)| *r -= k * l);
         norm(&mut t.out[1]);
         t
     }
@@ -190,21 +202,45 @@ pub struct DecayBand {
 
 impl Default for DecayBand {
     fn default() -> Self {
-        Self { on: false, shape: DecayShape::Bell, freq: 1000.0, mult: 1.0, q: 1.0 }
+        Self {
+            on: false,
+            shape: DecayShape::Bell,
+            freq: 1000.0,
+            mult: 1.0,
+            q: 1.0,
+        }
     }
 }
 
 impl DecayBand {
     pub fn bell(freq: f32, mult: f32, q: f32) -> Self {
-        Self { on: true, shape: DecayShape::Bell, freq, mult, q }
+        Self {
+            on: true,
+            shape: DecayShape::Bell,
+            freq,
+            mult,
+            q,
+        }
     }
 
     pub fn low_shelf(freq: f32, mult: f32) -> Self {
-        Self { on: true, shape: DecayShape::LowShelf, freq, mult, q: std::f32::consts::FRAC_1_SQRT_2 }
+        Self {
+            on: true,
+            shape: DecayShape::LowShelf,
+            freq,
+            mult,
+            q: std::f32::consts::FRAC_1_SQRT_2,
+        }
     }
 
     pub fn high_shelf(freq: f32, mult: f32) -> Self {
-        Self { on: true, shape: DecayShape::HighShelf, freq, mult, q: std::f32::consts::FRAC_1_SQRT_2 }
+        Self {
+            on: true,
+            shape: DecayShape::HighShelf,
+            freq,
+            mult,
+            q: std::f32::consts::FRAC_1_SQRT_2,
+        }
     }
 }
 
@@ -283,8 +319,19 @@ impl ReverbSettings {
 
 /// A decay band's section for a loss of `db` (dB a pass) against the rest of the loop.
 fn decay_section(b: &DecayBand, db: f64, fs: f64) -> Coeffs {
-    let settings = BandSettings { enabled: true, kind: b.shape.band_type(), freq: f64::from(b.freq), gain_db: db, q: f64::from(b.q), ..BandSettings::default() };
-    crate::eq::design(&settings, fs).as_slice().first().copied().unwrap_or(Coeffs::IDENTITY)
+    let settings = BandSettings {
+        enabled: true,
+        kind: b.shape.band_type(),
+        freq: f64::from(b.freq),
+        gain_db: db,
+        q: f64::from(b.q),
+        ..BandSettings::default()
+    };
+    crate::eq::design(&settings, fs)
+        .as_slice()
+        .first()
+        .copied()
+        .unwrap_or(Coeffs::IDENTITY)
 }
 
 /// One line's absorption: a gain and a section per decay band.
@@ -297,7 +344,13 @@ pub struct Absorption {
 impl Absorption {
     /// The loop's gain through this absorption at `w`.
     pub fn magnitude(&self, w: f64) -> f64 {
-        self.gain * self.sections.iter().map(|c| c.magnitude_sq(w)).product::<f64>().sqrt()
+        self.gain
+            * self
+                .sections
+                .iter()
+                .map(|c| c.magnitude_sq(w))
+                .product::<f64>()
+                .sqrt()
     }
 }
 
@@ -337,16 +390,28 @@ pub fn design_absorption(len: f64, s: &ReverbSettings, fs: f64, freeze: f64) -> 
         if b.on && (b.mult - 1.0).abs() > 1e-6 {
             let d = per_pass(t * f64::from(b.mult)) - mid;
             // A tilt's gain is the swing from DC to the top: the band's rate change at the top.
-            let d = if b.shape == DecayShape::Tilt { 2.0 * d } else { d };
+            let d = if b.shape == DecayShape::Tilt {
+                2.0 * d
+            } else {
+                d
+            };
             sections[k] = decay_section(b, d, fs);
         }
     }
-    let mut a = Absorption { gain: db(mid), sections };
+    let mut a = Absorption {
+        gain: db(mid),
+        sections,
+    };
     if keep > 0.0 {
         // The highest checked point, then refined between its neighbours (ternary search).
         let pts = check_points(s, fs);
-        let best = (0..pts.len()).max_by(|&i, &j| a.magnitude(pts[i]).total_cmp(&a.magnitude(pts[j]))).unwrap_or(0);
-        let (mut lo, mut hi) = (pts[best.saturating_sub(1)], pts[(best + 1).min(pts.len() - 1)]);
+        let best = (0..pts.len())
+            .max_by(|&i, &j| a.magnitude(pts[i]).total_cmp(&a.magnitude(pts[j])))
+            .unwrap_or(0);
+        let (mut lo, mut hi) = (
+            pts[best.saturating_sub(1)],
+            pts[(best + 1).min(pts.len() - 1)],
+        );
         for _ in 0..40 {
             let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
             if a.magnitude(m1) < a.magnitude(m2) {
@@ -383,7 +448,11 @@ pub fn decay_curve(s: &ReverbSettings, freqs: &[f64], fs: f64, out: &mut [f64]) 
         for (o, &f) in out.iter_mut().zip(freqs) {
             let w = std::f64::consts::TAU * (f / fs).clamp(0.0, 0.5);
             let per_pass_db = 20.0 * a.magnitude(w).log10();
-            *o += if per_pass_db < -1e-9 { -60.0 * len / fs / per_pass_db } else { 1e6 };
+            *o += if per_pass_db < -1e-9 {
+                -60.0 * len / fs / per_pass_db
+            } else {
+                1e6
+            };
         }
     }
     out.iter_mut().for_each(|v| *v /= LINES as f64);
@@ -404,8 +473,15 @@ pub struct DecayModel {
 impl DecayModel {
     pub fn new(s: &ReverbSettings, fs: f64) -> Self {
         let topo = Topology::new();
-        let len = (0..LINES).map(|i| f64::from(topo.line_len(i, s.size, fs as f32))).sum::<f64>() / LINES as f64;
-        Self { len, fs, a: design_absorption(len, s, fs, 0.0) }
+        let len = (0..LINES)
+            .map(|i| f64::from(topo.line_len(i, s.size, fs as f32)))
+            .sum::<f64>()
+            / LINES as f64;
+        Self {
+            len,
+            fs,
+            a: design_absorption(len, s, fs, 0.0),
+        }
     }
 
     /// T60 at `freq`, s.
@@ -431,7 +507,11 @@ pub(crate) struct Delay {
 impl Delay {
     pub(crate) fn new(max_delay: usize) -> Self {
         let len = (max_delay + 4).next_power_of_two();
-        Self { buf: vec![0.0; len], mask: len - 1, pos: 0 }
+        Self {
+            buf: vec![0.0; len],
+            mask: len - 1,
+            pos: 0,
+        }
     }
 
     pub(crate) fn reset(&mut self) {
@@ -458,7 +538,12 @@ impl Delay {
         let d = d.max(1.0);
         let k = d as usize;
         let f = d - k as f32;
-        let (x0, x1, x2, x3) = (self.tap(k - 1), self.tap(k), self.tap(k + 1), self.tap(k + 2));
+        let (x0, x1, x2, x3) = (
+            self.tap(k - 1),
+            self.tap(k),
+            self.tap(k + 1),
+            self.tap(k + 2),
+        );
         // Delay relative to x0: D = 1 + f.
         let dd = 1.0 + f;
         let (dm1, dm2, dm3) = (dd - 1.0, dd - 2.0, dd - 3.0);
@@ -512,7 +597,10 @@ pub(crate) struct Allpass {
 
 impl Allpass {
     pub(crate) fn new(len: usize) -> Self {
-        Self { line: Delay::new(len), len: len.max(1) }
+        Self {
+            line: Delay::new(len),
+            len: len.max(1),
+        }
     }
 
     #[inline]
@@ -551,7 +639,13 @@ impl LineFilter {
             self.gain = gain;
         }
         for (k, s) in a.sections.iter().enumerate() {
-            let target = [s.b0 as f32, s.b1 as f32, s.b2 as f32, s.a1 as f32, s.a2 as f32];
+            let target = [
+                s.b0 as f32,
+                s.b1 as f32,
+                s.b2 as f32,
+                s.a1 as f32,
+                s.a2 as f32,
+            ];
             let identity = *s == Coeffs::IDENTITY;
             if !self.on[k] && identity {
                 continue;
@@ -673,7 +767,14 @@ impl Wander {
         let from = rng.next() * 2.0 - 1.0;
         let to = rng.next() * 2.0 - 1.0;
         let jitter = 1.0 / (0.6 + 0.8 * rng.next());
-        Self { rng, from, to, phase: rng.next(), step: 0.0, jitter }
+        Self {
+            rng,
+            from,
+            to,
+            phase: rng.next(),
+            step: 0.0,
+            jitter,
+        }
     }
 
     #[inline]
@@ -704,7 +805,11 @@ impl EarlyTaps {
     /// distance, random in sign; a third read the other side. Each side's gains sum to unit power.
     fn new() -> Self {
         let mut rng = Rng(0x2545_F491);
-        let mut t = Self { at: [[0.0; ER_TAPS]; 2], gain: [[0.0; ER_TAPS]; 2], from: [[0; ER_TAPS]; 2] };
+        let mut t = Self {
+            at: [[0.0; ER_TAPS]; 2],
+            gain: [[0.0; ER_TAPS]; 2],
+            from: [[0; ER_TAPS]; 2],
+        };
         for c in 0..2 {
             let mut power = 0.0;
             for k in 0..ER_TAPS {
@@ -733,16 +838,37 @@ const SMOOTHED: usize = SCALARS + 3 * DECAY_BANDS;
 /// first).
 fn pack(s: &ReverbSettings, shapes: &[DecayShape; DECAY_BANDS]) -> [f32; SMOOTHED] {
     let mut v = [0.0; SMOOTHED];
-    v[..SCALARS].copy_from_slice(&[s.predelay_ms, s.size, s.decay_s, s.diffusion, s.early, s.mod_depth, s.mod_rate, s.width, s.duck_thresh_db, s.duck_db, s.early_size_ms, s.early_send]);
+    v[..SCALARS].copy_from_slice(&[
+        s.predelay_ms,
+        s.size,
+        s.decay_s,
+        s.diffusion,
+        s.early,
+        s.mod_depth,
+        s.mod_rate,
+        s.width,
+        s.duck_thresh_db,
+        s.duck_db,
+        s.early_size_ms,
+        s.early_send,
+    ]);
     for (k, b) in s.bands.iter().enumerate() {
         v[SCALARS + 3 * k] = b.freq;
-        v[SCALARS + 3 * k + 1] = if b.on && b.shape == shapes[k] { b.mult } else { 1.0 };
+        v[SCALARS + 3 * k + 1] = if b.on && b.shape == shapes[k] {
+            b.mult
+        } else {
+            1.0
+        };
         v[SCALARS + 3 * k + 2] = b.q;
     }
     v
 }
 
-fn unpack(v: &[f32; SMOOTHED], s: &ReverbSettings, shapes: &[DecayShape; DECAY_BANDS]) -> ReverbSettings {
+fn unpack(
+    v: &[f32; SMOOTHED],
+    s: &ReverbSettings,
+    shapes: &[DecayShape; DECAY_BANDS],
+) -> ReverbSettings {
     let mut bands = s.bands;
     for (k, b) in bands.iter_mut().enumerate() {
         b.freq = v[SCALARS + 3 * k];
@@ -781,7 +907,10 @@ pub struct ReverbTelemetry {
 
 impl Default for ReverbTelemetry {
     fn default() -> Self {
-        Self { duck_db: 0.0, freeze: 0.0 }
+        Self {
+            duck_db: 0.0,
+            freeze: 0.0,
+        }
     }
 }
 
@@ -835,12 +964,16 @@ impl Reverb {
             fs,
             pre: std::array::from_fn(|_| Delay::new(ms(MAX_PREDELAY_MS + MAX_EARLY_MS) + 8)),
             diff: std::array::from_fn(|c| std::array::from_fn(|k| Allpass::new(ms(DIFF_MS[c][k])))),
-            early_ap: std::array::from_fn(|c| std::array::from_fn(|k| Allpass::new(ms(ER_AP_MS[c][k])))),
+            early_ap: std::array::from_fn(|c| {
+                std::array::from_fn(|k| Allpass::new(ms(ER_AP_MS[c][k])))
+            }),
             taps: EarlyTaps::new(),
             topo,
             lines: std::array::from_fn(|i| Delay::new(ms(topo.main_ms[i] + MOD_MS) + 8)),
             reads: [AllpassRead::default(); LINES],
-            loop_ap: std::array::from_fn(|i| std::array::from_fn(|k| Allpass::new(topo.ap_len(i, k, fs)))),
+            loop_ap: std::array::from_fn(|i| {
+                std::array::from_fn(|k| Allpass::new(topo.ap_len(i, k, fs)))
+            }),
             filters: [LineFilter::default(); LINES],
             shapes: [DecayShape::Bell; DECAY_BANDS],
             tone: std::array::from_fn(|_| BandProcessor::new(f64::from(fs), TONE_SMOOTH_MS)),
@@ -883,7 +1016,13 @@ impl Reverb {
         for d in self.pre.iter_mut().chain(self.lines.iter_mut()) {
             d.reset();
         }
-        for a in self.diff.iter_mut().flatten().chain(self.early_ap.iter_mut().flatten()).chain(self.loop_ap.iter_mut().flatten()) {
+        for a in self
+            .diff
+            .iter_mut()
+            .flatten()
+            .chain(self.early_ap.iter_mut().flatten())
+            .chain(self.loop_ap.iter_mut().flatten())
+        {
             a.line.reset();
         }
         for f in &mut self.filters {
@@ -898,7 +1037,8 @@ impl Reverb {
             sm.reset(v);
         }
         self.freeze.reset(if s.freeze { 1.0 } else { 0.0 });
-        self.wander = std::array::from_fn(|i| Wander::new(0x9E37_79B9u32.wrapping_mul(i as u32 + 1)));
+        self.wander =
+            std::array::from_fn(|i| Wander::new(0x9E37_79B9u32.wrapping_mul(i as u32 + 1)));
         self.env = 0.0;
         self.phase = 0;
         self.duck_g = 1.0;
@@ -953,7 +1093,15 @@ impl Reverb {
         }
         if self.designed != Some((g, freeze)) {
             for i in 0..LINES {
-                self.filters[i].set(&design_absorption(f64::from(self.topo.line_len(i, g.size, fs)), &g, f64::from(fs), f64::from(freeze)), !jump);
+                self.filters[i].set(
+                    &design_absorption(
+                        f64::from(self.topo.line_len(i, g.size, fs)),
+                        &g,
+                        f64::from(fs),
+                        f64::from(freeze),
+                    ),
+                    !jump,
+                );
             }
             let step = g.mod_rate.max(0.01) / fs;
             for w in &mut self.wander {
@@ -962,8 +1110,25 @@ impl Reverb {
             self.designed = Some((g, freeze));
         }
         let d = g.diffusion.clamp(0.0, 1.0);
-        let next = [g.mod_depth * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]), d * DIFF_MAX, 0.3 + 0.35 * d, g.early, g.early_send.clamp(0.0, 1.0), g.width];
-        for (v, n) in [&mut self.depth, &mut self.diff_g, &mut self.loop_g, &mut self.early, &mut self.send, &mut self.width].into_iter().zip(next) {
+        let next = [
+            g.mod_depth * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
+            d * DIFF_MAX,
+            0.3 + 0.35 * d,
+            g.early,
+            g.early_send.clamp(0.0, 1.0),
+            g.width,
+        ];
+        for (v, n) in [
+            &mut self.depth,
+            &mut self.diff_g,
+            &mut self.loop_g,
+            &mut self.early,
+            &mut self.send,
+            &mut self.width,
+        ]
+        .into_iter()
+        .zip(next)
+        {
             v[0] = if jump { n } else { v[1] };
             v[1] = n;
         }
@@ -978,9 +1143,19 @@ impl Reverb {
 
     /// Writes the reverb of `input` (one or two channels) into `wet` (as many). Never allocates.
     #[allow(clippy::needless_range_loop)] // the lines' parallel arrays, by line
-    pub fn process(&mut self, input: [&[f32]; 2], wet: [&mut [f32]; 2], stereo: bool, s: &ReverbSettings) -> ReverbTelemetry {
+    pub fn process(
+        &mut self,
+        input: [&[f32]; 2],
+        wet: [&mut [f32]; 2],
+        stereo: bool,
+        s: &ReverbSettings,
+    ) -> ReverbTelemetry {
         let [wl, wr] = wet;
-        let n = input[0].len().min(wl.len()).min(if stereo { input[1].len().min(wr.len()) } else { usize::MAX });
+        let n = input[0].len().min(wl.len()).min(if stereo {
+            input[1].len().min(wr.len())
+        } else {
+            usize::MAX
+        });
         self.freeze.set_target(if s.freeze { 1.0 } else { 0.0 });
         let fs = self.fs;
         let att = 1.0 - (-1.0 / (DUCK_ATTACK_MS * 0.001 * fs)).exp();
@@ -1016,23 +1191,38 @@ impl Reverb {
                 None => (1, 0.0),
             };
             let er = lerp(self.er);
-            let (depth, diff_g, loop_g, early_lv, send, width) = (lerp(self.depth), lerp(self.diff_g), lerp(self.loop_g), lerp(self.early), lerp(self.send), lerp(self.width));
+            let (depth, diff_g, loop_g, early_lv, send, width) = (
+                lerp(self.depth),
+                lerp(self.diff_g),
+                lerp(self.loop_g),
+                lerp(self.early),
+                lerp(self.send),
+                lerp(self.width),
+            );
             // The early field and the diffused input to the tank, per side.
             let mut early = [0.0f32; 2];
             let mut into = [0.0f32; 2];
             let sides = if stereo { 2 } else { 1 };
-            let needs_early = self.early[0].max(self.early[1]) > 0.0 || self.send[0].max(self.send[1]) > 0.0;
+            let needs_early =
+                self.early[0].max(self.early[1]) > 0.0 || self.send[0].max(self.send[1]) > 0.0;
             for c in 0..sides {
                 let mut x = 0.0;
                 let mut e = 0.0;
                 for h in 0..heads {
-                    let w = if heads == 1 { 1.0 } else if h == 0 { 1.0 - fade } else { fade };
+                    let w = if heads == 1 {
+                        1.0
+                    } else if h == 0 {
+                        1.0 - fade
+                    } else {
+                        fade
+                    };
                     let pd = self.pd[h];
                     if needs_early {
                         let mut acc = 0.0;
                         for k in 0..ER_TAPS {
                             let src = if stereo { self.taps.from[c][k] } else { 0 };
-                            acc += self.taps.gain[c][k] * self.pre[src].read_linear(pd + self.taps.at[c][k] * er);
+                            acc += self.taps.gain[c][k]
+                                * self.pre[src].read_linear(pd + self.taps.at[c][k] * er);
                         }
                         e += w * acc;
                     }
@@ -1050,7 +1240,8 @@ impl Reverb {
                     x = a.process(x, diff_g);
                 }
                 early[c] = e * early_lv;
-                into[c] = (x * (1.0 - 0.5 * send) + e * send) * IN_GAIN * (16.0 / LINES as f32).sqrt();
+                into[c] =
+                    (x * (1.0 - 0.5 * send) + e * send) * IN_GAIN * (16.0 / LINES as f32).sqrt();
             }
             if !stereo {
                 early[1] = early[0];
@@ -1097,7 +1288,11 @@ impl Reverb {
         }
         // The tone EQ: the same on both sides, so it commutes with the width.
         for (p, b) in self.tone.iter_mut().zip(&s.eq) {
-            p.set_target(&BandSettings { placement: crate::eq::Placement::Stereo, dynamics: crate::eq::Dynamics::default(), ..*b });
+            p.set_target(&BandSettings {
+                placement: crate::eq::Placement::Stereo,
+                dynamics: crate::eq::Dynamics::default(),
+                ..*b
+            });
             if stereo {
                 p.process(&mut [&mut wl[..n], &mut wr[..n]]);
             } else {
@@ -1127,7 +1322,10 @@ mod tests {
         for (a, x) in vs.iter().enumerate() {
             for (b, y) in vs.iter().enumerate() {
                 let dot: f32 = x.iter().zip(y).map(|(p, q)| p * q).sum();
-                assert!((dot - if a == b { 1.0 } else { 0.0 }).abs() < 0.01, "{a}·{b} = {dot}");
+                assert!(
+                    (dot - if a == b { 1.0 } else { 0.0 }).abs() < 0.01,
+                    "{a}·{b} = {dot}"
+                );
             }
         }
         let mut seen = [false; LINES];
@@ -1151,7 +1349,11 @@ mod tests {
     #[test]
     fn decay_at_matches_the_settings_at_the_ends_and_at_a_bell() {
         let fs = 48000.0;
-        let s = ReverbSettings { decay_s: 3.0, ..ReverbSettings::default() }.with_shelves((250.0, 2.0), (5000.0, 0.4));
+        let s = ReverbSettings {
+            decay_s: 3.0,
+            ..ReverbSettings::default()
+        }
+        .with_shelves((250.0, 2.0), (5000.0, 0.4));
         assert!((decay_at(&s, 0.0, fs) - 6.0).abs() < 0.01);
         assert!((decay_at(&s, 24000.0, fs) - 1.2).abs() < 0.01);
         let mid = decay_at(&s, 1500.0, fs);
@@ -1160,21 +1362,35 @@ mod tests {
         let mut b = s;
         b.bands[2] = DecayBand::bell(1500.0, 0.5, 1.0);
         let at = decay_at(&b, 1500.0, fs);
-        assert!((at / (mid * 0.5) - 1.0).abs() < 0.02, "{at} against {}", mid * 0.5);
+        assert!(
+            (at / (mid * 0.5) - 1.0).abs() < 0.02,
+            "{at} against {}",
+            mid * 0.5
+        );
     }
 
     #[test]
     fn the_decay_model_follows_the_lines_mean() {
         let fs = 48000.0;
-        let mut s = ReverbSettings { decay_s: 2.5, ..ReverbSettings::default() }.with_shelves((200.0, 1.8), (4000.0, 0.3));
+        let mut s = ReverbSettings {
+            decay_s: 2.5,
+            ..ReverbSettings::default()
+        }
+        .with_shelves((200.0, 1.8), (4000.0, 0.3));
         s.bands[2] = DecayBand::bell(800.0, 0.4, 3.0);
-        s.bands[3] = DecayBand { shape: DecayShape::Tilt, ..DecayBand::bell(2000.0, 1.5, 1.0) };
+        s.bands[3] = DecayBand {
+            shape: DecayShape::Tilt,
+            ..DecayBand::bell(2000.0, 1.5, 1.0)
+        };
         for size in [0.0, 0.5, 1.0] {
             s.size = size;
             let m = DecayModel::new(&s, fs);
             for f in [30.0, 200.0, 800.0, 2000.0, 6000.0, 18000.0] {
                 let (exact, model) = (decay_at(&s, f, fs), m.at(f));
-                assert!((model / exact - 1.0).abs() < 0.03, "size {size}, {f} Hz: {model} against {exact}");
+                assert!(
+                    (model / exact - 1.0).abs() < 0.03,
+                    "size {size}, {f} Hz: {model} against {exact}"
+                );
             }
         }
     }

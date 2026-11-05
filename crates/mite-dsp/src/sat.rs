@@ -26,7 +26,7 @@ use std::sync::OnceLock;
 
 use crate::crossover::{Cross, Split};
 use crate::dynamics::{soft_above, soft_cap};
-use crate::hysteresis::{self, anhysteretic, Ja, JaParams};
+use crate::hysteresis::{self, Ja, JaParams, anhysteretic};
 use crate::oversample::Oversampler;
 
 pub use crate::crossover::{FREQ_MAX, FREQ_MIN, MIN_GAP_OCT};
@@ -125,8 +125,26 @@ pub enum Model {
 }
 
 impl Model {
-    pub const ALL: [Model; 8] = [Model::Tape, Model::Tube, Model::Transformer, Model::Diode, Model::Soft, Model::Hard, Model::Fold, Model::Rectify];
-    pub const NAMES: [&'static str; 8] = ["Tape", "Tube", "Transformer", "Diode", "Soft", "Hard", "Fold", "Rectify"];
+    pub const ALL: [Model; 8] = [
+        Model::Tape,
+        Model::Tube,
+        Model::Transformer,
+        Model::Diode,
+        Model::Soft,
+        Model::Hard,
+        Model::Fold,
+        Model::Rectify,
+    ];
+    pub const NAMES: [&'static str; 8] = [
+        "Tape",
+        "Tube",
+        "Transformer",
+        "Diode",
+        "Soft",
+        "Hard",
+        "Fold",
+        "Rectify",
+    ];
     pub const DEFAULT: Model = Model::Tube;
 
     pub fn from_index(i: usize) -> Self {
@@ -185,7 +203,11 @@ pub fn curve(model: Model, u: f32) -> f32 {
         // An unmatched pair: one diode conducts the top, two in series the bottom, so the halves
         // differ in shape at any level (even harmonics without bias).
         Model::Diode => {
-            let k = if u > 0.0 { DIODE_KNEES.0 } else { DIODE_KNEES.1 };
+            let k = if u > 0.0 {
+                DIODE_KNEES.0
+            } else {
+                DIODE_KNEES.1
+            };
             k * (u / k).asinh()
         }
         Model::Tape | Model::Transformer | Model::Soft => {
@@ -325,7 +347,10 @@ fn gain_tables() -> &'static [GainTable; 8] {
     static TABLES: OnceLock<Box<[GainTable; 8]>> = OnceLock::new();
     TABLES.get_or_init(|| {
         Box::new(Model::ALL.map(|m| {
-            let mut t = GainTable { p: [0.0; TABLE_U * TABLE_B], c: [0.0; TABLE_U * TABLE_B] };
+            let mut t = GainTable {
+                p: [0.0; TABLE_U * TABLE_B],
+                c: [0.0; TABLE_U * TABLE_B],
+            };
             let flat = (Tilt::IDENTITY, Tilt::IDENTITY);
             for j in 0..TABLE_B {
                 let b = -1.0 + j as f32 * (2.0 / (TABLE_B - 1) as f32);
@@ -341,8 +366,12 @@ fn gain_tables() -> &'static [GainTable; 8] {
                     for k in 0..settle + N {
                         let s = (std::f64::consts::TAU * (k as f64 + 0.5) / N as f64).sin();
                         let f = match m.magnet() {
-                            Some(w) => f64::from(magnet.process(w, &flat, (u * s) as f32, b, HELD_PEAK)),
-                            None => f64::from(curve(m, (u * s) as f32 + pt)) - f64::from(curve(m, pt)),
+                            Some(w) => {
+                                f64::from(magnet.process(w, &flat, (u * s) as f32, b, HELD_PEAK))
+                            }
+                            None => {
+                                f64::from(curve(m, (u * s) as f32 + pt)) - f64::from(curve(m, pt))
+                            }
                         };
                         if k < settle {
                             continue;
@@ -365,14 +394,16 @@ fn gain_tables() -> &'static [GainTable; 8] {
 pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, bias: f32, a: f32) -> f32 {
     let g = f64::from(crate::db_to_gain(drive_db));
     let u_db = 20.0 * (f64::from(CALIBRATION) * g * f64::from(amplitude).max(1e-9)).log10();
-    let x = ((u_db - TABLE_U_DB.0).clamp(0.0, TABLE_U_DB.1 - TABLE_U_DB.0)).min((TABLE_U - 1) as f64);
+    let x =
+        ((u_db - TABLE_U_DB.0).clamp(0.0, TABLE_U_DB.1 - TABLE_U_DB.0)).min((TABLE_U - 1) as f64);
     let y = ((f64::from(bias) + 1.0) / 2.0 * (TABLE_B - 1) as f64).clamp(0.0, (TABLE_B - 1) as f64);
     let (i, j) = ((x as usize).min(TABLE_U - 2), (y as usize).min(TABLE_B - 2));
     let (fx, fy) = (x - i as f64, y - j as f64);
     let t = &gain_tables()[model.index()];
     let at = |v: &[f32]| {
         let q = |jj: usize, ii: usize| f64::from(v[jj * TABLE_U + ii]);
-        (q(j, i) * (1.0 - fx) + q(j, i + 1) * fx) * (1.0 - fy) + (q(j + 1, i) * (1.0 - fx) + q(j + 1, i + 1) * fx) * fy
+        (q(j, i) * (1.0 - fx) + q(j, i + 1) * fx) * (1.0 - fy)
+            + (q(j + 1, i) * (1.0 - fx) + q(j + 1, i + 1) * fx) * fy
     };
     let (p, c) = (at(&t.p), at(&t.c));
     let a = f64::from(a);
@@ -396,7 +427,12 @@ pub enum StereoMode {
 }
 
 impl StereoMode {
-    pub const ALL: [StereoMode; 4] = [StereoMode::Stereo, StereoMode::Mid, StereoMode::Side, StereoMode::MidSide];
+    pub const ALL: [StereoMode; 4] = [
+        StereoMode::Stereo,
+        StereoMode::Mid,
+        StereoMode::Side,
+        StereoMode::MidSide,
+    ];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL[i.min(3)]
@@ -484,7 +520,11 @@ pub struct SatSettings {
 
 impl Default for SatSettings {
     fn default() -> Self {
-        Self { crossovers: [None; CROSSOVERS], bands: [BandSat::default(); BANDS], auto_gain: true }
+        Self {
+            crossovers: [None; CROSSOVERS],
+            bands: [BandSat::default(); BANDS],
+            auto_gain: true,
+        }
     }
 }
 
@@ -497,7 +537,9 @@ pub fn tone_pivot(layout: &Layout, crossovers: &[Option<f32>; CROSSOVERS], band:
     if layout.n == 0 {
         return TONE_PIVOT;
     }
-    layout.region(band, crossovers).map_or(TONE_PIVOT, |(lo, hi)| (lo * hi).sqrt())
+    layout
+        .region(band, crossovers)
+        .map_or(TONE_PIVOT, |(lo, hi)| (lo * hi).sqrt())
 }
 
 /// A first-order tilt, `tone_db / 2` above the pivot and as much below, unity at it (bilinear,
@@ -510,7 +552,11 @@ pub struct Tilt {
 }
 
 impl Tilt {
-    pub const IDENTITY: Tilt = Tilt { b0: 1.0, b1: 0.0, a1: 0.0 };
+    pub const IDENTITY: Tilt = Tilt {
+        b0: 1.0,
+        b1: 0.0,
+        a1: 0.0,
+    };
 
     pub fn new(tone_db: f32, pivot: f32, fs: f32) -> Self {
         if tone_db == 0.0 {
@@ -523,24 +569,39 @@ impl Tilt {
         let wp = w0 * (hi / lo).sqrt();
         let k = w0 / (std::f64::consts::PI * f0 / fs).tan();
         let d = k + wp;
-        Self { b0: ((hi * k + lo * wp) / d) as f32, b1: ((lo * wp - hi * k) / d) as f32, a1: ((wp - k) / d) as f32 }
+        Self {
+            b0: ((hi * k + lo * wp) / d) as f32,
+            b1: ((lo * wp - hi * k) / d) as f32,
+            a1: ((wp - k) / d) as f32,
+        }
     }
 
     /// The same section times `gain`.
     pub fn scaled(self, gain: f32) -> Self {
-        Self { b0: self.b0 * gain, b1: self.b1 * gain, ..self }
+        Self {
+            b0: self.b0 * gain,
+            b1: self.b1 * gain,
+            ..self
+        }
     }
 
     /// The exact inverse (the section is minimum phase: its zero is inside the unit circle).
     pub fn inverse(self) -> Self {
-        Self { b0: 1.0 / self.b0, b1: self.a1 / self.b0, a1: self.b1 / self.b0 }
+        Self {
+            b0: 1.0 / self.b0,
+            b1: self.a1 / self.b0,
+            a1: self.b1 / self.b0,
+        }
     }
 
     /// The magnitude at `f` Hz (for the editor and tests).
     pub fn magnitude(&self, f: f64, fs: f64) -> f64 {
         let w = std::f64::consts::TAU * f / fs;
         let (c, s) = (w.cos(), w.sin());
-        let num = (f64::from(self.b0) + f64::from(self.b1) * c, -f64::from(self.b1) * s);
+        let num = (
+            f64::from(self.b0) + f64::from(self.b1) * c,
+            -f64::from(self.b1) * s,
+        );
         let den = (1.0 + f64::from(self.a1) * c, -f64::from(self.a1) * s);
         (num.0.hypot(num.1)) / den.0.hypot(den.1)
     }
@@ -549,7 +610,10 @@ impl Tilt {
     fn apply(&self, f: f64, fs: f64, z: (f64, f64)) -> (f64, f64) {
         let w = std::f64::consts::TAU * f / fs;
         let (c, s) = (w.cos(), w.sin());
-        let (nr, ni) = (f64::from(self.b0) + f64::from(self.b1) * c, -f64::from(self.b1) * s);
+        let (nr, ni) = (
+            f64::from(self.b0) + f64::from(self.b1) * c,
+            -f64::from(self.b1) * s,
+        );
         let (dr, di) = (1.0 + f64::from(self.a1) * c, -f64::from(self.a1) * s);
         let d = dr * dr + di * di;
         let (hr, hi) = ((nr * dr + ni * di) / d, (ni * dr - nr * di) / d);
@@ -594,7 +658,17 @@ pub struct Magnet {
 
 impl Default for Magnet {
     fn default() -> Self {
-        Self { core: Ja::default(), pre: 0.0, post: 0.0, rest: 0.0, rest_at: 0.0, rest_slope: 0.0, env: 0.0, unity: 1.0, fresh: true }
+        Self {
+            core: Ja::default(),
+            pre: 0.0,
+            post: 0.0,
+            rest: 0.0,
+            rest_at: 0.0,
+            rest_slope: 0.0,
+            env: 0.0,
+            unity: 1.0,
+            fresh: true,
+        }
     }
 }
 
@@ -602,7 +676,11 @@ impl Magnet {
     /// A fresh core whose envelope starts at `env` and emphasis filter at `pre` (where a steady
     /// tone holds them).
     pub fn seeded(env: f32, pre: f32) -> Self {
-        Self { env, pre, ..Self::default() }
+        Self {
+            env,
+            pre,
+            ..Self::default()
+        }
     }
 
     /// Seeded for a sine `amp·sin(2π·i/n)` from `i = 0` (the drive in it) through emphasis `em` at
@@ -622,7 +700,11 @@ impl Magnet {
 
     /// The model core `w` plays.
     fn model(w: usize) -> Model {
-        if w == 0 { Model::Tape } else { Model::Transformer }
+        if w == 0 {
+            Model::Tape
+        } else {
+            Model::Transformer
+        }
     }
 
     /// The operating point now, from bias `bias` and the envelope.
@@ -633,7 +715,9 @@ impl Magnet {
     fn set_rest(&mut self, p: &JaParams, point: f32) {
         let d = 1e-3;
         self.rest = anhysteretic(p, p.h_in * point);
-        self.rest_slope = (anhysteretic(p, p.h_in * (point + d)) - anhysteretic(p, p.h_in * (point - d))) / (2.0 * d);
+        self.rest_slope = (anhysteretic(p, p.h_in * (point + d))
+            - anhysteretic(p, p.h_in * (point - d)))
+            / (2.0 * d);
         self.rest_at = point;
     }
 
@@ -641,7 +725,14 @@ impl Magnet {
     /// emphasis `em`, the envelope following with coefficients `k`: slope 1 for quiet signals, 0
     /// at rest.
     #[inline]
-    pub fn process(&mut self, w: usize, em: &(Tilt, Tilt), u0: f32, bias: f32, k: (f32, f32)) -> f32 {
+    pub fn process(
+        &mut self,
+        w: usize,
+        em: &(Tilt, Tilt),
+        u0: f32,
+        bias: f32,
+        k: (f32, f32),
+    ) -> f32 {
         let p = &MAGNETS[w];
         if self.fresh {
             let point = self.point(w, bias);
@@ -670,23 +761,45 @@ pub fn magnet_response(model: Model, x: &[f32], drive_db: f32, bias: f32, fs: f3
 }
 
 /// [`magnet_response`] from `magnet`'s state (`None`: from rest).
-fn respond(model: Model, x: &[f32], drive_db: f32, bias: f32, fs: f32, steady: Option<(f32, usize)>) -> Vec<f32> {
-    let Some(w) = model.magnet() else { return x.iter().map(|&v| curve(model, v)).collect() };
+fn respond(
+    model: Model,
+    x: &[f32],
+    drive_db: f32,
+    bias: f32,
+    fs: f32,
+    steady: Option<(f32, usize)>,
+) -> Vec<f32> {
+    let Some(w) = model.magnet() else {
+        return x.iter().map(|&v| curve(model, v)).collect();
+    };
     let em = emphasis(w, fs);
     let g = CALIBRATION * crate::db_to_gain(drive_db);
     let k = env_coefficients(f64::from(fs));
-    let mut magnet = steady.map_or_else(Magnet::default, |(amp, n)| Magnet::steady(&em, g * amp, n, fs, k));
-    x.iter().map(|&v| magnet.process(w, &em, g * v, bias, k) / CALIBRATION).collect()
+    let mut magnet = steady.map_or_else(Magnet::default, |(amp, n)| {
+        Magnet::steady(&em, g * amp, n, fs, k)
+    });
+    x.iter()
+        .map(|&v| magnet.process(w, &em, g * v, bias, k) / CALIBRATION)
+        .collect()
 }
 
 /// The loop a Tape or Transformer band traces for a sine of amplitude `amp` at `freq` Hz once
 /// settled (after one cycle from rest): `(x, F(x))` over the next, `n` points from phase 0 (the
 /// editor draws it).
-pub fn magnet_loop(model: Model, amp: f32, drive_db: f32, bias: f32, freq: f32, n: usize) -> Vec<(f32, f32)> {
+pub fn magnet_loop(
+    model: Model,
+    amp: f32,
+    drive_db: f32,
+    bias: f32,
+    freq: f32,
+    n: usize,
+) -> Vec<(f32, f32)> {
     // The core is rate independent and the emphasis only sees `freq / fs`: any rate with `n`
     // samples a cycle gives the same loop. The emphasis and envelope start where the tone holds them.
     let fs = freq * n as f32;
-    let x: Vec<f32> = (0..2 * n).map(|i| amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32).collect();
+    let x: Vec<f32> = (0..2 * n)
+        .map(|i| amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32)
+        .collect();
     let y = respond(model, &x, drive_db, bias, fs, Some((amp, n)));
     x[n..].iter().copied().zip(y[n..].iter().copied()).collect()
 }
@@ -754,9 +867,13 @@ impl Harmonics {
 /// the probe's rate, from the tone's peak until it repeats. For the editor; allocates.
 pub fn probe_harmonics(p: &Probe) -> Harmonics {
     let share = f64::from(engagement(p.drive_db)) * f64::from(p.mix);
-    let mut out = Harmonics { amp: [0.0; PARTIALS], hollow: std::array::from_fn(|i| (i + 1) as f32 * p.freq >= p.fs / 2.0) };
+    let mut out = Harmonics {
+        amp: [0.0; PARTIALS],
+        hollow: std::array::from_fn(|i| (i + 1) as f32 * p.freq >= p.fs / 2.0),
+    };
     let n = match p.model.magnet() {
-        Some(_) => ((PROBE_MAGNET_FS / p.freq.max(1.0)).ceil() as usize).clamp(PROBE_MAGNET.0, PROBE_MAGNET.1),
+        Some(_) => ((PROBE_MAGNET_FS / p.freq.max(1.0)).ceil() as usize)
+            .clamp(PROBE_MAGNET.0, PROBE_MAGNET.1),
         None => PROBE_STATIC,
     };
     let sine = |i: usize| p.amp * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32;
@@ -773,7 +890,10 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
                 *y = magnet.process(w, &em, g * sine(i), p.bias, k) / CALIBRATION;
             }
             let swing = cycle.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-            let moved = cycle.iter().zip(&last).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            let moved = cycle
+                .iter()
+                .zip(&last)
+                .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
             std::mem::swap(&mut cycle, &mut last);
             if c > 0 && moved <= PROBE_SETTLED * swing {
                 break;
@@ -785,17 +905,22 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         // The envelope only matters where it moves the point.
         let moves = p.model.tracks() && (p.bias != 0.0 || p.model == Model::Tube);
         let mut env = if moves { settled_env(&u, k) } else { 0.0 };
-        u.iter().map(|&v| static_lane(p.model, &mut env, v, p.bias, k)).collect()
+        u.iter()
+            .map(|&v| static_lane(p.model, &mut env, v, p.bias, k))
+            .collect()
     };
     let tilt = Tilt::new(p.tone_db, p.pivot, p.fs);
     let (fs, freq) = (f64::from(p.fs), f64::from(p.freq));
     for (i, a) in out.amp.iter_mut().enumerate() {
         let h = i + 1;
         let w = std::f64::consts::TAU * h as f64 / n as f64;
-        let (mut re, mut im) = wet.iter().enumerate().fold((0.0f64, 0.0f64), |(re, im), (k, &v)| {
-            let th = w * k as f64;
-            (re + f64::from(v) * th.cos(), im - f64::from(v) * th.sin())
-        });
+        let (mut re, mut im) =
+            wet.iter()
+                .enumerate()
+                .fold((0.0f64, 0.0f64), |(re, im), (k, &v)| {
+                    let th = w * k as f64;
+                    (re + f64::from(v) * th.cos(), im - f64::from(v) * th.sin())
+                });
         re *= 2.0 / n as f64;
         im *= 2.0 / n as f64;
         // The tone tilts what is left after the way down; what the way down removes never meets it.
@@ -808,7 +933,10 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         let f = h as f64 * freq;
         let d = f * f + HP_HZ * HP_HZ;
         let (hr, hi) = (f * f / d, f * HP_HZ / d);
-        (re, im) = ((re * hr - im * hi) * share, (re * hi + im * hr) * share - dry);
+        (re, im) = (
+            (re * hr - im * hi) * share,
+            (re * hi + im * hr) * share - dry,
+        );
         *a = re.hypot(im) as f32;
     }
     out
@@ -833,14 +961,32 @@ pub const MEASURE_N: usize = 16_384;
 /// Runs a sine of `cycles` periods per [`MEASURE_N`] samples at `amp` through one band of
 /// `model` at `factor`, `drive_db` and `bias` (auto gain off) at `fs` for a second, and reads
 /// the last window's spectrum. For reports and tests; allocates.
-pub fn distortion(model: Model, factor: usize, fs: f32, cycles: usize, amp: f32, drive_db: f32, bias: f32) -> Distortion {
+pub fn distortion(
+    model: Model,
+    factor: usize,
+    fs: f32,
+    cycles: usize,
+    amp: f32,
+    drive_db: f32,
+    bias: f32,
+) -> Distortion {
     use realfft::RealFftPlanner;
-    let mut s = SatSettings { auto_gain: false, ..SatSettings::default() };
-    s.bands[0] = BandSat { model, drive_db, bias, ..BandSat::default() };
+    let mut s = SatSettings {
+        auto_gain: false,
+        ..SatSettings::default()
+    };
+    s.bands[0] = BandSat {
+        model,
+        drive_db,
+        bias,
+        ..BandSat::default()
+    };
     let n = MEASURE_N;
     let total = fs as usize + n;
     let w = std::f64::consts::TAU * cycles as f64 / n as f64;
-    let mut x: Vec<f32> = (0..total).map(|i| (f64::from(amp) * (w * i as f64).sin()) as f32).collect();
+    let mut x: Vec<f32> = (0..total)
+        .map(|i| (f64::from(amp) * (w * i as f64).sin()) as f32)
+        .collect();
     let mut sat = Saturator::new(fs, factor, &s);
     for block in x.chunks_mut(512) {
         sat.process(&mut [block], &mut [], &s);
@@ -865,7 +1011,10 @@ pub fn distortion(model: Model, factor: usize, fs: f32, cycles: usize, amp: f32,
         }
     }
     let db = |r: f64| 10.0 * r.max(1e-30).log10();
-    Distortion { thd_db: db(harmonics / fundamental.max(1e-30)), alias_db: db(rest / strongest.max(1e-30)) }
+    Distortion {
+        thd_db: db(harmonics / fundamental.max(1e-30)),
+        alias_db: db(rest / strongest.max(1e-30)),
+    }
 }
 
 // ---- Engine --------------------------------------------------------------------------------
@@ -905,7 +1054,24 @@ struct BandCore {
 
 impl BandCore {
     fn new(factor: usize) -> Self {
-        Self { os: Oversampler::new(factor), env: [[0.0; 2]; 2], magnet: [[Magnet::default(); 2]; 2], tone: [0.0; 2], hp: [(0.0, 0.0); 2], level: 0.0, level_emph: [0.0; 2], emph_state: [[0.0; 2]; 2], trim_in: 0.0, trim_out: 0.0, short: 0.0, top: 0.0, dyn_peak: 0.0, dyn_db: 0.0, dyn_ref: None, idle: true }
+        Self {
+            os: Oversampler::new(factor),
+            env: [[0.0; 2]; 2],
+            magnet: [[Magnet::default(); 2]; 2],
+            tone: [0.0; 2],
+            hp: [(0.0, 0.0); 2],
+            level: 0.0,
+            level_emph: [0.0; 2],
+            emph_state: [[0.0; 2]; 2],
+            trim_in: 0.0,
+            trim_out: 0.0,
+            short: 0.0,
+            top: 0.0,
+            dyn_peak: 0.0,
+            dyn_db: 0.0,
+            dyn_ref: None,
+            idle: true,
+        }
     }
 
     fn clear(&mut self) {
@@ -1008,7 +1174,14 @@ impl Core {
             let dynamics = (p.dyn_peak, p.dyn_db, p.dyn_ref);
             let band = &mut self.bands[slot];
             band.clear();
-            (band.level, band.level_emph, band.trim_in, band.trim_out, band.short, band.top) = meters;
+            (
+                band.level,
+                band.level_emph,
+                band.trim_in,
+                band.trim_out,
+                band.short,
+                band.top,
+            ) = meters;
             (band.dyn_peak, band.dyn_db, band.dyn_ref) = dynamics;
             for c in 0..2 {
                 let r = self.ring(slot, c);
@@ -1098,7 +1271,14 @@ pub struct SatTelemetry {
 
 impl Default for SatTelemetry {
     fn default() -> Self {
-        Self { in_peak: [0.0; BANDS], out_peak: [0.0; BANDS], point: [0.0; BANDS], auto: [1.0; BANDS], dynamics: [1.0; BANDS], threshold: [0.0; BANDS] }
+        Self {
+            in_peak: [0.0; BANDS],
+            out_peak: [0.0; BANDS],
+            point: [0.0; BANDS],
+            auto: [1.0; BANDS],
+            dynamics: [1.0; BANDS],
+            threshold: [0.0; BANDS],
+        }
     }
 }
 
@@ -1109,7 +1289,10 @@ fn smooth(t: f64) -> f64 {
 
 /// Which bands are heard: muted ones are not; with any soloed, only those.
 fn audible(s: &SatSettings, layout: &Layout) -> [bool; BANDS] {
-    let any_solo = layout.bands().iter().any(|&b| s.bands[b].solo && !s.bands[b].mute);
+    let any_solo = layout
+        .bands()
+        .iter()
+        .any(|&b| s.bands[b].solo && !s.bands[b].mute);
     std::array::from_fn(|b| !s.bands[b].mute && (!any_solo || s.bands[b].solo))
 }
 
@@ -1310,21 +1493,38 @@ impl Saturator {
 
     /// A band's dynamics attack and release, per sample.
     fn dyn_coefficients(b: &BandSat, fs: f64) -> (f32, f32) {
-        let per = |ms: f32| (1.0 - (-1000.0 / (f64::from(ms.clamp(0.05, 5000.0)) * fs)).exp()) as f32;
+        let per =
+            |ms: f32| (1.0 - (-1000.0 / (f64::from(ms.clamp(0.05, 5000.0)) * fs)).exp()) as f32;
         (per(b.dyn_attack_ms), per(b.dyn_release_ms))
     }
 
     fn modes_for(&self, s: &SatSettings) -> [StereoMode; BANDS] {
-        std::array::from_fn(|b| if self.mono { StereoMode::Stereo } else { s.bands[b].stereo })
+        std::array::from_fn(|b| {
+            if self.mono {
+                StereoMode::Stereo
+            } else {
+                s.bands[b].stereo
+            }
+        })
     }
 
     /// Band slot `b`'s gain into the curve, bias, share, post gain and fader for its eased settings.
     fn targets(&self, b: usize, auto_gain: bool) -> [f32; 5] {
         let e = &self.eased[b];
         let share = e.share();
-        let auto = if auto_gain { e.comp * e.trim.powf(share) } else { 1.0 };
+        let auto = if auto_gain {
+            e.comp * e.trim.powf(share)
+        } else {
+            1.0
+        };
         let fader = e.out * smooth(e.audible);
-        [CALIBRATION * crate::db_to_gain(e.drive_db as f32), e.bias as f32, share as f32, (auto * fader) as f32, fader as f32]
+        [
+            CALIBRATION * crate::db_to_gain(e.drive_db as f32),
+            e.bias as f32,
+            share as f32,
+            (auto * fader) as f32,
+            fader as f32,
+        ]
     }
 
     /// Once per control step: glides the settings, follows a split change, retunes auto gain.
@@ -1332,10 +1532,16 @@ impl Saturator {
     fn control(&mut self, s: &SatSettings) {
         let layout = Layout::new(&s.crossovers);
         let modes = self.modes_for(s);
-        if self.fade.is_none() && (layout != self.cores[self.active].layout || modes != self.cores[self.active].modes) {
+        if self.fade.is_none()
+            && (layout != self.cores[self.active].layout || modes != self.cores[self.active].modes)
+        {
             let next = 1 - self.active;
             let (a, b) = self.cores.split_at_mut(1);
-            let (from, to) = if next == 1 { (&a[0], &mut b[0]) } else { (&b[0], &mut a[0]) };
+            let (from, to) = if next == 1 {
+                (&a[0], &mut b[0])
+            } else {
+                (&b[0], &mut a[0])
+            };
             to.copy_from(from);
             for p in 0..layout.n {
                 let k = layout.crossovers[p];
@@ -1356,7 +1562,11 @@ impl Saturator {
                 let target = f64::from(f.clamp(FREQ_MIN, FREQ_MAX)).ln();
                 let d = target - self.log_freq[k];
                 if d.abs() > 1e-6 {
-                    self.log_freq[k] = if d.abs() < 1e-4 { target } else { self.log_freq[k] + self.glide * d };
+                    self.log_freq[k] = if d.abs() < 1e-4 {
+                        target
+                    } else {
+                        self.log_freq[k] + self.glide * d
+                    };
                     self.cross[k] = Cross::new(self.log_freq[k].exp(), self.fs);
                 }
             }
@@ -1366,7 +1576,10 @@ impl Saturator {
         // settings (it had no sound to glide from).
         let was_live = self.live;
         let other = self.fade.map(|_| self.cores[1 - self.active].layout);
-        self.live = std::array::from_fn(|b| self.cores[self.active].layout.position(b).is_some() || other.is_some_and(|l| l.position(b).is_some()));
+        self.live = std::array::from_fn(|b| {
+            self.cores[self.active].layout.position(b).is_some()
+                || other.is_some_and(|l| l.position(b).is_some())
+        });
         for b in 0..BANDS {
             if self.live[b] && !was_live[b] {
                 self.eased[b] = Eased::at(&s.bands[b], heard[b]);
@@ -1378,24 +1591,58 @@ impl Saturator {
             *v = if d.abs() < 1e-6 { target } else { *v + k * d };
         };
         let toward = |v: &mut f64, target: f64, step: f64| {
-            *v = if target > *v { (*v + step).min(target) } else { (*v - step).max(target) };
+            *v = if target > *v {
+                (*v + step).min(target)
+            } else {
+                (*v - step).max(target)
+            };
         };
-        let level = self.cores[self.active].bands.each_ref().map(|b| (b.level, b.level_emph));
-        let trim_ms = self.cores[self.active].bands.each_ref().map(|b| (b.trim_in, b.trim_out));
+        let level = self.cores[self.active]
+            .bands
+            .each_ref()
+            .map(|b| (b.level, b.level_emph));
+        let trim_ms = self.cores[self.active]
+            .bands
+            .each_ref()
+            .map(|b| (b.trim_in, b.trim_out));
         for b in 0..BANDS {
             if !self.live[b] {
                 continue;
             }
             let t = &s.bands[b];
             let e = &mut self.eased[b];
-            ease(&mut e.drive_db, f64::from(t.drive_db.clamp(0.0, DRIVE_MAX_DB)), self.glide);
+            ease(
+                &mut e.drive_db,
+                f64::from(t.drive_db.clamp(0.0, DRIVE_MAX_DB)),
+                self.glide,
+            );
             ease(&mut e.bias, f64::from(t.bias.clamp(-1.0, 1.0)), self.glide);
-            ease(&mut e.tone_db, f64::from(t.tone_db.clamp(-TONE_MAX_DB, TONE_MAX_DB)), self.glide);
+            ease(
+                &mut e.tone_db,
+                f64::from(t.tone_db.clamp(-TONE_MAX_DB, TONE_MAX_DB)),
+                self.glide,
+            );
             ease(&mut e.mix, f64::from(t.mix.clamp(0.0, 1.0)), self.glide);
-            ease(&mut e.out, f64::from(crate::db_to_gain(t.out_db)), self.glide);
-            ease(&mut e.dyn_amount, f64::from(t.dyn_amount.clamp(-1.0, 1.0)), self.glide);
-            toward(&mut e.engage, if t.bypass { 0.0 } else { 1.0 }, self.switch_step);
-            toward(&mut e.audible, if heard[b] { 1.0 } else { 0.0 }, self.switch_step);
+            ease(
+                &mut e.out,
+                f64::from(crate::db_to_gain(t.out_db)),
+                self.glide,
+            );
+            ease(
+                &mut e.dyn_amount,
+                f64::from(t.dyn_amount.clamp(-1.0, 1.0)),
+                self.glide,
+            );
+            toward(
+                &mut e.engage,
+                if t.bypass { 0.0 } else { 1.0 },
+                self.switch_step,
+            );
+            toward(
+                &mut e.audible,
+                if heard[b] { 1.0 } else { 0.0 },
+                self.switch_step,
+            );
             // A new model: crossfade into it on the other lane (one change at a time).
             if e.lane_fade.is_none() && t.model != e.lanes[e.lane] {
                 let other = 1 - e.lane;
@@ -1414,15 +1661,32 @@ impl Saturator {
             // after it takes back about as much as it lifted).
             let ms = model.magnet().map_or(level[b].0, |w| level[b].1[w]);
             let amplitude = (2.0 * ms).sqrt() as f32;
-            let predicted = f64::from(predicted_gain(model, amplitude, e.drive_db as f32, e.bias as f32, share as f32)).max(1e-6);
+            let predicted = f64::from(predicted_gain(
+                model,
+                amplitude,
+                e.drive_db as f32,
+                e.bias as f32,
+                share as f32,
+            ))
+            .max(1e-6);
             let limit = 10f64.powf(AUTO_LIMIT_DB / 20.0);
             // Its inputs (level, eased settings) are smooth already: no lag of its own, so the
             // level holds while drive or bypass move.
             e.comp = (1.0 / predicted).clamp(1.0 / limit, limit);
             let (tin, tout) = trim_ms[b];
             if s.auto_gain && tin > TRIM_GATE && tout > TRIM_GATE {
-                let lim = 10f64.powf(if model.magnet().is_some() { TRIM_LIMIT_MAGNET_DB } else { TRIM_LIMIT_DB } / 20.0);
-                ease(&mut e.trim, (tin / tout).sqrt().clamp(1.0 / lim, lim), self.trim_k * CONTROL as f64);
+                let lim = 10f64.powf(
+                    if model.magnet().is_some() {
+                        TRIM_LIMIT_MAGNET_DB
+                    } else {
+                        TRIM_LIMIT_DB
+                    } / 20.0,
+                );
+                ease(
+                    &mut e.trim,
+                    (tin / tout).sqrt().clamp(1.0 / lim, lim),
+                    self.trim_k * CONTROL as f64,
+                );
             }
             if !s.auto_gain {
                 e.trim = 1.0;
@@ -1433,9 +1697,16 @@ impl Saturator {
             if !self.live[b] {
                 continue;
             }
-            self.from[b] = if was_live[b] { self.to[b] } else { self.targets(b, s.auto_gain) };
+            self.from[b] = if was_live[b] {
+                self.to[b]
+            } else {
+                self.targets(b, s.auto_gain)
+            };
             self.to[b] = self.targets(b, s.auto_gain);
-            let key = (self.eased[b].tone_db as f32, tone_pivot(&layout, &s.crossovers, b));
+            let key = (
+                self.eased[b].tone_db as f32,
+                tone_pivot(&layout, &s.crossovers, b),
+            );
             if key != self.tilt_key[b] {
                 self.tilt_now[b] = Tilt::new(key.0, key.1, fs);
                 self.tilt_key[b] = key;
@@ -1445,7 +1716,12 @@ impl Saturator {
 
     /// Saturates one stretch in place (`channels`: one or two) and writes the dry band sum (the
     /// allpass the split makes, delayed like the result) into `dry`, for mix and delta.
-    pub fn process(&mut self, channels: &mut [&mut [f32]], dry: &mut [&mut [f32]], s: &SatSettings) -> SatTelemetry {
+    pub fn process(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        dry: &mut [&mut [f32]],
+        s: &SatSettings,
+    ) -> SatTelemetry {
         let mut telemetry = SatTelemetry::default();
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
@@ -1488,7 +1764,14 @@ impl Saturator {
     }
 
     #[allow(clippy::needless_range_loop)] // bands, channels and samples indexed across arrays
-    fn chunk(&mut self, channels: &mut [&mut [f32]], dry: &mut [&mut [f32]; 2], n: usize, s: &SatSettings, telemetry: &mut SatTelemetry) {
+    fn chunk(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        dry: &mut [&mut [f32]; 2],
+        n: usize,
+        s: &SatSettings,
+        telemetry: &mut SatTelemetry,
+    ) {
         let n_ch = channels.len();
         let fading = self.fade.is_some();
         let latency = self.latency();
@@ -1531,7 +1814,8 @@ impl Saturator {
                 let layout = core.layout;
                 let mut sig = [0.0f64; BANDS];
                 for c in 0..n_ch {
-                    core.split.process(c, f64::from(x[c]), &layout, &self.cross, &mut sig);
+                    core.split
+                        .process(c, f64::from(x[c]), &layout, &self.cross, &mut sig);
                     for p in 0..=layout.n {
                         self.split[at(ci, p, c) + i] = sig[p] as f32;
                     }
@@ -1611,7 +1895,8 @@ impl Saturator {
                         let v = input[c][i];
                         power[i] += f64::from(v) * f64::from(v) * per_ch;
                         for (w, pe) in power_emph.iter_mut().enumerate() {
-                            let ve = f64::from(self.emph_base[w].process(&mut band.emph_state[w][c], v));
+                            let ve =
+                                f64::from(self.emph_base[w].process(&mut band.emph_state[w][c], v));
                             pe[i] += ve * ve * per_ch;
                         }
                         peak_in = peak_in.max(v.abs());
@@ -1624,15 +1909,37 @@ impl Saturator {
                         for (j, v) in tmp[..past].iter_mut().enumerate() {
                             let back = (self.write + core.ring_len - past + j) % core.ring_len;
                             let ring = |ch: usize| core.rings[(b * 2 + ch) * core.ring_len + back];
-                            *v = if ms { 0.5 * (ring(0) + if c == 0 { ring(1) } else { -ring(1) }) } else { ring(c) };
+                            *v = if ms {
+                                0.5 * (ring(0) + if c == 0 { ring(1) } else { -ring(1) })
+                            } else {
+                                ring(c)
+                            };
                         }
                         band.os.up(c, &tmp[..past], &mut self.hi[..past * f]);
-                        let (g, bias, model) = (self.lanes.gain[b][0], self.lanes.bias[b][0], e.lanes[e.lane]);
+                        let (g, bias, model) = (
+                            self.lanes.gain[b][0],
+                            self.lanes.bias[b][0],
+                            e.lanes[e.lane],
+                        );
                         // The core and the envelope warm up on the past too.
                         for v in &mut self.hi[..past * f] {
                             *v = match model.magnet() {
-                                Some(w) => band.magnet[e.lane][c].process(w, &self.emph[w], g * *v, bias, self.env_k) / CALIBRATION,
-                                None => static_lane(model, &mut band.env[e.lane][c], g * *v, bias, self.env_k),
+                                Some(w) => {
+                                    band.magnet[e.lane][c].process(
+                                        w,
+                                        &self.emph[w],
+                                        g * *v,
+                                        bias,
+                                        self.env_k,
+                                    ) / CALIBRATION
+                                }
+                                None => static_lane(
+                                    model,
+                                    &mut band.env[e.lane][c],
+                                    g * *v,
+                                    bias,
+                                    self.env_k,
+                                ),
                             };
                         }
                         let mut sink = [0.0f32; PREROLL];
@@ -1641,7 +1948,8 @@ impl Saturator {
                 }
                 if engaged {
                     for c in (0..n_ch).filter(|&c| driven[c]) {
-                        band.os.up(c, &input[c][..n], &mut self.hi[c * HI_CH..c * HI_CH + m]);
+                        band.os
+                            .up(c, &input[c][..n], &mut self.hi[c * HI_CH..c * HI_CH + m]);
                     }
                     // B: the curves, both signals in the same pass (their state chains are
                     // independent, so the CPU overlaps them: a hysteresis core is latency bound).
@@ -1652,7 +1960,10 @@ impl Saturator {
                     let mut lane = |l: usize, c: usize, u0: f32, bias: f32| {
                         let model = models[l];
                         match model.magnet() {
-                            Some(w) => band.magnet[l][c].process(w, &emph[w], u0, bias, env_k) / CALIBRATION,
+                            Some(w) => {
+                                band.magnet[l][c].process(w, &emph[w], u0, bias, env_k)
+                                    / CALIBRATION
+                            }
                             None => static_lane(model, &mut band.env[l][c], u0, bias, env_k),
                         }
                     };
@@ -1666,7 +1977,8 @@ impl Saturator {
                             let at = c * HI_CH + k;
                             let u0 = g * self.hi[at];
                             self.hi[at] = if lane_fading {
-                                let (a, z) = (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
+                                let (a, z) =
+                                    (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
                                 a + (z - a) * self.lanes.blend[b][i]
                             } else {
                                 lane(heard, c, u0, bias)
@@ -1679,7 +1991,8 @@ impl Saturator {
                 let mut diff = [[0.0f32; CHUNK]; 2];
                 for c in (0..n_ch).filter(|&c| driven[c]) {
                     if engaged {
-                        band.os.down(c, &self.hi[c * HI_CH..c * HI_CH + m], &mut self.wet[..n]);
+                        band.os
+                            .down(c, &self.hi[c * HI_CH..c * HI_CH + m], &mut self.wet[..n]);
                         let (mut x1, mut y1) = band.hp[c];
                         let mut tone = band.tone[c];
                         for i in 0..n {
@@ -1719,7 +2032,11 @@ impl Saturator {
                     }
                     let level = 20.0 * band.dyn_peak.max(1e-6).log10();
                     let target = dynamics_gain_db(amount, threshold, level);
-                    let k = if target.abs() > band.dyn_db.abs() { att } else { rel };
+                    let k = if target.abs() > band.dyn_db.abs() {
+                        att
+                    } else {
+                        rel
+                    };
                     band.dyn_db += k * (target - band.dyn_db);
                     if amount == 0.0 && band.dyn_db.abs() < 1e-4 {
                         band.dyn_db = 0.0;
@@ -1742,7 +2059,13 @@ impl Saturator {
                     let post = self.lanes.post[b][i] * dyn_gain[i];
                     if ms {
                         let fader = self.lanes.fader[b][i];
-                        let part = |c: usize| if driven[c] { xde[c][i] * (post - fader) + post * diff[c][i] } else { 0.0 };
+                        let part = |c: usize| {
+                            if driven[c] {
+                                xde[c][i] * (post - fader) + post * diff[c][i]
+                            } else {
+                                0.0
+                            }
+                        };
                         let (pm, ps) = (part(0), part(1));
                         let (l, r) = (xds[0][i] * fader + (pm + ps), xds[1][i] * fader + (pm - ps));
                         out[ci][0][i] += l;
@@ -1769,7 +2092,8 @@ impl Saturator {
                     }
                     band.level += self.level_k * (power[i] - band.level);
                     for w in 0..2 {
-                        band.level_emph[w] += self.level_k * (power_emph[w][i] - band.level_emph[w]);
+                        band.level_emph[w] +=
+                            self.level_k * (power_emph[w][i] - band.level_emph[w]);
                     }
                     band.trim_in += self.trim_k * (power[i] - band.trim_in);
                     band.trim_out += self.trim_k * (power_out[i] * comp2 - band.trim_out);
@@ -1785,7 +2109,11 @@ impl Saturator {
                     };
                     telemetry.dynamics[b] = crate::db_to_gain(band.dyn_db);
                     telemetry.threshold[b] = band.dyn_ref.map_or(0.0, crate::db_to_gain);
-                    telemetry.auto[b] = if s.auto_gain { (e.comp * e.trim.powf(e.share())) as f32 } else { 1.0 };
+                    telemetry.auto[b] = if s.auto_gain {
+                        (e.comp * e.trim.powf(e.share())) as f32
+                    } else {
+                        1.0
+                    };
                 }
             }
         }
@@ -1797,7 +2125,10 @@ impl Saturator {
                     let t = fade_at[i].clamp(0.0, 1.0);
                     let u = (t * t * (3.0 - 2.0 * t)) as f32;
                     let (a, z) = (self.active, 1 - self.active);
-                    (out[a][c][i] * (1.0 - u) + out[z][c][i] * u, dry_out[a][c][i] * (1.0 - u) + dry_out[z][c][i] * u)
+                    (
+                        out[a][c][i] * (1.0 - u) + out[z][c][i] * u,
+                        dry_out[a][c][i] * (1.0 - u) + dry_out[z][c][i] * u,
+                    )
                 } else {
                     (out[self.active][c][i], dry_out[self.active][c][i])
                 };
@@ -1832,7 +2163,9 @@ mod tests {
     const K: usize = 89;
 
     fn tone(n: usize, amp: f32, k: usize) -> Vec<f32> {
-        (0..n).map(|i| amp * (std::f64::consts::TAU * (k * i) as f64 / N as f64).sin() as f32).collect()
+        (0..n)
+            .map(|i| amp * (std::f64::consts::TAU * (k * i) as f64 / N as f64).sin() as f32)
+            .collect()
     }
 
     fn noise(n: usize, seed: u32, amp: f32) -> Vec<f32> {
@@ -1845,7 +2178,12 @@ mod tests {
             .collect()
     }
 
-    fn run(sat: &mut Saturator, input: &[f32], s: &SatSettings, block: usize) -> (Vec<f32>, Vec<f32>) {
+    fn run(
+        sat: &mut Saturator,
+        input: &[f32],
+        s: &SatSettings,
+        block: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let mut y = input.to_vec();
         let mut d = vec![0.0; input.len()];
         for (a, b) in y.chunks_mut(block).zip(d.chunks_mut(block)) {
@@ -1855,7 +2193,10 @@ mod tests {
     }
 
     fn band(model: Model, drive_db: f32) -> SatSettings {
-        let mut s = SatSettings { auto_gain: false, ..SatSettings::default() };
+        let mut s = SatSettings {
+            auto_gain: false,
+            ..SatSettings::default()
+        };
         s.bands[0].model = model;
         s.bands[0].drive_db = drive_db;
         s
@@ -1865,7 +2206,15 @@ mod tests {
     fn harmonic(y: &[f32], h: usize) -> f64 {
         let tail = &y[y.len() - N..];
         let w = std::f64::consts::TAU * (h * K) as f64 / N as f64;
-        let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+        let (re, im) = tail
+            .iter()
+            .enumerate()
+            .fold((0.0, 0.0), |(re, im), (i, &v)| {
+                (
+                    re + f64::from(v) * (w * i as f64).cos(),
+                    im + f64::from(v) * (w * i as f64).sin(),
+                )
+            });
         2.0 * re.hypot(im) / N as f64
     }
 
@@ -1875,7 +2224,10 @@ mod tests {
         let (re, im) = (0..m).fold((0.0, 0.0), |(re, im), i| {
             let th = std::f64::consts::TAU * i as f64 / m as f64;
             let v = f64::from(transfer(model, amp * th.sin() as f32, drive_db, point));
-            (re + v * (h as f64 * th).cos(), im + v * (h as f64 * th).sin())
+            (
+                re + v * (h as f64 * th).cos(),
+                im + v * (h as f64 * th).sin(),
+            )
         });
         2.0 * re.hypot(im) / m as f64
     }
@@ -1894,7 +2246,10 @@ mod tests {
             while u < 6.0 {
                 let d = (curve(m, u + h) - curve(m, u - h)) / (2.0 * h);
                 if let Some(prev) = last {
-                    assert!((d - prev).abs() < 0.02, "{m:?}: slope jumps at {u}: {prev} → {d}");
+                    assert!(
+                        (d - prev).abs() < 0.02,
+                        "{m:?}: slope jumps at {u}: {prev} → {d}"
+                    );
                 }
                 last = Some(d);
                 u += h;
@@ -1909,14 +2264,29 @@ mod tests {
         // following the envelope in both.
         let freq = K as f32 / N as f32 * FS;
         for m in Model::ALL {
-            for (amp, drive, bias, tilt, mix) in [(0.25f32, 12.0f32, 0.0f32, 0.0f32, 1.0f32), (0.1, 24.0, 0.4, 6.0, 1.0), (0.3, 9.0, -0.3, -8.0, 0.6), (0.2, 3.0, 0.0, 0.0, 1.0)] {
+            for (amp, drive, bias, tilt, mix) in [
+                (0.25f32, 12.0f32, 0.0f32, 0.0f32, 1.0f32),
+                (0.1, 24.0, 0.4, 6.0, 1.0),
+                (0.3, 9.0, -0.3, -8.0, 0.6),
+                (0.2, 3.0, 0.0, 0.0, 1.0),
+            ] {
                 let mut s = band(m, drive);
                 s.bands[0].bias = bias;
                 s.bands[0].tone_db = tilt;
                 s.bands[0].mix = mix;
                 let mut sat = Saturator::new(FS, 8, &s);
                 let (y, _) = run(&mut sat, &tone(32 * N, amp, K), &s, 333);
-                let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, bias, freq, tone_db: tilt, pivot: TONE_PIVOT, mix, fs: FS });
+                let got = probe_harmonics(&Probe {
+                    model: m,
+                    amp,
+                    drive_db: drive,
+                    bias,
+                    freq,
+                    tone_db: tilt,
+                    pivot: TONE_PIVOT,
+                    mix,
+                    fs: FS,
+                });
                 let want: [f64; PARTIALS] = std::array::from_fn(|i| harmonic(&y, i + 1));
                 let top = want.iter().copied().fold(0.0, f64::max);
                 for (i, &w) in want.iter().enumerate() {
@@ -1924,7 +2294,11 @@ mod tests {
                         continue;
                     }
                     let db = 20.0 * (f64::from(got.amp[i]) / w).log10();
-                    assert!(db.abs() < 0.25, "{m:?} amp {amp} drive {drive} bias {bias} tone {tilt} mix {mix}: H{} {db:.3} dB off", i + 1);
+                    assert!(
+                        db.abs() < 0.25,
+                        "{m:?} amp {amp} drive {drive} bias {bias} tone {tilt} mix {mix}: H{} {db:.3} dB off",
+                        i + 1
+                    );
                 }
             }
         }
@@ -1942,21 +2316,45 @@ mod tests {
                     s.bands[0].bias = bias;
                     let mut sat = Saturator::new(FS, 8, &s);
                     let (y, _) = run(&mut sat, &tone(32 * N, amp, k), &s, 333);
-                    let got = probe_harmonics(&Probe { model: m, amp, drive_db: drive, bias, freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+                    let got = probe_harmonics(&Probe {
+                        model: m,
+                        amp,
+                        drive_db: drive,
+                        bias,
+                        freq,
+                        tone_db: 0.0,
+                        pivot: TONE_PIVOT,
+                        mix: 1.0,
+                        fs: FS,
+                    });
                     let tail = &y[y.len() - N..];
                     let read = |h: usize| {
                         let w = std::f64::consts::TAU * (h * k) as f64 / N as f64;
-                        let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+                        let (re, im) =
+                            tail.iter()
+                                .enumerate()
+                                .fold((0.0, 0.0), |(re, im), (i, &v)| {
+                                    (
+                                        re + f64::from(v) * (w * i as f64).cos(),
+                                        im + f64::from(v) * (w * i as f64).sin(),
+                                    )
+                                });
                         2.0 * f64::hypot(re, im) / N as f64
                     };
-                    let top = (1..=PARTIALS).filter(|&h| !got.hollow[h - 1]).map(read).fold(0.0, f64::max);
+                    let top = (1..=PARTIALS)
+                        .filter(|&h| !got.hollow[h - 1])
+                        .map(read)
+                        .fold(0.0, f64::max);
                     for h in 1..=PARTIALS {
                         // Above 0.9 × Nyquist the way down is rolling off (the probe reads the curve).
                         if h as f32 * freq > 0.9 * FS / 2.0 || read(h) < top * 1e-2 {
                             continue;
                         }
                         let db = 20.0 * (f64::from(got.amp[h - 1]) / read(h)).log10();
-                        assert!(db.abs() < 1.0, "{m:?} bin {k} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
+                        assert!(
+                            db.abs() < 1.0,
+                            "{m:?} bin {k} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off"
+                        );
                     }
                 }
             }
@@ -1967,23 +2365,49 @@ mod tests {
     #[ignore = "prints what a probe costs"]
     fn probe_cost() {
         for m in Model::ALL {
-            for (freq, bias) in [(49.0f32, 0.0f32), (800.0, 0.0), (1043.0, 0.8), (9000.0, 0.8)] {
-                let p = Probe { model: m, amp: 0.3, drive_db: 24.0, bias, freq, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
+            for (freq, bias) in [
+                (49.0f32, 0.0f32),
+                (800.0, 0.0),
+                (1043.0, 0.8),
+                (9000.0, 0.8),
+            ] {
+                let p = Probe {
+                    model: m,
+                    amp: 0.3,
+                    drive_db: 24.0,
+                    bias,
+                    freq,
+                    tone_db: 0.0,
+                    pivot: TONE_PIVOT,
+                    mix: 1.0,
+                    fs: FS,
+                };
                 let t = std::time::Instant::now();
                 for _ in 0..20 {
                     std::hint::black_box(probe_harmonics(&p));
                 }
-                println!("{m:?} {freq} Hz bias {bias}: {:.0} µs", t.elapsed().as_secs_f64() * 1e6 / 20.0);
+                println!(
+                    "{m:?} {freq} Hz bias {bias}: {:.0} µs",
+                    t.elapsed().as_secs_f64() * 1e6 / 20.0
+                );
             }
         }
     }
 
     /// Mid and side over the last `N` samples of a stereo run through `s`, and the delayed input's.
-    fn run_stereo(s: &SatSettings, l: &[f32], r: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    fn run_stereo(
+        s: &SatSettings,
+        l: &[f32],
+        r: &[f32],
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
         let mut sat = Saturator::new(FS, 2, s);
         let (mut a, mut b) = (l.to_vec(), r.to_vec());
         let (mut da, mut db) = (vec![0.0; l.len()], vec![0.0; l.len()]);
-        for ((x, y), (u, v)) in a.chunks_mut(333).zip(b.chunks_mut(333)).zip(da.chunks_mut(333).zip(db.chunks_mut(333))) {
+        for ((x, y), (u, v)) in a
+            .chunks_mut(333)
+            .zip(b.chunks_mut(333))
+            .zip(da.chunks_mut(333).zip(db.chunks_mut(333)))
+        {
             sat.process(&mut [x, y], &mut [u, v], s);
         }
         (a, b, da, db)
@@ -2013,18 +2437,32 @@ mod tests {
     fn mid_leaves_the_side_alone_and_side_the_mid() {
         for auto_gain in [false, true] {
             let (l, r) = stereo_input();
-            let part = |x: &[f32], y: &[f32], side: bool| -> Vec<f32> { x.iter().zip(y).map(|(a, b)| if side { 0.5 * (a - b) } else { 0.5 * (a + b) }).collect() };
+            let part = |x: &[f32], y: &[f32], side: bool| -> Vec<f32> {
+                x.iter()
+                    .zip(y)
+                    .map(|(a, b)| if side { 0.5 * (a - b) } else { 0.5 * (a + b) })
+                    .collect()
+            };
             for (mode, clean_side) in [(StereoMode::Mid, true), (StereoMode::Side, false)] {
                 let mut s = band(Model::Tube, 18.0);
                 s.auto_gain = auto_gain;
                 s.bands[0].stereo = mode;
                 let (a, b, da, db) = run_stereo(&s, &l, &r);
                 let (got, want) = (part(&a, &b, clean_side), part(&da, &db, clean_side));
-                let worst = got.iter().zip(&want).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                let worst = got
+                    .iter()
+                    .zip(&want)
+                    .fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
                 assert!(worst < 2e-6, "{mode:?}: the clean part moved by {worst}");
                 let (got, want) = (part(&a, &b, !clean_side), part(&da, &db, !clean_side));
-                let moved = got.iter().zip(&want).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
-                assert!(moved > 0.01, "{mode:?}: the driven part did not change: {moved}");
+                let moved = got
+                    .iter()
+                    .zip(&want)
+                    .fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                assert!(
+                    moved > 0.01,
+                    "{mode:?}: the driven part did not change: {moved}"
+                );
             }
         }
     }
@@ -2040,12 +2478,18 @@ mod tests {
         s.bands[0].stereo = StereoMode::MidSide;
         let (both, _, _, _) = run_stereo(&s, &x, &x);
         for (name, y) in [("Mid", &mid), ("M/S", &both)] {
-            let worst = y.iter().zip(&stereo).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            let worst = y
+                .iter()
+                .zip(&stereo)
+                .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
             assert!(worst < 1e-5, "{name}: {worst}");
         }
         s.bands[0].stereo = StereoMode::Side;
         let (a, _, da, _) = run_stereo(&s, &x, &x);
-        assert!(a.iter().zip(&da).all(|(p, q)| (p - q).abs() < 1e-6), "no side, nothing to saturate");
+        assert!(
+            a.iter().zip(&da).all(|(p, q)| (p - q).abs() < 1e-6),
+            "no side, nothing to saturate"
+        );
     }
 
     #[test]
@@ -2054,14 +2498,22 @@ mod tests {
         let (m, sd) = (noise(72 * N, 3, 0.25), noise(72 * N, 5, 0.1));
         let l: Vec<f32> = m.iter().zip(&sd).map(|(a, b)| a + b).collect();
         let r: Vec<f32> = m.iter().zip(&sd).map(|(a, b)| a - b).collect();
-        let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
+        let rms = |x: &[f32]| {
+            (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt()
+        };
         for (mode, side) in [(StereoMode::Mid, false), (StereoMode::Side, true)] {
             let mut s = band(Model::Tube, 18.0);
             s.auto_gain = true;
             s.bands[0].stereo = mode;
             let (a, b, da, db) = run_stereo(&s, &l, &r);
             let t = a.len() - 12 * N;
-            let part = |x: &[f32], y: &[f32]| -> Vec<f32> { x[t..].iter().zip(&y[t..]).map(|(p, q)| if side { 0.5 * (p - q) } else { 0.5 * (p + q) }).collect() };
+            let part = |x: &[f32], y: &[f32]| -> Vec<f32> {
+                x[t..]
+                    .iter()
+                    .zip(&y[t..])
+                    .map(|(p, q)| if side { 0.5 * (p - q) } else { 0.5 * (p + q) })
+                    .collect()
+            };
             let db_off = 20.0 * (rms(&part(&a, &b)) / rms(&part(&da, &db))).log10();
             assert!(db_off.abs() < 0.5, "{mode:?}: {db_off:.2} dB");
         }
@@ -2072,7 +2524,11 @@ mod tests {
         // A change every so often: no sample steps further than any mode's steady wave does.
         let (l, r) = (tone(12 * N, 0.05, 40), tone(12 * N, 0.04, 61));
         let mut s = band(Model::Tube, 12.0);
-        let step = |x: &[f32]| x[8192..].windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        let step = |x: &[f32]| {
+            x[8192..]
+                .windows(2)
+                .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()))
+        };
         let mut steady = 0.0f32;
         for mode in StereoMode::ALL {
             s.bands[0].stereo = mode;
@@ -2083,12 +2539,20 @@ mod tests {
         let mut sat = Saturator::new(FS, 4, &s);
         let (mut a, mut b) = (l, r);
         let (mut da, mut db) = (vec![0.0; a.len()], vec![0.0; a.len()]);
-        for (count, ((x, y), (u, v))) in a.chunks_mut(64).zip(b.chunks_mut(64)).zip(da.chunks_mut(64).zip(db.chunks_mut(64))).enumerate() {
+        for (count, ((x, y), (u, v))) in a
+            .chunks_mut(64)
+            .zip(b.chunks_mut(64))
+            .zip(da.chunks_mut(64).zip(db.chunks_mut(64)))
+            .enumerate()
+        {
             s.bands[0].stereo = StereoMode::ALL[(count / 40) % 4];
             sat.process(&mut [x, y], &mut [u, v], &s);
         }
         let worst = step(&a).max(step(&b));
-        assert!(worst < 1.3 * steady, "largest step {worst}, steady {steady}");
+        assert!(
+            worst < 1.3 * steady,
+            "largest step {worst}, steady {steady}"
+        );
     }
 
     #[test]
@@ -2109,7 +2573,17 @@ mod tests {
         // a kick would be heard through; at drive 0 nothing has changed.
         let amp = 10f32.powf(-18.0 / 20.0);
         for m in [Model::Tube, Model::Soft, Model::Hard, Model::Diode] {
-            let h = probe_harmonics(&Probe { model: m, amp, drive_db: 12.0, bias: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+            let h = probe_harmonics(&Probe {
+                model: m,
+                amp,
+                drive_db: 12.0,
+                bias: 0.0,
+                freq: 1000.0,
+                tone_db: 0.0,
+                pivot: TONE_PIVOT,
+                mix: 1.0,
+                fs: FS,
+            });
             assert!(h.db(2) > -30.0, "{m:?}: H3 {:.1} dB", h.db(2));
         }
     }
@@ -2117,7 +2591,17 @@ mod tests {
     #[test]
     fn the_probe_marks_what_the_way_down_removes() {
         // A 9 kHz tone at 48 kHz: H2 (18 kHz) is heard, H3 (27 kHz) is not, though the curve makes it.
-        let p = Probe { model: Model::Soft, amp: 0.5, drive_db: 12.0, bias: 0.0, freq: 9000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS };
+        let p = Probe {
+            model: Model::Soft,
+            amp: 0.5,
+            drive_db: 12.0,
+            bias: 0.0,
+            freq: 9000.0,
+            tone_db: 0.0,
+            pivot: TONE_PIVOT,
+            mix: 1.0,
+            fs: FS,
+        };
         let h = probe_harmonics(&p);
         assert_eq!(&h.hollow[..3], &[false, false, true]);
         assert!(h.amp[2] > 0.01, "the curve makes H3: {}", h.amp[2]);
@@ -2127,12 +2611,32 @@ mod tests {
     fn a_clean_band_probes_clean() {
         // Drive 0 or mix 0 is the band itself: the tone and nothing else, at its own level.
         for (drive, mix) in [(0.0f32, 1.0f32), (18.0, 0.0)] {
-            let h = probe_harmonics(&Probe { model: Model::Tube, amp: 0.5, drive_db: drive, bias: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix, fs: FS });
+            let h = probe_harmonics(&Probe {
+                model: Model::Tube,
+                amp: 0.5,
+                drive_db: drive,
+                bias: 0.0,
+                freq: 1000.0,
+                tone_db: 0.0,
+                pivot: TONE_PIVOT,
+                mix,
+                fs: FS,
+            });
             assert!((h.amp[0] - 0.5).abs() < 1e-6, "H1 {}", h.amp[0]);
             assert!(h.amp[1..].iter().all(|&a| a == 0.0));
         }
         // Rectify trades the fundamental for the octave: H2 is the reference.
-        let h = probe_harmonics(&Probe { model: Model::Rectify, amp: 0.5, drive_db: 14.0, bias: 0.0, freq: 1000.0, tone_db: 0.0, pivot: TONE_PIVOT, mix: 1.0, fs: FS });
+        let h = probe_harmonics(&Probe {
+            model: Model::Rectify,
+            amp: 0.5,
+            drive_db: 14.0,
+            bias: 0.0,
+            freq: 1000.0,
+            tone_db: 0.0,
+            pivot: TONE_PIVOT,
+            mix: 1.0,
+            fs: FS,
+        });
         assert_eq!(h.db(1), 0.0);
     }
 
@@ -2147,7 +2651,10 @@ mod tests {
         let mut sat = Saturator::new(FS, 8, &s);
         let (y, _) = run(&mut sat, &tone(4 * N, amp, K), &s, 512);
         let (h1, h3) = (harmonic(&y, 1), harmonic(&y, 3));
-        assert!((h1 * k / (u - u.powi(3) / 9.0) - 1.0).abs() < 1e-3, "H1 {h1}");
+        assert!(
+            (h1 * k / (u - u.powi(3) / 9.0) - 1.0).abs() < 1e-3,
+            "H1 {h1}"
+        );
         assert!((h3 * k / (u.powi(3) / 27.0) - 1.0).abs() < 2e-3, "H3 {h3}");
         assert!(harmonic(&y, 2) < 1e-6 && harmonic(&y, 5) < 1e-6);
     }
@@ -2157,8 +2664,18 @@ mod tests {
         // Every static model, through the oversampled engine: its harmonics are those of the curve
         // the editor draws, within 0.05 dB down to −80 dB under the fundamental. With a bias, only
         // where the point stays put (elsewhere it follows the envelope: the probe test covers it).
-        for m in [Model::Diode, Model::Soft, Model::Hard, Model::Fold, Model::Rectify] {
-            for (amp, drive, bias) in [(0.0625f32, 12.0f32, 0.0f32), (0.025, 24.0, 0.4), (0.125, 3.0, -0.6)] {
+        for m in [
+            Model::Diode,
+            Model::Soft,
+            Model::Hard,
+            Model::Fold,
+            Model::Rectify,
+        ] {
+            for (amp, drive, bias) in [
+                (0.0625f32, 12.0f32, 0.0f32),
+                (0.025, 24.0, 0.4),
+                (0.125, 3.0, -0.6),
+            ] {
                 if bias != 0.0 && m.tracks() {
                     continue;
                 }
@@ -2167,7 +2684,9 @@ mod tests {
                 let mut sat = Saturator::new(FS, 8, &s);
                 let (y, _) = run(&mut sat, &tone(6 * N, amp, K), &s, 333);
                 let point = bias_point(bias);
-                let reference = (1..=5).map(|h| curve_harmonic(m, amp, drive, point, h)).fold(0.0, f64::max);
+                let reference = (1..=5)
+                    .map(|h| curve_harmonic(m, amp, drive, point, h))
+                    .fold(0.0, f64::max);
                 for h in 1..=5 {
                     let want = curve_harmonic(m, amp, drive, point, h);
                     if want < reference * 1e-4 {
@@ -2175,7 +2694,10 @@ mod tests {
                     }
                     let got = harmonic(&y, h);
                     let db = 20.0 * (got / want).log10();
-                    assert!(db.abs() < 0.05, "{m:?} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
+                    assert!(
+                        db.abs() < 0.05,
+                        "{m:?} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off"
+                    );
                 }
             }
         }
@@ -2187,7 +2709,15 @@ mod tests {
         let n = N * over;
         let tail = &y[y.len() - n..];
         let w = std::f64::consts::TAU * (h * K) as f64 / n as f64;
-        let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+        let (re, im) = tail
+            .iter()
+            .enumerate()
+            .fold((0.0, 0.0), |(re, im), (i, &v)| {
+                (
+                    re + f64::from(v) * (w * i as f64).cos(),
+                    im + f64::from(v) * (w * i as f64).sin(),
+                )
+            });
         2.0 * re.hypot(im) / n as f64
     }
 
@@ -2201,16 +2731,25 @@ mod tests {
                 s.bands[0].bias = bias;
                 let mut sat = Saturator::new(FS, 8, &s);
                 let (y, _) = run(&mut sat, &tone(6 * N, amp, K), &s, 333);
-                let x_hi: Vec<f32> = (0..6 * N * 8).map(|i| amp * (std::f64::consts::TAU * (K * i) as f64 / (8 * N) as f64).sin() as f32).collect();
+                let x_hi: Vec<f32> = (0..6 * N * 8)
+                    .map(|i| {
+                        amp * (std::f64::consts::TAU * (K * i) as f64 / (8 * N) as f64).sin() as f32
+                    })
+                    .collect();
                 let want_y = magnet_response(m, &x_hi, drive, bias, 8.0 * FS);
-                let reference = (1..=5).map(|h| harmonic_at(&want_y, h, 8)).fold(0.0, f64::max);
+                let reference = (1..=5)
+                    .map(|h| harmonic_at(&want_y, h, 8))
+                    .fold(0.0, f64::max);
                 for h in 1..=5 {
                     let want = harmonic_at(&want_y, h, 8);
                     if want < reference * 1e-3 {
                         continue;
                     }
                     let db = 20.0 * (harmonic(&y, h) / want).log10();
-                    assert!(db.abs() < 0.1, "{m:?} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off");
+                    assert!(
+                        db.abs() < 0.1,
+                        "{m:?} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off"
+                    );
                 }
             }
         }
@@ -2223,20 +2762,36 @@ mod tests {
         let h3 = |m: Model, k: usize| {
             let s = band(m, 12.0);
             let mut sat = Saturator::new(FS, 4, &s);
-            let x: Vec<f32> = (0..8 * N).map(|i| 0.05 * (std::f64::consts::TAU * (k * i) as f64 / N as f64).sin() as f32).collect();
+            let x: Vec<f32> = (0..8 * N)
+                .map(|i| 0.05 * (std::f64::consts::TAU * (k * i) as f64 / N as f64).sin() as f32)
+                .collect();
             let (y, _) = run(&mut sat, &x, &s, 256);
             let at = |h: usize| {
                 let tail = &y[y.len() - N..];
                 let w = std::f64::consts::TAU * (h * k) as f64 / N as f64;
-                let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin()));
+                let (re, im) = tail
+                    .iter()
+                    .enumerate()
+                    .fold((0.0, 0.0), |(re, im), (i, &v)| {
+                        (
+                            re + f64::from(v) * (w * i as f64).cos(),
+                            im + f64::from(v) * (w * i as f64).sin(),
+                        )
+                    });
                 re.hypot(im)
             };
             20.0 * (at(3) / at(1)).log10()
         };
         let (tape_lo, tape_hi) = (h3(Model::Tape, 6), h3(Model::Tape, 377));
         let (iron_lo, iron_hi) = (h3(Model::Transformer, 6), h3(Model::Transformer, 377));
-        assert!(tape_hi > tape_lo + 6.0, "tape: low {tape_lo:.1} dB, high {tape_hi:.1} dB");
-        assert!(iron_lo > iron_hi + 6.0, "transformer: low {iron_lo:.1} dB, high {iron_hi:.1} dB");
+        assert!(
+            tape_hi > tape_lo + 6.0,
+            "tape: low {tape_lo:.1} dB, high {tape_hi:.1} dB"
+        );
+        assert!(
+            iron_lo > iron_hi + 6.0,
+            "transformer: low {iron_lo:.1} dB, high {iron_hi:.1} dB"
+        );
     }
 
     #[test]
@@ -2270,7 +2825,11 @@ mod tests {
             let (y, _) = run(&mut sat, &tone(6 * N, 0.3, K), &s, 256);
             let h1 = harmonic(&y, 1);
             for h in [2, 4, 6] {
-                assert!(harmonic(&y, h) < h1 * 1e-4, "{m:?}: H{h} {}", harmonic(&y, h) / h1);
+                assert!(
+                    harmonic(&y, h) < h1 * 1e-4,
+                    "{m:?}: H{h} {}",
+                    harmonic(&y, h) / h1
+                );
             }
         }
         // Tube: even harmonics, more as it is pushed.
@@ -2299,11 +2858,23 @@ mod tests {
         // H2, does not fade (a fixed offset would be lost under the signal, the halves clipping at
         // equal times). Tube and Diode without a bias, every saturating model with one.
         let mut cases: Vec<(Model, f32)> = vec![(Model::Tube, 0.0), (Model::Diode, 0.0)];
-        cases.extend([Model::Tape, Model::Transformer, Model::Diode, Model::Soft, Model::Hard].map(|m| (m, 0.3)));
+        cases.extend(
+            [
+                Model::Tape,
+                Model::Transformer,
+                Model::Diode,
+                Model::Soft,
+                Model::Hard,
+            ]
+            .map(|m| (m, 0.3)),
+        );
         cases.push((Model::Tube, -0.3));
         for (m, bias) in cases {
             let (mid, top) = (h2_db(m, 12.0, bias), h2_db(m, 36.0, bias));
-            assert!(top > -26.0 && top > mid - 6.0, "{m:?} bias {bias}: H2 {mid:.1} dB at 12, {top:.1} dB at 36");
+            assert!(
+                top > -26.0 && top > mid - 6.0,
+                "{m:?} bias {bias}: H2 {mid:.1} dB at 12, {top:.1} dB at 36"
+            );
         }
     }
 
@@ -2339,7 +2910,9 @@ mod tests {
             let mut x = vec![0.0f32; 4000];
             x[1000] = 1e-3;
             let (y, _) = run(&mut sat, &x, &s, 128);
-            let peak = (0..y.len()).max_by(|&a, &b| y[a].abs().total_cmp(&y[b].abs())).unwrap();
+            let peak = (0..y.len())
+                .max_by(|&a, &b| y[a].abs().total_cmp(&y[b].abs()))
+                .unwrap();
             assert_eq!(peak, 1000 + sat.latency(), "{factor}×");
             assert_eq!(sat.latency(), Oversampler::latency_for(factor));
         }
@@ -2369,33 +2942,63 @@ mod tests {
     /// Renders `x` switching from `before` to `after` at `at`, and both held: no step between
     /// neighbouring samples of the switch may exceed what either held setting makes there by more
     /// than 0.01 (a crossfade's own movement), so the change itself never clicks.
-    fn assert_change_is_clean(x: &[f32], before: &SatSettings, after: &SatSettings, at: usize, factor: usize) {
+    fn assert_change_is_clean(
+        x: &[f32],
+        before: &SatSettings,
+        after: &SatSettings,
+        at: usize,
+        factor: usize,
+    ) {
         let render = |switch: Option<usize>, first: &SatSettings| {
             let mut sat = Saturator::new(FS, factor, first);
             let mut y = x.to_vec();
             let mut pos = 0;
             for chunk in y.chunks_mut(480) {
-                let s = if switch.is_some_and(|k| pos >= k) { after } else { first };
+                let s = if switch.is_some_and(|k| pos >= k) {
+                    after
+                } else {
+                    first
+                };
                 sat.process(&mut [chunk], &mut [], s);
                 pos += 480;
             }
             y
         };
-        let (y, held_a, held_b) = (render(Some(at), before), render(None, before), render(None, after));
+        let (y, held_a, held_b) = (
+            render(Some(at), before),
+            render(None, before),
+            render(None, after),
+        );
         let step = |v: &[f32], i: usize| (v[i + 1] - v[i]).abs();
         // The held settings' steepest step within half a period of the tone either side (edges
         // move in time as a setting glides).
-        let near = |v: &[f32], i: usize| (i.saturating_sub(512)..(i + 512).min(x.len() - 1)).map(|j| step(v, j)).fold(0.0, f32::max);
+        let near = |v: &[f32], i: usize| {
+            (i.saturating_sub(512)..(i + 512).min(x.len() - 1))
+                .map(|j| step(v, j))
+                .fold(0.0, f32::max)
+        };
         for i in at..(at + 9600).min(x.len() - 1) {
             let allowed = near(&held_a, i).max(near(&held_b, i)) + 0.01;
-            assert!(step(&y, i) <= allowed, "step {} at {} (held: {} / {}) {:?} → {:?}", step(&y, i), i - at, step(&held_a, i), step(&held_b, i), before.bands[0], after.bands[0]);
+            assert!(
+                step(&y, i) <= allowed,
+                "step {} at {} (held: {} / {}) {:?} → {:?}",
+                step(&y, i),
+                i - at,
+                step(&held_a, i),
+                step(&held_b, i),
+                before.bands[0],
+                after.bands[0]
+            );
         }
     }
 
     #[test]
     fn moving_drive_bias_tone_and_switching_model_never_clicks() {
         let x = tone(48_000, 0.4, 4);
-        let base = SatSettings { auto_gain: true, ..band(Model::Hard, 30.0) };
+        let base = SatSettings {
+            auto_gain: true,
+            ..band(Model::Hard, 30.0)
+        };
         let with = |f: &dyn Fn(&mut BandSat)| {
             let mut s = base;
             f(&mut s.bands[0]);
@@ -2406,9 +3009,21 @@ mod tests {
             (base, with(&|b| b.bias = 1.0)),
             (base, with(&|b| b.tone_db = -12.0)),
             (with(&|b| b.model = Model::Fold), base),
-            (with(&|b| b.model = Model::Tube), with(&|b| b.model = Model::Rectify)),
+            (
+                with(&|b| b.model = Model::Tube),
+                with(&|b| b.model = Model::Rectify),
+            ),
             // Auto gain off: a trim measured on Tape settles onto Transformer over seconds.
-            (SatSettings { auto_gain: false, ..with(&|b| b.model = Model::Tape) }, SatSettings { auto_gain: false, ..with(&|b| b.model = Model::Transformer) }),
+            (
+                SatSettings {
+                    auto_gain: false,
+                    ..with(&|b| b.model = Model::Tape)
+                },
+                SatSettings {
+                    auto_gain: false,
+                    ..with(&|b| b.model = Model::Transformer)
+                },
+            ),
             (base, with(&|b| b.model = Model::Tape)),
             (base, with(&|b| b.bypass = true)),
             (with(&|b| b.bypass = true), base),
@@ -2422,7 +3037,13 @@ mod tests {
     #[test]
     fn bands_at_rest_sum_flat_and_a_band_made_does_not_click() {
         let mut s = band(Model::Soft, 0.0);
-        s.crossovers = [Some(120.0), Some(500.0), Some(2000.0), Some(6000.0), Some(12_000.0)];
+        s.crossovers = [
+            Some(120.0),
+            Some(500.0),
+            Some(2000.0),
+            Some(6000.0),
+            Some(12_000.0),
+        ];
         let mut sat = Saturator::new(FS, 4, &s);
         let mut impulse = vec![0.0f32; 16_384];
         impulse[0] = 1.0;
@@ -2430,7 +3051,12 @@ mod tests {
         assert_eq!(y, d);
         for f in [40.0, 120.0, 900.0, 6000.0, 15_000.0] {
             let w = std::f64::consts::TAU * f / f64::from(FS);
-            let (re, im) = y.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + f64::from(v) * (w * i as f64).cos(), im - f64::from(v) * (w * i as f64).sin()));
+            let (re, im) = y.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| {
+                (
+                    re + f64::from(v) * (w * i as f64).cos(),
+                    im - f64::from(v) * (w * i as f64).sin(),
+                )
+            });
             let db = 10.0 * (re * re + im * im).log10();
             assert!(db.abs() < 0.01, "{f} Hz: {db}");
         }
@@ -2445,8 +3071,18 @@ mod tests {
 
     #[test]
     fn auto_gain_keeps_the_level() {
-        let rms = |v: &[f32]| (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
-        for m in [Model::Tape, Model::Tube, Model::Transformer, Model::Diode, Model::Soft, Model::Hard, Model::Fold] {
+        let rms = |v: &[f32]| {
+            (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+        };
+        for m in [
+            Model::Tape,
+            Model::Tube,
+            Model::Transformer,
+            Model::Diode,
+            Model::Soft,
+            Model::Hard,
+            Model::Fold,
+        ] {
             for drive in [6.0f32, 18.0, 36.0] {
                 // The trim settles over seconds (1.5 s time constant): judge the last two.
                 for input in [tone(288_000, 0.25, K), noise(288_000, 9, 0.3)] {
@@ -2492,7 +3128,10 @@ mod tests {
                 }
             }
             let db = 10.0 * (pout / pin).log10();
-            assert!(k > 0 && db.abs() < 2.0, "{m:?}: the hits come out {db:.2} dB off");
+            assert!(
+                k > 0 && db.abs() < 2.0,
+                "{m:?}: the hits come out {db:.2} dB off"
+            );
         }
     }
 
@@ -2526,7 +3165,9 @@ mod tests {
 
     /// The level of the last `N` samples against the input's, dB.
     fn settled_db(y: &[f32], x: &[f32]) -> f64 {
-        let rms = |v: &[f32]| (v.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+        let rms = |v: &[f32]| {
+            (v.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+        };
         20.0 * (rms(&y[y.len() - N..]) / rms(&x[x.len() - N..])).log10()
     }
 
@@ -2537,7 +3178,10 @@ mod tests {
         (0..n)
             .map(|i| {
                 let t = (i % (FS as usize / 2)) as f64 / f64::from(FS);
-                bed[i] + (f64::from(amp) * (-t / 0.08).exp() * (std::f64::consts::TAU * 60.0 * t).sin()) as f32
+                bed[i]
+                    + (f64::from(amp)
+                        * (-t / 0.08).exp()
+                        * (std::f64::consts::TAU * 60.0 * t).sin()) as f32
             })
             .collect()
     }
@@ -2546,10 +3190,20 @@ mod tests {
     /// half second), dB, averaged.
     fn hit_and_gap_db(y: &[f32], lat: usize) -> (f64, f64) {
         let half = FS as usize / 2;
-        let peak = |r: std::ops::Range<usize>| 20.0 * f64::from(y[r].iter().fold(0.0f32, |m, v| m.max(v.abs()))).log10();
+        let peak = |r: std::ops::Range<usize>| {
+            20.0 * f64::from(y[r].iter().fold(0.0f32, |m, v| m.max(v.abs()))).log10()
+        };
         let starts = [y.len() - 2 * half, y.len() - half];
-        let hit = starts.iter().map(|&s| peak(s + lat..s + lat + 2400)).sum::<f64>() / 2.0;
-        let gap = starts.iter().map(|&s| peak(s + lat + 17_000..s + lat + 23_000)).sum::<f64>() / 2.0;
+        let hit = starts
+            .iter()
+            .map(|&s| peak(s + lat..s + lat + 2400))
+            .sum::<f64>()
+            / 2.0;
+        let gap = starts
+            .iter()
+            .map(|&s| peak(s + lat + 17_000..s + lat + 23_000))
+            .sum::<f64>()
+            / 2.0;
         (hit, gap)
     }
 
@@ -2584,9 +3238,18 @@ mod tests {
             let (ye, _) = run_with(&x, 1.0);
             let (hc, gc) = hit_and_gap_db(&yc, lat);
             let (he, ge) = hit_and_gap_db(&ye, lat);
-            assert!(hc < hit0 - 6.0, "{amp}: compressed hits {hc:.1} against {hit0:.1}");
-            assert!(he > hit0 + 4.0, "{amp}: lifted hits {he:.1} against {hit0:.1}");
-            assert!((gc - gap0).abs() < 1.0 && (ge - gap0).abs() < 1.0, "{amp}: the bed moved ({gc:.1}, {ge:.1} against {gap0:.1})");
+            assert!(
+                hc < hit0 - 6.0,
+                "{amp}: compressed hits {hc:.1} against {hit0:.1}"
+            );
+            assert!(
+                he > hit0 + 4.0,
+                "{amp}: lifted hits {he:.1} against {hit0:.1}"
+            );
+            assert!(
+                (gc - gap0).abs() < 1.0 && (ge - gap0).abs() < 1.0,
+                "{amp}: the bed moved ({gc:.1}, {ge:.1} against {gap0:.1})"
+            );
             if amp < 0.5 {
                 continue;
             }
@@ -2595,7 +3258,12 @@ mod tests {
             let (q0, _) = run_with(&quiet, 0.0);
             let (qc, _) = run_with(&quiet, -1.0);
             let moved = |a: &[f32], b: &[f32]| hit_and_gap_db(b, lat).0 - hit_and_gap_db(a, lat).0;
-            assert!((moved(&y0, &yc) - moved(&q0, &qc)).abs() < 1.0, "level dependence: {:.2} vs {:.2}", moved(&y0, &yc), moved(&q0, &qc));
+            assert!(
+                (moved(&y0, &yc) - moved(&q0, &qc)).abs() < 1.0,
+                "level dependence: {:.2} vs {:.2}",
+                moved(&y0, &yc),
+                moved(&q0, &qc)
+            );
         }
     }
 
@@ -2622,7 +3290,10 @@ mod tests {
         assert!((0.5..0.75).contains(&a), "attack: {a}");
         let before = at(624.0).0;
         let r = at(625.0 + 200.0).0 / before;
-        assert!(before < -10.0 && (0.25..0.45).contains(&r), "release: {r} from {before}");
+        assert!(
+            before < -10.0 && (0.25..0.45).contains(&r),
+            "release: {r} from {before}"
+        );
     }
 
     #[test]
@@ -2647,9 +3318,28 @@ mod tests {
         let cases = [
             (base, with(&|b| b.dyn_amount = -1.0)),
             (base, with(&|b| b.dyn_amount = 1.0)),
-            (with(&|b| b.dyn_amount = 1.0), with(&|b| b.dyn_amount = -1.0)),
-            (with(&|b| b.dyn_amount = -1.0), with(&|b| { b.dyn_amount = -1.0; b.dyn_release_ms = 10.0 })),
-            (with(&|b| { b.dyn_amount = -1.0; b.dyn_attack_ms = 0.1 }), with(&|b| { b.dyn_amount = -1.0; b.dyn_attack_ms = 0.1; b.bypass = true })),
+            (
+                with(&|b| b.dyn_amount = 1.0),
+                with(&|b| b.dyn_amount = -1.0),
+            ),
+            (
+                with(&|b| b.dyn_amount = -1.0),
+                with(&|b| {
+                    b.dyn_amount = -1.0;
+                    b.dyn_release_ms = 10.0
+                }),
+            ),
+            (
+                with(&|b| {
+                    b.dyn_amount = -1.0;
+                    b.dyn_attack_ms = 0.1
+                }),
+                with(&|b| {
+                    b.dyn_amount = -1.0;
+                    b.dyn_attack_ms = 0.1;
+                    b.bypass = true
+                }),
+            ),
         ];
         for (before, after) in &cases {
             assert_change_is_clean(&x, before, after, 14_400, 2);
@@ -2662,10 +3352,17 @@ mod tests {
         // oversampler alone (its filters reject more than 100 dB).
         let at = |m: Model, f: usize| distortion(m, f, FS, 1709, 0.5, 18.0, 0.0).alias_db;
         assert!(distortion(Model::Soft, 8, FS, 1709, 0.01, 0.0, 0.0).alias_db < -100.0);
-        for (m, worst_8x) in [(Model::Tube, -38.0), (Model::Hard, -34.0), (Model::Diode, -40.0)] {
+        for (m, worst_8x) in [
+            (Model::Tube, -38.0),
+            (Model::Hard, -34.0),
+            (Model::Diode, -40.0),
+        ] {
             let (one, eight) = (at(m, 1), at(m, 8));
             assert!(eight < worst_8x, "{m:?} at 8×: {eight:.1} dB");
-            assert!(eight < one - 20.0, "{m:?}: 8× {eight:.1} against 1× {one:.1}");
+            assert!(
+                eight < one - 20.0,
+                "{m:?}: 8× {eight:.1} against 1× {one:.1}"
+            );
         }
     }
 
@@ -2674,7 +3371,12 @@ mod tests {
         let t = Tilt::new(12.0, 800.0, FS);
         let db = |f: f64| 20.0 * t.magnitude(f, f64::from(FS)).log10();
         assert!(db(800.0).abs() < 0.01, "{}", db(800.0));
-        assert!((db(20.0) + 6.0).abs() < 0.3 && (db(20_000.0) - 6.0).abs() < 0.6, "{} {}", db(20.0), db(20_000.0));
+        assert!(
+            (db(20.0) + 6.0).abs() < 0.3 && (db(20_000.0) - 6.0).abs() < 0.6,
+            "{} {}",
+            db(20.0),
+            db(20_000.0)
+        );
         assert_eq!(Tilt::new(0.0, 800.0, FS), Tilt::IDENTITY);
     }
 

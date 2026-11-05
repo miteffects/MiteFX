@@ -453,7 +453,19 @@ a time map, formant-resampled grains, per-note gain; unedited stretches pass the
 Tested on a synthetic sung line (notes found, centres within 5 cents; a 300-cent edit within 3
 cents with the formants kept; drift 0 flat, 2 doubled; timing and length; formant ±3 st; level;
 no clicks). On the user's real vocal stem (245 s, 44.1 kHz): 90 notes, analysis 1.9 s, a full
-render 2.1 s (`examples/melody_render`). Not yet heard by the user. Next: the plugin (transfer).
+render 2.1 s (`examples/melody_render`). Not yet heard by the user. 
+
+**Slice 2, the plugin (2026-11-05)** (`plugins/mite-pitch`, accent blush): TRANSFER arms; the
+next stretch the transport plays is recorded (mono) against the timeline into a buffer
+allocated on arming (600 s max) and ends on stop or a jump; a worker writes the take to
+`<data dir>/MiteFX/Pitch/<id>.f32`, analyses and renders it, and the audio thread plays the
+render in the take's stretch of the timeline (5 ms crossfades at its ends; elsewhere, stopped or
+bypassed, the input). State keeps the take's id, start, rate, length and edits (`take` field);
+a reload reads the file back. An edit re-renders only its stretch (`melody::render_range` from
+sync points before each note: identical to a full render, tested). Editor: note blobs on a
+pitch grid (thickness = level), pitch curves, ghosts where sung, drag = pitch (semitones, Alt
+free), double-click = centre, undo/redo, wheel scroll/zoom, playhead follow. Bypass is the
+only parameter. Next: slice 3 (timing, length, drift, formant, level tools, split/merge).
 
 ### 15. Mite Amp (later)
 

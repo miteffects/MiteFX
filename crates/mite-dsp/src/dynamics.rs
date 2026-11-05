@@ -26,9 +26,9 @@
 //!
 //! Nothing here allocates outside [`Compressor::prepare`] (and the UI-only [`simulate_stage`]).
 
-use crate::eq::{design, BandSettings, Sections, MAX_SECTIONS};
+use crate::eq::{BandSettings, MAX_SECTIONS, Sections, design};
 use crate::filter::{Coeffs, Tdf2};
-use crate::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
+use crate::{LinearSmoother, MINUS_INFINITY_DB, db_to_gain, gain_to_db};
 
 /// Stages per compressor.
 pub const STAGES: usize = 4;
@@ -230,7 +230,13 @@ pub fn soft_cap(m: f32, range: f32) -> f32 {
 /// `release_ms`: (build, fall).
 #[inline]
 fn auto_coefs(release_ms: f32, sample_rate: f32) -> (f32, f32) {
-    (coef(AUTO_BUILD_MS, sample_rate), coef((release_ms * AUTO_SLOW_FACTOR).clamp(AUTO_SLOW_MS.0, AUTO_SLOW_MS.1), sample_rate))
+    (
+        coef(AUTO_BUILD_MS, sample_rate),
+        coef(
+            (release_ms * AUTO_SLOW_FACTOR).clamp(AUTO_SLOW_MS.0, AUTO_SLOW_MS.1),
+            sample_rate,
+        ),
+    )
 }
 
 /// Auto release, one sample: the slow envelope `slow` follows `target` (building over the build
@@ -238,13 +244,13 @@ fn auto_coefs(release_ms: f32, sample_rate: f32) -> (f32, f32) {
 /// envelope `e` moves the level more.
 #[inline]
 fn auto_release(slow: &mut f32, e: f32, target: f32, (build, fall): (f32, f32)) -> f32 {
-    let k = if target.abs() > slow.abs() { build } else { fall };
-    *slow = k * *slow + (1.0 - k) * target;
-    if slow.abs() > e.abs() {
-        *slow
+    let k = if target.abs() > slow.abs() {
+        build
     } else {
-        e
-    }
+        fall
+    };
+    *slow = k * *slow + (1.0 - k) * target;
+    if slow.abs() > e.abs() { *slow } else { e }
 }
 
 /// The gain (dB, signed) stage `s` applies at detected level `level_db`. `mu_boost` (≥ 0) firms
@@ -276,7 +282,10 @@ pub fn order(stages: &[Stage; STAGES]) -> [usize; STAGES] {
     let mut idx = [0, 1, 2, 3];
     idx.sort_by(|&a, &b| {
         let (sa, sb) = (&stages[a], &stages[b]);
-        sb.on.cmp(&sa.on).then(sa.threshold_db.total_cmp(&sb.threshold_db)).then(a.cmp(&b))
+        sb.on
+            .cmp(&sa.on)
+            .then(sa.threshold_db.total_cmp(&sb.threshold_db))
+            .then(a.cmp(&b))
     });
     idx
 }
@@ -296,7 +305,9 @@ fn chained(stages: &[Stage; STAGES]) -> [Stage; STAGES] {
     let order = order(stages);
     for (n, &k) in order.iter().enumerate() {
         let (threshold, slope) = into_level(stages[k].threshold_db, |level| {
-            order[..n].iter().fold(level, |l, &j| l + stage_gain_db(&out[j], l, 0.0))
+            order[..n]
+                .iter()
+                .fold(level, |l, &j| l + stage_gain_db(&out[j], l, 0.0))
         });
         out[k].threshold_db = threshold;
         out[k].knee_db = stages[k].knee_db * slope;
@@ -333,7 +344,12 @@ pub fn curve_db(stages: &[Stage; STAGES], input_db: f32, offset_db: f32) -> f32 
 
 /// The curve as stage `slot` and the stages below it make it: where its node sits. The stages
 /// above it never change it.
-pub fn partial_curve_db(stages: &[Stage; STAGES], slot: usize, input_db: f32, offset_db: f32) -> f32 {
+pub fn partial_curve_db(
+    stages: &[Stage; STAGES],
+    slot: usize,
+    input_db: f32,
+    offset_db: f32,
+) -> f32 {
     run(stages, Some(slot), input_db, offset_db)
 }
 
@@ -379,12 +395,54 @@ pub const CUSTOM: usize = 6;
 
 /// The built-in Characters (Custom's defaults are Clean's, so switching to it changes nothing).
 pub const STYLES: [Style; 6] = [
-    Style { attack: 1.0, release: 1.0, drive_db: 0.0, slow_tail: 0.0, program: 0.0, ratio_bend: 0.0 },
-    Style { attack: 0.55, release: 0.70, drive_db: 0.0, slow_tail: 0.0, program: 0.35, ratio_bend: 0.0 },
-    Style { attack: 0.30, release: 0.55, drive_db: 1.6, slow_tail: 0.0, program: 0.20, ratio_bend: 0.0 },
-    Style { attack: 1.60, release: 2.00, drive_db: 0.0, slow_tail: 0.55, program: 0.60, ratio_bend: 0.15 },
-    Style { attack: 1.30, release: 1.60, drive_db: 0.0, slow_tail: 0.10, program: 0.70, ratio_bend: 0.0 },
-    Style { attack: 1.40, release: 1.40, drive_db: 0.4, slow_tail: 0.25, program: 0.40, ratio_bend: 0.50 },
+    Style {
+        attack: 1.0,
+        release: 1.0,
+        drive_db: 0.0,
+        slow_tail: 0.0,
+        program: 0.0,
+        ratio_bend: 0.0,
+    },
+    Style {
+        attack: 0.55,
+        release: 0.70,
+        drive_db: 0.0,
+        slow_tail: 0.0,
+        program: 0.35,
+        ratio_bend: 0.0,
+    },
+    Style {
+        attack: 0.30,
+        release: 0.55,
+        drive_db: 1.6,
+        slow_tail: 0.0,
+        program: 0.20,
+        ratio_bend: 0.0,
+    },
+    Style {
+        attack: 1.60,
+        release: 2.00,
+        drive_db: 0.0,
+        slow_tail: 0.55,
+        program: 0.60,
+        ratio_bend: 0.15,
+    },
+    Style {
+        attack: 1.30,
+        release: 1.60,
+        drive_db: 0.0,
+        slow_tail: 0.10,
+        program: 0.70,
+        ratio_bend: 0.0,
+    },
+    Style {
+        attack: 1.40,
+        release: 1.40,
+        drive_db: 0.4,
+        slow_tail: 0.25,
+        program: 0.40,
+        ratio_bend: 0.50,
+    },
 ];
 
 /// What adapts. The index is saved state.
@@ -438,8 +496,13 @@ impl Stage {
     /// The stage as `smart` plays it: Vocal sets a compressing stage's ratio and knee (one left
     /// at 1:1, the editor's way of switching a stage off, stays off).
     pub fn played(self, smart: Smart) -> Self {
-        if smart.sets_ratio_and_knee() && self.quadrant == Quadrant::Compress && self.ratio > 1.001 {
-            Self { ratio: RATIO_MAX, knee_db: VOCAL_KNEE_DB, ..self }
+        if smart.sets_ratio_and_knee() && self.quadrant == Quadrant::Compress && self.ratio > 1.001
+        {
+            Self {
+                ratio: RATIO_MAX,
+                knee_db: VOCAL_KNEE_DB,
+                ..self
+            }
         } else {
             self
         }
@@ -457,7 +520,11 @@ pub fn adaptive_release_scale(crest_db: f32, smart: Smart, amount: f32) -> f32 {
         return 1.0;
     }
     let raw = 2f32.powf((CREST_REF_DB - crest_db.clamp(0.0, 24.0)) / 8.0);
-    let (lo, hi) = if smart == Smart::Master { (0.6, 2.0) } else { (0.3, 3.0) };
+    let (lo, hi) = if smart == Smart::Master {
+        (0.6, 2.0)
+    } else {
+        (0.3, 3.0)
+    };
     1.0 + amount.clamp(0.0, 1.0) * (raw.clamp(lo, hi) - 1.0)
 }
 
@@ -526,7 +593,10 @@ impl CompSettings {
     /// The settings as they play: the stages as Smart sets them ([`Stage::played`]). The audio
     /// thread and the editor both use this, so the curve drawn is the one applied.
     pub fn played(&self) -> Self {
-        Self { stages: self.stages.map(|st| st.played(self.smart)), ..*self }
+        Self {
+            stages: self.stages.map(|st| st.played(self.smart)),
+            ..*self
+        }
     }
 
     /// The makeup in force, dB: the set makeup plus `auto_db` (what auto makeup measured, when
@@ -585,8 +655,22 @@ fn biquad(kind: Biquad, sample_rate: f32, freq: f32, q: f32, gain_db: f32) -> Co
     let (cs, sn) = (w0.cos(), w0.sin());
     let alpha = sn / (2.0 * f64::from(q));
     let (b0, b1, b2, a0, a1, a2) = match kind {
-        Biquad::HighPass => ((1.0 + cs) / 2.0, -(1.0 + cs), (1.0 + cs) / 2.0, 1.0 + alpha, -2.0 * cs, 1.0 - alpha),
-        Biquad::LowPass => ((1.0 - cs) / 2.0, 1.0 - cs, (1.0 - cs) / 2.0, 1.0 + alpha, -2.0 * cs, 1.0 - alpha),
+        Biquad::HighPass => (
+            (1.0 + cs) / 2.0,
+            -(1.0 + cs),
+            (1.0 + cs) / 2.0,
+            1.0 + alpha,
+            -2.0 * cs,
+            1.0 - alpha,
+        ),
+        Biquad::LowPass => (
+            (1.0 - cs) / 2.0,
+            1.0 - cs,
+            (1.0 - cs) / 2.0,
+            1.0 + alpha,
+            -2.0 * cs,
+            1.0 - alpha,
+        ),
         Biquad::HighShelf => {
             let a = 10f64.powf(f64::from(gain_db) / 40.0);
             let k = 2.0 * a.sqrt() * alpha;
@@ -600,7 +684,13 @@ fn biquad(kind: Biquad, sample_rate: f32, freq: f32, q: f32, gain_db: f32) -> Co
             )
         }
     };
-    Coeffs { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+    Coeffs {
+        b0: b0 / a0,
+        b1: b1 / a0,
+        b2: b2 / a0,
+        a1: a1 / a0,
+        a2: a2 / a0,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -654,7 +744,10 @@ impl Chan {
 
     fn reset(&mut self) {
         let delay = std::mem::take(&mut self.delay);
-        *self = Self { delay, ..Self::new() };
+        *self = Self {
+            delay,
+            ..Self::new()
+        };
         self.delay.fill(0.0);
     }
 }
@@ -690,7 +783,14 @@ impl StageGlide {
     }
 
     fn set_ramp(&mut self, sample_rate: f32) {
-        for sm in [&mut self.threshold, &mut self.inv_ratio, &mut self.knee, &mut self.range, &mut self.weight, &mut self.fade] {
+        for sm in [
+            &mut self.threshold,
+            &mut self.inv_ratio,
+            &mut self.knee,
+            &mut self.range,
+            &mut self.weight,
+            &mut self.fade,
+        ] {
             sm.set_ramp(sample_rate, SMOOTH_MS);
         }
     }
@@ -721,7 +821,16 @@ impl StageGlide {
     }
 
     fn is_smoothing(&self) -> bool {
-        [&self.threshold, &self.inv_ratio, &self.knee, &self.range, &self.weight, &self.fade].iter().any(|sm| sm.is_smoothing())
+        [
+            &self.threshold,
+            &self.inv_ratio,
+            &self.knee,
+            &self.range,
+            &self.weight,
+            &self.fade,
+        ]
+        .iter()
+        .any(|sm| sm.is_smoothing())
     }
 
     /// The stage as it plays this sample: (stage, weight, crossfade from the old quadrant).
@@ -843,7 +952,9 @@ impl Compressor {
     /// that allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &CompSettings) {
         self.base_rate = sample_rate;
-        let max = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize * crate::oversample::MAX_FACTOR + 1;
+        let max = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize
+            * crate::oversample::MAX_FACTOR
+            + 1;
         for ch in &mut self.chans {
             ch.delay = vec![0.0; max];
         }
@@ -858,11 +969,29 @@ impl Compressor {
         self.sample_rate = sample_rate;
         // K weighting (BS.1770): +4 dB above about 1.7 kHz, then a high pass near 38 Hz.
         self.k_coeffs = [
-            biquad(Biquad::HighShelf, sample_rate, 1681.0, std::f32::consts::FRAC_1_SQRT_2, 4.0),
+            biquad(
+                Biquad::HighShelf,
+                sample_rate,
+                1681.0,
+                std::f32::consts::FRAC_1_SQRT_2,
+                4.0,
+            ),
             biquad(Biquad::HighPass, sample_rate, 38.0, 0.5, 0.0),
         ];
-        self.sib_hp = biquad(Biquad::HighPass, sample_rate, 4500.0, std::f32::consts::FRAC_1_SQRT_2, 0.0);
-        self.sib_lp = biquad(Biquad::LowPass, sample_rate, 3000.0, std::f32::consts::FRAC_1_SQRT_2, 0.0);
+        self.sib_hp = biquad(
+            Biquad::HighPass,
+            sample_rate,
+            4500.0,
+            std::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+        );
+        self.sib_lp = biquad(
+            Biquad::LowPass,
+            sample_rate,
+            3000.0,
+            std::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+        );
         self.peak_a = coef(PEAK_RELEASE_MS, sample_rate);
         self.rms_a = coef(RMS_MS, sample_rate);
         self.loud_a = coef(LOUDNESS_MS, sample_rate);
@@ -895,8 +1024,18 @@ impl Compressor {
         self.sib_avg = 0.0;
         self.sib_guard = 0.0;
         self.offset_db = 0.0;
-        (self.auto_level, self.auto_in, self.auto_out, self.auto_short) = (0.0, 0.0, 0.0, 0.0);
-        (self.auto_trim, self.auto_db, self.auto_count, self.auto_heard) = (0.0, 0.0, 0, 0.0);
+        (
+            self.auto_level,
+            self.auto_in,
+            self.auto_out,
+            self.auto_short,
+        ) = (0.0, 0.0, 0.0, 0.0);
+        (
+            self.auto_trim,
+            self.auto_db,
+            self.auto_count,
+            self.auto_heard,
+        ) = (0.0, 0.0, 0, 0.0);
         self.auto_k = (0.0, 0.0, 0.0);
         self.levels_valid = false;
         self.makeup.reset(s.makeup_total_db(0.0));
@@ -947,7 +1086,12 @@ impl Compressor {
 
     /// Processes `channels` (one or two) in place. `key` is the sidechain input (one or two
     /// channels, at least as long), used when `s.external_key` is on; without it the key is silent.
-    pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &CompSettings) -> CompTelemetry {
+    pub fn process(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        key: Option<&[&[f32]]>,
+        s: &CompSettings,
+    ) -> CompTelemetry {
         let played = s.played();
         let s = &played;
         let mut t = CompTelemetry::default();
@@ -975,9 +1119,20 @@ impl Compressor {
         // Smart: the release scale from the crest of the previous block.
         let rel_scale = adaptive_release_scale(self.crest_db, s.smart, s.smart_amount);
         let style = s.style;
-        let attack_a: [f32; STAGES] = std::array::from_fn(|i| coef((s.stages[i].attack_ms * style.attack).max(0.02), fs));
-        let release_a: [f32; STAGES] = std::array::from_fn(|i| coef((s.stages[i].release_ms * style.release * rel_scale).max(4.0), fs));
-        let auto_a: [(f32, f32); STAGES] = std::array::from_fn(|i| auto_coefs((s.stages[i].release_ms * style.release * rel_scale).max(4.0), fs));
+        let attack_a: [f32; STAGES] =
+            std::array::from_fn(|i| coef((s.stages[i].attack_ms * style.attack).max(0.02), fs));
+        let release_a: [f32; STAGES] = std::array::from_fn(|i| {
+            coef(
+                (s.stages[i].release_ms * style.release * rel_scale).max(4.0),
+                fs,
+            )
+        });
+        let auto_a: [(f32, f32); STAGES] = std::array::from_fn(|i| {
+            auto_coefs(
+                (s.stages[i].release_ms * style.release * rel_scale).max(4.0),
+                fs,
+            )
+        });
         let fast_a = coef(PROGRAM_FAST_MS, fs);
         let tail_a = coef(SLOW_TAIL_MS, fs);
         let hold = (s.hold_ms.max(0.0) * 0.001 * fs) as u32;
@@ -992,7 +1147,11 @@ impl Compressor {
         let tracking = s.smart.tracks_threshold() && main.is_some();
         let (main_threshold, main_slope) = main.map_or((-18.0, 1.0), |i| {
             let st = &s.stages[i];
-            let slope = if st.ratio >= INF_RATIO { 1.0 } else { (1.0 - 1.0 / st.ratio.max(1.0)).max(0.05) };
+            let slope = if st.ratio >= INF_RATIO {
+                1.0
+            } else {
+                (1.0 - 1.0 / st.ratio.max(1.0)).max(0.05)
+            };
             (st.threshold_db, slope)
         });
         let master = s.smart == Smart::Master;
@@ -1007,7 +1166,11 @@ impl Compressor {
         let sib_slow = 1.0 - coef(1200.0, fs);
         let sib_att = 1.0 - coef(4.0, fs);
         let sib_rel = 1.0 - coef(80.0, fs);
-        let sib_depth = if s.smart == Smart::Vocal { s.sibilance.clamp(0.0, 1.0) } else { 0.0 };
+        let sib_depth = if s.smart == Smart::Vocal {
+            s.sibilance.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let program_gate = db_to_gain(PROGRAM_GATE_DB);
         self.makeup.set_target(s.makeup_total_db(self.auto_db));
         // The meters' times grow with the sound heard (see AUTO_LEVEL_MS).
@@ -1015,7 +1178,11 @@ impl Compressor {
             let t = (heard * 1000.0).clamp(0.0, AUTO_LONG_S * 1000.0);
             let level = t.max(AUTO_LEVEL_MS);
             let meter = t.max(AUTO_METER_MS);
-            (1.0 - coef(level, fs), 1.0 - coef(meter, fs), 1.0 - coef((3.0 * t).max(AUTO_TRIM_MS), fs / AUTO_EVERY as f32))
+            (
+                1.0 - coef(level, fs),
+                1.0 - coef(meter, fs),
+                1.0 - coef((3.0 * t).max(AUTO_TRIM_MS), fs / AUTO_EVERY as f32),
+            )
         };
         if self.auto_k.0 == 0.0 {
             self.auto_k = auto_times(self.auto_heard);
@@ -1027,7 +1194,11 @@ impl Compressor {
         let set_makeup_sq = db_to_gain(s.makeup_db).powi(2);
 
         let uses = |d: Detector| s.stages.iter().any(|st| st.on && st.detector == d);
-        let (use_peak, use_rms, use_loud) = (uses(Detector::Peak), uses(Detector::Rms), uses(Detector::Loudness));
+        let (use_peak, use_rms, use_loud) = (
+            uses(Detector::Peak),
+            uses(Detector::Rms),
+            uses(Detector::Loudness),
+        );
         let key_len = key.map_or(0, |k| k.iter().map(|c| c.len()).min().unwrap_or(0));
         let external = s.external_key;
 
@@ -1038,14 +1209,26 @@ impl Compressor {
             t.in_peak_db[0] = t.in_peak_db[0].max(l.abs());
             t.in_peak_db[1] = t.in_peak_db[1].max(if stereo { r.abs() } else { l.abs() });
             // Into the processing domain.
-            let audio = if ms { [(l + r) * 0.5, (l - r) * 0.5] } else { [l, r] };
+            let audio = if ms {
+                [(l + r) * 0.5, (l - r) * 0.5]
+            } else {
+                [l, r]
+            };
             // The detector's source.
             let mut det = if external {
                 let (kl, kr) = match key {
-                    Some(k) if i < key_len => (k[0][i], if k.len() > 1 { k[1][i] } else { k[0][i] }),
+                    Some(k) if i < key_len => {
+                        (k[0][i], if k.len() > 1 { k[1][i] } else { k[0][i] })
+                    }
                     _ => (0.0, 0.0),
                 };
-                if ms { [(kl + kr) * 0.5, (kl - kr) * 0.5] } else if stereo { [kl, kr] } else { [0.5 * (kl + kr), 0.0] }
+                if ms {
+                    [(kl + kr) * 0.5, (kl - kr) * 0.5]
+                } else if stereo {
+                    [kl, kr]
+                } else {
+                    [0.5 * (kl + kr), 0.0]
+                }
             } else if s.feedback {
                 [self.chans[0].feedback, self.chans[1].feedback]
             } else {
@@ -1081,9 +1264,18 @@ impl Compressor {
                 // where the samples happen to fall on each cycle.
                 let [a, b] = ch.prev;
                 let (ya, yb, yc) = (a.abs(), b.abs(), x.abs());
-                let between = if use_peak && yb > ya && yb >= yc && (a >= 0.0) == (b >= 0.0) && (b >= 0.0) == (x >= 0.0) {
+                let between = if use_peak
+                    && yb > ya
+                    && yb >= yc
+                    && (a >= 0.0) == (b >= 0.0)
+                    && (b >= 0.0) == (x >= 0.0)
+                {
                     let d = ya - 2.0 * yb + yc;
-                    if d < 0.0 { yb - 0.125 * (ya - yc) * (ya - yc) / d } else { yb }
+                    if d < 0.0 {
+                        yb - 0.125 * (ya - yc) * (ya - yc) / d
+                    } else {
+                        yb
+                    }
                 } else {
                     0.0
                 };
@@ -1111,7 +1303,9 @@ impl Compressor {
             }
             let mono = level[0][0].max(if stereo { level[1][0] } else { 0.0 });
             for (d, v) in t.detector_levels_db.iter_mut().enumerate() {
-                *v = v.max(level[0][d]).max(if stereo { level[1][d] } else { 0.0 });
+                *v = v
+                    .max(level[0][d])
+                    .max(if stereo { level[1][d] } else { 0.0 });
             }
             // In dB, once per detector the stages use (peak always: it is always tracked).
             let mut level_db = [[MINUS_INFINITY_DB; 3]; 2];
@@ -1130,10 +1324,18 @@ impl Compressor {
 
             // Smart trackers, on the linked peak (nothing reads them while Smart is off).
             if s.smart != Smart::Off {
-                self.fast_env = if mono > self.fast_env { crest_att * self.fast_env + (1.0 - crest_att) * mono } else { crest_rel * self.fast_env + (1.0 - crest_rel) * mono };
+                self.fast_env = if mono > self.fast_env {
+                    crest_att * self.fast_env + (1.0 - crest_att) * mono
+                } else {
+                    crest_rel * self.fast_env + (1.0 - crest_rel) * mono
+                };
                 self.slow_sq += (mono * mono - self.slow_sq) * slow_a;
                 if mono > program_gate {
-                    self.program_env = if mono > self.program_env { program_att * self.program_env + (1.0 - program_att) * mono } else { program_rel * self.program_env + (1.0 - program_rel) * mono };
+                    self.program_env = if mono > self.program_env {
+                        program_att * self.program_env + (1.0 - program_att) * mono
+                    } else {
+                        program_rel * self.program_env + (1.0 - program_rel) * mono
+                    };
                 }
             }
             if sib_depth > 0.0 {
@@ -1144,7 +1346,12 @@ impl Compressor {
                 self.sib_avg += (ratio - self.sib_avg) * sib_slow;
                 let excess = ((ratio / (self.sib_avg + 1e-4) - 1.0) * 0.5).clamp(0.0, 1.0);
                 let want = sib_depth * excess;
-                self.sib_guard += (want - self.sib_guard) * if want > self.sib_guard { sib_att } else { sib_rel };
+                self.sib_guard += (want - self.sib_guard)
+                    * if want > self.sib_guard {
+                        sib_att
+                    } else {
+                        sib_rel
+                    };
             } else if self.sib_guard > 0.0 {
                 self.sib_guard -= self.sib_guard * sib_rel;
                 // Gone: stop the filters, from rest.
@@ -1158,7 +1365,8 @@ impl Compressor {
             }
             let want_offset = if tracking {
                 let program_db = gain_to_db(self.program_env);
-                ((program_db - s.target_gr_db / main_slope) - main_threshold).clamp(-swing, swing) * s.smart_amount.clamp(0.0, 1.0)
+                ((program_db - s.target_gr_db / main_slope) - main_threshold).clamp(-swing, swing)
+                    * s.smart_amount.clamp(0.0, 1.0)
             } else {
                 0.0
             };
@@ -1183,14 +1391,27 @@ impl Compressor {
                         (stage.threshold_db, stage.knee_db) = self.levels[k];
                     }
                 }
-                for (n, &k) in order.iter().enumerate().filter(|_| moving || !self.levels_valid) {
+                for (n, &k) in order
+                    .iter()
+                    .enumerate()
+                    .filter(|_| moving || !self.levels_valid)
+                {
                     let glides = &self.glides;
                     let (threshold, slope) = into_level(stages_now[k].0.threshold_db, |level| {
                         order[..n].iter().fold(level, |l, &j| {
                             let (stage, weight, fade) = stages_now[j];
                             let mut g = stage_gain_db(&stage, l, 0.0);
                             if fade < 1.0 {
-                                g = fade * g + (1.0 - fade) * stage_gain_db(&Stage { quadrant: glides[j].from_quadrant, ..stage }, l, 0.0);
+                                g = fade * g
+                                    + (1.0 - fade)
+                                        * stage_gain_db(
+                                            &Stage {
+                                                quadrant: glides[j].from_quadrant,
+                                                ..stage
+                                            },
+                                            l,
+                                            0.0,
+                                        );
                             }
                             l + weight * g
                         })
@@ -1235,17 +1456,27 @@ impl Compressor {
                         if weight == 0.0 && ch.env[k] == 0.0 {
                             continue;
                         }
-                        let detected = level_db[c][stage.detector as usize] + style.drive_db - self.offset_db + sum;
+                        let detected = level_db[c][stage.detector as usize] + style.drive_db
+                            - self.offset_db
+                            + sum;
                         let mu = if style.ratio_bend > 0.0 {
-                            let over = if stage.quadrant.acts_above() { detected - stage.threshold_db } else { stage.threshold_db - detected };
+                            let over = if stage.quadrant.acts_above() {
+                                detected - stage.threshold_db
+                            } else {
+                                stage.threshold_db - detected
+                            };
                             style.ratio_bend * (over / 12.0).clamp(0.0, 1.0)
                         } else {
                             0.0
                         };
                         let mut target = stage_gain_db(&stage, detected, mu);
                         if fade < 1.0 {
-                            let old = Stage { quadrant: self.glides[k].from_quadrant, ..stage };
-                            target = fade * target + (1.0 - fade) * stage_gain_db(&old, detected, mu);
+                            let old = Stage {
+                                quadrant: self.glides[k].from_quadrant,
+                                ..stage
+                            };
+                            target =
+                                fade * target + (1.0 - fade) * stage_gain_db(&old, detected, mu);
                         }
                         target *= weight;
                         let e = &mut ch.env[k];
@@ -1276,8 +1507,16 @@ impl Compressor {
                         sum += *e;
                     }
                     // The slow tail: a second, slow release stage blended in (Opto, Bus, Vari-Mu).
-                    ch.tail = if sum.abs() > ch.tail.abs() { attack_a[order[0]] * ch.tail + (1.0 - attack_a[order[0]]) * sum } else { tail_a * ch.tail + (1.0 - tail_a) * sum };
-                    let mut gain_db = if style.slow_tail > 0.0 { sum + (ch.tail - sum) * style.slow_tail } else { sum };
+                    ch.tail = if sum.abs() > ch.tail.abs() {
+                        attack_a[order[0]] * ch.tail + (1.0 - attack_a[order[0]]) * sum
+                    } else {
+                        tail_a * ch.tail + (1.0 - tail_a) * sum
+                    };
+                    let mut gain_db = if style.slow_tail > 0.0 {
+                        sum + (ch.tail - sum) * style.slow_tail
+                    } else {
+                        sum
+                    };
                     if let Some(k) = s.solo.filter(|&k| k < STAGES) {
                         gain_db = ch.env[k];
                     }
@@ -1300,7 +1539,13 @@ impl Compressor {
             }
             self.write = (self.write + 1) % delay_len;
             // Auto makeup's meters: the power going in and coming out before makeup (not in silence).
-            let power = |v: [f32; 2]| if ms { v[0] * v[0] + v[1] * v[1] } else { (v[0] * v[0] + v[1] * v[1]) / n_ch as f32 };
+            let power = |v: [f32; 2]| {
+                if ms {
+                    v[0] * v[0] + v[1] * v[1]
+                } else {
+                    (v[0] * v[0] + v[1] * v[1]) / n_ch as f32
+                }
+            };
             let p_in = power(audio);
             // After the auto part of the makeup (not the set part): the trim closes the loop on it.
             let p_out = power(out) / set_makeup_sq;
@@ -1327,7 +1572,8 @@ impl Compressor {
                     if self.auto_in > 0.0 && self.auto_out > 0.0 {
                         // What is still missing, made up over the trim's time.
                         let error = 10.0 * (self.auto_in / self.auto_out).log10();
-                        self.auto_trim = (self.auto_trim + error * auto_step).clamp(-AUTO_TRIM_LIMIT_DB, AUTO_TRIM_LIMIT_DB);
+                        self.auto_trim = (self.auto_trim + error * auto_step)
+                            .clamp(-AUTO_TRIM_LIMIT_DB, AUTO_TRIM_LIMIT_DB);
                     }
                     self.auto_db = (predicted + self.auto_trim).clamp(-24.0, 24.0);
                 } else if !s.auto_makeup {
@@ -1335,7 +1581,11 @@ impl Compressor {
                 }
                 self.makeup.set_target(s.makeup_total_db(self.auto_db));
             }
-            let (ol, or) = if ms { (out[0] + out[1], out[0] - out[1]) } else { (out[0], out[1]) };
+            let (ol, or) = if ms {
+                (out[0] + out[1], out[0] - out[1])
+            } else {
+                (out[0], out[1])
+            };
             channels[0][i] = ol;
             if stereo {
                 channels[1][i] = or;
@@ -1366,7 +1616,12 @@ impl Compressor {
 /// A stage's gain (dB) over time for an input level envelope `input_db` (one value per sample at
 /// `sample_rate`), through its real gain computer and ballistics with `style` — the stage panel's
 /// envelope scope. UI only (allocates).
-pub fn simulate_stage(stage: &Stage, style: &Style, sample_rate: f32, input_db: &[f32]) -> Vec<f32> {
+pub fn simulate_stage(
+    stage: &Stage,
+    style: &Style,
+    sample_rate: f32,
+    input_db: &[f32],
+) -> Vec<f32> {
     let st = Stage { on: true, ..*stage };
     let att = coef((st.attack_ms * style.attack).max(0.02), sample_rate);
     let rel = coef((st.release_ms * style.release).max(4.0), sample_rate);
@@ -1401,7 +1656,18 @@ mod tests {
     const FS: f32 = 48_000.0;
 
     fn stage(quadrant: Quadrant, threshold_db: f32, ratio: f32) -> Stage {
-        Stage { on: true, quadrant, threshold_db, ratio, knee_db: 0.0, attack_ms: 0.05, release_ms: 5.0, auto_release: false, detector: Detector::Peak, ..Stage::default() }
+        Stage {
+            on: true,
+            quadrant,
+            threshold_db,
+            ratio,
+            knee_db: 0.0,
+            attack_ms: 0.05,
+            release_ms: 5.0,
+            auto_release: false,
+            detector: Detector::Peak,
+            ..Stage::default()
+        }
     }
 
     fn settings(stages: &[Stage]) -> CompSettings {
@@ -1452,7 +1718,10 @@ mod tests {
             for i in 0..=1200 {
                 let x = -90.0 + i as f32 * 0.1;
                 let y = curve_db(&stages, x, 0.0);
-                assert!(y >= last - 1e-3, "not monotone at {x}: {last} → {y} for {stages:?}");
+                assert!(
+                    y >= last - 1e-3,
+                    "not monotone at {x}: {last} → {y} for {stages:?}"
+                );
                 last = y;
             }
         }
@@ -1462,7 +1731,13 @@ mod tests {
     fn no_stages_or_ratio_one_pass_audio_unchanged() {
         let mut rng = Lcg(3);
         let input: Vec<f32> = (0..4800).map(|_| rng.next() - 0.5).collect();
-        for s in [settings(&[]), settings(&[Stage { ratio: 1.0, ..stage(Quadrant::Compress, -40.0, 1.0) }])] {
+        for s in [
+            settings(&[]),
+            settings(&[Stage {
+                ratio: 1.0,
+                ..stage(Quadrant::Compress, -40.0, 1.0)
+            }]),
+        ] {
             let mut c = Compressor::new(FS);
             c.prepare(FS, &s);
             let (mut l, mut r) = (input.clone(), input.clone());
@@ -1474,42 +1749,78 @@ mod tests {
 
     #[test]
     fn each_quadrant_has_its_slope() {
-        let range = |st: Stage| Stage { range_db: 60.0, ..st };
+        let range = |st: Stage| Stage {
+            range_db: 60.0,
+            ..st
+        };
         // 10 dB over a −20 dB threshold at 4:1 loses 7.5 dB.
-        let g = steady_gain(&settings(&[range(stage(Quadrant::Compress, -20.0, 4.0))]), -10.0, 0.2);
+        let g = steady_gain(
+            &settings(&[range(stage(Quadrant::Compress, -20.0, 4.0))]),
+            -10.0,
+            0.2,
+        );
         assert!((g + 7.5).abs() < 0.05, "compress {g}");
         // 10 dB under a −20 dB threshold at 2:1 expands by 10 dB more.
-        let g = steady_gain(&settings(&[range(stage(Quadrant::Expand, -20.0, 2.0))]), -30.0, 0.2);
+        let g = steady_gain(
+            &settings(&[range(stage(Quadrant::Expand, -20.0, 2.0))]),
+            -30.0,
+            0.2,
+        );
         assert!((g + 10.0).abs() < 0.05, "expand {g}");
         // Upward compression lifts the quiet part halfway back at 2:1.
-        let g = steady_gain(&settings(&[Stage { range_db: 24.0, ..stage(Quadrant::UpCompress, -20.0, 2.0) }]), -30.0, 0.2);
+        let g = steady_gain(
+            &settings(&[Stage {
+                range_db: 24.0,
+                ..stage(Quadrant::UpCompress, -20.0, 2.0)
+            }]),
+            -30.0,
+            0.2,
+        );
         assert!((g - 5.0).abs() < 0.05, "upward compress {g}");
         // Upward expansion adds a dB per dB over at 2:1.
-        let g = steady_gain(&settings(&[Stage { range_db: 24.0, ..stage(Quadrant::UpExpand, -20.0, 2.0) }]), -15.0, 0.2);
+        let g = steady_gain(
+            &settings(&[Stage {
+                range_db: 24.0,
+                ..stage(Quadrant::UpExpand, -20.0, 2.0)
+            }]),
+            -15.0,
+            0.2,
+        );
         assert!((g - 5.0).abs() < 0.05, "upward expand {g}");
     }
 
     #[test]
     fn range_caps_the_gain_softly() {
         // ∞:1 at −40 dB would take 30 dB off a −10 dB signal; the range stops it at 6.
-        let st = Stage { range_db: 6.0, ..stage(Quadrant::Compress, -40.0, RATIO_MAX) };
+        let st = Stage {
+            range_db: 6.0,
+            ..stage(Quadrant::Compress, -40.0, RATIO_MAX)
+        };
         let g = steady_gain(&settings(&[st]), -10.0, 0.2);
         assert!((g + 6.0).abs() < 0.05, "{g}");
         // No corner where the range runs out (6 dB past the threshold at ∞:1).
         let stages = settings(&[st]).stages;
-        let slope = |x: f32| (curve_db(&stages, x + 0.01, 0.0) - curve_db(&stages, x - 0.01, 0.0)) / 0.02;
+        let slope =
+            |x: f32| (curve_db(&stages, x + 0.01, 0.0) - curve_db(&stages, x - 0.01, 0.0)) / 0.02;
         let mut last = slope(-39.0);
         for i in 0..400 {
             let x = -39.0 + i as f32 * 0.02;
             let now = slope(x);
-            assert!((now - last).abs() < 0.05, "slope jumps at {x}: {last} → {now}");
+            assert!(
+                (now - last).abs() < 0.05,
+                "slope jumps at {x}: {last} → {now}"
+            );
             last = now;
         }
     }
 
     #[test]
     fn attack_and_release_follow_their_times() {
-        let st = Stage { attack_ms: 10.0, release_ms: 100.0, ..stage(Quadrant::Compress, -20.0, RATIO_MAX) };
+        let st = Stage {
+            attack_ms: 10.0,
+            release_ms: 100.0,
+            ..stage(Quadrant::Compress, -20.0, RATIO_MAX)
+        };
         let s = settings(&[st]);
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
@@ -1520,20 +1831,31 @@ mod tests {
         let mut loud = vec![hi; 4800];
         c.process(&mut [&mut loud], None, &s);
         let after_attack = gain_to_db(loud[479] / hi);
-        assert!((after_attack + 10.0 * (1.0 - (-1.0f32).exp())).abs() < 0.32, "attack {after_attack}");
+        assert!(
+            (after_attack + 10.0 * (1.0 - (-1.0f32).exp())).abs() < 0.32,
+            "attack {after_attack}"
+        );
         // Down to −15 dB (still over the threshold, so the target is −5 dB): after one release
         // time, 1/e of the 5 dB step is left (the peak detector's 10 ms release adds a little).
         let mid = db_to_gain(-15.0);
         let mut quieter = vec![mid; 9600];
         c.process(&mut [&mut quieter], None, &s);
         let after_release = gain_to_db(quieter[4799] / mid);
-        assert!((after_release + 5.0 + 5.0 * (-1.0f32).exp()).abs() < 0.2, "release {after_release}");
+        assert!(
+            (after_release + 5.0 + 5.0 * (-1.0f32).exp()).abs() < 0.2,
+            "release {after_release}"
+        );
     }
 
     /// A stage at ∞:1 from −20 dB, 100 ms release (auto or not): −10 dB for `burst` samples after
     /// a quiet second, then −40 dB; the gain (dB) every sample of the recovery.
     fn recovery(auto_release: bool, burst: usize) -> Vec<f32> {
-        let st = Stage { attack_ms: 1.0, release_ms: 100.0, auto_release, ..stage(Quadrant::Compress, -20.0, RATIO_MAX) };
+        let st = Stage {
+            attack_ms: 1.0,
+            release_ms: 100.0,
+            auto_release,
+            ..stage(Quadrant::Compress, -20.0, RATIO_MAX)
+        };
         let s = settings(&[st]);
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
@@ -1543,33 +1865,65 @@ mod tests {
         x.extend(std::iter::repeat_n(lo, 2 * FS as usize));
         let mut y = x.clone();
         c.process(&mut [&mut y], None, &s);
-        y.iter().zip(&x).skip(FS as usize + burst).map(|(a, b)| gain_to_db(a / b)).collect()
+        y.iter()
+            .zip(&x)
+            .skip(FS as usize + burst)
+            .map(|(a, b)| gain_to_db(a / b))
+            .collect()
     }
 
     #[test]
     fn auto_release_lets_a_peak_go_quickly_and_sustained_compression_slowly() {
         // When the gain is back within 37 % of where it started (ms).
-        let back = |g: &[f32]| g.iter().position(|v| v.abs() <= 0.37 * g[0].abs()).unwrap_or(g.len()) as f32 * 1000.0 / FS;
+        let back = |g: &[f32]| {
+            g.iter()
+                .position(|v| v.abs() <= 0.37 * g[0].abs())
+                .unwrap_or(g.len()) as f32
+                * 1000.0
+                / FS
+        };
         let (peak, held) = (480, 2 * FS as usize);
         let (plain_peak, plain_held) = (back(&recovery(false, peak)), back(&recovery(false, held)));
         let (auto_peak, auto_held) = (back(&recovery(true, peak)), back(&recovery(true, held)));
-        println!("recovery to 37 %: plain {plain_peak:.0} / {plain_held:.0} ms, auto {auto_peak:.0} / {auto_held:.0} ms");
+        println!(
+            "recovery to 37 %: plain {plain_peak:.0} / {plain_held:.0} ms, auto {auto_peak:.0} / {auto_held:.0} ms"
+        );
         // Without it, the same release either way (the detector's 10 ms adds a little).
-        assert!((plain_peak - plain_held).abs() < 15.0 && (90.0..130.0).contains(&plain_held), "{plain_peak} / {plain_held} ms");
+        assert!(
+            (plain_peak - plain_held).abs() < 15.0 && (90.0..130.0).contains(&plain_held),
+            "{plain_peak} / {plain_held} ms"
+        );
         // With it: a 10 ms peak still lets go within 1.5 × the release ...
         assert!(auto_peak < 150.0, "peak: {auto_peak} ms");
         // ... and two seconds of compression take several times longer, smoothly (no step).
         assert!(auto_held > 3.0 * plain_held, "held: {auto_held} ms");
         let held = recovery(true, held);
-        assert!(held.windows(2).all(|w| (w[1] - w[0]).abs() < 0.05 && w[1] >= w[0] - 1e-6), "the recovery steps or turns back");
+        assert!(
+            held.windows(2)
+                .all(|w| (w[1] - w[0]).abs() < 0.05 && w[1] >= w[0] - 1e-6),
+            "the recovery steps or turns back"
+        );
     }
 
     #[test]
     fn auto_release_off_is_unchanged_and_the_scope_draws_the_engine() {
         // The engine's gain on a level envelope against `simulate_stage` for the same stage, with
         // auto release (a DC signal is its own level, detector Peak).
-        let st = Stage { attack_ms: 5.0, release_ms: 80.0, auto_release: true, ..stage(Quadrant::Compress, -20.0, 4.0) };
-        let levels: Vec<f32> = (0..96_000).map(|i| if (4800..60_000).contains(&i) { -6.0 } else { -40.0 }).collect();
+        let st = Stage {
+            attack_ms: 5.0,
+            release_ms: 80.0,
+            auto_release: true,
+            ..stage(Quadrant::Compress, -20.0, 4.0)
+        };
+        let levels: Vec<f32> = (0..96_000)
+            .map(|i| {
+                if (4800..60_000).contains(&i) {
+                    -6.0
+                } else {
+                    -40.0
+                }
+            })
+            .collect();
         let sim = simulate_stage(&st, &Style::default(), FS, &levels);
         let s = settings(&[st]);
         let mut c = Compressor::new(FS);
@@ -1580,11 +1934,15 @@ mod tests {
         for i in (0..x.len()).step_by(97) {
             let g = gain_to_db(y[i] / x[i]);
             // The engine's peak detector releases over 10 ms where the level falls.
-            let near = (i.saturating_sub(1500)..(i + 1).min(sim.len())).any(|j| (sim[j] - g).abs() < 0.3);
+            let near =
+                (i.saturating_sub(1500)..(i + 1).min(sim.len())).any(|j| (sim[j] - g).abs() < 0.3);
             assert!(near, "at {i}: engine {g:.2} dB, scope {:.2}", sim[i]);
         }
         // Switching it off mid-recovery lets the slow envelope go without a step.
-        let mut s = settings(&[Stage { auto_release: true, ..st }]);
+        let mut s = settings(&[Stage {
+            auto_release: true,
+            ..st
+        }]);
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
         let mut a = vec![db_to_gain(-6.0); 96_000];
@@ -1594,14 +1952,20 @@ mod tests {
         let mut b = vec![lo; 96_000];
         c.process(&mut [&mut b], None, &s);
         let g: Vec<f32> = b.iter().map(|v| gain_to_db(v / lo)).collect();
-        assert!(g.windows(2).all(|w| (w[1] - w[0]).abs() < 0.1), "switching auto release off steps");
+        assert!(
+            g.windows(2).all(|w| (w[1] - w[0]).abs() < 0.1),
+            "switching auto release off steps"
+        );
     }
 
     #[test]
     fn link_moves_both_channels_together() {
         let st = stage(Quadrant::Compress, -20.0, 4.0);
         for (link, quiet_moves) in [(1.0, true), (0.0, false)] {
-            let s = CompSettings { link, ..settings(&[st]) };
+            let s = CompSettings {
+                link,
+                ..settings(&[st])
+            };
             let mut c = Compressor::new(FS);
             c.prepare(FS, &s);
             let (a, b) = (db_to_gain(-10.0), db_to_gain(-40.0));
@@ -1614,7 +1978,10 @@ mod tests {
 
     #[test]
     fn lookahead_delays_the_audio_by_its_reported_latency() {
-        let s = CompSettings { lookahead_ms: 5.0, ..settings(&[]) };
+        let s = CompSettings {
+            lookahead_ms: 5.0,
+            ..settings(&[])
+        };
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
         let mut buf = vec![0.0f32; 1000];
@@ -1660,7 +2027,11 @@ mod tests {
         for _ in 0..5 {
             worst = worst.max(run(&mut c, &s));
         }
-        s.stages[0] = Stage { quadrant: Quadrant::Expand, threshold_db: -3.0, ..s.stages[0] };
+        s.stages[0] = Stage {
+            quadrant: Quadrant::Expand,
+            threshold_db: -3.0,
+            ..s.stages[0]
+        };
         s.stages[0].on = true;
         for _ in 0..5 {
             worst = worst.max(run(&mut c, &s));
@@ -1680,7 +2051,8 @@ mod tests {
                 let noise = (rng.next() - 0.5) * 2.0;
                 if hits {
                     let t = (i % (FS as usize / 2)) as f32 / FS;
-                    a * (-t / 0.08).exp() * (std::f32::consts::TAU * 60.0 * t).sin() + noise * a * 0.03
+                    a * (-t / 0.08).exp() * (std::f32::consts::TAU * 60.0 * t).sin()
+                        + noise * a * 0.03
                 } else {
                     noise * a * 0.25 * 3f32.sqrt()
                 }
@@ -1700,28 +2072,52 @@ mod tests {
 
     #[test]
     fn auto_makeup_matches_the_loudness_going_in() {
-        let rms = |v: &[f32]| (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+        let rms = |v: &[f32]| {
+            (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+        };
         // Long enough for its meters to reach their song-long times (AUTO_LONG_S).
         let n = 40 * FS as usize;
         let tail = 30 * FS as usize..;
         for (threshold, ratio) in [(-24.0, 4.0), (-30.0, 8.0), (-12.0, 2.0)] {
             for (hits, peak) in [(true, -6.0), (true, -20.0), (false, -6.0)] {
-                let st = Stage { attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms, ..stage(Quadrant::Compress, threshold, ratio) };
-                let s = CompSettings { auto_makeup: true, ..settings(&[st]) };
+                let st = Stage {
+                    attack_ms: 10.0,
+                    release_ms: 120.0,
+                    detector: Detector::Rms,
+                    ..stage(Quadrant::Compress, threshold, ratio)
+                };
+                let s = CompSettings {
+                    auto_makeup: true,
+                    ..settings(&[st])
+                };
                 let x = material(n, peak, hits);
                 let y = run_blocks(&s, &x, 512);
                 let db = 20.0 * (rms(&y[tail.clone()]) / rms(&x[tail.clone()])).log10();
                 println!("{threshold} dB {ratio}:1, hits {hits} at {peak}: {db:.2} dB");
-                assert!(db.abs() < 0.5, "{threshold} dB {ratio}:1, hits {hits} at {peak}: {db:.2} dB");
+                assert!(
+                    db.abs() < 0.5,
+                    "{threshold} dB {ratio}:1, hits {hits} at {peak}: {db:.2} dB"
+                );
             }
         }
         // The set makeup adds on top; and the block size never changes the result.
         let st = stage(Quadrant::Compress, -24.0, 4.0);
         let x = material(4 * FS as usize, -6.0, true);
-        let s = CompSettings { auto_makeup: true, makeup_db: 3.0, ..settings(&[st]) };
+        let s = CompSettings {
+            auto_makeup: true,
+            makeup_db: 3.0,
+            ..settings(&[st])
+        };
         let a = run_blocks(&s, &x, 512);
         assert_eq!(a, run_blocks(&s, &x, 37));
-        let b = run_blocks(&CompSettings { makeup_db: 0.0, ..s }, &x, 512);
+        let b = run_blocks(
+            &CompSettings {
+                makeup_db: 0.0,
+                ..s
+            },
+            &x,
+            512,
+        );
         let d = 20.0 * (rms(&a[3 * FS as usize..]) / rms(&b[3 * FS as usize..])).log10();
         assert!((d - 3.0).abs() < 0.05, "{d}");
     }
@@ -1731,8 +2127,17 @@ mod tests {
         // Whatever ratio and knee the stage has, Vocal plays ∞:1 over a 36 dB knee: 4.5 dB of
         // reduction at the threshold, none 18 dB under it, the output held at the threshold from
         // 18 dB over it; the curve drawn (`played`) is the one heard.
-        let st = Stage { release_ms: 80.0, attack_ms: 5.0, ..stage(Quadrant::Compress, -24.0, 2.0) };
-        let s = CompSettings { smart: Smart::Vocal, smart_amount: 0.0, sibilance: 0.0, ..settings(&[st]) };
+        let st = Stage {
+            release_ms: 80.0,
+            attack_ms: 5.0,
+            ..stage(Quadrant::Compress, -24.0, 2.0)
+        };
+        let s = CompSettings {
+            smart: Smart::Vocal,
+            smart_amount: 0.0,
+            sibilance: 0.0,
+            ..settings(&[st])
+        };
         let played = s.played().stages[0];
         assert_eq!((played.ratio, played.knee_db), (RATIO_MAX, VOCAL_KNEE_DB));
         assert!((curve_db(&s.played().stages, -24.0, 0.0) + 28.5).abs() < 0.01);
@@ -1745,7 +2150,10 @@ mod tests {
             let mut buf = vec![x; (FS * 2.0) as usize];
             c.process(&mut [&mut buf], None, &s);
             let g = gain_to_db(buf[buf.len() - 1] / x);
-            assert!((g - want).abs() < 0.3, "at {level} dB the gain is {g:.2}, the curve says {want:.2}");
+            assert!(
+                (g - want).abs() < 0.3,
+                "at {level} dB the gain is {g:.2}, the curve says {want:.2}"
+            );
         }
         // An expanding stage keeps its own ratio and knee; Off leaves the compressor's alone.
         let ex = stage(Quadrant::Expand, -50.0, 3.0);
@@ -1760,20 +2168,39 @@ mod tests {
         // Once it has heard the song, auto makeup holds: a quiet section and a loud one come out
         // as far apart as the compressor alone makes them (it used to bring each back to its own
         // loudness, undoing the compression).
-        let rms = |v: &[f32]| 20.0 * (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt().log10();
+        let rms = |v: &[f32]| {
+            20.0 * (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64)
+                .sqrt()
+                .log10()
+        };
         let sec = FS as usize;
         let mut x = material(30 * sec, -12.0, true);
         let quiet = material(6 * sec, -30.0, true);
         let loud = material(6 * sec, -10.0, true);
         x.extend_from_slice(&quiet);
         x.extend_from_slice(&loud);
-        let st = Stage { attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms, ..stage(Quadrant::Compress, -24.0, 4.0) };
+        let st = Stage {
+            attack_ms: 10.0,
+            release_ms: 120.0,
+            detector: Detector::Rms,
+            ..stage(Quadrant::Compress, -24.0, 4.0)
+        };
         let gap = |auto: bool| {
-            let y = run_blocks(&CompSettings { auto_makeup: auto, ..settings(&[st]) }, &x, 512);
+            let y = run_blocks(
+                &CompSettings {
+                    auto_makeup: auto,
+                    ..settings(&[st])
+                },
+                &x,
+                512,
+            );
             rms(&y[36 * sec + sec..]) - rms(&y[30 * sec + sec..36 * sec])
         };
         let (with, without) = (gap(true), gap(false));
-        assert!((with - without).abs() < 1.0, "loud − quiet: {with:.1} dB with auto makeup, {without:.1} dB without");
+        assert!(
+            (with - without).abs() < 1.0,
+            "loud − quiet: {with:.1} dB with auto makeup, {without:.1} dB without"
+        );
     }
 
     #[test]
@@ -1782,13 +2209,23 @@ mod tests {
         let steady = adaptive_release_scale(3.0, Smart::Adaptive, 1.0);
         assert!(spiky < 1.0 && steady > 1.0, "{spiky} {steady}");
         assert_eq!(adaptive_release_scale(20.0, Smart::Off, 1.0), 1.0);
-        assert_eq!(adaptive_release_scale(3.0, Smart::Vocal, 1.0), 1.0, "Vocal releases at RELEASE");
+        assert_eq!(
+            adaptive_release_scale(3.0, Smart::Vocal, 1.0),
+            1.0,
+            "Vocal releases at RELEASE"
+        );
     }
 
     #[test]
     fn the_external_key_drives_the_detector() {
-        let st = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -30.0, 4.0) };
-        let s = CompSettings { external_key: true, ..settings(&[st]) };
+        let st = Stage {
+            range_db: 60.0,
+            ..stage(Quadrant::Compress, -30.0, 4.0)
+        };
+        let s = CompSettings {
+            external_key: true,
+            ..settings(&[st])
+        };
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
         let x = db_to_gain(-40.0);
@@ -1796,30 +2233,54 @@ mod tests {
         let mut buf = vec![x; 9600];
         c.process(&mut [&mut buf], Some(&[&key]), &s);
         let g = gain_to_db(buf[9599] / x);
-        assert!((g + 15.0).abs() < 0.1, "a loud key ducks a quiet track: {g}");
+        assert!(
+            (g + 15.0).abs() < 0.1,
+            "a loud key ducks a quiet track: {g}"
+        );
     }
 
     #[test]
     fn a_gate_stays_open_on_a_steady_tone_above_its_threshold() {
         // A 100 Hz sine at −20 dBFS peak through a fast 4:1 gate at −40 dB: the waveform crosses
         // zero 200 times a second, but the level is steady, so the gate must not chatter.
-        let st = Stage { range_db: 60.0, attack_ms: 0.5, release_ms: 60.0, ..stage(Quadrant::Expand, -40.0, 4.0) };
+        let st = Stage {
+            range_db: 60.0,
+            attack_ms: 0.5,
+            release_ms: 60.0,
+            ..stage(Quadrant::Expand, -40.0, 4.0)
+        };
         let s = settings(&[st]);
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
-        let input: Vec<f32> = (0..48_000).map(|i| 0.1 * (2.0 * std::f32::consts::PI * 100.0 * i as f32 / FS).sin()).collect();
+        let input: Vec<f32> = (0..48_000)
+            .map(|i| 0.1 * (2.0 * std::f32::consts::PI * 100.0 * i as f32 / FS).sin())
+            .collect();
         let mut buf = input.clone();
         c.process(&mut [&mut buf], None, &s);
-        let worst = buf[24_000..].iter().zip(&input[24_000..]).filter(|(_, x)| x.abs() > 0.05).map(|(y, x)| gain_to_db(y / x)).fold(0.0f32, f32::min);
-        assert!(worst > -0.5, "the gate closes on zero crossings: {worst} dB");
+        let worst = buf[24_000..]
+            .iter()
+            .zip(&input[24_000..])
+            .filter(|(_, x)| x.abs() > 0.05)
+            .map(|(y, x)| gain_to_db(y / x))
+            .fold(0.0f32, f32::min);
+        assert!(
+            worst > -0.5,
+            "the gate closes on zero crossings: {worst} dB"
+        );
     }
 
     #[test]
     fn a_stage_starts_where_the_input_reaches_its_threshold() {
         // 2:1 from −30 dB, then ∞:1 from −20 dB on the input: the limiter holds what the
         // compressor makes of −20 (−25) from there on.
-        let comp = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -30.0, 2.0) };
-        let limit = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -20.0, RATIO_MAX) };
+        let comp = Stage {
+            range_db: 60.0,
+            ..stage(Quadrant::Compress, -30.0, 2.0)
+        };
+        let limit = Stage {
+            range_db: 60.0,
+            ..stage(Quadrant::Compress, -20.0, RATIO_MAX)
+        };
         let stages = settings(&[comp, limit]).stages;
         assert!((curve_db(&stages, -20.0, 0.0) + 25.0).abs() < 0.01);
         assert!((curve_db(&stages, -5.0, 0.0) + 25.0).abs() < 0.01);
@@ -1828,10 +2289,28 @@ mod tests {
 
     #[test]
     fn a_higher_stage_never_changes_anything_below_it() {
-        let low = Stage { knee_db: 6.0, ..stage(Quadrant::Compress, -40.0, 2.0) };
-        let high = Stage { knee_db: 6.0, ..stage(Quadrant::Compress, -20.0, 4.0) };
+        let low = Stage {
+            knee_db: 6.0,
+            ..stage(Quadrant::Compress, -40.0, 2.0)
+        };
+        let high = Stage {
+            knee_db: 6.0,
+            ..stage(Quadrant::Compress, -20.0, 4.0)
+        };
         let before = settings(&[low, high]).stages;
-        for moved in [Stage { threshold_db: -26.0, ratio: 20.0, ..high }, Stage { threshold_db: -12.0, ratio: 1.5, ..high }, Stage { on: false, ..high }] {
+        for moved in [
+            Stage {
+                threshold_db: -26.0,
+                ratio: 20.0,
+                ..high
+            },
+            Stage {
+                threshold_db: -12.0,
+                ratio: 1.5,
+                ..high
+            },
+            Stage { on: false, ..high },
+        ] {
             let after = settings(&[low, moved]).stages;
             // The curve below the higher stage's knee (3 dB of level each side of its threshold,
             // 6 dB of input behind the 2:1 stage), and the lower stage's own curve (where its
@@ -1839,23 +2318,47 @@ mod tests {
             for i in 0..=300 {
                 let x = -60.0 + 0.2 * i as f32;
                 if x < moved.threshold_db.min(high.threshold_db) - 6.1 {
-                    assert_eq!(curve_db(&after, x, 0.0), curve_db(&before, x, 0.0), "at {x}");
+                    assert_eq!(
+                        curve_db(&after, x, 0.0),
+                        curve_db(&before, x, 0.0),
+                        "at {x}"
+                    );
                 }
-                assert_eq!(partial_curve_db(&after, 0, x, 0.0), partial_curve_db(&before, 0, x, 0.0), "at {x}");
+                assert_eq!(
+                    partial_curve_db(&after, 0, x, 0.0),
+                    partial_curve_db(&before, 0, x, 0.0),
+                    "at {x}"
+                );
             }
         }
     }
 
     #[test]
     fn solo_plays_one_stage_alone() {
-        let a = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -25.0, 4.0) };
-        let b = Stage { range_db: 60.0, ..stage(Quadrant::Compress, -30.0, 2.0) };
+        let a = Stage {
+            range_db: 60.0,
+            ..stage(Quadrant::Compress, -25.0, 4.0)
+        };
+        let b = Stage {
+            range_db: 60.0,
+            ..stage(Quadrant::Compress, -30.0, 2.0)
+        };
         let both = steady_gain(&settings(&[a, b]), -10.0, 0.2);
-        let solo = steady_gain(&CompSettings { solo: Some(1), ..settings(&[a, b]) }, -10.0, 0.2);
+        let solo = steady_gain(
+            &CompSettings {
+                solo: Some(1),
+                ..settings(&[a, b])
+            },
+            -10.0,
+            0.2,
+        );
         // Stage b (lower threshold) runs first: −10 dB is 20 over −30 at 2:1, so it takes 10 dB;
         // a starts at an input of −25, which b leaves at −27.5, so it takes 5.625 dB more (−20 is
         // 7.5 over at 4:1).
-        assert!((solo + 10.0).abs() < 0.05 && (both + 15.625).abs() < 0.05, "solo {solo}, both {both}");
+        assert!(
+            (solo + 10.0).abs() < 0.05 && (both + 15.625).abs() < 0.05,
+            "solo {solo}, both {both}"
+        );
     }
 
     #[test]

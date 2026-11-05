@@ -68,7 +68,11 @@ impl KWeighting {
         let vb = vh.powf(0.4996667741545416);
         let a0 = 1.0 + k / q + k * k;
         let shelf = Biquad {
-            b: [(vh + vb * k / q + k * k) / a0, 2.0 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0],
+            b: [
+                (vh + vb * k / q + k * k) / a0,
+                2.0 * (k * k - vh) / a0,
+                (vh - vb * k / q + k * k) / a0,
+            ],
             a: [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
             s: [0.0; 2],
         };
@@ -77,7 +81,11 @@ impl KWeighting {
         let (f0, q) = (38.13547087602444, 0.5003270373238773);
         let k = (PI * f0 / sample_rate).tan();
         let a0 = 1.0 + k / q + k * k;
-        let high_pass = Biquad { b: [1.0, -2.0, 1.0], a: [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0], s: [0.0; 2] };
+        let high_pass = Biquad {
+            b: [1.0, -2.0, 1.0],
+            a: [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
+            s: [0.0; 2],
+        };
         Self { shelf, high_pass }
     }
 
@@ -101,7 +109,10 @@ struct Gate {
 
 impl Gate {
     fn new() -> Self {
-        Self { count: vec![0; BINS], energy: vec![0.0; BINS] }
+        Self {
+            count: vec![0; BINS],
+            energy: vec![0.0; BINS],
+        }
     }
 
     fn clear(&mut self) {
@@ -129,7 +140,10 @@ impl Gate {
 
     /// The count and energy of the blocks from `from` up.
     fn sum_from(&self, from: usize) -> (u64, f64) {
-        (self.count[from..].iter().sum(), self.energy[from..].iter().sum())
+        (
+            self.count[from..].iter().sum(),
+            self.energy[from..].iter().sum(),
+        )
     }
 
     /// The first bin at or above `lufs`.
@@ -249,7 +263,12 @@ impl Loudness {
         self.step_sum = 0.0;
         self.step_pos = 0;
         self.steps += 1;
-        let window = |n: usize| -> f64 { (0..n).map(|i| self.ring[(self.ring_pos + SHORT_STEPS - i) % SHORT_STEPS]).sum::<f64>() / (n * self.step_len) as f64 };
+        let window = |n: usize| -> f64 {
+            (0..n)
+                .map(|i| self.ring[(self.ring_pos + SHORT_STEPS - i) % SHORT_STEPS])
+                .sum::<f64>()
+                / (n * self.step_len) as f64
+        };
         if self.steps >= MOMENTARY_STEPS {
             self.momentary = window(MOMENTARY_STEPS);
             self.integrated_gate.add(self.momentary);
@@ -355,7 +374,11 @@ impl TruePeak {
             let raw: Vec<f64> = (0..TAPS)
                 .map(|t| {
                     let d = t as f64 - (half - 1.0) - frac;
-                    let sinc = if d.abs() < 1e-12 { 1.0 } else { (PI * d).sin() / (PI * d) };
+                    let sinc = if d.abs() < 1e-12 {
+                        1.0
+                    } else {
+                        (PI * d).sin() / (PI * d)
+                    };
                     let w = i0(TP_BETA * (1.0 - (d / half).powi(2)).max(0.0).sqrt()) / i0(TP_BETA);
                     sinc * w
                 })
@@ -364,7 +387,12 @@ impl TruePeak {
             let sum: f64 = raw.iter().sum();
             taps.extend(raw.iter().map(|v| (v / sum) as f32));
         }
-        Self { phases, taps, hist: [0.0; 2 * TAPS], pos: 0 }
+        Self {
+            phases,
+            taps,
+            hist: [0.0; 2 * TAPS],
+            pos: 0,
+        }
     }
 
     pub fn phases(&self) -> usize {
@@ -416,11 +444,16 @@ mod tests {
 
     fn sine(db: f64, seconds: f64, f: f64, phase: f64) -> Vec<f32> {
         let a = 10f64.powf(db / 20.0);
-        (0..(seconds * FS) as usize).map(|i| (a * (std::f64::consts::TAU * f * i as f64 / FS + phase).sin()) as f32).collect()
+        (0..(seconds * FS) as usize)
+            .map(|i| (a * (std::f64::consts::TAU * f * i as f64 / FS + phase).sin()) as f32)
+            .collect()
     }
 
     fn stereo(parts: &[(f64, f64)]) -> Vec<f32> {
-        parts.iter().flat_map(|&(db, s)| sine(db, s, 1000.0, 0.0)).collect()
+        parts
+            .iter()
+            .flat_map(|&(db, s)| sine(db, s, 1000.0, 0.0))
+            .collect()
     }
 
     fn measure(signal: &[f32]) -> Loudness {
@@ -434,10 +467,24 @@ mod tests {
         let k = KWeighting::new(48000.0);
         let near = |a: f64, b: f64| (a - b).abs() < 1e-8;
         let s = k.shelf;
-        assert!(near(s.b[0], 1.53512485958697) && near(s.b[1], -2.69169618940638) && near(s.b[2], 1.19839281085285), "{:?}", s.b);
-        assert!(near(s.a[0], -1.69065929318241) && near(s.a[1], 0.73248077421585), "{:?}", s.a);
+        assert!(
+            near(s.b[0], 1.53512485958697)
+                && near(s.b[1], -2.69169618940638)
+                && near(s.b[2], 1.19839281085285),
+            "{:?}",
+            s.b
+        );
+        assert!(
+            near(s.a[0], -1.69065929318241) && near(s.a[1], 0.73248077421585),
+            "{:?}",
+            s.a
+        );
         let h = k.high_pass;
-        assert!(near(h.a[0], -1.99004745483398) && near(h.a[1], 0.99007225036621), "{:?}", h.a);
+        assert!(
+            near(h.a[0], -1.99004745483398) && near(h.a[1], 0.99007225036621),
+            "{:?}",
+            h.a
+        );
         assert_eq!(h.b, [1.0, -2.0, 1.0]);
     }
 
@@ -446,7 +493,11 @@ mod tests {
     fn tech_3341_steady_tones() {
         for db in [-23.0, -33.0] {
             let m = measure(&stereo(&[(db, 20.0)]));
-            for (what, v) in [("M", m.momentary()), ("S", m.short_term()), ("I", m.integrated())] {
+            for (what, v) in [
+                ("M", m.momentary()),
+                ("S", m.short_term()),
+                ("I", m.integrated()),
+            ] {
                 assert!((f64::from(v) - db).abs() < 0.1, "{db} dBFS: {what} = {v}");
             }
         }
@@ -456,7 +507,13 @@ mod tests {
     fn tech_3341_gated_sequences() {
         let cases: [&[(f64, f64)]; 3] = [
             &[(-36.0, 10.0), (-23.0, 60.0), (-36.0, 10.0)],
-            &[(-72.0, 10.0), (-36.0, 10.0), (-23.0, 60.0), (-36.0, 10.0), (-72.0, 10.0)],
+            &[
+                (-72.0, 10.0),
+                (-36.0, 10.0),
+                (-23.0, 60.0),
+                (-36.0, 10.0),
+                (-72.0, 10.0),
+            ],
             &[(-26.0, 20.0), (-20.0, 20.1), (-26.0, 20.0)],
         ];
         for parts in cases {
@@ -488,11 +545,23 @@ mod tests {
             (&[(-20.0, 20.0), (-30.0, 20.0)], 10.0),
             (&[(-20.0, 20.0), (-15.0, 20.0)], 5.0),
             (&[(-40.0, 20.0), (-20.0, 20.0)], 20.0),
-            (&[(-50.0, 20.0), (-35.0, 20.0), (-20.0, 20.0), (-35.0, 20.0), (-50.0, 20.0)], 15.0),
+            (
+                &[
+                    (-50.0, 20.0),
+                    (-35.0, 20.0),
+                    (-20.0, 20.0),
+                    (-35.0, 20.0),
+                    (-50.0, 20.0),
+                ],
+                15.0,
+            ),
         ];
         for (parts, lra) in cases {
             let r = measure(&stereo(parts)).range();
-            assert!((r - lra).abs() < 1.0, "{parts:?}: LRA = {r}, expected {lra}");
+            assert!(
+                (r - lra).abs() < 1.0,
+                "{parts:?}: LRA = {r}, expected {lra}"
+            );
         }
     }
 
@@ -512,7 +581,11 @@ mod tests {
     fn steady_true_peak(x: &[f32]) -> f32 {
         let mut tp = TruePeak::new(4);
         let edge = 2400;
-        x.iter().enumerate().map(|(i, &v)| (i, tp.push(v))).filter(|&(i, _)| i >= edge && i + edge < x.len()).fold(0.0, |m, (_, p)| m.max(p))
+        x.iter()
+            .enumerate()
+            .map(|(i, &v)| (i, tp.push(v)))
+            .filter(|&(i, _)| i >= edge && i + edge < x.len())
+            .fold(0.0, |m, (_, p)| m.max(p))
     }
 
     /// A reference true peak: the sine's own amplitude when the signal is one sine.
@@ -531,7 +604,10 @@ mod tests {
                 let x = sine(-1.0, 0.25, f, phase);
                 let tp = crate::gain_to_db(steady_true_peak(&x)) + 1.0;
                 let bound = if f < 8000.0 { 0.25 } else { 0.7 };
-                assert!(tp < 0.01 && tp > -bound, "{f} Hz, phase {phase}: {tp} dB from the truth");
+                assert!(
+                    tp < 0.01 && tp > -bound,
+                    "{f} Hz, phase {phase}: {tp} dB from the truth"
+                );
             }
         }
     }
@@ -548,6 +624,11 @@ mod tests {
         let d = TruePeak::DELAY;
         assert!((out[10 + d] - 1.0).abs() < 1e-6);
         assert!(out[11 + d] > 0.85 && out[11 + d] < 0.95, "{}", out[11 + d]);
-        assert!(out[9 + d] < 0.3 && out[12 + d] < 0.3, "{} {}", out[9 + d], out[12 + d]);
+        assert!(
+            out[9 + d] < 0.3 && out[12 + d] < 0.3,
+            "{} {}",
+            out[9 + d],
+            out[12 + d]
+        );
     }
 }

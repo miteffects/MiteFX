@@ -9,7 +9,7 @@
 //! run in steps of at most [`CONTROL`] samples (a line is never read closer than that to where it
 //! is written), so the EQ runs on blocks; the result is the same for any host block size.
 
-use crate::eq::{analog_response_db, BandProcessor, BandSettings, Dynamics, Placement};
+use crate::eq::{BandProcessor, BandSettings, Dynamics, Placement, analog_response_db};
 use crate::reverb::{Allpass, Delay, Wander};
 
 pub const TAPS: usize = 4;
@@ -116,7 +116,14 @@ pub struct TapSettings {
 
 impl Default for TapSettings {
     fn default() -> Self {
-        Self { on: false, time_ms: 500.0, level_db: 0.0, feedback: 0.4, pan: 0.0, pingpong: false }
+        Self {
+            on: false,
+            time_ms: 500.0,
+            level_db: 0.0,
+            feedback: 0.4,
+            pan: 0.0,
+            pingpong: false,
+        }
     }
 }
 
@@ -185,13 +192,24 @@ fn hp_mag(a: f64, w: f64) -> f64 {
 /// small-signal path: drive and the machine's saturation leave quiet signals alone). Echo `k`
 /// (from 1) of a tap is `level × loop^k × feedback^(k−1)`.
 pub fn loop_gain(s: &DelaySettings, tap: usize, freq: f64, fs: f64) -> f64 {
-    let eq_db: f64 = s.eq.iter().filter(|b| b.enabled).map(|b| analog_response_db(b, freq)).sum();
+    let eq_db: f64 =
+        s.eq.iter()
+            .filter(|b| b.enabled)
+            .map(|b| analog_response_db(b, freq))
+            .sum();
     let w = std::f64::consts::TAU * freq / fs;
     let fsf = fs as f32;
     let time_s = s.taps[tap].time_ms.clamp(MIN_TIME_MS, MAX_TIME_MS) * 0.001;
     let [p1, p2] = s.mode.lp_hz(time_s);
-    let hp = if s.mode.hp_hz() > 0.0 { hp_mag(f64::from(one_pole(Some(s.mode.hp_hz()), fsf)), w) } else { 1.0 };
-    10f64.powf(eq_db / 20.0) * hp * one_pole_mag(f64::from(one_pole(p1, fsf)), w) * one_pole_mag(f64::from(one_pole(p2, fsf)), w)
+    let hp = if s.mode.hp_hz() > 0.0 {
+        hp_mag(f64::from(one_pole(Some(s.mode.hp_hz()), fsf)), w)
+    } else {
+        1.0
+    };
+    10f64.powf(eq_db / 20.0)
+        * hp
+        * one_pole_mag(f64::from(one_pole(p1, fsf)), w)
+        * one_pole_mag(f64::from(one_pole(p2, fsf)), w)
 }
 
 /// Tap `tap`'s echoes for a mono input of unit amplitude at `freq`: `out[k]` is echo `k + 1`'s
@@ -204,9 +222,16 @@ pub fn echoes(s: &DelaySettings, tap: usize, freq: f64, fs: f64, out: &mut [[f32
     let mut e = if t.pingpong { [h, 0.0] } else { [h, h] };
     for o in out.iter_mut() {
         let (m, side) = (0.5 * (e[0] + e[1]), 0.5 * (e[0] - e[1]));
-        *o = [(level * (m * f64::from(gl) + side)).abs() as f32, (level * (m * f64::from(gr) - side)).abs() as f32];
+        *o = [
+            (level * (m * f64::from(gl) + side)).abs() as f32,
+            (level * (m * f64::from(gr) - side)).abs() as f32,
+        ];
         let fb = f64::from(t.feedback) * h;
-        e = if t.pingpong { [e[1] * fb, e[0] * fb] } else { [e[0] * fb, e[1] * fb] };
+        e = if t.pingpong {
+            [e[1] * fb, e[0] * fb]
+        } else {
+            [e[0] * fb, e[1] * fb]
+        };
     }
 }
 
@@ -214,17 +239,16 @@ pub fn echoes(s: &DelaySettings, tap: usize, freq: f64, fs: f64, out: &mut [[f32
 /// centre); the side is kept.
 fn pan_gains(pan: f32) -> (f32, f32) {
     let th = std::f32::consts::FRAC_PI_4 * (1.0 + pan.clamp(-1.0, 1.0));
-    (std::f32::consts::SQRT_2 * th.cos(), std::f32::consts::SQRT_2 * th.sin())
+    (
+        std::f32::consts::SQRT_2 * th.cos(),
+        std::f32::consts::SQRT_2 * th.sin(),
+    )
 }
 
 /// The machine's saturation: `tanh(k x) / k` (unity for quiet signals), none at `k` = 0.
 #[inline]
 fn saturate(x: f32, k: f32) -> f32 {
-    if k < 1e-3 {
-        x
-    } else {
-        (k * x).tanh() / k
-    }
+    if k < 1e-3 { x } else { (k * x).tanh() / k }
 }
 
 /// Holds a loop under 2 × SAFE, transparent under SAFE (slope-continuous at the knee).
@@ -253,7 +277,11 @@ impl Step {
     /// The next step toward `target` (one-pole, `k` per step), or straight there on a jump.
     fn next(&mut self, target: f32, k: f32, jump: bool) {
         self.from = if jump { target } else { self.to };
-        self.to = if jump { target } else { self.to + (target - self.to) * k };
+        self.to = if jump {
+            target
+        } else {
+            self.to + (target - self.to) * k
+        };
     }
 
     #[inline]
@@ -291,8 +319,10 @@ struct TapLine {
 impl TapLine {
     fn new(fs: f32, max: usize) -> Self {
         let ap_len = |ms: f32| ((ms * 0.001 * fs).round() as usize).max(1);
-        let diff = std::array::from_fn(|c| std::array::from_fn(|k| Allpass::new(ap_len(DIFF_MS[c][k]))));
-        let ap_total = std::array::from_fn(|c| DIFF_MS[c].iter().map(|&ms| ap_len(ms) as f32).sum());
+        let diff =
+            std::array::from_fn(|c| std::array::from_fn(|k| Allpass::new(ap_len(DIFF_MS[c][k]))));
+        let ap_total =
+            std::array::from_fn(|c| DIFF_MS[c].iter().map(|&ms| ap_len(ms) as f32).sum());
         Self {
             lines: [Delay::new(max), Delay::new(max)],
             diff,
@@ -438,13 +468,40 @@ impl DelayLine {
         }
         self.mode_now = s.mode;
         let w = self.weights;
-        let hard: f32 = Mode::ALL.iter().zip(w).map(|(m, w)| w * m.hardness()).sum::<f32>() + 6.0 * s.drive.clamp(0.0, 1.0);
+        let hard: f32 = Mode::ALL
+            .iter()
+            .zip(w)
+            .map(|(m, w)| w * m.hardness())
+            .sum::<f32>()
+            + 6.0 * s.drive.clamp(0.0, 1.0);
         self.hard.next(hard, k, jump);
-        let a_hp: f32 = Mode::ALL.iter().zip(w).map(|(m, w)| w * if m.hp_hz() > 0.0 { one_pole(Some(m.hp_hz()), fs) } else { 0.0 }).sum();
+        let a_hp: f32 = Mode::ALL
+            .iter()
+            .zip(w)
+            .map(|(m, w)| {
+                w * if m.hp_hz() > 0.0 {
+                    one_pole(Some(m.hp_hz()), fs)
+                } else {
+                    0.0
+                }
+            })
+            .sum();
         self.a_hp.next(a_hp, k, jump);
-        let depth: f32 = Mode::ALL.iter().zip(w).map(|(m, w)| w * m.mod_ms()).sum::<f32>() * s.mod_depth.clamp(0.0, 1.0) * 0.001 * fs;
-        self.depth.next(depth, 1.0 - (-(CONTROL as f32) / (DEPTH_GLIDE_MS * 0.001 * fs)).exp(), jump);
-        self.diff_g.next(DIFF_MAX * s.diffusion.clamp(0.0, 1.0), k, jump);
+        let depth: f32 = Mode::ALL
+            .iter()
+            .zip(w)
+            .map(|(m, w)| w * m.mod_ms())
+            .sum::<f32>()
+            * s.mod_depth.clamp(0.0, 1.0)
+            * 0.001
+            * fs;
+        self.depth.next(
+            depth,
+            1.0 - (-(CONTROL as f32) / (DEPTH_GLIDE_MS * 0.001 * fs)).exp(),
+            jump,
+        );
+        self.diff_g
+            .next(DIFF_MAX * s.diffusion.clamp(0.0, 1.0), k, jump);
         self.width.next(s.width.clamp(0.0, 1.5), k, jump);
         self.rate = s.mod_rate.max(0.01) / fs;
         for wd in &mut self.wander {
@@ -470,13 +527,18 @@ impl DelayLine {
             line.gin.next(on, k, jump);
             line.level.next(on * 10f32.powf(t.level_db / 20.0), k, jump);
             line.fb.next(t.feedback.clamp(0.0, 1.0), k, lj);
-            line.pp.next(if t.pingpong && stereo { 1.0 } else { 0.0 }, k, lj);
+            line.pp
+                .next(if t.pingpong && stereo { 1.0 } else { 0.0 }, k, lj);
             let (gl, gr) = pan_gains(t.pan);
             line.gl.next(gl, k, lj);
             line.gr.next(gr, k, lj);
             let time_s = line.time as f32 / fs;
             for p in 0..2 {
-                let a: f32 = Mode::ALL.iter().zip(w).map(|(m, w)| w * one_pole(m.lp_hz(time_s)[p], fs)).sum();
+                let a: f32 = Mode::ALL
+                    .iter()
+                    .zip(w)
+                    .map(|(m, w)| w * one_pole(m.lp_hz(time_s)[p], fs))
+                    .sum();
                 line.a_lp[p].next(a, k, lj);
             }
             if t.on {
@@ -484,14 +546,28 @@ impl DelayLine {
             }
         }
         let over = crate::gain_to_db(self.env.max(1e-9)) - s.duck_thresh_db;
-        self.duck.next(crate::db_to_gain(-over.clamp(0.0, s.duck_db.max(0.0))), 1.0, jump);
+        self.duck.next(
+            crate::db_to_gain(-over.clamp(0.0, s.duck_db.max(0.0))),
+            1.0,
+            jump,
+        );
     }
 
     /// Writes the echoes of `input` (one or two channels) into `wet` (as many). Never allocates.
     #[allow(clippy::needless_range_loop)] // the taps' parallel state, by side
-    pub fn process(&mut self, input: [&[f32]; 2], wet: [&mut [f32]; 2], stereo: bool, s: &DelaySettings) -> DelayTelemetry {
+    pub fn process(
+        &mut self,
+        input: [&[f32]; 2],
+        wet: [&mut [f32]; 2],
+        stereo: bool,
+        s: &DelaySettings,
+    ) -> DelayTelemetry {
         let [wl, wr] = wet;
-        let n = input[0].len().min(wl.len()).min(if stereo { input[1].len().min(wr.len()) } else { usize::MAX });
+        let n = input[0].len().min(wl.len()).min(if stereo {
+            input[1].len().min(wr.len())
+        } else {
+            usize::MAX
+        });
         let fs = self.fs;
         let att = 1.0 - (-1.0 / (DUCK_ATTACK_MS * 0.001 * fs)).exp();
         let rel = 1.0 - (-1.0 / (s.duck_release_ms.max(1.0) * 0.001 * fs)).exp();
@@ -553,8 +629,15 @@ impl DelayLine {
                         line.time_to = f64::from(target);
                         line.fade_left = xfade.max(1);
                     }
-                    let x = if line.fade_left > 0 { 1.0 - line.fade_left as f32 / xfade.max(1) as f32 } else { 0.0 };
-                    let (ga, gb) = ((std::f32::consts::FRAC_PI_2 * x).cos(), (std::f32::consts::FRAC_PI_2 * x).sin());
+                    let x = if line.fade_left > 0 {
+                        1.0 - line.fade_left as f32 / xfade.max(1) as f32
+                    } else {
+                        0.0
+                    };
+                    let (ga, gb) = (
+                        (std::f32::consts::FRAC_PI_2 * x).cos(),
+                        (std::f32::consts::FRAC_PI_2 * x).sin(),
+                    );
                     for c in 0..2 {
                         let read = |t: f64| {
                             let t = t as f32;
@@ -573,7 +656,11 @@ impl DelayLine {
                 {
                     let [bl, br] = buf;
                     for (p, b) in line.eq.iter_mut().zip(&s.eq) {
-                        p.set_target(&BandSettings { placement: Placement::Stereo, dynamics: Dynamics::default(), ..*b });
+                        p.set_target(&BandSettings {
+                            placement: Placement::Stereo,
+                            dynamics: Dynamics::default(),
+                            ..*b
+                        });
                         p.process(&mut [&mut bl[..len], &mut br[..len]]);
                     }
                 }

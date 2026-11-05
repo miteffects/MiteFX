@@ -44,9 +44,19 @@ pub struct JaParams {
 }
 
 /// Tape: a wide loop, soft and loose.
-pub const TAPE: JaParams = JaParams { coupling: 0.1, pinning: 0.3, reversible: 0.82, h_in: 2.5 };
+pub const TAPE: JaParams = JaParams {
+    coupling: 0.1,
+    pinning: 0.3,
+    reversible: 0.82,
+    h_in: 2.5,
+};
 /// Transformer: a narrow loop on a stiffer core.
-pub const TRANSFORMER: JaParams = JaParams { coupling: 0.1, pinning: 0.12, reversible: 0.9, h_in: 2.0 };
+pub const TRANSFORMER: JaParams = JaParams {
+    coupling: 0.1,
+    pinning: 0.12,
+    reversible: 0.9,
+    h_in: 2.0,
+};
 
 /// Substeps: at most this far apart in `w = asinh(h / H_S)`, and at most this many a sample.
 const MAX_DW: f32 = 0.5;
@@ -66,7 +76,10 @@ fn langevin_both(x: f32) -> (f32, f32) {
     if a < 0.3 {
         // The series (both differences cancel badly in f32 near 0); next terms under 1e-5.
         let x2 = x * x;
-        return (x * (1.0 / 3.0 - x2 / 45.0 + 2.0 * x2 * x2 / 945.0), 1.0 / 3.0 - x2 / 15.0 + 2.0 * x2 * x2 / 189.0);
+        return (
+            x * (1.0 / 3.0 - x2 / 45.0 + 2.0 * x2 * x2 / 945.0),
+            1.0 / 3.0 - x2 / 15.0 + 2.0 * x2 * x2 / 189.0,
+        );
     }
     let t = (-2.0 * a).exp();
     let r = 1.0 / (1.0 - t);
@@ -95,7 +108,10 @@ pub struct Ja {
 impl Ja {
     /// At rest at field `h` (on the anhysteretic curve, as after a long fade).
     pub fn rest(p: &JaParams, h: f32) -> Self {
-        Self { h, m: anhysteretic(p, h) }
+        Self {
+            h,
+            m: anhysteretic(p, h),
+        }
     }
 
     /// The equation's parts at `(h, m)` moving in direction `d`: the irreversible relaxation rate
@@ -146,7 +162,14 @@ impl Ja {
         let predicted = Self::relax(m, t0, s0, a0, b0, dh);
         let (k1, t1, r1, den1) = Self::parts(p, h + dh, predicted, d);
         let s1 = (t1 - t0) / dh;
-        Self::relax(m, t0, 0.5 * (s0 + s1), 0.5 * (a0 + k1 / den1), 0.5 * (b0 + r1 / den1), dh)
+        Self::relax(
+            m,
+            t0,
+            0.5 * (s0 + s1),
+            0.5 * (a0 + k1 / den1),
+            0.5 * (b0 + r1 / den1),
+            dh,
+        )
     }
 
     /// Drives the core to field `h` and returns its magnetisation.
@@ -169,7 +192,11 @@ impl Ja {
             let n = (((w1 - w0).abs() / MAX_DW).ceil() as usize).clamp(1, MAX_SUBSTEPS);
             let (mut at, mut m) = (self.h, self.m);
             for j in 1..=n {
-                let next = if j == n { h } else { H_S * (w0 + (w1 - w0) * j as f32 / n as f32).sinh() };
+                let next = if j == n {
+                    h
+                } else {
+                    H_S * (w0 + (w1 - w0) * j as f32 / n as f32).sinh()
+                };
                 m = Self::substep(p, at, m, next - at, d);
                 at = next;
             }
@@ -283,8 +310,18 @@ mod tests {
         let mut x = -40.0f64;
         while x < 40.0 {
             let (l, d) = langevin_both(x as f32);
-            let (wl, wd) = if x.abs() < 1e-3 { (x / 3.0, 1.0 / 3.0) } else { (1.0 / x.tanh() - 1.0 / x, 1.0 / (x * x) - 1.0 / x.sinh().powi(2)) };
-            worst = (worst.0.max((f64::from(l) - wl).abs()), worst.1.max((f64::from(d) - wd).abs()));
+            let (wl, wd) = if x.abs() < 1e-3 {
+                (x / 3.0, 1.0 / 3.0)
+            } else {
+                (
+                    1.0 / x.tanh() - 1.0 / x,
+                    1.0 / (x * x) - 1.0 / x.sinh().powi(2),
+                )
+            };
+            worst = (
+                worst.0.max((f64::from(l) - wl).abs()),
+                worst.1.max((f64::from(d) - wd).abs()),
+            );
             x += 0.000_731;
         }
         assert!(worst.0 < 1e-5 && worst.1 < 1e-5, "{worst:?}");
@@ -299,12 +336,24 @@ mod tests {
             for amp in [4.0f64, 40.0, 400.0] {
                 let run = |n: usize| -> Vec<f32> {
                     let mut core = Ja::rest(&p, 0.0);
-                    (0..3 * n).map(|i| core.step(&p, (amp * (std::f64::consts::TAU * i as f64 / n as f64).sin()) as f32)).skip(2 * n).collect()
+                    (0..3 * n)
+                        .map(|i| {
+                            core.step(
+                                &p,
+                                (amp * (std::f64::consts::TAU * i as f64 / n as f64).sin()) as f32,
+                            )
+                        })
+                        .skip(2 * n)
+                        .collect()
                 };
                 let fine = run(6144);
                 for n in [12usize, 48] {
                     let coarse = run(n);
-                    let worst = coarse.iter().enumerate().map(|(i, m)| (m - fine[i * (6144 / n)]).abs()).fold(0.0f32, f32::max);
+                    let worst = coarse
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| (m - fine[i * (6144 / n)]).abs())
+                        .fold(0.0f32, f32::max);
                     assert!(worst < 0.005, "{p:?} amp {amp}, {n} a cycle: {worst}");
                 }
             }
@@ -319,7 +368,10 @@ mod tests {
             let mut core = Ja::rest(&p, 0.0);
             let mut peak = 0.0f32;
             for i in 0..3 * n {
-                let m = core.step(&p, 2.0 * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32);
+                let m = core.step(
+                    &p,
+                    2.0 * (std::f64::consts::TAU * i as f64 / n as f64).sin() as f32,
+                );
                 if i >= 2 * n && i % (n / 4) == 0 {
                     peak = peak.max(m.abs());
                 }

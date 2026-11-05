@@ -10,13 +10,18 @@ fn main() {
     for (k, b) in s.bands.iter_mut().enumerate() {
         *b = mite_dsp::reverb::DecayBand::bell(200.0 * 3f32.powi(k as i32), 0.7, 1.0);
     }
-    let freqs: Vec<f64> = (0..240).map(|i| 20.0 * 1000f64.powf(i as f64 / 239.0)).collect();
+    let freqs: Vec<f64> = (0..240)
+        .map(|i| 20.0 * 1000f64.powf(i as f64 / 239.0))
+        .collect();
     let mut out = vec![0.0; 240];
     let t = std::time::Instant::now();
     for _ in 0..100 {
         mite_dsp::reverb::decay_curve(&s, &freqs, 48_000.0, &mut out);
     }
-    println!("decay curve, 240 points, eight bells: {:.2} ms", t.elapsed().as_secs_f64() * 10.0);
+    println!(
+        "decay curve, 240 points, eight bells: {:.2} ms",
+        t.elapsed().as_secs_f64() * 10.0
+    );
     let fs = 48_000.0;
     let mut seed = 3u32;
     let mut noise = move || {
@@ -27,14 +32,48 @@ fn main() {
     };
     let n = 48_000 * 10;
     let x: Vec<f32> = (0..n).map(|_| noise()).collect();
-    let rms = |v: &[f32]| (v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+    let rms =
+        |v: &[f32]| (v.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
     for (name, s) in [
         ("default", ReverbSettings::default()),
-        ("no early", ReverbSettings { early: 0.0, ..ReverbSettings::default() }),
-        ("early only", ReverbSettings { decay_s: 0.1, ..ReverbSettings::default() }),
-        ("small 0.6 s", ReverbSettings { size: 0.15, decay_s: 0.6, ..ReverbSettings::default() }),
-        ("hall 4 s", ReverbSettings { size: 0.85, decay_s: 4.0, ..ReverbSettings::default() }),
-        ("huge 15 s", ReverbSettings { size: 1.0, decay_s: 15.0, ..ReverbSettings::default() }),
+        (
+            "no early",
+            ReverbSettings {
+                early: 0.0,
+                ..ReverbSettings::default()
+            },
+        ),
+        (
+            "early only",
+            ReverbSettings {
+                decay_s: 0.1,
+                ..ReverbSettings::default()
+            },
+        ),
+        (
+            "small 0.6 s",
+            ReverbSettings {
+                size: 0.15,
+                decay_s: 0.6,
+                ..ReverbSettings::default()
+            },
+        ),
+        (
+            "hall 4 s",
+            ReverbSettings {
+                size: 0.85,
+                decay_s: 4.0,
+                ..ReverbSettings::default()
+            },
+        ),
+        (
+            "huge 15 s",
+            ReverbSettings {
+                size: 1.0,
+                decay_s: 15.0,
+                ..ReverbSettings::default()
+            },
+        ),
         ("all bands", {
             // Every decay band and every tone band on: the most the EQs can cost.
             let mut s = ReverbSettings::default();
@@ -42,7 +81,12 @@ fn main() {
                 *b = mite_dsp::reverb::DecayBand::bell(100.0 * 2f32.powi(k as i32), 0.7, 1.0);
             }
             for (k, b) in s.eq.iter_mut().enumerate() {
-                *b = mite_dsp::eq::BandSettings { enabled: true, freq: 100.0 * 2f64.powi(k as i32), gain_db: -3.0, ..Default::default() };
+                *b = mite_dsp::eq::BandSettings {
+                    enabled: true,
+                    freq: 100.0 * 2f64.powi(k as i32),
+                    gain_db: -3.0,
+                    ..Default::default()
+                };
             }
             s.eq[0].kind = mite_dsp::eq::BandType::LowCut;
             s.eq[0].slope = 8;

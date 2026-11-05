@@ -20,8 +20,13 @@
 
 use realfft::num_complex::Complex;
 
-use crate::analyzer::{spectrum_point_freq, spectrum_point_oct, Analyzer, LogSpectrum, ANALYZER_SIZE, SPECTRUM_POINTS};
-use crate::eq::{BandSettings, BandType, Dynamics, Placement, CURVE_SMOOTH_MS, FREQ_MAX, FREQ_MIN, RELATIVE_WIDTH_OCT, SMOOTHING_MAX_OCT};
+use crate::analyzer::{
+    ANALYZER_SIZE, Analyzer, LogSpectrum, SPECTRUM_POINTS, spectrum_point_freq, spectrum_point_oct,
+};
+use crate::eq::{
+    BandSettings, BandType, CURVE_SMOOTH_MS, Dynamics, FREQ_MAX, FREQ_MIN, Placement,
+    RELATIVE_WIDTH_OCT, SMOOTHING_MAX_OCT,
+};
 use crate::filter::Analog;
 use crate::stft::Stft;
 
@@ -121,7 +126,10 @@ impl SpectralBands {
         let reads = freqs
             .iter()
             .map(|&f| {
-                let (a, b) = (point_pos(f - 0.5 * bin_hz).max(0.0).ceil(), point_pos(f + 0.5 * bin_hz).min(last).floor());
+                let (a, b) = (
+                    point_pos(f - 0.5 * bin_hz).max(0.0).ceil(),
+                    point_pos(f + 0.5 * bin_hz).min(last).floor(),
+                );
                 if f > 0.0 && b >= a + 1.0 {
                     BinRead::Mean(a as usize, b as usize)
                 } else {
@@ -140,7 +148,10 @@ impl SpectralBands {
             history: [vec![0.0; ANALYZER_SIZE], vec![0.0; ANALYZER_SIZE]],
             write: 0,
             signal: vec![0.0; ANALYZER_SIZE],
-            power: [vec![0.0; ANALYZER_SIZE / 2 + 1], vec![0.0; ANALYZER_SIZE / 2 + 1]],
+            power: [
+                vec![0.0; ANALYZER_SIZE / 2 + 1],
+                vec![0.0; ANALYZER_SIZE / 2 + 1],
+            ],
             analyzer: Analyzer::new(ANALYZER_SIZE),
             spectrum: LogSpectrum::new(ANALYZER_SIZE, sample_rate),
             levels: std::array::from_fn(|_| vec![FLOOR_DB as f32; SPECTRUM_POINTS]),
@@ -187,7 +198,13 @@ impl SpectralBands {
 
     /// Runs a stereo buffer through `stft` for `bands`: the detector hears each hop just before
     /// the STFT takes it in. Allocation-free.
-    pub fn process(&mut self, stft: &mut Stft, left: &mut [f32], right: &mut [f32], bands: &[BandSettings]) {
+    pub fn process(
+        &mut self,
+        stft: &mut Stft,
+        left: &mut [f32],
+        right: &mut [f32],
+        bands: &[BandSettings],
+    ) {
         let hop = stft.hop();
         for (l, r) in left.chunks_mut(hop).zip(right.chunks_mut(hop)) {
             self.listen(l, r);
@@ -237,7 +254,12 @@ impl SpectralBands {
     ///
     /// Stereo, Left and Right bands are diagonal in L/R and commute, so they add up in dB; Mid
     /// and Side bands combine as matrices, applied after them.
-    fn process_frame(&mut self, left: &mut [Complex<f64>], right: &mut [Complex<f64>], bands: &[BandSettings]) {
+    fn process_frame(
+        &mut self,
+        left: &mut [Complex<f64>],
+        right: &mut [Complex<f64>],
+        bands: &[BandSettings],
+    ) {
         let bands = &bands[..bands.len().min(self.states.len())];
         let detect = self.frames % DETECT_EVERY_FRAMES == 0;
         self.frames = self.frames.wrapping_add(1);
@@ -270,7 +292,11 @@ impl SpectralBands {
             self.compressor_targets(b, level_index(s.placement), &d, detect);
             let state = &mut self.states[b];
             let mut peak = 0.0f64;
-            for (g, (&t, &w)) in state.gain.iter_mut().zip(self.target.iter().zip(&state.weight)) {
+            for (g, (&t, &w)) in state
+                .gain
+                .iter_mut()
+                .zip(self.target.iter().zip(&state.weight))
+            {
                 *g = t * w;
                 if g.abs() < GAIN_EPSILON_DB {
                     *g = 0.0;
@@ -315,7 +341,10 @@ impl SpectralBands {
         }
         for (k, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
             let (dl, dr) = (self.diag_db[0][k], self.diag_db[1][k]);
-            let (gl, gr) = (if dl == 0.0 { 1.0 } else { db_to_lin(dl) }, if dr == 0.0 { 1.0 } else { db_to_lin(dr) });
+            let (gl, gr) = (
+                if dl == 0.0 { 1.0 } else { db_to_lin(dl) },
+                if dr == 0.0 { 1.0 } else { db_to_lin(dr) },
+            );
             if matrices {
                 let m = self.matrix[k];
                 let (a, c) = (*l * gl, *r * gr);
@@ -333,7 +362,11 @@ impl SpectralBands {
     fn measure(&mut self, needed: [bool; 5]) {
         let n = ANALYZER_SIZE;
         let (newer, older) = (n - self.write, self.write);
-        let analyse = |signal: &mut Vec<f32>, history: &[Vec<f32>; 2], f: &dyn Fn(f32, f32) -> f32, out: &mut Vec<f32>, analyzer: &mut Analyzer| {
+        let analyse = |signal: &mut Vec<f32>,
+                       history: &[Vec<f32>; 2],
+                       f: &dyn Fn(f32, f32) -> f32,
+                       out: &mut Vec<f32>,
+                       analyzer: &mut Analyzer| {
             // Oldest first: the ring from `write` on, then up to it.
             for (i, x) in signal.iter_mut().enumerate() {
                 let k = if i < newer { older + i } else { i - newer };
@@ -344,11 +377,23 @@ impl SpectralBands {
         let [pl, pr] = &mut self.power;
         let channels = needed[0] || needed[1] || needed[2];
         if channels {
-            analyse(&mut self.signal, &self.history, &|l, _| l, pl, &mut self.analyzer);
+            analyse(
+                &mut self.signal,
+                &self.history,
+                &|l, _| l,
+                pl,
+                &mut self.analyzer,
+            );
             if needed[1] {
                 self.spectrum.read(pl, &mut self.levels[1]);
             }
-            analyse(&mut self.signal, &self.history, &|_, r| r, pr, &mut self.analyzer);
+            analyse(
+                &mut self.signal,
+                &self.history,
+                &|_, r| r,
+                pr,
+                &mut self.analyzer,
+            );
             if needed[2] {
                 self.spectrum.read(pr, &mut self.levels[2]);
             }
@@ -360,11 +405,23 @@ impl SpectralBands {
             }
         }
         if needed[3] {
-            analyse(&mut self.signal, &self.history, &|l, r| 0.5 * (l + r), pl, &mut self.analyzer);
+            analyse(
+                &mut self.signal,
+                &self.history,
+                &|l, r| 0.5 * (l + r),
+                pl,
+                &mut self.analyzer,
+            );
             self.spectrum.read(pl, &mut self.levels[3]);
         }
         if needed[4] {
-            analyse(&mut self.signal, &self.history, &|l, r| 0.5 * (l - r), pl, &mut self.analyzer);
+            analyse(
+                &mut self.signal,
+                &self.history,
+                &|l, r| 0.5 * (l - r),
+                pl,
+                &mut self.analyzer,
+            );
             self.spectrum.read(pl, &mut self.levels[4]);
         }
     }
@@ -411,7 +468,13 @@ impl SpectralBands {
             }
         }
         let [threshold_db, relative_db, ratio, range_db] = *curve;
-        Dynamics { threshold_db, relative_db, ratio, range_db, ..*d }
+        Dynamics {
+            threshold_db,
+            relative_db,
+            ratio,
+            range_db,
+            ..*d
+        }
     }
 
     /// Spectral compressor: each point's level envelope (advanced on detection frames) through
@@ -432,7 +495,10 @@ impl SpectralBands {
             // carry the same attack/release bias) averaged in dB over 0.6 octave around it.
             // The curve then has its threshold at `relative_db` over them.
             prefix(&state.level, &mut self.sum);
-            let relative = Dynamics { threshold_db: d.relative_db, ..*d };
+            let relative = Dynamics {
+                threshold_db: d.relative_db,
+                ..*d
+            };
             let half = 0.5 * RELATIVE_WIDTH_OCT / spectrum_point_oct();
             for i in 0..SPECTRUM_POINTS {
                 let around = window_mean(&self.sum, i, half);
@@ -531,9 +597,15 @@ pub fn region(s: &BandSettings, f: f64) -> f64 {
     let x = f / s.freq.clamp(FREQ_MIN, FREQ_MAX);
     let q = s.q.clamp(0.025, 40.0);
     let proto = match s.kind {
-        BandType::Bell | BandType::Notch | BandType::BandPass => Analog::second(0.0, 1.0 / q, 0.0, 1.0, 1.0 / q, 1.0),
-        BandType::LowShelf | BandType::LowCut => Analog::second(0.0, 0.0, 1.0, 1.0, std::f64::consts::SQRT_2, 1.0),
-        BandType::HighShelf | BandType::HighCut => Analog::second(1.0, 0.0, 0.0, 1.0, std::f64::consts::SQRT_2, 1.0),
+        BandType::Bell | BandType::Notch | BandType::BandPass => {
+            Analog::second(0.0, 1.0 / q, 0.0, 1.0, 1.0 / q, 1.0)
+        }
+        BandType::LowShelf | BandType::LowCut => {
+            Analog::second(0.0, 0.0, 1.0, 1.0, std::f64::consts::SQRT_2, 1.0)
+        }
+        BandType::HighShelf | BandType::HighCut => {
+            Analog::second(1.0, 0.0, 0.0, 1.0, std::f64::consts::SQRT_2, 1.0)
+        }
         BandType::TiltShelf | BandType::FlatTilt | BandType::AllPass => return 1.0,
     };
     proto.magnitude_sq(x).min(1.0)
@@ -560,11 +632,15 @@ mod tests {
     }
 
     fn tone(n: usize, freq: f64, amp: f64) -> Vec<f64> {
-        (0..n).map(|i| amp * (2.0 * std::f64::consts::PI * freq * i as f64 / FS).sin()).collect()
+        (0..n)
+            .map(|i| amp * (2.0 * std::f64::consts::PI * freq * i as f64 / FS).sin())
+            .collect()
     }
 
     fn mix(parts: &[&[f64]]) -> Vec<f32> {
-        (0..parts[0].len()).map(|i| parts.iter().map(|p| p[i]).sum::<f64>() as f32).collect()
+        (0..parts[0].len())
+            .map(|i| parts.iter().map(|p| p[i]).sum::<f64>() as f32)
+            .collect()
     }
 
     /// Runs stereo input through an STFT with `bands`.
@@ -598,8 +674,22 @@ mod tests {
     /// A relative spectral compressor: cuts what sticks out more than 6 dB over its surroundings
     /// back towards them (ratio 10), by up to 12 dB.
     fn relative_band(freq: f64, q: f64) -> BandSettings {
-        let mut band = BandSettings { enabled: true, kind: BandType::Bell, freq, q, ..Default::default() };
-        band.dynamics = Dynamics { enabled: true, spectral: true, relative: true, relative_db: 6.0, ratio: 10.0, range_db: -12.0, ..Dynamics::default() };
+        let mut band = BandSettings {
+            enabled: true,
+            kind: BandType::Bell,
+            freq,
+            q,
+            ..Default::default()
+        };
+        band.dynamics = Dynamics {
+            enabled: true,
+            spectral: true,
+            relative: true,
+            relative_db: 6.0,
+            ratio: 10.0,
+            range_db: -12.0,
+            ..Dynamics::default()
+        };
         band
     }
 
@@ -615,7 +705,10 @@ mod tests {
         // The noise around it barely changes: measure without the tone.
         let (quiet, _) = run(&mix(&[&hiss]), &mix(&[&hiss]), &[band]);
         let noise_change = 20.0 * (rms(&quiet) / rms(&mix(&[&hiss]))).log10();
-        assert!(noise_change.abs() < 1.0, "plain noise changed by {noise_change:.2} dB");
+        assert!(
+            noise_change.abs() < 1.0,
+            "plain noise changed by {noise_change:.2} dB"
+        );
     }
 
     #[test]
@@ -623,8 +716,22 @@ mod tests {
         let n = 96_000;
         let (loud, soft) = (tone(n, 1_500.0, 0.5), tone(n, 3_000.0, 0.003));
         let input = mix(&[&loud, &soft]);
-        let mut band = BandSettings { enabled: true, kind: BandType::Bell, freq: 2_000.0, q: 0.3, ..Default::default() };
-        band.dynamics = Dynamics { enabled: true, mode: DynamicsMode::Compressor, spectral: true, threshold_db: -45.0, ratio: 4.0, range_db: -12.0, ..Dynamics::default() };
+        let mut band = BandSettings {
+            enabled: true,
+            kind: BandType::Bell,
+            freq: 2_000.0,
+            q: 0.3,
+            ..Default::default()
+        };
+        band.dynamics = Dynamics {
+            enabled: true,
+            mode: DynamicsMode::Compressor,
+            spectral: true,
+            threshold_db: -45.0,
+            ratio: 4.0,
+            range_db: -12.0,
+            ..Dynamics::default()
+        };
         let (out, _) = run(&input, &input, &[band]);
         let loud_cut = 20.0 * (amplitude(&out, 1_500.0) / amplitude(&input, 1_500.0)).log10();
         let soft_cut = 20.0 * (amplitude(&out, 3_000.0) / amplitude(&input, 3_000.0)).log10();
@@ -638,8 +745,23 @@ mod tests {
         // the threshold jumps from far below it to above it. The cut follows over several frames
         // (eased like the band's other parameters), not at once.
         let input = mix(&[&tone(48_000, 1_500.0, 0.5)]);
-        let mut band = BandSettings { enabled: true, kind: BandType::Bell, freq: 1_500.0, q: 0.5, ..Default::default() };
-        band.dynamics = Dynamics { enabled: true, mode: DynamicsMode::Compressor, spectral: true, smoothing: 0.0, threshold_db: -60.0, ratio: 4.0, range_db: -24.0, ..Dynamics::default() };
+        let mut band = BandSettings {
+            enabled: true,
+            kind: BandType::Bell,
+            freq: 1_500.0,
+            q: 0.5,
+            ..Default::default()
+        };
+        band.dynamics = Dynamics {
+            enabled: true,
+            mode: DynamicsMode::Compressor,
+            spectral: true,
+            smoothing: 0.0,
+            threshold_db: -60.0,
+            ratio: 4.0,
+            range_db: -24.0,
+            ..Dynamics::default()
+        };
         let mut stft = Stft::new(SIZE);
         let mut engine = SpectralBands::new(1, SIZE, FS);
         let (mut l, mut r) = (input.clone(), input);
@@ -652,10 +774,20 @@ mod tests {
             peaks.push(engine.band_peaks()[0]);
         }
         let (before, after) = (peaks[119], *peaks.last().unwrap());
-        assert!(after - before > 10.0, "the cut barely changed: {before:.1} → {after:.1} dB");
-        let steps: Vec<f64> = peaks[119..].windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        assert!(
+            after - before > 10.0,
+            "the cut barely changed: {before:.1} → {after:.1} dB"
+        );
+        let steps: Vec<f64> = peaks[119..]
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .collect();
         let largest = steps.iter().cloned().fold(0.0, f64::max);
-        assert!(largest < 0.4 * (after - before), "the cut stepped {largest:.1} of {:.1} dB in one frame", after - before);
+        assert!(
+            largest < 0.4 * (after - before),
+            "the cut stepped {largest:.1} of {:.1} dB in one frame",
+            after - before
+        );
     }
 
     #[test]
@@ -675,7 +807,10 @@ mod tests {
         };
         let (fixed, relative) = (change(false), change(true));
         assert!(fixed < -6.0, "fixed threshold only moved {fixed:.2} dB");
-        assert!(relative > -1.0, "relative moved even noise by {relative:.2} dB");
+        assert!(
+            relative > -1.0,
+            "relative moved even noise by {relative:.2} dB"
+        );
     }
 
     #[test]
@@ -685,17 +820,41 @@ mod tests {
         // with no smoothing only the loud one moves; with full smoothing (half an octave) the
         // quiet one is pulled down too.
         let n = 96_000;
-        let input = mix(&[&tone(n, 1_500.0, 0.5), &tone(n, 1_500.0 * 2f64.powf(0.25), 0.0015)]);
+        let input = mix(&[
+            &tone(n, 1_500.0, 0.5),
+            &tone(n, 1_500.0 * 2f64.powf(0.25), 0.0015),
+        ]);
         let quiet_cut = |smoothing: f64| {
-            let mut band = BandSettings { enabled: true, kind: BandType::Bell, freq: 2_000.0, q: 0.3, ..Default::default() };
-            band.dynamics = Dynamics { enabled: true, mode: DynamicsMode::Compressor, spectral: true, smoothing, threshold_db: -50.0, ratio: 4.0, range_db: -12.0, ..Dynamics::default() };
+            let mut band = BandSettings {
+                enabled: true,
+                kind: BandType::Bell,
+                freq: 2_000.0,
+                q: 0.3,
+                ..Default::default()
+            };
+            band.dynamics = Dynamics {
+                enabled: true,
+                mode: DynamicsMode::Compressor,
+                spectral: true,
+                smoothing,
+                threshold_db: -50.0,
+                ratio: 4.0,
+                range_db: -12.0,
+                ..Dynamics::default()
+            };
             let (out, _) = run(&input, &input, &[band]);
             let f = 1_500.0 * 2f64.powf(0.25);
             20.0 * (amplitude(&out, f) / amplitude(&input, f)).log10()
         };
         let (alone, spread) = (quiet_cut(0.0), quiet_cut(1.0));
-        assert!(alone.abs() < 0.5, "unsmoothed, the quiet tone moved {alone:.2} dB");
-        assert!(spread < alone - 1.0, "smoothed, the quiet tone only moved {spread:.2} dB");
+        assert!(
+            alone.abs() < 0.5,
+            "unsmoothed, the quiet tone moved {alone:.2} dB"
+        );
+        assert!(
+            spread < alone - 1.0,
+            "smoothed, the quiet tone only moved {spread:.2} dB"
+        );
     }
 
     #[test]
@@ -705,7 +864,9 @@ mod tests {
         // The tone is in the mid; an opposite-polarity tone at another frequency is the side.
         let side = tone(n, 5_000.0, 0.3);
         let l = mix(&[&hiss, &ring, &side]);
-        let r: Vec<f32> = (0..n).map(|i| (hiss[i] + ring[i] - side[i]) as f32).collect();
+        let r: Vec<f32> = (0..n)
+            .map(|i| (hiss[i] + ring[i] - side[i]) as f32)
+            .collect();
         let mut band = relative_band(3_000.0, 0.2);
         band.placement = Placement::Mid;
         let (ol, or) = run(&l, &r, &[band]);
@@ -749,9 +910,17 @@ mod tests {
     fn bands_that_do_not_use_the_spectrum_change_nothing() {
         let n = 20_000;
         let input = mix(&[&noise(n, 3, 0.2)]);
-        let plain = BandSettings { enabled: true, kind: BandType::Bell, freq: 1_000.0, gain_db: 6.0, ..Default::default() };
+        let plain = BandSettings {
+            enabled: true,
+            kind: BandType::Bell,
+            freq: 1_000.0,
+            gain_db: 6.0,
+            ..Default::default()
+        };
         let (out, _) = run(&input, &input, &[plain]);
-        let worst = (2 * SIZE..n).map(|i| (out[i] - input[i - SIZE]).abs()).fold(0.0f32, f32::max);
+        let worst = (2 * SIZE..n)
+            .map(|i| (out[i] - input[i - SIZE]).abs())
+            .fold(0.0f32, f32::max);
         assert!(worst < 1e-6, "{worst}");
     }
 }

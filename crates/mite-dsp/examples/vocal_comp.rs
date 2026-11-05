@@ -4,7 +4,7 @@
 //!
 //!     cargo run --release -p mite-dsp --example vocal_comp
 
-use mite_dsp::dynamics::{CompSettings, Compressor, Smart, Stage, STAGES};
+use mite_dsp::dynamics::{CompSettings, Compressor, STAGES, Smart, Stage};
 use mite_dsp::loudness::KWeighting;
 
 const FS: f32 = 48_000.0;
@@ -30,10 +30,15 @@ fn voice(phrases: &[(f32, f32)]) -> (Vec<f32>, Vec<Option<usize>>) {
             let g = 10f32.powf((db + 8.0 * (rnd() - 0.5)) / 20.0);
             let f0 = 180.0 + 120.0 * rnd();
             for i in 0..syl {
-                let env = (i as f32 / (0.015 * FS)).min(1.0) * ((syl - i) as f32 / (0.03 * FS)).min(1.0);
+                let env =
+                    (i as f32 / (0.015 * FS)).min(1.0) * ((syl - i) as f32 / (0.03 * FS)).min(1.0);
                 let t = x.len() as f32 / FS;
                 phase += f0 * (1.0 + 0.004 * (std::f32::consts::TAU * 5.5 * t).sin()) / FS;
-                let v: f32 = (1..14).map(|k| (std::f32::consts::TAU * phase * k as f32).sin() / (k as f32).powf(1.2)).sum();
+                let v: f32 = (1..14)
+                    .map(|k| {
+                        (std::f32::consts::TAU * phase * k as f32).sin() / (k as f32).powf(1.2)
+                    })
+                    .sum();
                 x.push(g * env * v * 0.5);
                 tag.push(Some(p));
             }
@@ -56,7 +61,9 @@ fn phrase_db(y: &[f32], tag: &[Option<usize>], n: usize) -> Vec<f64> {
             acc[*p].1 += 1;
         }
     }
-    acc.iter().map(|(e, c)| 10.0 * (e / (*c).max(1) as f64).max(1e-20).log10()).collect()
+    acc.iter()
+        .map(|(e, c)| 10.0 * (e / (*c).max(1) as f64).max(1e-20).log10())
+        .collect()
 }
 
 /// How different two renders are: the difference's level against the first's, dB.
@@ -69,13 +76,35 @@ fn diff_db(a: &[f32], b: &[f32]) -> f64 {
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("attack") {
         let (x, _) = voice(&[(6.0, -20.0), (6.0, -14.0)]);
-        let amount: f32 = std::env::var("AMOUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.7);
-        let det = match std::env::var("DET").as_deref() { Ok("peak") => mite_dsp::dynamics::Detector::Peak, _ => mite_dsp::dynamics::Detector::Rms };
+        let amount: f32 = std::env::var("AMOUNT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.7);
+        let det = match std::env::var("DET").as_deref() {
+            Ok("peak") => mite_dsp::dynamics::Detector::Peak,
+            _ => mite_dsp::dynamics::Detector::Rms,
+        };
         let auto = std::env::var("AUTO").map_or(true, |v| v != "0");
         let render = |smart: Smart, attack: f32, ratio: f32, knee: f32| {
             let mut stages = [Stage::default(); STAGES];
-            stages[0] = Stage { on: true, threshold_db: -24.0, ratio, knee_db: knee, attack_ms: attack, release_ms: 120.0, detector: det, ..Stage::default() };
-            let s = CompSettings { stages, smart, auto_makeup: auto, smart_amount: amount, sibilance: 0.5, ..CompSettings::default() };
+            stages[0] = Stage {
+                on: true,
+                threshold_db: -24.0,
+                ratio,
+                knee_db: knee,
+                attack_ms: attack,
+                release_ms: 120.0,
+                detector: det,
+                ..Stage::default()
+            };
+            let s = CompSettings {
+                stages,
+                smart,
+                auto_makeup: auto,
+                smart_amount: amount,
+                sibilance: 0.5,
+                ..CompSettings::default()
+            };
             let mut c = Compressor::new(FS);
             c.prepare(FS, &s);
             let mut y = x.clone();
@@ -86,9 +115,18 @@ fn main() {
         };
         // Each syllable's first 30 ms against its whole, dB (how much of the attack gets through).
         let (_, tag) = voice(&[(6.0, -20.0), (6.0, -14.0)]);
-        let onsets: Vec<usize> = (1..tag.len()).filter(|&i| tag[i].is_some() && tag[i - 1].is_none()).collect();
+        let onsets: Vec<usize> = (1..tag.len())
+            .filter(|&i| tag[i].is_some() && tag[i - 1].is_none())
+            .collect();
         let punch = |y: &[f32]| {
-            let rms = |r: std::ops::Range<usize>| (y[r.clone()].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / r.len() as f64).sqrt();
+            let rms = |r: std::ops::Range<usize>| {
+                (y[r.clone()]
+                    .iter()
+                    .map(|v| f64::from(*v).powi(2))
+                    .sum::<f64>()
+                    / r.len() as f64)
+                    .sqrt()
+            };
             let mut acc = 0.0;
             for &o in &onsets {
                 let mut end = o;
@@ -108,31 +146,73 @@ fn main() {
             let y = render(Smart::Vocal, att, 4.0, 6.0);
             let g = |ms: f64| {
                 let i = o + (ms * 48.0) as usize;
-                let r = |v: &[f32]| (v[i - 48..i + 48].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>()).sqrt();
+                let r = |v: &[f32]| {
+                    (v[i - 48..i + 48]
+                        .iter()
+                        .map(|s| f64::from(*s).powi(2))
+                        .sum::<f64>())
+                    .sqrt()
+                };
                 20.0 * (r(&y) / r(&x)).log10()
             };
-            let pts: Vec<String> = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 300.0].iter().map(|&t| format!("{:6.1}", g(t))).collect();
-            println!("vocal attack {att:6.2}: gain at 2,5,10,20,50,100,200,300 ms: {}", pts.join(" "));
+            let pts: Vec<String> = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 300.0]
+                .iter()
+                .map(|&t| format!("{:6.1}", g(t)))
+                .collect();
+            println!(
+                "vocal attack {att:6.2}: gain at 2,5,10,20,50,100,200,300 ms: {}",
+                pts.join(" ")
+            );
         }
-        for (name, smart, ratio, knee) in [("off 4:1", Smart::Off, 4.0, 6.0), ("vocal", Smart::Vocal, 4.0, 6.0)] {
+        for (name, smart, ratio, knee) in [
+            ("off 4:1", Smart::Off, 4.0, 6.0),
+            ("vocal", Smart::Vocal, 4.0, 6.0),
+        ] {
             for att in [0.05, 10.0, 50.0, 250.0] {
-                println!("{name:10} attack {att:6.2} ms: onsets {:+.2} dB against the syllable", punch(&render(smart, att, ratio, knee)));
+                println!(
+                    "{name:10} attack {att:6.2} ms: onsets {:+.2} dB against the syllable",
+                    punch(&render(smart, att, ratio, knee))
+                );
             }
             let a = render(smart, 0.05, ratio, knee);
             let b = render(smart, 250.0, ratio, knee);
             let reduced = diff_db(&x, &a);
-            println!("{name:10} attack 0.05 vs 250 ms: difference {:6.1} dB under the output; the compression itself {:6.1} dB", diff_db(&a, &b), reduced);
+            println!(
+                "{name:10} attack 0.05 vs 250 ms: difference {:6.1} dB under the output; the compression itself {:6.1} dB",
+                diff_db(&a, &b),
+                reduced
+            );
         }
         return;
     }
-    let phrases = [(6.0, -30.0), (6.0, -20.0), (6.0, -12.0), (6.0, -26.0), (6.0, -16.0), (6.0, -34.0)];
+    let phrases = [
+        (6.0, -30.0),
+        (6.0, -20.0),
+        (6.0, -12.0),
+        (6.0, -26.0),
+        (6.0, -16.0),
+        (6.0, -34.0),
+    ];
     let (x, tag) = voice(&phrases);
     let n = phrases.len();
     let input = phrase_db(&x, &tag, n);
     let run = |smart: Smart, threshold: f32, ratio: f32, knee: f32, auto: bool| {
         let mut stages = [Stage::default(); STAGES];
-        stages[0] = Stage { on: true, threshold_db: threshold, ratio, knee_db: knee, attack_ms: 10.0, release_ms: 120.0, ..Stage::default() };
-        let s = CompSettings { stages, smart, auto_makeup: auto, ..CompSettings::default() };
+        stages[0] = Stage {
+            on: true,
+            threshold_db: threshold,
+            ratio,
+            knee_db: knee,
+            attack_ms: 10.0,
+            release_ms: 120.0,
+            ..Stage::default()
+        };
+        let s = CompSettings {
+            stages,
+            smart,
+            auto_makeup: auto,
+            ..CompSettings::default()
+        };
         let mut c = Compressor::new(FS);
         c.prepare(FS, &s);
         let mut y = x.clone();
@@ -141,7 +221,9 @@ fn main() {
         }
         phrase_db(&y, &tag, n)
     };
-    let spread = |v: &[f64]| v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min);
+    let spread = |v: &[f64]| {
+        v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
+    };
     let show = |name: &str, v: &[f64]| {
         let d: Vec<String> = v.iter().map(|d| format!("{d:6.1}")).collect();
         println!("{name:28} {}   spread {:5.1} dB", d.join(" "), spread(v));
@@ -150,8 +232,14 @@ fn main() {
     for auto in [false, true] {
         println!("auto makeup {auto}");
         for t in [-30.0, -24.0, -18.0] {
-            show(&format!("off 4:1 at {t}"), &run(Smart::Off, t, 4.0, 6.0, auto));
-            show(&format!("vocal at {t}"), &run(Smart::Vocal, t, 4.0, 6.0, auto));
+            show(
+                &format!("off 4:1 at {t}"),
+                &run(Smart::Off, t, 4.0, 6.0, auto),
+            );
+            show(
+                &format!("vocal at {t}"),
+                &run(Smart::Vocal, t, 4.0, 6.0, auto),
+            );
         }
     }
 }

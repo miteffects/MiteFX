@@ -17,13 +17,20 @@ fn main() {
         })
         .collect();
     for reduce in [Reduce::Shelf, Reduce::Band, Reduce::Wide, Reduce::Spectral] {
-        let s = DeEssSettings { reduce, threshold_db: -20.0, ..DeEssSettings::default() };
+        let s = DeEssSettings {
+            reduce,
+            threshold_db: -20.0,
+            ..DeEssSettings::default()
+        };
         let mut d = DeEsser::new(fs, &s);
         let (mut l, mut r) = (x.clone(), x.clone());
         let t = std::time::Instant::now();
         for (a, b) in l.chunks_mut(512).zip(r.chunks_mut(512)) {
             d.process(&mut [a, b], &s);
         }
-        println!("{reduce:?}: {:.2} % of a core", t.elapsed().as_secs_f64() / 10.0 * 100.0);
+        println!(
+            "{reduce:?}: {:.2} % of a core",
+            t.elapsed().as_secs_f64() / 10.0 * 100.0
+        );
     }
 }

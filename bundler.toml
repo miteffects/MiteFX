@@ -40,3 +40,6 @@ name = "Mite DeEss"
 
 [mite_mod]
 name = "Mite Mod"
+
+[mite_pitch]
+name = "Mite Pitch"

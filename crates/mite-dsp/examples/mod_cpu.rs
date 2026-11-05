@@ -21,21 +21,82 @@ fn main() {
     for (name, s) in [
         ("chorus, 2 voices", ModSettings { voices: 2, ..d }),
         ("chorus, 4 voices", ModSettings { voices: 4, ..d }),
-        ("ensemble", ModSettings { mode: Mode::Ensemble, ..d }),
-        ("flanger", ModSettings { mode: Mode::Flanger, feedback: 0.6, ..d }),
-        ("flanger, through zero", ModSettings { mode: Mode::Flanger, thru_zero: true, ..d }),
-        ("phaser, 4 stages", ModSettings { mode: Mode::Phaser, ..d }),
-        ("phaser, 24 stages", ModSettings { mode: Mode::Phaser, stages: 24, ..d }),
-        ("vibrato", ModSettings { mode: Mode::Vibrato, ..d }),
-        ("rotary (fast)", ModSettings { mode: Mode::Rotary, rotor: mite_dsp::modulation::Rotor::Fast, depth: 0.8, ..d }),
-        ("micro", ModSettings { mode: Mode::Micro, detune_cents: 12.0, depth: 0.3, ..d }),
+        (
+            "ensemble",
+            ModSettings {
+                mode: Mode::Ensemble,
+                ..d
+            },
+        ),
+        (
+            "flanger",
+            ModSettings {
+                mode: Mode::Flanger,
+                feedback: 0.6,
+                ..d
+            },
+        ),
+        (
+            "flanger, through zero",
+            ModSettings {
+                mode: Mode::Flanger,
+                thru_zero: true,
+                ..d
+            },
+        ),
+        (
+            "phaser, 4 stages",
+            ModSettings {
+                mode: Mode::Phaser,
+                ..d
+            },
+        ),
+        (
+            "phaser, 24 stages",
+            ModSettings {
+                mode: Mode::Phaser,
+                stages: 24,
+                ..d
+            },
+        ),
+        (
+            "vibrato",
+            ModSettings {
+                mode: Mode::Vibrato,
+                ..d
+            },
+        ),
+        (
+            "rotary (fast)",
+            ModSettings {
+                mode: Mode::Rotary,
+                rotor: mite_dsp::modulation::Rotor::Fast,
+                depth: 0.8,
+                ..d
+            },
+        ),
+        (
+            "micro",
+            ModSettings {
+                mode: Mode::Micro,
+                detune_cents: 12.0,
+                depth: 0.3,
+                ..d
+            },
+        ),
     ] {
         let mut m = Mod::new(fs, &s);
         let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
         let t0 = std::time::Instant::now();
         for c in x.chunks(512) {
             let k = c.len();
-            m.process([c, c], [&mut l[..k], &mut r[..k]], true, &s, &Transport::default());
+            m.process(
+                [c, c],
+                [&mut l[..k], &mut r[..k]],
+                true,
+                &s,
+                &Transport::default(),
+            );
         }
         let used = t0.elapsed().as_secs_f64() / 10.0 * 100.0;
         println!("{name:24} {used:5.2} % of a core");

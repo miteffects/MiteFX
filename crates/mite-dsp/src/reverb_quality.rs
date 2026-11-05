@@ -23,7 +23,11 @@ pub fn flatten(ir: &[f32], win: usize) -> Vec<f64> {
         .map(|i| {
             let (a, b) = (i.saturating_sub(win / 2), (i + win / 2).min(n));
             let rms = ((prefix[b] - prefix[a]) / (b - a) as f64).sqrt();
-            if rms > 1e-12 { f64::from(ir[i]) / rms } else { 0.0 }
+            if rms > 1e-12 {
+                f64::from(ir[i]) / rms
+            } else {
+                0.0
+            }
         })
         .collect()
 }
@@ -78,7 +82,9 @@ pub fn periodicity(ir: &[f32], fs: f64, from: f64, to: f64) -> f64 {
     inv.process(&mut spec, &mut ac).expect("ifft");
     let zero = ac[0];
     let (lo, hi) = ((0.0005 * fs) as usize, (0.06 * fs) as usize);
-    (lo..hi.min(n)).map(|k| (ac[k] / zero).abs() * n as f64 / (n - k) as f64).fold(0.0, f64::max)
+    (lo..hi.min(n))
+        .map(|k| (ac[k] / zero).abs() * n as f64 / (n - k) as f64)
+        .fold(0.0, f64::max)
 }
 
 /// [`periodicity`]'s strongest lags (ms) and their correlations, the strongest first.
@@ -106,7 +112,9 @@ pub fn peakiness(ir: &[f32], fs: f64, from: f64, to: f64) -> f64 {
     let flat = flatten(ir, (0.01 * fs) as usize);
     let (a, b) = ((from * fs) as usize, ((to * fs) as usize).min(flat.len()));
     let n = (b - a).next_power_of_two() / 2;
-    let mut buf: Vec<f64> = (0..n).map(|i| flat[a + i] * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos())).collect();
+    let mut buf: Vec<f64> = (0..n)
+        .map(|i| flat[a + i] * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos()))
+        .collect();
     let mut planner = RealFftPlanner::<f64>::new();
     let fwd = planner.plan_fft_forward(n);
     let mut spec = fwd.make_output_vec();
@@ -117,7 +125,10 @@ pub fn peakiness(ir: &[f32], fs: f64, from: f64, to: f64) -> f64 {
         prefix[i + 1] = prefix[i] + p[i];
     }
     let hz = fs / n as f64;
-    let (k0, k1) = ((100.0 / hz) as usize, ((10_000.0 / hz) as usize).min(p.len() - 1));
+    let (k0, k1) = (
+        (100.0 / hz) as usize,
+        ((10_000.0 / hz) as usize).min(p.len() - 1),
+    );
     let mut over = 0;
     for k in k0..k1 {
         let half = ((k as f64 * (2f64.powf(1.0 / 6.0) - 1.0)) as usize).max(4);
@@ -135,7 +146,9 @@ pub fn peaks(ir: &[f32], fs: f64, from: f64, to: f64, count: usize) -> Vec<(f64,
     let flat = flatten(ir, (0.01 * fs) as usize);
     let (a, b) = ((from * fs) as usize, ((to * fs) as usize).min(flat.len()));
     let n = (b - a).next_power_of_two() / 2;
-    let mut buf: Vec<f64> = (0..n).map(|i| flat[a + i] * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos())).collect();
+    let mut buf: Vec<f64> = (0..n)
+        .map(|i| flat[a + i] * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos()))
+        .collect();
     let mut planner = RealFftPlanner::<f64>::new();
     let fwd = planner.plan_fft_forward(n);
     let mut spec = fwd.make_output_vec();
@@ -146,7 +159,10 @@ pub fn peaks(ir: &[f32], fs: f64, from: f64, to: f64, count: usize) -> Vec<(f64,
         prefix[i + 1] = prefix[i] + p[i];
     }
     let hz = fs / n as f64;
-    let (k0, k1) = ((100.0 / hz) as usize, ((10_000.0 / hz) as usize).min(p.len() - 1));
+    let (k0, k1) = (
+        (100.0 / hz) as usize,
+        ((10_000.0 / hz) as usize).min(p.len() - 1),
+    );
     let mut out: Vec<(f64, f64)> = (k0..k1)
         .map(|k| {
             let half = ((k as f64 * (2f64.powf(1.0 / 6.0) - 1.0)) as usize).max(4);
@@ -167,7 +183,13 @@ pub fn highpass(x: &[f32], fc: f64, fs: f64) -> Vec<f32> {
     let (sin, cos) = w.sin_cos();
     let alpha = sin * std::f64::consts::FRAC_1_SQRT_2;
     let a0 = 1.0 + alpha;
-    let (b0, b1, b2, a1, a2) = ((1.0 + cos) / 2.0 / a0, -(1.0 + cos) / a0, (1.0 + cos) / 2.0 / a0, -2.0 * cos / a0, (1.0 - alpha) / a0);
+    let (b0, b1, b2, a1, a2) = (
+        (1.0 + cos) / 2.0 / a0,
+        -(1.0 + cos) / a0,
+        (1.0 + cos) / 2.0 / a0,
+        -2.0 * cos / a0,
+        (1.0 - alpha) / a0,
+    );
     let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
     x.iter()
         .map(|&v| {

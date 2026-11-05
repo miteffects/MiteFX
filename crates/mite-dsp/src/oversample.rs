@@ -37,7 +37,8 @@ fn half_band(pairs: usize, beta: f64) -> Vec<f32> {
         .map(|j| {
             let n = (2 * j + 1) as f64;
             let sinc = (std::f64::consts::FRAC_PI_2 * n).sin() / (std::f64::consts::FRAC_PI_2 * n);
-            let w = bessel_i0(beta * (1.0 - (n / (half + 1.0)).powi(2)).max(0.0).sqrt()) / bessel_i0(beta);
+            let w = bessel_i0(beta * (1.0 - (n / (half + 1.0)).powi(2)).max(0.0).sqrt())
+                / bessel_i0(beta);
             (0.5 * sinc * w) as f32
         })
         .collect()
@@ -53,12 +54,20 @@ struct History {
 
 impl History {
     fn new(len: usize) -> Self {
-        Self { data: vec![0.0; 2 * len], len, pos: 0 }
+        Self {
+            data: vec![0.0; 2 * len],
+            len,
+            pos: 0,
+        }
     }
 
     #[inline]
     fn push(&mut self, x: f32) {
-        self.pos = if self.pos == 0 { self.len - 1 } else { self.pos - 1 };
+        self.pos = if self.pos == 0 {
+            self.len - 1
+        } else {
+            self.pos - 1
+        };
         self.data[self.pos] = x;
         self.data[self.pos + self.len] = x;
     }
@@ -139,7 +148,13 @@ impl Stage {
         let taps = half_band(pairs, beta);
         let full = (pairs >= VECTOR_PAIRS).then(|| mirrored(&taps));
         let len = full.as_ref().map_or(2 * pairs, Vec::len);
-        Self { taps, full, up: History::new(len), even: History::new(len), odd: History::new(len) }
+        Self {
+            taps,
+            full,
+            up: History::new(len),
+            even: History::new(len),
+            odd: History::new(len),
+        }
     }
 
     #[inline]
@@ -202,7 +217,14 @@ impl Oversampler {
     /// Allocates; `factor` can change later without allocating.
     pub fn new(factor: usize) -> Self {
         let stage = |i: usize| Stage::new(PAIRS[i], BETA[i]);
-        let mut o = Self { factor: 1, stages: [[stage(0), stage(1), stage(2), stage(3)], [stage(0), stage(1), stage(2), stage(3)]], pad: [History::new(1), History::new(1)] };
+        let mut o = Self {
+            factor: 1,
+            stages: [
+                [stage(0), stage(1), stage(2), stage(3)],
+                [stage(0), stage(1), stage(2), stage(3)],
+            ],
+            pad: [History::new(1), History::new(1)],
+        };
         o.set_factor(factor);
         o
     }
@@ -235,7 +257,12 @@ impl Oversampler {
     /// Becomes a copy of `other`'s factor and state, without allocating.
     pub fn copy_from(&mut self, other: &Self) {
         self.factor = other.factor;
-        for (a, b) in self.stages.iter_mut().flatten().zip(other.stages.iter().flatten()) {
+        for (a, b) in self
+            .stages
+            .iter_mut()
+            .flatten()
+            .zip(other.stages.iter().flatten())
+        {
             a.copy_from(b);
         }
         for (a, b) in self.pad.iter_mut().zip(&other.pad) {
@@ -333,7 +360,12 @@ impl Oversampler {
             }
             8 => {
                 for (o, x) in out.iter_mut().zip(input.chunks_exact(8)) {
-                    let c = [third.decimate([x[0], x[1]]), third.decimate([x[2], x[3]]), third.decimate([x[4], x[5]]), third.decimate([x[6], x[7]])];
+                    let c = [
+                        third.decimate([x[0], x[1]]),
+                        third.decimate([x[2], x[3]]),
+                        third.decimate([x[4], x[5]]),
+                        third.decimate([x[6], x[7]]),
+                    ];
                     // One sample of delay at the 4× rate.
                     let held = pad.recent()[0];
                     pad.push(c[3]);
@@ -351,7 +383,12 @@ impl Oversampler {
                         *v = fourth.decimate([x[2 * j], x[2 * j + 1]]);
                     }
                     pad.push(d[8]);
-                    let c = [third.decimate([d[0], d[1]]), third.decimate([d[2], d[3]]), third.decimate([d[4], d[5]]), third.decimate([d[6], d[7]])];
+                    let c = [
+                        third.decimate([d[0], d[1]]),
+                        third.decimate([d[2], d[3]]),
+                        third.decimate([d[4], d[5]]),
+                        third.decimate([d[6], d[7]]),
+                    ];
                     let a = second.decimate([c[0], c[1]]);
                     let b = second.decimate([c[2], c[3]]);
                     *o = first.decimate([a, b]);
@@ -370,7 +407,9 @@ mod tests {
     fn round_trip(factor: usize, f: f64) -> (f64, f64) {
         let mut o = Oversampler::new(factor);
         let n = 4096;
-        let x: Vec<f32> = (0..n).map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32 * 0.5).collect();
+        let x: Vec<f32> = (0..n)
+            .map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32 * 0.5)
+            .collect();
         let mut hi = vec![0.0; n * factor];
         let mut y = vec![0.0; n];
         o.up(0, &x, &mut hi);
@@ -409,16 +448,23 @@ mod tests {
             let n = 8192;
             let mut worst = f64::MIN;
             // Multiples of the base Nyquist, up to the high rate's Nyquist.
-            for f_nyq in [1.12, 1.3, 1.6, 1.95, 2.5, 3.0, 3.6, 3.95, 4.5, 5.5, 6.4, 7.1, 7.9, 8.6, 10.2, 12.5, 14.4, 15.9] {
+            for f_nyq in [
+                1.12, 1.3, 1.6, 1.95, 2.5, 3.0, 3.6, 3.95, 4.5, 5.5, 6.4, 7.1, 7.9, 8.6, 10.2,
+                12.5, 14.4, 15.9,
+            ] {
                 if f_nyq >= factor as f64 {
                     continue;
                 }
                 let f = f_nyq * 0.5 / factor as f64;
                 o.reset();
-                let hi: Vec<f32> = (0..n * factor).map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32).collect();
+                let hi: Vec<f32> = (0..n * factor)
+                    .map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32)
+                    .collect();
                 let mut y = vec![0.0; n];
                 o.down(0, &hi, &mut y);
-                let rms = (y[2048..].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / (n - 2048) as f64).sqrt();
+                let rms = (y[2048..].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>()
+                    / (n - 2048) as f64)
+                    .sqrt();
                 worst = worst.max(20.0 * (rms * std::f64::consts::SQRT_2).log10());
             }
             assert!(worst < -100.0, "{factor}×: aliases at {worst:.1} dB");
@@ -431,15 +477,28 @@ mod tests {
             let mut o = Oversampler::new(factor);
             let n = 8192;
             let f = 0.3; // of the base rate: 0.6 of the base Nyquist
-            let x: Vec<f32> = (0..n).map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32).collect();
+            let x: Vec<f32> = (0..n)
+                .map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32)
+                .collect();
             let mut hi = vec![0.0; n * factor];
             o.up(0, &x, &mut hi);
             // Correlate with the image at (1 − f) of the base rate, and its 4× images.
             let images: Vec<f64> = match factor {
                 2 => vec![1.0 - f],
                 4 => vec![1.0 - f, 1.0 + f, 2.0 - f],
-                8 => vec![1.0 - f, 1.0 + f, 2.0 - f, 2.0 + f, 3.0 - f, 3.0 + f, 4.0 - f],
-                _ => (1..8).flat_map(|k| [k as f64 - f, k as f64 + f]).chain([8.0 - f]).collect(),
+                8 => vec![
+                    1.0 - f,
+                    1.0 + f,
+                    2.0 - f,
+                    2.0 + f,
+                    3.0 - f,
+                    3.0 + f,
+                    4.0 - f,
+                ],
+                _ => (1..8)
+                    .flat_map(|k| [k as f64 - f, k as f64 + f])
+                    .chain([8.0 - f])
+                    .collect(),
             };
             for img in images {
                 let w = std::f64::consts::TAU * img / factor as f64;
@@ -448,11 +507,23 @@ mod tests {
                 let m = tail.len() as f64;
                 let win = |i: usize| {
                     let x = std::f64::consts::TAU * i as f64 / m;
-                    0.35875 - 0.48829 * x.cos() + 0.14128 * (2.0 * x).cos() - 0.01168 * (3.0 * x).cos()
+                    0.35875 - 0.48829 * x.cos() + 0.14128 * (2.0 * x).cos()
+                        - 0.01168 * (3.0 * x).cos()
                 };
-                let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + win(i) * f64::from(v) * (w * i as f64).cos(), im + win(i) * f64::from(v) * (w * i as f64).sin()));
+                let (re, im) = tail
+                    .iter()
+                    .enumerate()
+                    .fold((0.0, 0.0), |(re, im), (i, &v)| {
+                        (
+                            re + win(i) * f64::from(v) * (w * i as f64).cos(),
+                            im + win(i) * f64::from(v) * (w * i as f64).sin(),
+                        )
+                    });
                 let level = 20.0 * (2.0 * (re * re + im * im).sqrt() / (0.35875 * m)).log10();
-                assert!(level < -100.0, "{factor}×: image at {img} of the base rate is {level:.1} dB");
+                assert!(
+                    level < -100.0,
+                    "{factor}×: image at {img} of the base rate is {level:.1} dB"
+                );
             }
         }
     }
