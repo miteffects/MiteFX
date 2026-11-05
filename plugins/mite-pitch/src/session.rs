@@ -195,7 +195,19 @@ pub struct Session {
     pub finished: AtomicBool,
     /// The transport, as the audio thread last saw it.
     pub playhead: AtomicI64,
-    pub playing: AtomicBool,
+        pub playing: AtomicBool,
+    /// The plugin's own transport (while the host is stopped): play wanted (the UI sets it, the
+    /// audio thread clears it at the take's end), the cue (take samples: where play starts),
+    /// a seek to the cue wanted while playing, the position playing (published by the audio
+    /// thread), the loop range (take samples) and whether it loops.
+    pub local_play: AtomicBool,
+    pub cue: AtomicI64,
+    pub seek: AtomicBool,
+    pub local_pos: AtomicI64,
+    pub local_active: AtomicBool,
+    pub loop_on: AtomicBool,
+    pub loop_start: AtomicI64,
+    pub loop_end: AtomicI64,
     /// The recording in progress (the UI's hold on it, so the audio thread never frees it).
     recording: Mutex<Option<Arc<RecordBuffer>>>,
     jobs: Mutex<Option<mpsc::Sender<Job>>>,
@@ -223,7 +235,15 @@ impl Session {
             armed: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             playhead: AtomicI64::new(0),
-            playing: AtomicBool::new(false),
+                        playing: AtomicBool::new(false),
+            local_play: AtomicBool::new(false),
+            cue: AtomicI64::new(0),
+            seek: AtomicBool::new(false),
+            local_pos: AtomicI64::new(0),
+            local_active: AtomicBool::new(false),
+            loop_on: AtomicBool::new(false),
+            loop_start: AtomicI64::new(0),
+            loop_end: AtomicI64::new(0),
             recording: Mutex::new(None),
             jobs: Mutex::new(None),
             busy: AtomicUsize::new(0),

@@ -17,19 +17,37 @@ contrast checks.
   folder, named by an id saved with the plugin's state (never in the state itself: it is large).
 - **ARA 2 (slice 5):** the host hands the clip's audio to the plugin (no recording; edits
   follow the clip). Only the audio's way in changes: the analysis, the notes, the editor and the
-  engine stay. Checked 2026-11-05: the user's REAPER (Linux) hosts ARA over CLAP
-  (`com.celemony.ara.plugin_extension.draft/1` in its binary), so CLAP first, VST3 after. The
-  ARA SDK (Celemony/ARA_API, Apache-2.0: fine under GPL-3) is plain C headers. The work:
-  1. `crates/mite-ara`: bindgen of `ARAInterface.h`, safe wrappers (factory, document
-     controller, audio-reader access, playback renderer, archive read/write).
-  2. Our nih-plug fork: the CLAP factory `com.celemony.ara.factory` and the plugin extension
-     returning the ARA plug-in instance (the only framework change, behind a trait the plugin
-     opts into).
-  3. The document model: audio sources (read through the host's audio reader on a worker, then
-     `melody::analyse`), audio modifications (a note list and edits each), playback regions
-     (render through `render_range`, mapped from the song timeline); persistence through the
-     host's archive instead of the take file.
-  4. The editor follows the selected region; transfer stays for hosts without ARA.
+  engine stay. Transfer stays for hosts without ARA.
+
+### 1a. ARA plan (2026-11-05, user: "do it but with specific plan")
+
+What the host offers (checked in the user's REAPER binary, Linux): ARA is on, and over CLAP it
+asks for `com.celemony.ara.plugin_extension.draft/1` (a pre-release name: the SDK, Celemony
+ARA_API 2.3, Apache-2.0, names it `org.ara-audio.ara.pluginextension/2`, with the same two
+calls `get_factory` and `bind_to_document_controller`). We offer all three names. REAPER has no
+CLAP transport-control: the plugin moves REAPER's transport only through ARA's playback
+controller.
+
+| Step | What | Done when |
+|---|---|---|
+| A1 | `crates/mite-ara`: the SDK headers vendored (with their licence), Rust bindings generated once by bindgen and committed (no libclang needed to build), constants and the CLAP structs by hand | the bindings compile; struct sizes match the C headers (a test against bindgen's layout tests) |
+| A2 | The document model, plain Rust (no nih-plug): `ARAFactory`, the document controller (edit cycles, musical context, region sequences, audio sources, audio modifications, playback regions; create, update, destroy), audio read through the host's audio reader on a worker, analysis per audio source, notes and edits per audio modification, archive store/restore (our JSON) | a test host in Rust (host interfaces implemented in the test) drives a whole document: add a source, a modification, a region; edits; store; restore into a fresh controller; same notes and edits |
+| A3 | Playback renderer: the regions bound to an instance, rendered from their modification (`render_range`), placed by the region's song time and start in the source; editor renderer and view: selection notifications | the test host renders a region at a song offset and gets the edited audio sample-exact; unedited it nulls with the source |
+| A4 | Our nih-plug fork: a `ClapPlugin` hook for the ARA factory and the plugin extension under the three names, the `ara:supported` feature, `org.ara-audio.ara.factory/2` on the entry | clap-validator still passes; the CLAP test host finds the extension and binds |
+| A5 | Mite Pitch over ARA: when bound, the session's take comes from the selected region's audio modification; the editor shows that clip at song time; renders go to the playback renderer; transport buttons ask the host (start, stop, position, cycle) | in REAPER: Mite Pitch on a clip as ARA, notes show without transfer, edits play, the project reopens with them |
+| A6 | Only if REAPER does not bind over CLAP: ARA over VST3 (`IPlugInEntryPoint`, `IMainFactory` in the fork's VST3 wrapper) | as A5, as VST3 |
+
+A5 needs the user in REAPER (no headless REAPER here); A1–A4 are proved by tests.
+
+### 1b. Time in the plugin (user: "timeframe control so I don't have to control time in
+REAPER but in plugin too")
+
+- Click the ruler: the play cursor goes there. Space or the footer's play button: play from the
+  cursor, stop. Drag along the ruler: a loop range; L: loop on/off. Double-click a note: play
+  from it is not taken (double-click is "onto the snap").
+- Without ARA the plugin plays the take itself while the host is stopped (REAPER runs FX when
+  stopped), the edited render from the cursor, looping if asked; when the host plays, the host
+  wins. With ARA (A5) the same controls drive REAPER's transport.
 
 ## 2. The engine (`mite_dsp::melody`), offline, off the audio thread
 

@@ -387,3 +387,28 @@ fn the_transition_tool_sets_the_glide_from_the_pointer() {
     assert_eq!(s.edits()[3].transition_ms, 0.0);
     settle(&shared);
 }
+
+#[test]
+fn the_ruler_sets_the_cursor_and_the_loop_and_space_plays() {
+    use std::sync::atomic::Ordering;
+    let (mut view, host, shared) = ready("ed-transport");
+    let s = &shared.session;
+    let ruler = view.ruler();
+    let at = Point::new(view.x_of(1.0), ruler.center().y);
+    click(&mut view, &host, at, MODS);
+    assert!((view.cue_s() - 1.0).abs() < 0.01, "{}", view.cue_s());
+    // A drag: the loop, on.
+    let (p0, p1) = (Point::new(view.x_of(0.5), ruler.center().y), Point::new(view.x_of(1.5), ruler.center().y));
+    drag(&mut view, &host, p0, p1, MODS);
+    assert!(s.loop_on.load(Ordering::Acquire));
+    let (a, b) = (s.loop_start.load(Ordering::Acquire) as f64 / FS, s.loop_end.load(Ordering::Acquire) as f64 / FS);
+    assert!((a - 0.5).abs() < 0.01 && (b - 1.5).abs() < 0.01, "{a} {b}");
+    view.event(&UiEvent::KeyDown { key: Key::Character('l'), mods: MODS }, &host);
+    assert!(!s.loop_on.load(Ordering::Acquire));
+    view.event(&UiEvent::KeyDown { key: Key::Character(' '), mods: MODS }, &host);
+    assert!(s.local_play.load(Ordering::Acquire));
+    let at = view.play_button().center();
+    click(&mut view, &host, at, MODS);
+    assert!(!s.local_play.load(Ordering::Acquire));
+    draw(&mut view, &host);
+}

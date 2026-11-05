@@ -53,8 +53,14 @@ const SNAP_X: f64 = 176.0;
 const SNAP_W: f64 = 36.0;
 const KEY_BUTTON: Rect = Rect::new(298.0, FOOTER_TOP + 10.0, 440.0, FOOTER_TOP + 46.0);
 /// The Correct macro's two sliders.
-const CENTRE_SLIDER: Rect = Rect::new(540.0, FOOTER_TOP + 22.0, 720.0, FOOTER_TOP + 34.0);
-const DRIFT_SLIDER: Rect = Rect::new(820.0, FOOTER_TOP + 22.0, 1000.0, FOOTER_TOP + 34.0);
+const CENTRE_SLIDER: Rect = Rect::new(530.0, FOOTER_TOP + 22.0, 690.0, FOOTER_TOP + 34.0);
+const DRIFT_SLIDER: Rect = Rect::new(780.0, FOOTER_TOP + 22.0, 940.0, FOOTER_TOP + 34.0);
+/// The plugin's own transport: play and loop.
+const PLAY: Rect = Rect::new(986.0, FOOTER_TOP + 12.0, 1022.0, FOOTER_TOP + 44.0);
+const LOOP: Rect = Rect::new(1030.0, FOOTER_TOP + 12.0, 1066.0, FOOTER_TOP + 44.0);
+const PLAY_GLYPH: &str = "M8 5.5 V18.5 L18.5 12 Z";
+const STOP_GLYPH: &str = "M7 7 H17 V17 H7 Z";
+const LOOP_GLYPH: &str = "M5 12 C5 8 7.5 6.5 11 6.5 H18 M15.5 4 L18 6.5 L15.5 9 M19 12 C19 16 16.5 17.5 13 17.5 H6 M8.5 15 L6 17.5 L8.5 20";
 /// The tools' buttons in the header, from here, each this wide.
 const TOOLS_X: f64 = 440.0;
 const TOOL_W: f64 = 44.0;
@@ -162,9 +168,12 @@ enum Hot {
     Transfer,
     Tool(Tool),
     Snap(Snap),
-    KeyButton,
+        KeyButton,
     Centre,
     Drift,
+    Ruler,
+    Play,
+    Loop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -216,7 +225,9 @@ pub struct PitchView {
     /// The macro sliders' values (0–1), until the selection changes.
     centre: f64,
     drift: f64,
-    key_menu: Option<Dropdown>,
+        key_menu: Option<Dropdown>,
+    /// A press on the ruler: where (s); a drag from it sets the loop.
+    ruler_from: Option<f64>,
     hot: Option<Hot>,
     pointer: Option<Point>,
     undo: Vec<Snapshot>,
@@ -242,7 +253,8 @@ impl PitchView {
             macro_drag: None,
             centre: 0.0,
             drift: 0.0,
-            key_menu: None,
+                        key_menu: None,
+            ruler_from: None,
             hot: None,
             pointer: None,
             undo: Vec::new(),
@@ -273,6 +285,18 @@ impl PitchView {
 
     pub fn key_menu_rows(&self) -> Vec<Rect> {
         self.key_menu.as_ref().map(Dropdown::item_rects).unwrap_or_default()
+    }
+
+        pub fn play_button(&self) -> Rect {
+        PLAY
+    }
+
+    pub fn loop_button(&self) -> Rect {
+        LOOP
+    }
+
+    pub fn ruler(&self) -> Rect {
+        RULER
     }
 
     pub fn centre_slider(&self) -> Rect {
@@ -357,8 +381,17 @@ impl PitchView {
         if let Some(&s) = SNAPS.iter().find(|&&s| self.snap_button(s).contains(p)) {
             return Some(Hot::Snap(s));
         }
-        if KEY_BUTTON.contains(p) {
+                if KEY_BUTTON.contains(p) {
             return Some(Hot::KeyButton);
+        }
+        if PLAY.contains(p) {
+            return Some(Hot::Play);
+        }
+        if LOOP.contains(p) {
+            return Some(Hot::Loop);
+        }
+        if RULER.contains(p) {
+            return Some(Hot::Ruler);
         }
         if CENTRE_SLIDER.inflate(8.0, 10.0).contains(p) {
             return Some(Hot::Centre);
@@ -430,6 +463,55 @@ impl PitchView {
         }
         self.centre = 0.0;
         self.drift = 0.0;
+    }
+
+        /// The play cursor, s of the take.
+    pub fn cue_s(&self) -> f64 {
+        let fs = self.shared.session.take().map_or(48_000.0, |t| t.sample_rate);
+        self.shared.session.cue.load(Ordering::Acquire) as f64 / fs
+    }
+
+    /// Where the take is playing (the host's playhead while it plays, else the plugin's own
+    /// while it plays), s of the take.
+    pub fn playing_at(&self) -> Option<f64> {
+        let s = &self.shared.session;
+        let t = s.take()?;
+        if s.playing.load(Ordering::Relaxed) {
+            return Some((s.playhead.load(Ordering::Relaxed) - t.start) as f64 / t.sample_rate);
+        }
+        s.local_active.load(Ordering::Acquire).then(|| s.local_pos.load(Ordering::Acquire) as f64 / t.sample_rate)
+    }
+
+    /// The cursor to `t` (s); playing, the play jumps there.
+    fn set_cue(&mut self, t: f64) {
+        let s = &self.shared.session;
+        let Some(take) = s.take() else { return };
+        let k = (t.max(0.0) * take.sample_rate) as i64;
+        s.cue.store(k.min(take.len as i64), Ordering::Release);
+        s.seek.store(true, Ordering::Release);
+    }
+
+    fn toggle_play(&mut self) {
+        let s = &self.shared.session;
+        if s.take().is_none() {
+            return;
+        }
+        let on = s.local_play.load(Ordering::Acquire);
+        s.local_play.store(!on, Ordering::Release);
+    }
+
+    fn toggle_loop(&mut self) {
+        let s = &self.shared.session;
+        let on = s.loop_on.load(Ordering::Acquire);
+        // No range yet: the view's middle half.
+        if !on && s.loop_end.load(Ordering::Acquire) <= s.loop_start.load(Ordering::Acquire) {
+            if let Some(t) = s.take() {
+                let (a, b) = (self.t0 + 0.25 * self.span, self.t0 + 0.75 * self.span);
+                s.loop_start.store((a * t.sample_rate) as i64, Ordering::Release);
+                s.loop_end.store((b * t.sample_rate) as i64, Ordering::Release);
+            }
+        }
+        s.loop_on.store(!on, Ordering::Release);
     }
 
     /// Where pitch snaps while dragging (Alt: the other way).
@@ -532,8 +614,33 @@ impl PitchView {
             }
             let label = if step < 1.0 { format!("{t:.2} s") } else { format!("{t:.0} s") };
             cx.text.draw(cx.scene, &label, x + 4.0, RULER.y0 + 6.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0) }, theme.text_lo, Align::Left);
-            k += 1;
+                        k += 1;
             guard += 1;
+        }
+        // The loop range and the cursor on the ruler.
+        let s = &self.shared.session;
+        if let Some(t) = s.take() {
+            let (a, b) = (s.loop_start.load(Ordering::Acquire) as f64 / t.sample_rate, s.loop_end.load(Ordering::Acquire) as f64 / t.sample_rate);
+            let (a, b) = match (self.ruler_from, self.pointer) {
+                (Some(from), Some(p)) if (self.x_of(from) - p.x).abs() > 4.0 => (from.min(self.t_of(p.x)), from.max(self.t_of(p.x))),
+                _ => (a, b),
+            };
+            if b > a {
+                let on = s.loop_on.load(Ordering::Acquire) || self.ruler_from.is_some();
+                let band = Rect::new(self.x_of(a).max(RULER.x0), RULER.y0 + 2.0, self.x_of(b).min(RULER.x1), RULER.y0 + 6.0);
+                if band.width() > 0.0 {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(if on { 0.8 } else { 0.25 }), None, &RoundedRect::from_rect(band, 2.0));
+                }
+            }
+            let x = self.x_of(self.cue_s());
+            if (RULER.x0..=RULER.x1).contains(&x) {
+                let mut tri = BezPath::new();
+                tri.move_to((x - 5.0, RULER.y1 - 1.0));
+                tri.line_to((x + 5.0, RULER.y1 - 1.0));
+                tri.line_to((x, RULER.y1 - 8.0));
+                tri.close_path();
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_hi, None, &tri);
+            }
         }
     }
 
@@ -630,9 +737,20 @@ impl PitchView {
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.08), None, &r);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, accent.multiply_alpha(0.6), None, &r);
         }
-        // The playhead.
+                // The loop range, faintly.
         if let Some(t) = s.take() {
-            let at = (s.playhead.load(Ordering::Relaxed) - t.start) as f64 / t.sample_rate;
+            if s.loop_on.load(Ordering::Acquire) {
+                let (a, b) = (s.loop_start.load(Ordering::Acquire) as f64 / t.sample_rate, s.loop_end.load(Ordering::Acquire) as f64 / t.sample_rate);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.04), None, &Rect::new(self.x_of(a), ROLL.y0, self.x_of(b), ROLL.y1));
+            }
+        }
+        // The cursor (dashed) and the playhead.
+        let cue = self.cue_s();
+        if (v0..=v1).contains(&cue) {
+            let x = self.x_of(cue);
+            cx.scene.stroke(&Stroke::new(1.0).with_dashes(0.0, [4.0, 4.0]), Affine::IDENTITY, theme.text_mid, None, &Line::new((x, ROLL.y0), (x, ROLL.y1)));
+        }
+        if let Some(at) = self.playing_at() {
             if (v0..=v1).contains(&at) {
                 let x = self.x_of(at);
                 cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, theme.text_hi, None, &Line::new((x, ROLL.y0), (x, ROLL.y1)));
@@ -677,10 +795,11 @@ impl PitchView {
         }
         top.close_path();
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.45), None, &top);
-        let at = (s.playhead.load(Ordering::Relaxed) - t.start) as f64 / t.sample_rate;
-        if (self.t0..=self.t0 + self.span).contains(&at) {
-            let x = self.x_of(at);
-            cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, theme.text_hi, None, &Line::new((x, LANE.y0), (x, LANE.y1)));
+                if let Some(at) = self.playing_at() {
+            if (self.t0..=self.t0 + self.span).contains(&at) {
+                let x = self.x_of(at);
+                cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, theme.text_hi, None, &Line::new((x, LANE.y0), (x, LANE.y1)));
+            }
         }
     }
 
@@ -740,6 +859,21 @@ impl PitchView {
         let key = KEY_NAMES[scale.tonic * 2 + usize::from(scale.minor)];
         let accent = theme.accent;
         draw_dropdown_button(cx, KEY_BUTTON, key, self.key_menu.is_some(), self.hot == Some(Hot::KeyButton), |scene, at| draw_glyph(scene, snap_glyph(Snap::Scale), at + (8.0, 6.0), 18.0, accent, 1.5));
+                // The plugin's own transport.
+        let s = &self.shared.session;
+        let playing = s.local_play.load(Ordering::Acquire);
+        let looping = s.loop_on.load(Ordering::Acquire);
+        for (r, glyph, on, h) in [(PLAY, if playing { STOP_GLYPH } else { PLAY_GLYPH }, playing, Hot::Play), (LOOP, LOOP_GLYPH, looping, Hot::Loop)] {
+            let hot = self.hot == Some(h);
+            let rr = RoundedRect::from_rect(r, 7.0);
+            if on {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.16), None, &rr);
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, accent.multiply_alpha(0.6), None, &rr);
+            } else if hot {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &rr);
+            }
+            draw_glyph(cx.scene, glyph, r.center(), 18.0, if on { accent } else if hot { theme.text_hi } else { theme.text_mid }, 1.5);
+        }
         // The Correct macro.
         for (r, v, name, h) in [(CENTRE_SLIDER, self.centre, "CENTRE", Hot::Centre), (DRIFT_SLIDER, self.drift, "DRIFT", Hot::Drift)] {
             let hot = self.hot == Some(h) || self.macro_drag.as_ref().is_some_and(|m| m.centre == (h == Hot::Centre));
@@ -785,7 +919,10 @@ impl PitchView {
             }
         }
         match self.hot {
-            Some(Hot::Seam(_)) => Help::default().text("Click to join these two notes"),
+                        Some(Hot::Seam(_)) => Help::default().text("Click to join these two notes"),
+            Some(Hot::Ruler) => Help::default().text("Click: the play cursor here; drag: a loop range"),
+            Some(Hot::Play) => Help::default().text("Play from the cursor, or stop (Space) — the plugin plays the take itself while the host is stopped"),
+            Some(Hot::Loop) => Help::default().text("Loop the range on the ruler (L); drag along the ruler to set it"),
             Some(Hot::Transfer) => Help::default().text("Transfer — record the next stretch the transport plays (it replaces the take); click again to cancel"),
             Some(Hot::Tool(t)) => Help::default().text(t.words()),
             Some(Hot::Snap(sn)) => Help::default().text(snap_words(sn)),
@@ -941,6 +1078,14 @@ impl PitchView {
                 self.selected = (0..session.analysis().map_or(0, |a| a.notes.len())).collect();
                 true
             }
+                        UiEvent::KeyDown { key: Key::Character(' '), mods } if !mods.ctrl && session.take().is_some() => {
+                self.toggle_play();
+                true
+            }
+            UiEvent::KeyDown { key: Key::Character('l' | 'L'), mods } if !mods.ctrl && session.take().is_some() => {
+                self.toggle_loop();
+                true
+            }
             UiEvent::KeyDown { key: Key::Escape, .. } => {
                 self.selected.clear();
                 true
@@ -982,6 +1127,18 @@ impl PitchView {
                     let mut sc = session.scale();
                     sc.snap = sn;
                     session.set_scale(sc);
+                    true
+                }
+                                Some(Hot::Play) => {
+                    self.toggle_play();
+                    true
+                }
+                Some(Hot::Loop) => {
+                    self.toggle_loop();
+                    true
+                }
+                Some(Hot::Ruler) => {
+                    self.ruler_from = Some(self.t_of(pos.x));
                     true
                 }
                 Some(Hot::KeyButton) => {
@@ -1049,7 +1206,20 @@ impl PitchView {
                 }
                 None => false,
             },
-            UiEvent::PointerUp { pos, button: MouseButton::Left, .. } => {
+                        UiEvent::PointerUp { pos, button: MouseButton::Left, .. } => {
+                if let Some(from) = self.ruler_from.take() {
+                    let to = self.t_of(pos.x);
+                    if (self.x_of(from) - pos.x).abs() > 4.0 {
+                        if let Some(t) = session.take() {
+                            session.loop_start.store((from.min(to).max(0.0) * t.sample_rate) as i64, Ordering::Release);
+                            session.loop_end.store((from.max(to).max(0.0) * t.sample_rate) as i64, Ordering::Release);
+                            session.loop_on.store(true, Ordering::Release);
+                        }
+                    } else {
+                        self.set_cue(from);
+                    }
+                    return true;
+                }
                 if self.drag.is_some() {
                     self.end_drag();
                     return true;
@@ -1195,10 +1365,9 @@ impl View for PitchView {
             self.fitted = false;
         }
         // Follow the playhead a page at a time while the take plays.
-        let playing = s.playing.load(Ordering::Relaxed);
+                let playing = s.playing.load(Ordering::Relaxed) || s.local_active.load(Ordering::Acquire);
         if playing && self.drag.is_none() {
-            if let Some(t) = s.take() {
-                let at = (s.playhead.load(Ordering::Relaxed) - t.start) as f64 / t.sample_rate;
+            if let (Some(t), Some(at)) = (s.take(), self.playing_at()) {
                 if (at > self.t0 + self.span * 0.95 || at < self.t0) && at >= 0.0 && at <= t.len as f64 / t.sample_rate {
                     self.t0 = (at - 0.05 * self.span).max(0.0);
                 }

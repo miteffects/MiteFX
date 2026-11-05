@@ -48,6 +48,16 @@ fn engine_process_never_allocates() {
         run(&mut e, true, 0, 40);
         s.renders.collect();
     }
+    // The plugin's own transport, looping, seeking.
+    s.local_play.store(true, std::sync::atomic::Ordering::Release);
+    s.loop_start.store(1000, std::sync::atomic::Ordering::Release);
+    s.loop_end.store(9000, std::sync::atomic::Ordering::Release);
+    s.loop_on.store(true, std::sync::atomic::Ordering::Release);
+    run(&mut e, false, 0, 40);
+    s.seek.store(true, std::sync::atomic::Ordering::Release);
+    run(&mut e, false, 0, 10);
+    s.local_play.store(false, std::sync::atomic::Ordering::Release);
+    run(&mut e, false, 0, 10);
     s.set_armed(true);
     run(&mut e, true, 0, 20);
 }

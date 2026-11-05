@@ -29,8 +29,12 @@ pub struct PitchEngine {
     /// Retired values the handovers' slots were too full to take (given back next block).
     stale_render: Option<Box<Rendered>>,
     stale_record: Option<Box<Arc<RecordBuffer>>>,
-    /// 0: the input, 1: the take.
+        /// 0: the input, 1: the take.
     blend: f32,
+    /// The plugin's own transport: playing, where (take samples), its fade (0–1).
+    local: bool,
+    local_pos: i64,
+    local_gain: f32,
     blend_step: f32,
 }
 
@@ -42,8 +46,11 @@ impl PitchEngine {
             rendered: None,
             stale_render: None,
             stale_record: None,
-            blend: 0.0,
+                        blend: 0.0,
             blend_step: 1.0,
+            local: false,
+            local_pos: 0,
+            local_gain: 0.0,
         };
         e.prepare(sample_rate);
         e
@@ -127,9 +134,22 @@ impl PitchEngine {
             // The input is heard while recording.
             return;
         }
-        if self.recording {
+                if self.recording {
             self.end_recording(s);
         }
+        // The host is stopped: the plugin's own transport.
+        if !t.playing {
+            self.blend = 0.0;
+            self.play_local(channels, n_ch, len, s);
+            return;
+        }
+        if self.local {
+            // The host plays: it wins.
+            self.local = false;
+            self.local_gain = 0.0;
+            s.local_active.store(false, Ordering::Release);
+        }
+        s.local_play.store(false, Ordering::Release);
         // Playback of the take in its stretch of the timeline.
         let (Some(r), Some(pos), true) = (&self.rendered, t.pos, t.playing && !bypass) else {
             self.blend = 0.0;
@@ -159,6 +179,53 @@ impl PitchEngine {
                 ch[i] = ch[i] * (1.0 - self.blend) + v * self.blend;
             }
         }
+    }
+
+        /// The take (as rendered) from the cue, looping if asked, faded in and out over
+    /// [`EDGE_MS`]; the input under it as the fade lets it through.
+    fn play_local(&mut self, channels: &mut [&mut [f32]], n_ch: usize, len: usize, s: &Session) {
+        let want = s.local_play.load(Ordering::Acquire);
+        let Some(r) = &self.rendered else {
+            s.local_play.store(false, Ordering::Release);
+            return;
+        };
+        let n = r.audio.len() as i64;
+        if want && !self.local {
+            self.local = true;
+            self.local_gain = 0.0;
+            self.local_pos = s.cue.load(Ordering::Acquire).clamp(0, n);
+            s.seek.store(false, Ordering::Release);
+        }
+        if !self.local {
+            return;
+        }
+        if s.seek.swap(false, Ordering::AcqRel) {
+            self.local_pos = s.cue.load(Ordering::Acquire).clamp(0, n);
+        }
+        let looping = s.loop_on.load(Ordering::Acquire);
+        let (ls, le) = (s.loop_start.load(Ordering::Acquire).clamp(0, n), s.loop_end.load(Ordering::Acquire).clamp(0, n));
+        let mut want = want;
+        for i in 0..len {
+            if looping && le > ls && self.local_pos >= le {
+                self.local_pos = ls;
+            }
+            if self.local_pos >= n {
+                // The take's end: stop (fading out over silence).
+                want = false;
+                s.local_play.store(false, Ordering::Release);
+            }
+            self.local_gain = if want { (self.local_gain + self.blend_step).min(1.0) } else { (self.local_gain - self.blend_step).max(0.0) };
+            let v = if self.local_pos >= 0 && self.local_pos < n { r.audio[self.local_pos as usize] } else { 0.0 };
+            for ch in channels.iter_mut().take(n_ch) {
+                ch[i] = ch[i] * (1.0 - self.local_gain) + v * self.local_gain;
+            }
+            self.local_pos += 1;
+        }
+        s.local_pos.store(self.local_pos, Ordering::Release);
+        if !want && self.local_gain == 0.0 {
+            self.local = false;
+        }
+        s.local_active.store(self.local, Ordering::Release);
     }
 
     fn end_recording(&mut self, s: &Session) {

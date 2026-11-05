@@ -196,3 +196,66 @@ fn the_take_and_its_edits_come_back_from_the_state() {
     assert!(u.wait_idle(std::time::Duration::from_secs(30)));
     assert!(matches!(u.status(), Status::Problem(_)));
 }
+
+/// Blocks with the host stopped, input silent; what came out.
+fn stopped(e: &mut PitchEngine, s: &mite_pitch::session::Session, samples: usize) -> Vec<f32> {
+    let mut out = Vec::new();
+    while out.len() < samples {
+        let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
+        e.process(&mut [&mut l, &mut r], mite_pitch::dsp::Transport { playing: false, pos: Some(0) }, false, s);
+        out.extend_from_slice(&l);
+    }
+    out.truncate(samples);
+    out
+}
+
+#[test]
+fn the_plugin_plays_the_take_itself_while_the_host_is_stopped() {
+    use std::sync::atomic::Ordering;
+    let s = session("local");
+    let mut e = PitchEngine::new(FS as f32);
+    let x = take();
+    transfer(&mut e, &s, &x, 7000);
+    s.set_edit(1, NoteEdit { shift_cents: 100.0, ..NoteEdit::default() });
+    settle(&mut e, &s);
+    let full = mite_dsp::melody::render(&x, &s.analysis().expect("a"), &s.edits());
+    // Nothing asked: silence passes.
+    assert!(stopped(&mut e, &s, 2048).iter().all(|v| *v == 0.0));
+    // Play from 20 000: the render from there (after the 5 ms fade in).
+    s.cue.store(20_000, Ordering::Release);
+    s.local_play.store(true, Ordering::Release);
+    let out = stopped(&mut e, &s, 30_000);
+    let fade = (0.005 * FS) as usize + 1;
+    let worst = out[fade..].iter().zip(&full[20_000 + fade..50_000]).map(|(o, f)| (o - f).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-4, "{worst}");
+    assert!(s.local_active.load(Ordering::Acquire));
+    // A seek: from 60 000.
+    s.cue.store(60_000, Ordering::Release);
+    s.seek.store(true, Ordering::Release);
+    let out = stopped(&mut e, &s, 2560);
+    assert!((out[1000] - full[60_000 + 1000]).abs() < 1e-4);
+    // Loop 30 000–31 000: it wraps.
+    s.loop_start.store(30_000, Ordering::Release);
+    s.loop_end.store(31_000, Ordering::Release);
+    s.loop_on.store(true, Ordering::Release);
+    s.cue.store(30_000, Ordering::Release);
+    s.seek.store(true, Ordering::Release);
+    let out = stopped(&mut e, &s, 2560);
+    assert!((out[1500] - full[30_500]).abs() < 1e-4, "{} vs {}", out[1500], full[30_500]);
+    // Stop: it fades out and goes quiet.
+    s.local_play.store(false, Ordering::Release);
+    let out = stopped(&mut e, &s, 2048);
+    assert!(out[512..].iter().all(|v| *v == 0.0));
+    assert!(!s.local_active.load(Ordering::Acquire));
+    // The host playing takes over.
+    s.local_play.store(true, Ordering::Release);
+    stopped(&mut e, &s, 512);
+    play(&mut e, &s, &[0.0; 512], 0, 512);
+    assert!(!s.local_play.load(Ordering::Acquire) && !s.local_active.load(Ordering::Acquire));
+    // To the end of the take without a loop: it stops by itself.
+    s.loop_on.store(false, Ordering::Release);
+    s.cue.store(x.len() as i64 - 1000, Ordering::Release);
+    s.local_play.store(true, Ordering::Release);
+    stopped(&mut e, &s, 4096);
+    assert!(!s.local_play.load(Ordering::Acquire) && !s.local_active.load(Ordering::Acquire));
+}
