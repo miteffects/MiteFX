@@ -44,6 +44,12 @@
   arrives (tested: its first ms > 3 dB lower than without).
 - **Listen:** the trigger band alone. **Bypass:** the input, delayed by the lookahead (switching
   keeps time). Both glide 10 ms.
+- **Auto gain** (2026-11-05, user: "also make auto gain for de-ess"; on by default): gives back the
+  loudness the reduction took. The input and the reduced signal (before auto gain's own gain: no
+  loop) are metered K-weighted (BS.1770), both sides, over 3 s and only while there is sound (the
+  detector's gate); the gain that makes them equal glides 300 ms, 0…+6 dB (a de-esser only takes
+  away). Only the processed signal gets it: Bypass and Listen stay bit-exact. Measured on a voice
+  with sibilants: Shelf −2.9 → 0.0 dB, Band −2.6 → 0.0, Wide −4.6 → 0.0, Spectral −2.4 → 0.0.
 
 CPU (48 kHz stereo, `examples/deess_cpu`): shelf 0.98 %, band 1.43 %, wide 0.84 %, spectral 0.83 %
 of a core.
@@ -71,9 +77,10 @@ of a core.
 ## 3. Parameters (`tests/golden/mite_deess.params.txt`)
 
 `threshold`, `detection`, `range`, `release`, `lo`, `hi`, `reduce`, `lookahead`, `listen`,
-`out_gain`, `bypass`. Listen and bypass are monitoring. State 2 (2026-11-05): REDUCE gained
+`out_gain`, `bypass`, `auto_gain` (state 3). Listen and bypass are monitoring. State 2 (2026-11-05): REDUCE gained
 Spectral; `migrate::v1_to_v2` re-normalises `reduce` in stored snapshots (a choice is stored
-normalised over its count: version 1's Band, 0.5, would have read as Wide). Presets: Init, Gentle Vocal,
+normalised over its count: version 1's Band, 0.5, would have read as Wide). State 3 (2026-11-05):
+AUTO GAIN; `migrate::v2_to_v3` turns it off in older sessions so they sound as they did. Presets: Init, Gentle Vocal,
 Strong Vocal, Bright Voice, Low Voice, Keep the Air (band), Cymbal Tamer (absolute).
 
 ## 4. Tests
@@ -92,4 +99,6 @@ pills, double-click, groups).
 2. (done 2026-11-05) The spectral mode and the heat-map; state 2 with its migration. Tests: transparent
    at rest with its latency, a sibilant down and the rest kept, only the peak of a peaky sibilant,
    block sizes, switching in and out without a click, the snapshot migration.
+2b. (done 2026-11-05) Auto gain (state 3). Tests: the loudness given back within 0.5 dB in every
+   mode, nothing given when nothing is reduced (bit for bit), bypass exact with it on, no click.
 3. Mid/side detection.

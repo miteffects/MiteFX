@@ -26,5 +26,6 @@ fn listen_and_bypass_stay_out_of_presets() {
 #[test]
 fn the_plugin_settings_follow_the_parameters() {
     let s = DeEssParams::default().settings();
-    assert_eq!(s, mite_dsp::deess::DeEssSettings::default());
+    // Auto gain is on in the plugin (the engine leaves it off unless asked).
+    assert_eq!(s, mite_dsp::deess::DeEssSettings { auto_gain: true, ..mite_dsp::deess::DeEssSettings::default() });
 }

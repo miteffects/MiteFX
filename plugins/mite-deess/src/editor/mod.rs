@@ -187,6 +187,7 @@ impl DeEssView {
             FOOTER_TOP,
             (VIEW_W, VIEW_H),
             vec![
+                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — gives back the loudness the reduction took (the output as loud as the input, over a few seconds), so Bypass compares fairly" },
                 FooterToggle { id: LISTEN.id, glyph: ToggleGlyph::Listen, words: "Listen — the trigger band alone: what the detector hears" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input as it came (in time with the lookahead)" },
             ],

@@ -93,7 +93,7 @@ impl Plugin for MiteDeEss {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3]);
     }
 
     fn params(&self) -> Arc<dyn Params> {

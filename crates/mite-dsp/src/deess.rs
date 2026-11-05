@@ -29,6 +29,13 @@ const GLIDE_MS: f32 = 20.0;
 /// of the time, a sibilant just under the threshold at the set pace. (A plain 60 ms release left
 /// 3…8 dB on the next vowel's first 50…100 ms and dulled it.)
 const SMART_DB: f32 = 5.0;
+/// Auto gain's loudness meters (K-weighted mean squares, in and out) integrate over this, s: long
+/// enough that the gain is a level, never a pump.
+const AUTO_METER_S: f32 = 3.0;
+/// Auto gain's gain glides over this, s.
+const AUTO_GLIDE_S: f32 = 0.3;
+/// Auto gain's reach, dB: a de-esser only takes away, so it only gives back, up to this.
+pub const AUTO_MAX_DB: f32 = 6.0;
 
 /// What a sibilant is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -91,11 +98,14 @@ pub struct DeEssSettings {
     pub listen: bool,
     /// The input as it came (delayed by the lookahead, so switching keeps time).
     pub bypass: bool,
+    /// Give back the loudness the reduction took (user, 2026-11-05: "also make auto gain for
+    /// de-ess"): the output as loud as the input (K-weighted, over 3 s), so Bypass compares fairly.
+    pub auto_gain: bool,
 }
 
 impl Default for DeEssSettings {
     fn default() -> Self {
-        Self { threshold_db: -15.0, detection: Detection::Relative, range_db: 12.0, release_ms: 60.0, lo_hz: 5000.0, hi_hz: 12_000.0, reduce: Reduce::Shelf, lookahead: true, listen: false, bypass: false }
+        Self { threshold_db: -15.0, detection: Detection::Relative, range_db: 12.0, release_ms: 60.0, lo_hz: 5000.0, hi_hz: 12_000.0, reduce: Reduce::Shelf, lookahead: true, listen: false, bypass: false, auto_gain: false }
     }
 }
 
@@ -230,6 +240,54 @@ pub struct DeEssTelemetry {
     /// The trigger band's and the whole input's loudest RMS, dBFS.
     pub band_db: f32,
     pub whole_db: f32,
+    /// What auto gain gives back now, dB (0 when off).
+    pub auto_db: f32,
+}
+
+/// Auto gain: the input's and the output's loudness (K-weighted, both sides, over
+/// `AUTO_METER_S`, only while there is sound) and the gain that makes them equal, gliding.
+struct AutoGain {
+    k_in: [crate::loudness::KWeighting; 2],
+    k_out: [crate::loudness::KWeighting; 2],
+    p_in: f64,
+    p_out: f64,
+    k_meter: f64,
+    gain: f32,
+    k_glide: f32,
+    /// On (1) or off (0), gliding: switching never jumps.
+    on: f32,
+}
+
+impl AutoGain {
+    fn new(fs: f32) -> Self {
+        let kw = crate::loudness::KWeighting::new(f64::from(fs));
+        Self {
+            k_in: [kw; 2],
+            k_out: [kw; 2],
+            p_in: 0.0,
+            p_out: 0.0,
+            k_meter: 1.0 - (-1.0 / f64::from(AUTO_METER_S * fs)).exp(),
+            gain: 1.0,
+            k_glide: 1.0 - (-1.0 / (AUTO_GLIDE_S * fs)).exp(),
+            on: 0.0,
+        }
+    }
+
+    fn reset(&mut self, on: bool) {
+        for k in self.k_in.iter_mut().chain(&mut self.k_out) {
+            k.reset();
+        }
+        self.p_in = 0.0;
+        self.p_out = 0.0;
+        self.gain = 1.0;
+        self.on = f32::from(u8::from(on));
+    }
+
+    /// The gain in force (1 when off).
+    #[inline]
+    fn now(&self) -> f32 {
+        1.0 + (self.gain - 1.0) * self.on
+    }
 }
 
 pub struct DeEsser {
@@ -263,6 +321,7 @@ pub struct DeEsser {
     /// Whether the spectral path is the one heard (switched at the bottom of a dip, as the
     /// latency changes with it).
     spectral_on: bool,
+    auto: AutoGain,
 }
 
 /// The spectral mode's frame: 512 samples at 48 kHz (scaled with the rate), a quarter hop.
@@ -428,6 +487,7 @@ impl DeEsser {
             k_switch: 1.0 - (-1.0 / (0.010 * fs)).exp(),
             spectral: Spectral::new(fs),
             spectral_on: false,
+            auto: AutoGain::new(fs),
         };
         d.reset(s);
         d
@@ -473,6 +533,7 @@ impl DeEsser {
         self.bypass = f32::from(u8::from(s.bypass));
         self.spectral.reset();
         self.spectral_on = s.reduce == Reduce::Spectral;
+        self.auto.reset(s.auto_gain);
     }
 
     /// The spectral reduction per bin now (dB, ≥ 0), and a bin's width (Hz).
@@ -498,7 +559,7 @@ impl DeEsser {
     #[allow(clippy::needless_range_loop)] // the sides' parallel state, by sample and side
     pub fn process(&mut self, channels: &mut [&mut [f32]], s: &DeEssSettings) -> DeEssTelemetry {
         let n_ch = channels.len().min(2);
-        let mut tel = DeEssTelemetry { gr_db: 0.0, band_db: -200.0, whole_db: -200.0 };
+        let mut tel = DeEssTelemetry { gr_db: 0.0, band_db: -200.0, whole_db: -200.0, auto_db: 0.0 };
         if n_ch == 0 {
             return tel;
         }
@@ -563,6 +624,7 @@ impl DeEsser {
             };
             snap(&mut self.listen, s.listen, self.k_switch);
             snap(&mut self.bypass, s.bypass, self.k_switch);
+            snap(&mut self.auto.on, s.auto_gain, self.k_switch);
             // Detection, linked: the louder side's.
             let mut over = f32::MIN;
             let mut nearest = f32::MIN;
@@ -601,6 +663,9 @@ impl DeEsser {
             }
             let coeffs = reduction_filter(s, self.gr, fs);
             let wide = if s.reduce == Reduce::Wide { crate::db_to_gain(-self.gr) } else { 1.0 };
+            let sounding = nearest != f32::MIN;
+            let makeup = self.auto.now();
+            let (mut e_in, mut e_out) = (0.0f64, 0.0f64);
             for c in 0..n_ch {
                 let x = channels[c][i];
                 let d = &mut self.delay[c];
@@ -612,18 +677,32 @@ impl DeEsser {
                     y = st.run(co, y);
                 }
                 let y = if self.spectral_on { self.spectral.buf[c.min(1)][i - chunk_start] } else { y as f32 * wide };
+                // Auto gain meters the reduction alone (before its own gain: no loop), and gives
+                // back to the processed signal only (bypass and listen stay as they are).
+                let (ki, ko) = (self.auto.k_in[c].run(xd), self.auto.k_out[c].run(y));
+                e_in += ki * ki;
+                e_out += ko * ko;
+                let y = y * makeup;
                 // Each blend as a·(1 − t) + b·t, so its ends are exact (bypass gives the input).
                 let y = y * (1.0 - self.listen) + band_out[c] * self.listen;
                 let y = y * (1.0 - self.bypass) + xd * self.bypass;
                 channels[c][i] = y * self.dip;
             }
             self.pos = (self.pos + 1) % size;
+            let a = &mut self.auto;
+            if sounding {
+                a.p_in += (e_in - a.p_in) * a.k_meter;
+                a.p_out += (e_out - a.p_out) * a.k_meter;
+            }
+            let target = if a.p_out > 1e-14 && a.p_in > 1e-14 { ((a.p_in / a.p_out).sqrt() as f32).clamp(1.0, crate::db_to_gain(AUTO_MAX_DB)) } else { 1.0 };
+            a.gain += (target - a.gain) * a.k_glide;
         }
             chunk_start = chunk_end;
         }
         if self.spectral_on {
             tel.gr_db = tel.gr_db.max(spec_gr);
         }
+        tel.auto_db = crate::gain_to_db(self.auto.now());
         tel
     }
 }

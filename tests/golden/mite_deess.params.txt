@@ -9,3 +9,4 @@ lookahead | bool | true
 listen | bool | false
 out_gain | dB | -24 | 24 | 0 | Linear
 bypass | bool | false
+auto_gain | bool | true

@@ -13,7 +13,9 @@ use nih_plug::prelude::*;
 ///
 /// - 2 (2026-11-05): REDUCE gained Spectral; [`crate::migrate::v1_to_v2`] re-normalises the
 ///   choice in stored snapshots.
-pub const STATE_VERSION: u32 = 2;
+/// - 3 (2026-11-05): AUTO GAIN (on by default); [`crate::migrate::v2_to_v3`] turns it off in
+///   sessions saved before it, so they sound as they did.
+pub const STATE_VERSION: u32 = 3;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -31,6 +33,8 @@ pub const LOOKAHEAD: BoolSpec = BoolSpec { id: "lookahead", name: "Lookahead", d
 pub const LISTEN: BoolSpec = BoolSpec { id: "listen", name: "Listen", default: false };
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
+/// Give back the loudness the reduction took (user, 2026-11-05: "also make auto gain for de-ess").
+pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: true };
 
 const CONTINUOUS: [ParamSpec; 6] = [THRESHOLD, RANGE, RELEASE, LO, HI, OUT_GAIN];
 
@@ -47,6 +51,7 @@ pub fn manifest() -> String {
         LISTEN.manifest_line(),
         OUT_GAIN.manifest_line(),
         BYPASS.manifest_line(),
+        AUTO_GAIN.manifest_line(),
     ]
     .join("\n")
         + "\n"
@@ -81,6 +86,7 @@ pub struct DeEssParams {
     pub listen: BoolParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
+    pub auto_gain: BoolParam,
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -101,6 +107,7 @@ impl Default for DeEssParams {
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()),
+            auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -121,6 +128,7 @@ pub fn deess_settings(p: impl Fn(&str) -> f32) -> DeEssSettings {
         lookahead: p(LOOKAHEAD.id) >= 0.5,
         listen: p(LISTEN.id) >= 0.5,
         bypass: p(BYPASS.id) >= 0.5,
+        auto_gain: p(AUTO_GAIN.id) >= 0.5,
     }
 }
 
@@ -138,6 +146,7 @@ impl DeEssParams {
             "lookahead" => flag(&self.lookahead),
             "listen" => flag(&self.listen),
             "bypass" => flag(&self.bypass),
+            "auto_gain" => flag(&self.auto_gain),
             _ => 0.0,
         }
     }
@@ -173,6 +182,7 @@ unsafe impl Params for DeEssParams {
             p(LISTEN.id, self.listen.as_ptr(), ""),
             p(OUT_GAIN.id, self.out_gain.as_ptr(), ""),
             p(BYPASS.id, self.bypass.as_ptr(), ""),
+            p(AUTO_GAIN.id, self.auto_gain.as_ptr(), ""),
         ]
     }
 }

@@ -175,6 +175,7 @@ fn moving_any_setting_never_clicks() {
         ("band", DeEssSettings { lo_hz: 3000.0, hi_hz: 16_000.0, ..base }),
         ("reduce", DeEssSettings { reduce: Reduce::Band, ..base }),
         ("lookahead", DeEssSettings { lookahead: false, ..base }),
+        ("auto gain", DeEssSettings { auto_gain: true, ..base }),
         ("detection", DeEssSettings { detection: Detection::Absolute, threshold_db: -30.0, ..base }),
     ];
     let d2 = |v: &[f32], i: usize| (v[i + 1] - 2.0 * v[i] + v[i - 1]).abs();
@@ -288,4 +289,41 @@ fn fine_db(x: &[f32], fc: f32, width: f32) -> f32 {
         p += re * re + im * im;
     }
     (10.0 * p.max(1e-30).log10()) as f32
+}
+
+/// K-weighted power of `x` over `range`, dB (BS.1770's weighting).
+fn k_db(x: &[f32], range: std::ops::Range<usize>) -> f64 {
+    let mut k = mite_dsp::loudness::KWeighting::new(f64::from(FS));
+    let y: Vec<f64> = x.iter().map(|&v| k.run(v)).collect();
+    10.0 * (y[range.clone()].iter().map(|v| v * v).sum::<f64>() / range.len() as f64).max(1e-20).log10()
+}
+
+#[test]
+fn auto_gain_gives_back_the_loudness_the_reduction_took() {
+    // Loud sibilants, deep reduction: the output is quieter than the input, and auto gain brings
+    // it back within half a dB once its meters have settled (and only up, never past +6 dB).
+    let (x, _) = voice(12.0, -18.0, -20.0);
+    for reduce in [Reduce::Shelf, Reduce::Band, Reduce::Wide, Reduce::Spectral] {
+        let s = DeEssSettings { reduce, range_db: 24.0, threshold_db: -20.0, ..DeEssSettings::default() };
+        let look = DeEsser::latency_for(&s, FS);
+        let y = run(&s, &x, 256);
+        let off = k_db(&y[look..], (8.0 * FS) as usize..x.len() - look) - k_db(&x, (8.0 * FS) as usize..x.len() - look);
+        let y = run(&DeEssSettings { auto_gain: true, ..s }, &x, 256);
+        let on = k_db(&y[look..], (8.0 * FS) as usize..x.len() - look) - k_db(&x, (8.0 * FS) as usize..x.len() - look);
+        assert!(off < -0.5, "{reduce:?}: the reduction took only {off:.2} dB");
+        assert!(on.abs() < 0.5, "{reduce:?}: {off:.2} dB lost, {on:.2} dB after auto gain");
+        eprintln!("{reduce:?}: {off:.2} → {on:.2}");
+    }
+    // Nothing reduced: nothing given (bit for bit).
+    let quiet = DeEssSettings { range_db: 0.0, auto_gain: true, ..DeEssSettings::default() };
+    assert_eq!(run(&quiet, &x, 256), run(&DeEssSettings { auto_gain: false, ..quiet }, &x, 256));
+}
+
+#[test]
+fn bypass_stays_the_input_with_auto_gain_on() {
+    let (x, _) = voice(3.0, -18.0, -6.0);
+    let s = DeEssSettings { bypass: true, auto_gain: true, range_db: 24.0, ..DeEssSettings::default() };
+    let look = DeEsser::latency_for(&s, FS);
+    let y = run(&s, &x, 256);
+    assert_eq!(&y[look..], &x[..x.len() - look]);
 }

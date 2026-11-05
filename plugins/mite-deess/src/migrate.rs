@@ -5,7 +5,11 @@
 //! choices (`index / (count − 1)`): version 1's Band (1 of 3: 0.5) would now read as 1.5 of 4 and
 //! round to Wide. Every stored snapshot's `reduce` is re-normalised (× 2 / 3).
 
-use nih_plug::wrapper::state::PluginState;
+//!
+//! **2 → 3 (2026-11-05): auto gain.** A new parameter, on by default; sessions saved before it
+//! get it off, so they sound as they did.
+
+use nih_plug::wrapper::state::{ParamValue, PluginState};
 
 const REDUCE: &str = "reduce";
 
@@ -15,6 +19,10 @@ pub fn v1_to_v2(state: &mut PluginState) {
             *json = lifted;
         }
     }
+}
+
+pub fn v2_to_v3(state: &mut PluginState) {
+    state.params.entry(crate::params::AUTO_GAIN.id.to_owned()).or_insert(ParamValue::Bool(false));
 }
 
 fn lift_snapshots(json: &str) -> Option<String> {
