@@ -440,6 +440,21 @@ after its editor froze REAPER (a name-shortening loop that never ended on long t
 of it is in the code; the plugins report to nothing. The nih-plug fork keeps the track-info hook
 it added (ansabic/nih-plug 75780dc), unused: MiteFX stays pinned to 2d0eca3.
 
+### 14e. Mite Pitch (2026-11-05)
+
+- A Melodyne-style note editor for monophonic takes (user: "let's implement our melodyne"): per
+  note pitch, drift and vibrato, timing and length, formant and level. Audio comes in by transfer
+  first, ARA 2 after (user decision); see `docs/design/pitch-brief.md`.
+
+**Status (2026-11-05): slice 1, the engine** (`mite_dsp::melody`): the pitch every 5 ms (McLeod,
+40 ms window), voicing gated relative to the take's loud level, notes cut at vibrato-smoothed
+pitch steps and level dips, each note's centre and drift, pitch marks; TD-PSOLA resynthesis with
+a time map, formant-resampled grains, per-note gain; unedited stretches pass the input exactly.
+Tested on a synthetic sung line (notes found, centres within 5 cents; a 300-cent edit within 3
+cents with the formants kept; drift 0 flat, 2 doubled; timing and length; formant ±3 st; level;
+no clicks). On the user's real vocal stem (245 s, 44.1 kHz): 90 notes, analysis 1.9 s, a full
+render 2.1 s (`examples/melody_render`). Not yet heard by the user. Next: the plugin (transfer).
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).

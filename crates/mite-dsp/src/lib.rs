@@ -26,6 +26,7 @@ pub mod output;
 pub mod reverb;
 pub mod reverb_quality;
 pub mod sat;
+pub mod melody;
 pub mod meter;
 pub mod min_phase;
 pub mod modmatrix;
