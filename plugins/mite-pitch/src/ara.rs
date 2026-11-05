@@ -39,19 +39,27 @@ unsafe extern "C" fn ext_factory(_plugin: *const c_void) -> *const ARAFactory {
 }
 
 unsafe extern "C" fn ext_bind(plugin: *const c_void, dc: ARADocumentControllerRef, known: ARAPlugInInstanceRoleFlags, assigned: ARAPlugInInstanceRoleFlags) -> *const ARAPlugInExtensionInstance {
-    log(&format!("ara bind: dc null {}, known {known}, assigned {assigned}", dc.is_null()));
-    if dc.is_null() {
-        return std::ptr::null();
-    }
     // SAFETY: the host passes the `clap_plugin` of a live Mite Pitch instance; its context is
     // `Arc::as_ptr` of the instance's `PitchShared`, which the instance keeps alive.
     let ctx = unsafe { nih_plug::wrapper::clap::extension_context::<MitePitch>(plugin) } as *const PitchShared;
-    if ctx.is_null() {
+    // SAFETY: as above; `dc` comes from the host.
+    unsafe { bind(ctx, dc, known, assigned) }
+}
+
+/// Binds the instance behind `ctx` (`Arc::as_ptr` of its `PitchShared`) to document controller
+/// `dc`: the CLAP extension's and the VST3 entry point's common path.
+///
+/// # Safety
+/// `ctx` must be null or point at a live `PitchShared`; `dc` must be null or a document controller
+/// made by our factory.
+pub unsafe fn bind(ctx: *const PitchShared, dc: ARADocumentControllerRef, known: ARAPlugInInstanceRoleFlags, assigned: ARAPlugInInstanceRoleFlags) -> *const ARAPlugInExtensionInstance {
+    log(&format!("ara bind: dc null {}, known {known}, assigned {assigned}", dc.is_null()));
+    if ctx.is_null() || dc.is_null() {
         return std::ptr::null();
     }
-    // SAFETY: as above.
+    // SAFETY: as the caller promises.
     let shared = unsafe { &*ctx };
-    // SAFETY: the host passes a document controller made by our factory.
+    // SAFETY: as the caller promises.
     let inst = unsafe { mite_ara::bind(dc, known, assigned) };
     let ext = inst.extension();
     shared.session.bind_ara(inst);

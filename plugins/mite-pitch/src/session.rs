@@ -743,11 +743,10 @@ impl AraState {
         }
         self.seen = v;
                 let model = inst.document.snapshot();
-                let mut st = inst.state();
-        // A host that gives this instance no regions to render: the clips it shows are the ones
-        // it plays (over its input).
+                                let mut st = inst.state();
+        // Only a playback renderer plays its regions.
         if !Self::renders(&inst) {
-            st.playback = st.editor.clone();
+            st.playback.clear();
         }
         let current_region = st.selection.iter().filter(|id| st.editor.contains(id) || st.playback.contains(id)).chain(st.editor.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
         let mut wanted: Vec<u64> = st.playback.iter().filter_map(|id| model.regions.get(id).map(|r| r.modification)).collect();
@@ -855,12 +854,12 @@ impl AraState {
         self.seen = inst.document.version.load(Ordering::Acquire).wrapping_add(inst.version.load(Ordering::Acquire));
     }
 
-        /// Whether the host made this instance a playback renderer (then the regions are all that
-    /// plays, silence elsewhere); otherwise it plays the clips it shows over its input, as a
-    /// transfer does.
-        fn renders(inst: &mite_ara::Instance) -> bool {
-        // REAPER assigns only the editor roles yet hands the playback renderer its regions.
-        inst.roles & mite_ara::sys::kARAPlaybackRendererRole as i32 != 0 || !inst.state().playback.is_empty()
+            /// Whether the host made this instance a playback renderer: then its regions are all that
+    /// plays (silence elsewhere). An editor-only instance passes its input: REAPER (VST3) binds
+    /// the visible FX with the editor roles and a hidden second instance as the renderer; edits
+    /// reach it through the document.
+    fn renders(inst: &mite_ara::Instance) -> bool {
+        inst.roles & mite_ara::sys::kARAPlaybackRendererRole as i32 != 0
     }
 
     fn segments(&self) -> Vec<Segment> {

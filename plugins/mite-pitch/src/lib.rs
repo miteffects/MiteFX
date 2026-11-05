@@ -154,8 +154,21 @@ impl ClapPlugin for MitePitch {
 
 impl Vst3Plugin for MitePitch {
     const VST3_CLASS_ID: [u8; 16] = *b"MiteFX-Pitch-01-";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
-        &[Vst3SubCategory::Fx, Vst3SubCategory::PitchShift];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::PitchShift];
+
+    fn vst3_ara_factory() -> *const std::ffi::c_void {
+        mite_ara::factory(&ara::INFO).cast()
+    }
+
+    fn vst3_ara_bind(context: *const std::ffi::c_void, document_controller: *mut std::ffi::c_void, known_roles: i32, assigned_roles: i32) -> *const std::ffi::c_void {
+        // SAFETY: `context` is this instance's `vst3_extension_context`; the host passes a
+        // document controller made by our factory.
+        unsafe { ara::bind(context.cast(), document_controller.cast(), known_roles, assigned_roles) }.cast()
+    }
+
+    fn vst3_extension_context(&self) -> *const std::ffi::c_void {
+        Arc::as_ptr(&self.shared).cast()
+    }
 }
 
 nih_export_clap!(MitePitch);

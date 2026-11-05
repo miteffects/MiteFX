@@ -122,31 +122,42 @@ fn moving_the_region_moves_what_plays() {
 }
 
 #[test]
-fn bound_with_the_editor_roles_only_as_reaper_does_it_still_renders() {
+fn an_editor_instance_and_a_playback_instance_as_reaper_binds_them_over_vst3() {
     let x = take();
     let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
     let dur = x.len() as f64 / FS;
     let (_src, _md, rg) = host.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-r", c"mod-r", 1.0, 0.0, dur);
-    let s = session("ara-reaper");
-    // known 7, assigned 6: editor renderer and view, no playback renderer; REAPER calls the
-    // playback renderer all the same (null, it crashed): every interface is there.
-    let inst = unsafe { mite_ara::bind(host.dc, 7, 6) };
-    let ext = unsafe { std::ptr::read_unaligned(inst.extension()) };
-    assert!(!ext.playbackRendererInterface.is_null() && !ext.editorRendererInterface.is_null() && !ext.editorViewInterface.is_null());
-    host.give(inst.extension(), rg);
-    assert!(inst.document.wait_reads(Duration::from_secs(10)));
-    s.bind_ara(inst);
-    assert!(s.wait_idle(Duration::from_secs(30)));
-    s.set_edit(0, NoteEdit { shift_cents: 100.0, ..NoteEdit::default() });
-    assert!(s.wait_idle(Duration::from_secs(30)));
-    let mut e = PitchEngine::new(FS as f32);
-    song(&mut e, &s, 0, 480);
-    let out = song(&mut e, &s, 0, 48_000 + x.len());
-    // Given regions to render: they are all that plays (silence before the clip).
+    // The visible FX: editor renderer and view (6); a hidden one: playback renderer (1).
+    let editor = session("ara-ed");
+    let player = session("ara-pl");
+    let inst_ed = unsafe { mite_ara::bind(host.dc, 7, 6) };
+    let inst_pl = unsafe { mite_ara::bind(host.dc, 7, 1) };
+    host.give(inst_ed.extension(), rg);
+    host.give(inst_pl.extension(), rg);
+    assert!(inst_ed.document.wait_reads(Duration::from_secs(10)));
+    editor.bind_ara(inst_ed);
+    player.bind_ara(inst_pl);
+    assert!(editor.wait_idle(Duration::from_secs(30)) && player.wait_idle(Duration::from_secs(30)));
+    assert_eq!(editor.analysis().expect("the editor shows the clip").notes.len(), 4);
+    // The editor instance passes its input; the player renders the clip (silence before it).
+    let (mut e_ed, mut e_pl) = (PitchEngine::new(FS as f32), PitchEngine::new(FS as f32));
+    song(&mut e_ed, &editor, 0, 480);
+    song(&mut e_pl, &player, 0, 480);
+    let through = song(&mut e_ed, &editor, 0, 48_000 + x.len());
+    assert!(through.iter().all(|v| *v == 0.5), "the editor instance passes its input");
+    let out = song(&mut e_pl, &player, 0, 48_000 + x.len());
     assert!(out[..48_000 - 241].iter().all(|v| *v == 0.0));
-    let a = s.analysis().expect("analysis");
+    assert!((out[48_000 + 30_000] - x[30_000]).abs() < 1e-6);
+    // An edit in the editor reaches the player through the document.
+    editor.set_edit(0, NoteEdit { shift_cents: 100.0, ..NoteEdit::default() });
+    assert!(editor.wait_idle(Duration::from_secs(30)));
+    player.sync_ara();
+    assert!(player.wait_idle(Duration::from_secs(30)));
+    assert_eq!(player.edits(), editor.edits());
+    let out = song(&mut e_pl, &player, 48_000, x.len());
+    let a = editor.analysis().expect("analysis");
     let n0 = &a.notes[0];
-    let moved = out[48_000 + n0.start..48_000 + n0.end].iter().zip(&x[n0.start..n0.end]).map(|(o, v)| (o - v).abs()).fold(0.0f32, f32::max);
+    let moved = out[n0.start..n0.end].iter().zip(&x[n0.start..n0.end]).map(|(o, v)| (o - v).abs()).fold(0.0f32, f32::max);
     assert!(moved > 0.01, "{moved}");
     host.notify_model_updates();
     host.edit_cycle();

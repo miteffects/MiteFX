@@ -493,7 +493,9 @@ Space / play button, L), playing the take while the host is stopped. ARA 2 over 
 (brief §1a, steps A1–A5): `crates/mite-ara` (generated bindings, document controller, instances,
 test host), our nih-plug fork's CLAP hooks for extra factories and extensions (190d4dd), and
 Mite Pitch bound to the host's document (clips without transfer, regions on the song timeline,
-edits archived by the host, transport through the host). Not yet tried in REAPER.
+edits archived by the host, transport through the host). REAPER crashes in its own code over
+CLAP (ARA over CLAP is now off by default); over VST3 (fork 965eb1b) it binds an editor
+instance and a hidden playback instance and works (brief §1c, §1d).
 
 ### 15. Mite Amp (later)
 

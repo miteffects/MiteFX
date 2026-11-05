@@ -133,3 +133,16 @@ the addresses above.
 
 ARA over CLAP is now off unless `MITE_PITCH_CLAP_ARA` is set. Next: A6, ARA over VST3 (REAPER's
 mature ARA path), and report the CLAP crash to Cockos.
+
+### 1d. ARA over VST3 (A6, 2026-11-05)
+
+Our nih-plug fork (965eb1b) gives a VST3 plugin with ARA an "ARA Main Factory Class" (answering
+`ARA::IMainFactory`) and a component answering `ARA::IPlugInEntryPoint` / `IPlugInEntryPoint2`
+(`Vst3Plugin::vst3_ara_factory`, `vst3_ara_bind`, `vst3_extension_context`). In REAPER (private
+copy, track FX), REAPER binds two instances: the visible FX with roles 6 (editor renderer and
+view) and a hidden one with roles 1 (playback renderer). Both of REAPER's records get linked; no
+crash. The project saves the ARA archive (`<ARA io.github.ansabic.mitefx.pitch.archive.1>`)
+and reopens without trouble. The editor-only instance passes its input through; the playback
+instance renders. Edits go from the editor through the document (state, version) to the
+player's worker. Tested with a Rust host binding both kinds. Mite Gate (no ARA) also loads fine
+with the new wrapper.
