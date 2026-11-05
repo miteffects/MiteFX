@@ -115,7 +115,7 @@ MiteFX/
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
 | Pitch detection (McLeod pitch method, sub-cent), notes and cents against a reference | `mite_dsp::pitch` (`PitchDetector`, `note_of`, `note_hz`; Tuner, 2026-11-04) |
 | Doubling: per-note timing, detune, level and tone from an onset detector, switched before each note arrives; chorus; placement | `mite_dsp::doubler` (`Doubler`; Double, 2026-11-04) |
-| Modulation: one smooth LFO (six shapes, sync locked to the song), chorus, ensemble, flanger (through zero), phaser (2–24 stages), vibrato, their responses for drawing; the doubler's sinc reads | `mite_dsp::modulation` (`Mod`, `shape_at`, `flanger_response`, `phaser_response`; Mod, 2026-11-05) |
+| Modulation: one smooth LFO (six shapes, sync locked to the song), chorus, ensemble, flanger (through zero), phaser (2–24 stages), vibrato, rotary speaker (horn and drum with their own inertia), their responses for drawing; the doubler's sinc reads | `mite_dsp::modulation` (`Mod`, `shape_at`, `flanger_response`, `phaser_response`, `rotor_time_s`; Mod, 2026-11-05) |
 | De-essing: relative (band against the whole) or absolute detection, dynamic shelf / three-bell band / wide reduction exactly the identity at rest, lookahead, smart release | `mite_dsp::deess` (`DeEsser`, `response_db`; DeEss, 2026-11-05) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
@@ -381,8 +381,18 @@ crossfaded in only under 15 samples); modes switch by crossfading programs (no c
 the editor draws from the same functions the engine plays (flanger and phaser responses tested
 against tones). Editor: mode tiles, each mode's view (scrolling voice delays or pitch; a live
 response with the sweep shaded and a MANUAL/CENTRE × FEEDBACK puck), the LFO strip, MOTION and
-SOUND groups. 0.4–2.1 % of a core, 118 fps. Next: Rotary (state 2 with a `mode` migration), then
-the modulation matrix.
+SOUND groups. 0.4–2.1 % of a core, 118 fps. **Slice 2, Rotary (2026-11-05, user: "let's do mod
+rotary"):** a spinning speaker as a sixth mode, its own motion instead of the LFO: the mono sum
+split at 800 Hz (Linkwitz–Riley), the horn and the drum each a Doppler read (±0.45 / ±0.2 ms
+at DEPTH 100 %) and a swell as it passes each mic (the horn's highs beaming further, a back-wall
+reflection 1.3 ms later), two mics SPREAD apart (0–180°), Slow / Fast / Brake with each rotor's
+own inertia (the horn 0.7 s up, the heavy drum 3.2 s; INERTIA ×¼…×4), BALANCE horn against drum;
+latency 2 ms (the paths at rest, reported, tested by an impulse). 1.6 % of a core. Editor: the
+cabinet from above (the horn's two bells and beam, the drum's scoop, turning past the mics; a
+click switches slow ⇄ fast), the rotors' speeds over 8 s where the LFO strip is, SLOW/FAST/BRAKE
+with BALANCE and INERTIA; RATE reads the speed. State 2: `mode` appended (snapshots re-normalised,
+`migrate::v1_to_v2`), `rotor`, `balance`, `inertia` appended; presets Rotary Chorale, Rotary
+Tremolo, Warm Cabinet. Next: the modulation matrix.
 
 ### 14. Mite Meter and Mite Utility
 

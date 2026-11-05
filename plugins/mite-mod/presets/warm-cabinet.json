@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Warm Cabinet",
+  "params": {"mode": 5.0, "rotor": 0.0, "depth": 55.0, "spread": 90.0, "mix": 100.0, "balance": -30.0, "inertia": 70.0, "high_cut": 7000.0}
+}

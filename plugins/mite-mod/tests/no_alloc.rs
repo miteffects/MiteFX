@@ -2,7 +2,7 @@
 
 use assert_no_alloc::assert_no_alloc as process_wrapper;
 use mite_core::HistoryTap;
-use mite_dsp::modulation::{Mode, ModSettings, Shape, Transport, STAGE_COUNTS};
+use mite_dsp::modulation::{Mode, ModSettings, Rotor, Shape, Transport, STAGE_COUNTS};
 use mite_mod::dsp::{record, ModEngine, Output};
 
 #[test]
@@ -12,7 +12,9 @@ fn engine_process_never_allocates() {
     let mut engine = ModEngine::new(48_000.0, &s, &Output::default());
     let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
     for i in 0..1500 {
-        s.mode = Mode::from_index((i / 40) % 5);
+        s.mode = Mode::from_index((i / 40) % Mode::ALL.len());
+        s.rotor = Rotor::from_index((i / 23) % 3);
+        s.balance = [-1.0, 0.3, 1.0][(i / 31) % 3];
         s.thru_zero = (i / 90) % 2 == 0;
         s.shape = Shape::from_index((i / 33) % 6);
         s.voices = 1 + (i / 25) % 4;

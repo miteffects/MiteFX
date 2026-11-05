@@ -1,21 +1,23 @@
 //! The Mite Mod editor (docs/design/mod-brief.md §2), in 1280×760 design units.
 //!
-//! On top the five modes, each a tile with a picture of what it does. Under them the mode's own
+//! On top the six modes, each a tile with a picture of what it does. Under them the mode's own
 //! view: chorus, ensemble and vibrato draw their voices' readings scrolling in time (the delays,
 //! or vibrato's pitch), drag up and down for DELAY (DEPTH for vibrato); flanger and phaser draw
 //! their response as it moves, with the span the sweep covers shaded, and a puck to drag (across:
 //! MANUAL or CENTRE, up and down: FEEDBACK). Right of it the mode's own controls. Bottom left the
 //! LFO: its shape over one cycle with the left and right sides' places riding on it, the shapes,
 //! SYNC and the division. Bottom right MOTION (RATE, DEPTH, SPREAD) and SOUND (MIX, WIDTH, the
-//! wet's LOW and HIGH CUT).
+//! wet's LOW and HIGH CUT). The rotary sets its own motion: its view is the cabinet from above
+//! (the horn and the drum turning past the two mics; a click switches slow and fast), and the
+//! LFO's strip shows the rotors' speeds instead.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
 use mite_core::ParamSpec;
-use mite_dsp::modulation::{self as m, Mode, ModSettings, Shape, DIVISIONS, STAGE_COUNTS};
-use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
+use mite_dsp::modulation::{self as m, Mode, ModSettings, Rotor, Shape, DIVISIONS, STAGE_COUNTS};
+use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Shape as _, Stroke};
 use mite_ui::paint::{glow_stroke, panel};
 use mite_ui::peniko::Fill;
 use mite_ui::session::{Session, SessionConfig};
@@ -147,6 +149,8 @@ pub enum Pill {
     /// Phaser stages (index into `STAGE_COUNTS`).
     Stages(usize),
     ThruZero,
+    /// The rotary's speed.
+    Rotor(Rotor),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -156,6 +160,8 @@ enum Hot {
     Puck,
     /// The time view (a drag sets DELAY, or vibrato's DEPTH).
     Time,
+    /// The rotary's cabinet (a click: slow ⇄ fast).
+    Cabinet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -177,7 +183,12 @@ struct Group {
 }
 
 const ALL: &[Mode] = &Mode::ALL;
-const NOT_VIBRATO: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser];
+const NOT_VIBRATO: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Rotary];
+/// The modes the LFO moves (the rotary turns by itself).
+const LFO_MODES: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato];
+/// The rotors' speed strip: this many seconds across, up to this many rotations a second.
+const ROTOR_SECONDS: f64 = 8.0;
+const ROTOR_TOP_HZ: f64 = 8.0;
 
 pub struct ModView {
     shared: Arc<ModShared>,
@@ -210,7 +221,7 @@ impl ModView {
         let dial = |spec: ParamSpec, label: &'static str, kind: KnobKind, p: Point, modes: &'static [Mode]| Dial { knob: Knob::new(spec, label, kind, p, DIAL_D), modes };
         let mg = MODE_GROUP;
         let mut dials = vec![
-            dial(RATE, "RATE", KnobKind::Unipolar, at(MOTION, 0, 3, 64.0), ALL),
+            dial(RATE, "RATE", KnobKind::Unipolar, at(MOTION, 0, 3, 64.0), LFO_MODES),
             dial(DEPTH, "DEPTH", KnobKind::Unipolar, at(MOTION, 1, 3, 64.0), ALL),
             dial(SPREAD, "SPREAD", KnobKind::Unipolar, at(MOTION, 2, 3, 64.0), ALL),
             dial(MIX, "MIX", KnobKind::Unipolar, at(SOUND, 0, 4, 64.0), NOT_VIBRATO),
@@ -226,6 +237,8 @@ impl ModView {
         // Ensemble's one dial sits in the middle.
         dials[7].modes = &[Mode::Chorus];
         dials.push(dial(DELAY, "DELAY", KnobKind::Unipolar, at(mg, 0, 1, 96.0), &[Mode::Ensemble]));
+        dials.push(dial(BALANCE, "BALANCE", KnobKind::Bipolar, at(mg, 0, 2, 96.0), &[Mode::Rotary]));
+        dials.push(dial(INERTIA, "INERTIA", KnobKind::Unipolar, at(mg, 1, 2, 96.0), &[Mode::Rotary]));
         let groups = vec![
             Group { name: "MOTION", words: "how fast, how far, and how far apart the two sides move", rect: MOTION },
             Group { name: "SOUND", words: "how much of it, how wide, and the wet's lows and highs", rect: SOUND },
@@ -303,15 +316,19 @@ impl ModView {
             Pill::Voices(n) => row(MODE_GROUP, n - 1, 4, MODE_GROUP.y0 + 196.0, 20.0),
             Pill::Stages(i) => row(MODE_GROUP, i, STAGE_COUNTS.len(), MODE_GROUP.y0 + 196.0, 14.0),
             Pill::ThruZero => Rect::new(MODE_GROUP.x0 + 20.0, MODE_GROUP.y0 + 196.0, MODE_GROUP.x1 - 20.0, MODE_GROUP.y0 + 196.0 + PILL_H),
+            Pill::Rotor(r) => row(MODE_GROUP, r.index(), Rotor::ALL.len(), MODE_GROUP.y0 + 196.0, 20.0),
         }
     }
 
     /// The pills showing for `mode`.
     fn pills(&self, mode: Mode) -> Vec<Pill> {
         let mut v: Vec<Pill> = Mode::ALL.iter().map(|&m| Pill::Mode(m)).collect();
-        v.extend(Shape::ALL.iter().map(|&s| Pill::Shape(s)));
-        v.extend([Pill::Sync, Pill::Division]);
+        if mode != Mode::Rotary {
+            v.extend(Shape::ALL.iter().map(|&s| Pill::Shape(s)));
+            v.extend([Pill::Sync, Pill::Division]);
+        }
         match mode {
+            Mode::Rotary => v.extend(Rotor::ALL.iter().map(|&r| Pill::Rotor(r))),
             Mode::Chorus => v.extend((1..=4).map(Pill::Voices)),
             Mode::Flanger => v.push(Pill::ThruZero),
             Mode::Phaser => v.extend((0..STAGE_COUNTS.len()).map(Pill::Stages)),
@@ -398,6 +415,19 @@ impl ModView {
             Mode::Chorus => paths.extend([wave(0.0, 1.5, 0.9, 0.0), wave(0.12, 1.5, 0.9, 0.0)]),
             Mode::Ensemble => paths.extend([wave(0.0, 1.5, 0.9, 0.0), wave(0.1, 1.5, 0.75, 0.0), wave(0.2, 1.5, 0.6, 0.0)]),
             Mode::Vibrato => paths.push(wave(0.0, 2.5, 0.9, 3.0)),
+            Mode::Rotary => {
+                // The cabinet from above: a ring, and the horn across it (its bell flared).
+                let c = r.center();
+                let rad = 0.46 * r.height();
+                paths.push(Circle::new(c, rad).to_path(0.1));
+                let (dx, dy) = (0.72 * rad, -0.42 * rad);
+                let mut horn = BezPath::new();
+                horn.move_to((c.x - dx, c.y - dy));
+                horn.line_to((c.x + dx, c.y + dy));
+                horn.move_to((c.x + dx - 0.2 * rad, c.y + dy - 0.3 * rad));
+                horn.line_to((c.x + dx + 0.2 * rad, c.y + dy + 0.3 * rad));
+                paths.push(horn);
+            }
             Mode::Flanger | Mode::Phaser => {
                 // The comb (evenly spaced notches) or the phaser's few, wide ones.
                 let pts: Vec<Point> = (0..=n * 2)
@@ -439,6 +469,7 @@ impl ModView {
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &PLOT);
         match s.mode {
             Mode::Flanger | Mode::Phaser => self.draw_response(cx, s),
+            Mode::Rotary => self.draw_cabinet(cx, s),
             _ => self.draw_time(cx, s),
         }
         let _ = theme;
@@ -605,6 +636,154 @@ impl ModView {
         glow_stroke(cx, &c, 1.8, accent, accent, if hot { 5.0 } else { 2.5 });
     }
 
+    /// The rotors now: their place in the turn (the last record's, carried on at their speed
+    /// since it came) and their speeds, horn then drum.
+    pub fn rotors_now(&self) -> ([f64; 2], [f64; 2]) {
+        let since = self.since_fresh_s();
+        self.history.back().map_or(([0.0, 0.3], [0.0; 2]), |r| {
+            let v = |k: usize| f64::from(r[record::VALUES + k]);
+            ([v(0) + v(2) * since, v(1) + v(3) * since], [v(2), v(3)])
+        })
+    }
+
+    /// The rotors' centres and radius in the view.
+    fn rotor_circles() -> ([Point; 2], f64) {
+        let cy = PLOT_IN.center().y - 6.0;
+        let r = 0.36 * PLOT_IN.height();
+        ([Point::new(PLOT_IN.x0 + 0.3 * PLOT_IN.width(), cy), Point::new(PLOT_IN.x0 + 0.7 * PLOT_IN.width(), cy)], r)
+    }
+
+    /// The rotary: the cabinet from above, the horn (left) and the drum (right) turning past the
+    /// two mics (front is down). The horn's beam is shaded; turning fast, a trail behind each.
+    fn draw_cabinet(&self, cx: &mut DrawCx<'_>, s: &ModSettings) {
+        let theme = cx.theme;
+        let accent = theme.accent;
+        cx.text.draw(cx.scene, "ROTORS · from above", PLOT.x0 + 12.0, PLOT.y0 + 8.0, TextStyle::LABEL.sized(9.0), theme.text_mid, Align::Left);
+        let (angles, speeds) = self.rotors_now();
+        let ([horn_c, drum_c], r) = Self::rotor_circles();
+        let tau = std::f64::consts::TAU;
+        // A place in the turn (cycles, 0: front, which is down) as a direction.
+        let dir = |a: f64| (f64::sin(tau * a), f64::cos(tau * a));
+        let mics = m::mic_angles(s.spread);
+        let hot = self.hot == Some(Hot::Cabinet);
+        for (k, c) in [horn_c, drum_c].into_iter().enumerate() {
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Circle::new(c, r));
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if hot { theme.text_lo } else { theme.grid_major }, None, &Circle::new(c, r));
+            // The mics, outside the ring.
+            for (side, &a) in mics.iter().enumerate() {
+                let (dx, dy) = dir(a);
+                let p = Point::new(c.x + dx * (r + 16.0), c.y + dy * (r + 16.0));
+                let cap = Circle::new(p, 5.0);
+                if side == 0 {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_mid, None, &cap);
+                } else {
+                    cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, theme.text_mid, None, &cap);
+                }
+                if k == 0 || mics[0] != mics[1] {
+                    let label = if mics[0] == mics[1] { "L R" } else if side == 0 { "L" } else { "R" };
+                    cx.text.draw(cx.scene, label, p.x + dx * 14.0, p.y + dy * 14.0 - 6.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Center);
+                }
+            }
+            // Turning fast, the beam and the scoop smear a little wider (motion, not a setting).
+            let blur = ((speeds[k] - 1.0) / 6.0).clamp(0.0, 1.0) * 0.06;
+            let arc = |a: f64, span: f64, rad: f64| {
+                let n = 24;
+                let pts: Vec<Point> = (0..=n).map(|i| {
+                    let (x, y) = dir(a + (i as f64 / n as f64 - 0.5) * span);
+                    Point::new(c.x + x * rad, c.y + y * rad)
+                }).collect();
+                smooth_path(&pts)
+            };
+            if k == 0 {
+                // The horn: its beam shaded, then the two bells on their bar (the live one lit,
+                // the dummy dim), each a flare opening outwards.
+                let mut beam = arc(angles[0], 0.16 + blur, r);
+                beam.line_to(c);
+                beam.close_path();
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.08 + 0.1 * s.depth), None, &beam);
+                let bell = |a: f64, len: f64| {
+                    let (dx, dy) = dir(a);
+                    let (px, py) = (-dy, dx);
+                    let at = |along: f64, across: f64| Point::new(c.x + dx * along * r + px * across * r, c.y + dy * along * r + py * across * r);
+                    let mut path = BezPath::new();
+                    path.move_to(at(0.0, 0.0));
+                    path.line_to(at(len * 0.55, 0.0));
+                    path.move_to(at(len * 0.55, 0.035));
+                    path.quad_to(at(len * 0.8, 0.045), at(len, 0.15));
+                    path.line_to(at(len, -0.15));
+                    path.quad_to(at(len * 0.8, -0.045), at(len * 0.55, -0.035));
+                    path.close_path();
+                    path
+                };
+                cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, accent.multiply_alpha(0.4), None, &bell(angles[0] + 0.5, 0.62));
+                glow_stroke(cx, &bell(angles[0], 0.84), 2.0, accent, accent, 3.0);
+            } else {
+                // The drum: its body, the scoop's opening (where the sound leaves) lit.
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.05), None, &Circle::new(c, 0.78 * r));
+                let mut scoop = arc(angles[1], 0.36 + blur, 0.78 * r);
+                scoop.line_to(c);
+                scoop.close_path();
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.14), None, &scoop);
+                glow_stroke(cx, &arc(angles[1], 0.36, 0.78 * r), 3.0, accent, accent, 3.0);
+            }
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_mid, None, &Circle::new(c, 3.0));
+            cx.text.draw(cx.scene, if k == 0 { "HORN" } else { "DRUM" }, c.x, c.y + r + 34.0, TextStyle::LABEL.sized(10.0), theme.text_lo, Align::Center);
+        }
+    }
+
+    /// The rotary's strip (where the LFO is otherwise): each rotor's speed over the last seconds,
+    /// the horn solid, the drum dashed.
+    fn draw_rotor_speeds(&self, cx: &mut DrawCx<'_>, s: &ModSettings) {
+        let theme = cx.theme;
+        let accent = theme.accent;
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &LFO);
+        cx.text.draw(cx.scene, "ROTOR SPEED · turns a second", LFO.x0 + 12.0, LFO.y0 + 8.0, TextStyle::LABEL.sized(9.0), theme.text_mid, Align::Left);
+        let area = Rect::new(WAVE.x0, WAVE.y0, WAVE.x1, LFO.y1 - 24.0);
+        let y_of = |hz: f64| area.y1 - (hz / ROTOR_TOP_HZ).clamp(0.0, 1.0) * area.height();
+        let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) };
+        for hz in [0.0, 2.0, 4.0, 6.0, 8.0] {
+            let y = y_of(hz);
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if hz == 0.0 { theme.grid_major } else { theme.grid_minor }, None, &Line::new((area.x0, y), (area.x1, y)));
+            cx.text.draw(cx.scene, &format!("{hz:.0}"), area.x0 - 8.0, y - 6.0, label, theme.text_lo, Align::Right);
+        }
+        // Where the speed is headed: slow and fast, dashed faintly.
+        for w in 0..2 {
+            for hz in [m::ROTOR_SLOW_HZ[w], m::ROTOR_FAST_HZ[w]] {
+                let y = y_of(f64::from(hz));
+                cx.scene.stroke(&Stroke::new(1.0).with_dashes(0.0, [2.0, 4.0]), Affine::IDENTITY, accent.multiply_alpha(0.25), None, &Line::new((area.x0, y), (area.x1, y)));
+            }
+        }
+        let lane = HistoryLane { x0: area.x0, width: area.width(), top: area.y0, bottom: area.y1, seconds: ROTOR_SECONDS, slice_ms: HISTORY_SLICE_MS };
+        let since = (self.last_fresh.elapsed().as_secs_f64() * 1000.0 / f64::from(HISTORY_SLICE_MS)).min(4.0);
+        let cols = lane.columns(&self.history, self.seen, since);
+        if cols.len() >= 2 {
+            cx.begin_clip(&area.inflate(0.0, 4.0));
+            for w in [1, 0] {
+                let pts: Vec<Point> = cols.iter().map(|c| Point::new(c.x, y_of(f64::from(c.high[record::VALUES + 2 + w])))).collect();
+                let path = smooth_path(&pts);
+                if w == 0 {
+                    glow_stroke(cx, &path, 2.0, accent, accent, 2.5);
+                } else {
+                    cx.scene.stroke(&Stroke::new(1.6).with_dashes(0.0, [5.0, 3.0]), Affine::IDENTITY, accent.multiply_alpha(0.7), None, &path);
+                }
+            }
+            cx.end_clip();
+        }
+        // The key, where the shapes are otherwise.
+        let kx = LFO.x0 + 570.0;
+        for (i, (name, dashed)) in [("HORN", false), ("DRUM", true)].into_iter().enumerate() {
+            let y = LFO.y0 + 52.0 + i as f64 * 34.0;
+            let line = Line::new((kx, y), (kx + 36.0, y));
+            if dashed {
+                cx.scene.stroke(&Stroke::new(1.6).with_dashes(0.0, [5.0, 3.0]), Affine::IDENTITY, accent.multiply_alpha(0.7), None, &line);
+            } else {
+                glow_stroke(cx, &line, 2.0, accent, accent, 2.5);
+            }
+            cx.text.draw(cx.scene, name, kx + 46.0, y - 6.0, TextStyle::LABEL.sized(10.0), theme.text_mid, Align::Left);
+        }
+        let _ = s;
+    }
+
     fn draw_pill(&self, cx: &mut DrawCx<'_>, pill: Pill, text: &str, on: bool) {
         let theme = cx.theme;
         let r = RoundedRect::from_rect(self.pill(pill), PILL_H / 2.0);
@@ -632,6 +811,12 @@ impl ModView {
                 cx.text.draw(cx.scene, "VOICES", MODE_GROUP.center().x, MODE_GROUP.y0 + 230.0, TextStyle::LABEL, theme.text_lo, Align::Center);
             }
             Mode::Flanger => self.draw_pill(cx, Pill::ThruZero, "THROUGH ZERO", s.thru_zero),
+            Mode::Rotary => {
+                for r in Rotor::ALL {
+                    self.draw_pill(cx, Pill::Rotor(r), &Rotor::NAMES[r.index()].to_uppercase(), s.rotor == r);
+                }
+                cx.text.draw(cx.scene, "SPEED", MODE_GROUP.center().x, MODE_GROUP.y0 + 230.0, TextStyle::LABEL, theme.text_lo, Align::Center);
+            }
             Mode::Phaser => {
                 for (i, n) in STAGE_COUNTS.iter().enumerate() {
                     self.draw_pill(cx, Pill::Stages(i), &n.to_string(), s.stages == *n);
@@ -723,6 +908,11 @@ impl ModView {
                 d.knob.draw(cx);
             }
         }
+        if s.mode == Mode::Rotary {
+            // Where RATE would be: the rotors set their own speed.
+            let k = Knob::new(RATE, "RATE", KnobKind::Unipolar, Point::new(MOTION.x0 + MOTION.width() / 6.0, MOTION.y0 + 64.0), DIAL_D);
+            Self::draw_plaque(cx, &k, ["SLOW", "FAST", "STOP"][s.rotor.index()]);
+        }
         if s.mode == Mode::Vibrato {
             // Where MIX would be: vibrato is all wet.
             let k = Knob::new(MIX, "MIX", KnobKind::Unipolar, Point::new(SOUND.x0 + SOUND.width() * 0.125, SOUND.y0 + 64.0), DIAL_D);
@@ -786,6 +976,7 @@ impl ModView {
                     Mode::Flanger => "Flanger — a short delay swept against the dry: a comb of notches moving (through zero: the wet passes the dry, the tape flange)",
                     Mode::Phaser => "Phaser — 2 to 24 allpass stages swept: a few wide notches moving",
                     Mode::Vibrato => "Vibrato — the pitch swayed, nothing of the dry left",
+                    Mode::Rotary => "Rotary — a spinning speaker: the horn and the drum turning past two mics, each speeding up and slowing down at its own pace",
                 });
             }
             Some(Hot::Pill(Pill::Shape(shape))) => return Help::default().text(format!("{} — the LFO's shape (every one smooth: a delay swept by a step would click)", Shape::NAMES[shape.index()])),
@@ -793,6 +984,14 @@ impl ModView {
             Some(Hot::Pill(Pill::Division)) => return Help::default().text("Division — one LFO cycle this long when synced; click to pick, wheel to step"),
             Some(Hot::Pill(Pill::Voices(n))) => return Help::default().text(format!("{n} voice{} — each its own delay and place in the cycle", if n > 1 { "s" } else { "" })),
             Some(Hot::Pill(Pill::Stages(i))) => return Help::default().text(format!("{} stages — {} notches; more stages, more notches", STAGE_COUNTS[i], STAGE_COUNTS[i] / 2)),
+            Some(Hot::Pill(Pill::Rotor(r))) => {
+                return Help::default().text(match r {
+                    Rotor::Slow => "Slow — the rotors turn lazily (the chorale): a gentle swirl",
+                    Rotor::Fast => "Fast — the rotors spin up (the tremolo): the horn gets there in a second or two, the heavy drum takes longer",
+                    Rotor::Brake => "Brake — both rotors coast to a stop; the sound stays wherever they stop",
+                });
+            }
+            Some(Hot::Cabinet) => return Help::default().text("The cabinet from above: the horn (left) and the drum (right) turning past the two mics (front is down) — click: slow ⇄ fast"),
             Some(Hot::Pill(Pill::ThruZero)) => return Help::default().text("Through zero — the dry waits (5 ms of latency, reported) so the wet can catch it and pass it: at the crossing everything cancels or doubles, the tape flange"),
             Some(Hot::Puck) => {
                 let fb = Self::plain(host, FEEDBACK.id);
@@ -825,8 +1024,14 @@ impl ModView {
         if let Some(h) = self.session.help() {
             return h;
         }
+        if self.pointer.is_some_and(|p| LFO.contains(p)) && s.mode == Mode::Rotary {
+            return Help::default().text("Each rotor's speed over the last seconds: the horn solid, the drum dashed (faint lines: slow and fast).");
+        }
         if self.pointer.is_some_and(|p| LFO.contains(p)) {
             return Help::default().text("The LFO: its shape over one cycle; the dot is the left side now, the ring the right (SPREAD ahead).");
+        }
+        if s.mode == Mode::Rotary {
+            return Help::default().text("Pick a mode on top; the rotary turns by itself: SLOW, FAST or BRAKE (or click the cabinet).");
         }
         Help::default().text("Pick a mode on top; its view and controls follow. The LFO below moves everything.")
     }
@@ -847,6 +1052,7 @@ impl ModView {
         if PLOT.contains(p) {
             return match mode {
                 Mode::Flanger | Mode::Phaser => (self.puck(host).distance(p) <= 16.0).then_some(Hot::Puck),
+                Mode::Rotary => PLOT_IN.contains(p).then_some(Hot::Cabinet),
                 _ => PLOT_IN.contains(p).then_some(Hot::Time),
             };
         }
@@ -940,6 +1146,7 @@ impl ModView {
                             let on = Self::plain(host, THRU_ZERO.id) >= 0.5;
                             Self::gesture(host, THRU_ZERO.id, if on { 0.0 } else { 1.0 });
                         }
+                        Pill::Rotor(r) => Self::gesture(host, ROTOR.id, r.index() as f32),
                     }
                     true
                 }
@@ -948,6 +1155,11 @@ impl ModView {
                     host.begin_gesture(id);
                     host.begin_gesture(FEEDBACK.id);
                     self.drag = Some(Drag::Puck { start: pos, at: self.puck(host) });
+                    true
+                }
+                Some(Hot::Cabinet) => {
+                    let fast = Rotor::from_index(Self::plain(host, ROTOR.id).round().max(0.0) as usize) == Rotor::Fast;
+                    Self::gesture(host, ROTOR.id, if fast { Rotor::Slow } else { Rotor::Fast }.index() as f32);
                     true
                 }
                 Some(Hot::Time) => {
@@ -1033,8 +1245,12 @@ fn knob_words(id: &str, mode: Mode) -> &'static str {
             Mode::Flanger => " — how far the comb sweeps (through zero: from 50 % the wet passes the dry)",
             Mode::Phaser => " — how far the notches sweep (±3 octaves at 100 %)",
             Mode::Vibrato => " — how far the pitch sways (100 %: a semitone at the sine's steepest)",
+            Mode::Rotary => " — how much the turning moves the sound (the Doppler sway and the swell as each rotor passes a mic)",
         },
+        "spread" if mode == Mode::Rotary => " — the two mics' angle around the cabinet (0: one place; 180°: either side, the widest)",
         "spread" => " — how far the right side's LFO runs ahead of the left (180°: opposite, the widest)",
+        "balance" => " — the horn against the drum (−: more drum, the body; +: more horn, the swirl)",
+        "inertia" => " — how slowly the rotors change speed (50 %: as built; the drum is always the slower)",
         "feedback" => " — how hard it rings (negative: the other notches)",
         "delay" => " — how far behind the voices sit",
         "manual" => " — where the comb sits (its first notch at 1 / (2 × this))",
@@ -1064,7 +1280,11 @@ impl View for ModView {
         self.draw_tiles(cx, s.mode);
         self.draw_plot(cx, &s);
         self.draw_mode_group(cx, &s);
-        self.draw_lfo(cx, &s);
+        if s.mode == Mode::Rotary {
+            self.draw_rotor_speeds(cx, &s);
+        } else {
+            self.draw_lfo(cx, &s);
+        }
         self.draw_groups(cx, &s);
         self.draw_meters(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));

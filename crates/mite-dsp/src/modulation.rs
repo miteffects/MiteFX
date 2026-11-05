@@ -1,5 +1,6 @@
 //! Modulation effects behind Mite Mod (docs/design/mod-brief.md): chorus, ensemble, flanger
-//! (through-zero too), phaser (2…24 stages) and vibrato, on one LFO.
+//! (through-zero too), phaser (2…24 stages) and vibrato, on one LFO; and a rotary speaker
+//! (horn and drum, each spinning with its own inertia; it sets its own motion, not the LFO).
 //!
 //! Ideas from Nova's NovaChorus, NovaFlanger and NovaPhaser; the code is new. What is new here:
 //!
@@ -19,8 +20,8 @@
 //!   the new one's over 30 ms (both run meanwhile). Every continuous setting glides.
 //!
 //! Latency: none, except the through-zero flanger (the dry is delayed so the wet can pass it:
-//! [`TZ_MAX_MS`] plus the sinc's reach) and vibrato (it plays around [`VIB_CENTER_MS`], so the
-//! voice stays in time). Nothing here allocates outside [`Mod::new`].
+//! [`TZ_MAX_MS`] plus the sinc's reach), vibrato (it plays around [`VIB_CENTER_MS`], so the
+//! voice stays in time) and the rotary (its rotors' paths, [`ROT_BASE_MS`]). Nothing here allocates outside [`Mod::new`].
 
 use crate::doubler::Sinc;
 use crate::reverb::Delay;
@@ -54,6 +55,31 @@ pub const ENSEMBLE_FAST_MS: f32 = 0.35;
 pub const VOICE_PHASE: [f64; MAX_VOICES] = [0.0, 0.5, 0.25, 0.75];
 pub const VOICE_DELAY: [f32; MAX_VOICES] = [1.0, 1.23, 0.81, 1.41];
 
+/// The rotary: the crossover between the drum (below) and the horn, Hz.
+pub const ROT_SPLIT_HZ: f32 = 800.0;
+/// Its paths' delay at rest (the mics' distance; the latency), ms.
+pub const ROT_BASE_MS: f32 = 2.0;
+/// The horn's mouth swings this much nearer and further at 100 % DEPTH (radius over the speed of
+/// sound, ~15 cm), ms; the drum's, through its scoop.
+pub const HORN_DOPPLER_MS: f32 = 0.45;
+pub const DRUM_DOPPLER_MS: f32 = 0.2;
+/// How much quieter a rotor is facing away from a mic at 100 % DEPTH (0…1 of its level), and the
+/// horn's treble over [`HORN_BEAM_HZ`] on top (a horn beams its highs).
+pub const HORN_AM: f32 = 0.6;
+pub const DRUM_AM: f32 = 0.4;
+pub const HORN_BEAM: f32 = 0.6;
+pub const HORN_BEAM_HZ: f32 = 2500.0;
+/// The horn's sound off the cabinet's back wall: this much later, at this level.
+pub const ROT_REFLECT_MS: f32 = 1.3;
+pub const ROT_REFLECT_GAIN: f32 = 0.3;
+/// Rotations a second: slow (chorale) and fast (tremolo), horn then drum (the drum a little
+/// slower, so the two drift against each other).
+pub const ROTOR_SLOW_HZ: [f32; 2] = [0.83, 0.67];
+pub const ROTOR_FAST_HZ: [f32; 2] = [6.7, 5.8];
+/// Each rotor's speed changes over these times (a one-pole's, s) at INERTIA 50 %: speeding up,
+/// slowing down; horn then drum (the drum is heavy: it takes several seconds).
+pub const ROTOR_TIMES_S: [[f32; 2]; 2] = [[0.7, 1.1], [3.2, 4.2]];
+
 /// The sinc reaches this many samples either side of a reading.
 const SINC_REACH: f64 = 15.0;
 /// Under this, Lagrange alone (between, a crossfade).
@@ -77,11 +103,35 @@ pub enum Mode {
     Flanger,
     Phaser,
     Vibrato,
+    Rotary,
 }
 
 impl Mode {
-    pub const NAMES: [&'static str; 5] = ["Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato"];
-    pub const ALL: [Mode; 5] = [Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato];
+    pub const NAMES: [&'static str; 6] = ["Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato", "Rotary"];
+    pub const ALL: [Mode; 6] = [Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato, Mode::Rotary];
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL.get(i).copied().unwrap_or_default()
+    }
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The rotary's speed. The index is saved state (append only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Rotor {
+    #[default]
+    Slow,
+    Fast,
+    /// Both rotors coast to a stop (where they stop, the sound stays put).
+    Brake,
+}
+
+impl Rotor {
+    pub const NAMES: [&'static str; 3] = ["Slow", "Fast", "Brake"];
+    pub const ALL: [Rotor; 3] = [Rotor::Slow, Rotor::Fast, Rotor::Brake];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -174,6 +224,11 @@ pub struct ModSettings {
     /// Phaser.
     pub centre_hz: f32,
     pub stages: usize,
+    /// Rotary: the speed, the horn against the drum (−1: drum only … 1: horn only, ±12 dB at the
+    /// ends of a ±6 dB tilt and beyond), how slowly the rotors change speed (0…1, 0.5: as built).
+    pub rotor: Rotor,
+    pub balance: f32,
+    pub inertia: f32,
 }
 
 impl Default for ModSettings {
@@ -197,6 +252,9 @@ impl Default for ModSettings {
             thru_zero: false,
             centre_hz: 800.0,
             stages: 4,
+            rotor: Rotor::Slow,
+            balance: 0.0,
+            inertia: 0.5,
         }
     }
 }
@@ -301,6 +359,41 @@ pub fn tz_latency(fs: f32) -> usize {
     SINC_REACH as usize + 1 + (TZ_MAX_MS * 0.001 * fs).ceil() as usize
 }
 
+/// Samples the rotary delays the sound at `fs` (its paths at rest).
+pub fn rotary_latency(fs: f32) -> usize {
+    (ROT_BASE_MS * 0.001 * fs).round() as usize
+}
+
+/// A rotor's speed for `rotor`, rotations a second (`which`: 0 the horn, 1 the drum).
+pub fn rotor_target_hz(rotor: Rotor, which: usize) -> f32 {
+    match rotor {
+        Rotor::Slow => ROTOR_SLOW_HZ[which],
+        Rotor::Fast => ROTOR_FAST_HZ[which],
+        Rotor::Brake => 0.0,
+    }
+}
+
+/// How long a rotor takes to change speed (a one-pole's time, s): `up` speeding up. INERTIA
+/// scales it from a quarter (0) to four times (1).
+pub fn rotor_time_s(which: usize, up: bool, inertia: f32) -> f32 {
+    ROTOR_TIMES_S[which][usize::from(!up)] * 4f32.powf(2.0 * inertia.clamp(0.0, 1.0) - 1.0)
+}
+
+/// The two mics' places around the rotors, cycles (0: in front): SPREAD 0 together in front, 1
+/// either side (180° apart).
+pub fn mic_angles(spread: f32) -> [f64; 2] {
+    let a = 0.25 * f64::from(spread.clamp(0.0, 1.0));
+    [-a, a]
+}
+
+/// The horn's and the drum's gains for BALANCE (−1…1): a tilt of ±6 dB, then fading the other
+/// out towards the ends.
+pub fn rotary_balance(balance: f32) -> [f32; 2] {
+    let b = balance.clamp(-1.0, 1.0);
+    let tilt = 10f32.powf(6.0 * b / 20.0);
+    [tilt * (1.0 + b).min(1.0), (1.0 - b).min(1.0) / tilt]
+}
+
 /// Samples vibrato delays the voice at `fs`.
 pub fn vibrato_latency(fs: f32) -> usize {
     (VIB_CENTER_MS * 0.001 * fs).round() as usize
@@ -311,6 +404,7 @@ pub fn latency_for(s: &ModSettings, fs: f32) -> usize {
     match s.mode {
         Mode::Flanger if s.thru_zero => tz_latency(fs),
         Mode::Vibrato => vibrato_latency(fs),
+        Mode::Rotary => rotary_latency(fs),
         _ => 0,
     }
 }
@@ -463,7 +557,7 @@ impl Glide {
     }
 }
 
-const PROGRAMS: usize = 6;
+const PROGRAMS: usize = 7;
 
 /// The programs: each mode, and the flanger twice (through zero has its own latency and state).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -474,6 +568,7 @@ enum Program {
     FlangerTz,
     Phaser,
     Vibrato,
+    Rotary,
 }
 
 impl Program {
@@ -485,6 +580,7 @@ impl Program {
             Mode::Flanger => Self::Flanger,
             Mode::Phaser => Self::Phaser,
             Mode::Vibrato => Self::Vibrato,
+            Mode::Rotary => Self::Rotary,
         }
     }
 }
@@ -497,7 +593,8 @@ pub struct ModTelemetry {
     pub rate: f64,
     /// The mode's readings, left then right: chorus, each voice's delay (ms, 4 + 4); ensemble,
     /// each voice's (3 + 3); flanger, the delay between wet and dry (ms); phaser, the corner (Hz);
-    /// vibrato, the pitch (cents).
+    /// vibrato, the pitch (cents); rotary, the horn's and the drum's place in their turn
+    /// (cycles, 0…1: 0 faces front) and their speeds (rotations a second).
     pub values: [f32; 8],
 }
 
@@ -522,6 +619,17 @@ pub struct Mod {
     fast_phase: f64,
     /// Vibrato's last delays (for its pitch), per side.
     vib_last: [f64; 2],
+    /// The rotary: its crossover (low pass, high pass) and their states (two sections each), the
+    /// drum's and the horn's lines, each horn reading's treble split (per mic), the rotors'
+    /// places (cycles) and speeds (Hz), horn then drum.
+    rot_split: [Biquad; 2],
+    rot_split_z: [[BiquadState; 2]; 2],
+    rot_line: [Delay; 2],
+    rot_beam: [f32; 2],
+    rot_beam_k: f32,
+    rot_angle: [f64; 2],
+    rot_speed: [f32; 2],
+    balance: Glide,
     cur: Program,
     prev: Program,
     fade: f32,
@@ -572,6 +680,14 @@ impl Mod {
             phase: 0.0,
             fast_phase: 0.0,
             vib_last: [0.0; 2],
+            rot_split: [Biquad::butter(f64::from(ROT_SPLIT_HZ), f64::from(fs), false), Biquad::butter(f64::from(ROT_SPLIT_HZ), f64::from(fs), true)],
+            rot_split_z: [[BiquadState::default(); 2]; 2],
+            rot_line: mk(((ROT_BASE_MS + ROT_REFLECT_MS + 2.0 * HORN_DOPPLER_MS) * 0.001 * fs) as usize + 64),
+            rot_beam: [0.0; 2],
+            rot_beam_k: 1.0 - (-std::f32::consts::TAU * HORN_BEAM_HZ / fs).exp(),
+            rot_angle: [0.0, 0.3],
+            rot_speed: [0.0; 2],
+            balance: Glide::default(),
             cur: Program::of(s),
             prev: Program::of(s),
             fade: 1.0,
@@ -613,6 +729,7 @@ impl Mod {
         match self.cur {
             Program::FlangerTz => tz_latency(self.fs),
             Program::Vibrato => vibrato_latency(self.fs),
+            Program::Rotary => rotary_latency(self.fs),
             _ => 0,
         }
     }
@@ -647,8 +764,21 @@ impl Mod {
         }
         (self.stage_from, self.stage_to, self.stage_fade) = (s.stages, s.stages, 1.0);
         self.vib_last = [f64::from(VIB_CENTER_MS) * 0.001 * f64::from(self.fs); 2];
+        self.reset_rotary();
+        self.rot_angle = [0.0, 0.3];
+        self.rot_speed = [rotor_target_hz(s.rotor, 0), rotor_target_hz(s.rotor, 1)];
+        self.balance.v = s.balance;
         self.values = [0.0; 8];
         self.design_tone();
+    }
+
+    /// The rotary's lines and filters from silence (the rotors keep turning).
+    fn reset_rotary(&mut self) {
+        for d in &mut self.rot_line {
+            d.reset();
+        }
+        self.rot_split_z = [[BiquadState::default(); 2]; 2];
+        self.rot_beam = [0.0; 2];
     }
 
     fn design_tone(&mut self) {
@@ -734,6 +864,7 @@ impl Mod {
             let feedback = self.feedback.next(s.feedback.clamp(-0.95, 0.95), k);
             let mix = self.mix.next(s.mix.clamp(0.0, 1.0), k);
             let width = self.width.next(s.width.clamp(0.0, 2.0), k);
+            let balance = self.balance.next(s.balance.clamp(-1.0, 1.0), k);
             let delay = self.delay.next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), kd);
             let manual = self.manual.next(s.manual_ms.clamp(MIN_MANUAL_MS, TZ_MAX_MS), kd);
             let centre = self.centre.next(s.centre_hz.clamp(50.0, 8000.0).log2(), kd).exp2();
@@ -747,7 +878,7 @@ impl Mod {
                 g.next(if v < s.voices.clamp(1, MAX_VOICES) { 1.0 } else { 0.0 }, k);
             }
             // The settings as they play this sample (glided), for the readings' functions.
-            let now = ModSettings { depth, spread, feedback, mix, width, delay_ms: delay, manual_ms: manual, centre_hz: centre, ..*s };
+            let now = ModSettings { depth, spread, feedback, mix, width, balance, delay_ms: delay, manual_ms: manual, centre_hz: centre, ..*s };
             let offsets = [0.0, 0.5 * f64::from(spread)];
             let lfo = [self.lfo(self.phase), self.lfo(self.phase + offsets[1])];
             let mut y = self.play(self.cur, &now, lfo, offsets, vib_amp, ms, [xl, xr]);
@@ -788,6 +919,7 @@ impl Mod {
                 self.ap = [[[0.0; 2]; MAX_STAGES]; 2];
                 self.ap_out = [0.0; 2];
             }
+            Program::Rotary => self.reset_rotary(),
             _ => {}
         }
         self.tone[p as usize] = [[BiquadState::default(); 2]; 2];
@@ -913,6 +1045,58 @@ impl Mod {
                 }
                 // All wet: the vibrato is the effect (MIX does not apply).
                 self.finish(p, wet, s.width)
+            }
+            Program::Rotary => {
+                let fs = self.fs;
+                // The rotors: each speed eases to its target (its own inertia), then turns.
+                for w in 0..2 {
+                    let target = rotor_target_hz(s.rotor, w);
+                    let up = target > self.rot_speed[w];
+                    let k = 1.0 - (-1.0 / (rotor_time_s(w, up, s.inertia) * fs)).exp();
+                    self.rot_speed[w] += (target - self.rot_speed[w]) * k;
+                    self.rot_angle[w] = (self.rot_angle[w] + f64::from(self.rot_speed[w]) / f64::from(fs)).fract();
+                }
+                // Mono into the cabinet, split (Linkwitz–Riley: two Butterworths each way).
+                let mono = f64::from(0.5 * (x[0] + x[1]));
+                let [lp, hp] = self.rot_split;
+                let [zl, zh] = &mut self.rot_split_z;
+                let low = zl[0].run(&lp, mono);
+                let low = zl[1].run(&lp, low);
+                let high = zh[0].run(&hp, mono);
+                let high = zh[1].run(&hp, high);
+                self.rot_line[0].write(high as f32);
+                self.rot_line[1].write(low as f32);
+                let depth = s.depth;
+                // At rest the paths are the latency exactly (whole samples).
+                let base = rotary_latency(self.fs) as f64;
+                let [g_horn, g_drum] = rotary_balance(s.balance);
+                let mics = mic_angles(s.spread);
+                let mut wet = [0.0f32; 2];
+                let tau = std::f64::consts::TAU;
+                for c in 0..2 {
+                    // Facing the mic: +1 (nearest, loudest, brightest), away: −1.
+                    let facing = (tau * (self.rot_angle[0] - mics[c])).cos() as f32;
+                    let d = base - f64::from(HORN_DOPPLER_MS * depth * facing) * ms;
+                    let direct = Self::read(&self.sinc, &self.rot_line[0], d);
+                    let away = 0.5 * (1.0 - facing);
+                    // The horn's highs beam: facing away, they drop further than its body.
+                    self.rot_beam[c] += (direct - self.rot_beam[c]) * self.rot_beam_k;
+                    let body = self.rot_beam[c];
+                    let horn = (body + (direct - body) * (1.0 - HORN_BEAM * depth * away)) * (1.0 - HORN_AM * depth * away);
+                    // Off the back wall: the side facing away, a little later.
+                    let dr = base + f64::from(ROT_REFLECT_MS) * ms + f64::from(HORN_DOPPLER_MS * depth * facing) * ms;
+                    let back = Self::read(&self.sinc, &self.rot_line[0], dr) * (1.0 - HORN_AM * depth * (1.0 - away));
+                    let horn = (horn + ROT_REFLECT_GAIN * back) / (1.0 + ROT_REFLECT_GAIN);
+                    let facing_d = (tau * (self.rot_angle[1] - mics[c])).cos() as f32;
+                    let dd = base - f64::from(DRUM_DOPPLER_MS * depth * facing_d) * ms;
+                    let drum = Self::read(&self.sinc, &self.rot_line[1], dd) * (1.0 - DRUM_AM * depth * 0.5 * (1.0 - facing_d));
+                    wet[c] = g_horn * horn + g_drum * drum;
+                }
+                self.values[..4].copy_from_slice(&[self.rot_angle[0] as f32, self.rot_angle[1] as f32, self.rot_speed[0], self.rot_speed[1]]);
+                let lat = rotary_latency(fs);
+                let dry = [self.clean[0].tap(lat), self.clean[1].tap(lat)];
+                let w = self.finish(p, wet, s.width);
+                [dry[0] * (1.0 - mix) + w[0] * mix, dry[1] * (1.0 - mix) + w[1] * mix]
             }
         }
     }

@@ -1,5 +1,5 @@
 //! Mite Mod (docs/design/mod-brief.md): chorus, ensemble, flanger (through zero too), phaser and
-//! vibrato in one plugin, on one smooth LFO (`mite_dsp::modulation`), each mode with its own view.
+//! vibrato and a rotary speaker in one plugin, on one smooth LFO (`mite_dsp::modulation`), each mode with its own view.
 
 use std::sync::Arc;
 
@@ -11,6 +11,7 @@ use nih_plug::prelude::*;
 
 pub mod dsp;
 pub mod editor;
+pub mod migrate;
 pub mod params;
 pub mod presets;
 
@@ -78,7 +79,7 @@ impl Plugin for MiteMod {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -110,7 +111,7 @@ impl Plugin for MiteMod {
         self.shared.tempo.store(tempo.unwrap_or(0.0) as f32);
         let (s, out) = (self.params.settings(), self.params.output());
         self.engine.process(buffer.as_slice(), self.stereo_in, &s, &out, &transport, &self.shared.history);
-        // Through zero or vibrato in or out: tell the host.
+        // Through zero, vibrato or the rotary in or out: tell the host.
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {
             self.reported_latency = latency;
@@ -122,7 +123,7 @@ impl Plugin for MiteMod {
 
 impl ClapPlugin for MiteMod {
     const CLAP_ID: &'static str = "io.github.ansabic.mitefx.mod";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Chorus, ensemble, flanger, phaser and vibrato");
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("Chorus, ensemble, flanger, phaser, vibrato and rotary speaker");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = Some("https://github.com/ansabic/MiteFX/issues");
     const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Stereo, ClapFeature::Mono, ClapFeature::Chorus, ClapFeature::Flanger, ClapFeature::Phaser];

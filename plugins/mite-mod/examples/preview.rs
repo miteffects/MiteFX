@@ -4,7 +4,7 @@
 //!
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_mod --example preview
 //!
-//! MOD_MODE=0…4 opens it in a mode.
+//! MOD_MODE=0…5 opens it in a mode.
 
 #[path = "common/riff.rs"]
 mod riff;
@@ -19,7 +19,7 @@ use mite_ui::{run_standalone, ParamHost, ThemeKind, WindowOptions};
 
 fn main() -> Result<(), String> {
     let host = Arc::new(Mutex::new(memory_host()));
-    // MOD_MODE=0…4 opens in that mode (frame-time checks of each view).
+    // MOD_MODE=0…5 opens in that mode (frame-time checks of each view).
     if let Some(mode) = std::env::var("MOD_MODE").ok().and_then(|m| m.parse::<f32>().ok()) {
         host.lock().expect("host").set_plain("mode", mode);
     }

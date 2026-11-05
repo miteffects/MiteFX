@@ -38,6 +38,7 @@ fn modes() -> Vec<(&'static str, ModSettings)> {
         ("flanger tz", ModSettings { mode: Mode::Flanger, thru_zero: true, feedback: 0.3, ..d }),
         ("phaser", ModSettings { mode: Mode::Phaser, feedback: 0.5, stages: 8, ..d }),
         ("vibrato", ModSettings { mode: Mode::Vibrato, rate_hz: 5.0, ..d }),
+        ("rotary", ModSettings { mode: Mode::Rotary, rotor: Rotor::Fast, depth: 0.8, ..d }),
     ]
 }
 
@@ -83,6 +84,7 @@ fn the_latency_is_where_the_sound_is() {
     for s in [
         ModSettings { mode: Mode::Flanger, thru_zero: true, mix: 0.0, ..ModSettings::default() },
         ModSettings { mode: Mode::Vibrato, depth: 0.0, ..ModSettings::default() },
+        ModSettings { mode: Mode::Rotary, depth: 0.0, mix: 1.0, ..ModSettings::default() },
     ] {
         let lat = latency_for(&s, FS);
         assert_eq!(Mod::new(FS, &s).latency(), lat);
@@ -191,6 +193,10 @@ fn moving_any_setting_never_clicks() {
             ("shape", with(&|s| s.shape = Shape::Square)),
             ("rate", with(&|s| s.rate_hz = 3.0)),
             ("mode", with(&|s| s.mode = if s.mode == Mode::Phaser { Mode::Chorus } else { Mode::Phaser })),
+            ("rotor fast", with(&|s| s.rotor = Rotor::Fast)),
+            ("rotor brake", with(&|s| s.rotor = Rotor::Brake)),
+            ("balance", with(&|s| s.balance = 0.9)),
+            ("inertia", with(&|s| s.inertia = 0.0)),
             ("through zero", with(&|s| {
                 s.mode = Mode::Flanger;
                 s.thru_zero = !s.thru_zero;
@@ -233,4 +239,67 @@ fn a_synced_lfo_locks_to_the_song_position() {
     assert!((tel.rate - 0.5).abs() < 1e-9);
     let err = ((beats / 4.0) - tel.phase + 0.5).rem_euclid(1.0) - 0.5;
     assert!(err.abs() < 0.01, "{err}");
+}
+
+/// The rotary on `x` (mono), switching to `later` after `switch_at` samples: the left side and
+/// the telemetry per 10 ms block.
+fn rotary(s: &ModSettings, later: &ModSettings, switch_at: usize, x: &[f32]) -> (Vec<f32>, Vec<ModTelemetry>) {
+    let mut m = Mod::new(FS, s);
+    let (mut l, mut r) = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
+    let mut tel = Vec::new();
+    for (k, ((a, b), c)) in l.chunks_mut(480).zip(r.chunks_mut(480)).zip(x.chunks(480)).enumerate() {
+        let now = if k * 480 >= switch_at { later } else { s };
+        tel.push(m.process([c, c], [a, b], false, now, &NO_TRANSPORT));
+    }
+    (l, tel)
+}
+
+#[test]
+fn the_rotors_change_speed_each_with_its_own_inertia() {
+    // From slow to fast: the light horn is nearly there in 2 s, the heavy drum still on its way;
+    // braking, both coast to a stop.
+    let slow = ModSettings { mode: Mode::Rotary, rotor: Rotor::Slow, ..ModSettings::default() };
+    let fast = ModSettings { rotor: Rotor::Fast, ..slow };
+    let x = vec![0.0f32; 48_000 * 2];
+    let (_, tel) = rotary(&slow, &fast, 0, &x);
+    let [horn, drum] = [tel[199].values[2], tel[199].values[3]];
+    assert!(tel[0].values[2] < 1.5, "starts slow: {}", tel[0].values[2]);
+    assert!(horn > 0.9 * ROTOR_FAST_HZ[0], "horn at 2 s: {horn}");
+    assert!(drum < 0.6 * ROTOR_FAST_HZ[1] && drum > ROTOR_SLOW_HZ[1] * 2.0, "drum at 2 s: {drum}");
+    // More inertia: slower still.
+    let (_, heavy) = rotary(&ModSettings { inertia: 1.0, ..slow }, &ModSettings { inertia: 1.0, ..fast }, 0, &x);
+    assert!(heavy[199].values[2] < 0.7 * horn, "{} against {horn}", heavy[199].values[2]);
+    let brake = ModSettings { rotor: Rotor::Brake, ..slow };
+    let (_, tel) = rotary(&fast, &brake, 0, &vec![0.0f32; 48_000 * 30]);
+    let last = tel.last().expect("tel");
+    assert!(last.values[2] < 0.02 && last.values[3] < 0.05, "{:?}", &last.values[..4]);
+    // The places turn with the speeds, in 0…1.
+    assert!(tel.iter().all(|t| (0.0..1.0).contains(&t.values[0]) && (0.0..1.0).contains(&t.values[1])));
+}
+
+#[test]
+fn the_horn_sweeps_its_level_and_pitch_past_the_mics_and_depth_zero_stands_still() {
+    // A 3 kHz tone (the horn's) through a fast rotary: each 5 ms slice's level swings with the
+    // horn's turn at DEPTH 100 %, and stays put at 0 (only the rotors' sound, nothing moving).
+    let n = 48_000 * 3;
+    let x: Vec<f32> = (0..n).map(|i| 0.3 * (std::f32::consts::TAU * 3000.0 * i as f32 / FS).sin()).collect();
+    let swing = |depth: f32| {
+        let s = ModSettings { mode: Mode::Rotary, rotor: Rotor::Fast, depth, mix: 1.0, ..ModSettings::default() };
+        let (l, _) = rotary(&s, &s, 0, &x);
+        let db: Vec<f32> = l[48_000..].chunks(240).map(|c| 10.0 * (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).max(1e-12).log10()).collect();
+        db.iter().cloned().fold(f32::MIN, f32::max) - db.iter().cloned().fold(f32::MAX, f32::min)
+    };
+    let (still, moving) = (swing(0.0), swing(1.0));
+    assert!(still < 0.3, "depth 0 swings {still} dB");
+    assert!(moving > 6.0, "depth 100 % swings only {moving} dB");
+}
+
+#[test]
+fn rotary_balance_tilts_and_then_takes_the_other_rotor_away() {
+    assert_eq!(rotary_balance(0.0), [1.0, 1.0]);
+    let [h, d] = rotary_balance(0.5);
+    // Half way: the ±3 dB tilt and the drum at half: 12 dB between them.
+    assert!((20.0 * (h / d).log10() - 12.04).abs() < 0.05, "{h} {d}");
+    assert_eq!(rotary_balance(1.0)[1], 0.0);
+    assert_eq!(rotary_balance(-1.0)[0], 0.0);
 }

@@ -11,12 +11,13 @@ fn instance() -> ClapInstance {
     ClapInstance::new(&mite_mod::clap_entry, mite_mod::MiteMod::CLAP_ID)
 }
 
-/// A deep phaser, through-zero on, synced, with a snapshot and a preset name.
+/// A deep phaser, through-zero on, synced, the rotary's settings moved, with a snapshot and a
+/// preset name.
 fn configured_state() -> Vec<u8> {
     let plugin = instance();
     let mut state: Value = serde_json::from_slice(&plugin.save()).expect("JSON");
     let params = state["params"].as_object_mut().expect("params");
-    for (id, v) in [("mode", json!({"i32": 3})), ("stages", json!({"i32": 4})), ("feedback", json!({"f32": 60.0})), ("thru_zero", json!({"bool": true})), ("sync", json!({"bool": true})), ("centre", json!({"f32": 1200.0}))] {
+    for (id, v) in [("mode", json!({"i32": 3})), ("stages", json!({"i32": 4})), ("feedback", json!({"f32": 60.0})), ("thru_zero", json!({"bool": true})), ("sync", json!({"bool": true})), ("centre", json!({"f32": 1200.0})), ("rotor", json!({"i32": 2})), ("balance", json!({"f32": -20.0})), ("inertia", json!({"f32": 70.0}))] {
         assert!(params.contains_key(id), "no parameter {id}");
         params.insert(id.into(), v);
     }

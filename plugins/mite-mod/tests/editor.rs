@@ -1,10 +1,10 @@
 //! The Mod editor driven through events, against a stand-in host: the mode tiles, each mode's
 //! own controls, the puck on the response view, dragging the time view, the shapes, sync and the
-//! division menu, the dial groups.
+//! division menu, the dial groups, the rotary's speed (pills and a click on the cabinet).
 
 use std::sync::Arc;
 
-use mite_dsp::modulation::{Mode, Shape, DIVISIONS};
+use mite_dsp::modulation::{Mode, Rotor, Shape, DIVISIONS};
 use mite_mod::editor::{memory_host, ModView, Pill};
 use mite_mod::params::*;
 use mite_mod::ModShared;
@@ -166,5 +166,43 @@ fn dragging_the_puck_stays_well_under_a_frame() {
         if !cfg!(debug_assertions) {
             assert!(per < 4.0, "mode {mode}: {per:.2} ms");
         }
+    }
+}
+
+#[test]
+fn the_rotary_has_its_speed_its_cabinet_and_no_lfo() {
+    let (mut view, host) = setup();
+    let at = view.pill(Pill::Mode(Mode::Rotary)).center();
+    click(&mut view, &host, at);
+    assert_eq!(ModView::mode(&host), Mode::Rotary);
+    // Its own dials in MODE; no RATE (the rotors set their speed), the LFO's pills gone.
+    let groups = view.dial_groups();
+    let mode = groups.iter().find(|(n, _)| *n == "MODE").expect("mode").1;
+    for id in [BALANCE.id, INERTIA.id] {
+        assert!(mode.contains(view.dial(&host, id).unwrap_or_else(|| panic!("no dial {id}"))));
+    }
+    assert!(view.dial(&host, RATE.id).is_none());
+    assert!(view.dial(&host, DEPTH.id).is_some() && view.dial(&host, MIX.id).is_some());
+    let shape = view.pill(Pill::Shape(Shape::Square)).center();
+    click(&mut view, &host, shape);
+    assert_eq!(plain(&host, SHAPE.id), 0.0, "the shapes are hidden in rotary");
+    // The speed: a pill, and a click on the cabinet toggles slow and fast.
+    let at = view.pill(Pill::Rotor(Rotor::Brake)).center();
+    click(&mut view, &host, at);
+    assert_eq!(plain(&host, ROTOR.id), 2.0);
+    let cabinet = view.plot().center();
+    click(&mut view, &host, cabinet);
+    assert_eq!(plain(&host, ROTOR.id), 1.0);
+    click(&mut view, &host, cabinet);
+    assert_eq!(plain(&host, ROTOR.id), 0.0);
+    // Drawing it leaves room in a 120 fps frame (release builds).
+    let t0 = std::time::Instant::now();
+    for _ in 0..10 {
+        draw(&mut view, &host);
+    }
+    let per = t0.elapsed().as_secs_f64() * 100.0;
+    println!("rotary: {per:.2} ms a draw");
+    if !cfg!(debug_assertions) {
+        assert!(per < 4.0, "{per:.2} ms");
     }
 }

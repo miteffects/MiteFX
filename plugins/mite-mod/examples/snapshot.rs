@@ -3,7 +3,8 @@
 //!
 //!     cargo run -p mite_mod --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: a mode (chorus, ensemble, flanger, tz, phaser, vibrato) or synced.
+//! SNAPSHOT_VARIANT: a mode (chorus, ensemble, flanger, tz, phaser, vibrato, rotary: slow, then
+//! fast for the last 3 s) or synced.
 //! SNAPSHOT_HOVER=x,y hovers a point.
 
 #[path = "common/riff.rs"]
@@ -50,6 +51,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             host.set_plain("mode", 4.0);
             host.set_plain("rate", 5.0);
         }
+        Ok("rotary") => {
+            host.set_plain("mode", 5.0);
+            host.set_plain("depth", 70.0);
+            host.set_plain("spread", 120.0);
+            host.set_plain("mix", 100.0);
+        }
         Ok("synced") => {
             host.set_plain("sync", 1.0);
             host.set_plain("shape", 5.0);
@@ -66,8 +73,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (s, out) = (settings(&host), output(&host));
     let mut engine = ModEngine::new(fs as f32, &s, &out);
     let x = riff::riff(6.0, fs);
-    for block in x.chunks(480) {
+    let rotary = std::env::var("SNAPSHOT_VARIANT").as_deref() == Ok("rotary");
+    for (k, block) in x.chunks(480).enumerate() {
         let (mut l, mut r) = (block.to_vec(), vec![0.0f32; block.len()]);
+        let fast = mite_dsp::modulation::ModSettings { rotor: mite_dsp::modulation::Rotor::Fast, ..s };
+        let s = if rotary && k * 480 >= 3 * 48_000 { fast } else { s };
+        if rotary && k * 480 == 3 * 48_000 {
+            host.set_plain("rotor", 1.0);
+        }
         engine.process(&mut [&mut l, &mut r], false, &s, &out, &mite_dsp::modulation::Transport::default(), &shared.history);
     }
     let mut view = ModView::new(shared.clone());

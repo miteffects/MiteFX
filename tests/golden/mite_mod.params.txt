@@ -1,4 +1,4 @@
-mode | choice | Chorus, Ensemble, Flanger, Phaser, Vibrato | 0
+mode | choice | Chorus, Ensemble, Flanger, Phaser, Vibrato, Rotary | 0
 rate | Hz | 0.02 | 20 | 0.6 | Log
 sync | bool | false
 division | choice | 4 bars, 2 bars, 1 bar, 1/2, 1/2., 1/2T, 1/4, 1/4., 1/4T, 1/8, 1/8., 1/8T, 1/16, 1/16T, 1/32 | 6
@@ -18,3 +18,6 @@ low_cut | Hz | 20 | 2000 | 20 | Log
 high_cut | Hz | 1000 | 20000 | 20000 | Log
 out_gain | dB | -24 | 24 | 0 | Linear
 bypass | bool | false
+rotor | choice | Slow, Fast, Brake | 0
+balance | % | -100 | 100 | 0 | Linear
+inertia | % | 0 | 100 | 50 | Linear

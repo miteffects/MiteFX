@@ -36,6 +36,14 @@ Kilohearts' modulation snapins, FabFilter-style display quality.
   is 100 cents at the sine's steepest (the sweep from the rate: `(2^(c/1200) − 1) / (2π rate)`,
   at most 4.5 ms). Its reading is the pitch played, from the delay's slope (tested ±50 cents at
   50 %).
+- **Rotary** (slice 2): the mono sum split at 800 Hz (Linkwitz–Riley 4th order) into the horn
+  and the drum; each read at 2 ms (the latency) ± its Doppler (horn 0.45 ms, drum 0.2 ms × DEPTH,
+  nearest when facing a mic) and quieter facing away (horn 60 %, drum 40 % × DEPTH; the horn's
+  highs over 2.5 kHz drop 60 % further: it beams); the horn's back off the cabinet wall 1.3 ms
+  later at 0.3. Two mics at ±SPREAD/2 (0–180°). Speeds: Slow 0.83 / 0.67 Hz, Fast 6.7 / 5.8 Hz
+  (horn / drum), Brake 0; each eases to its target over its own time (horn 0.7 s up, 1.1 s down;
+  drum 3.2 / 4.2 s) × 4^(2·INERTIA − 1). BALANCE: a ±6 dB tilt, then the other rotor fades out
+  towards the ends. It ignores the LFO (RATE, shape, sync).
 - **Sound:** MIX (vibrato ignores it), the wet's WIDTH (M/S, 0–200 %), LOW CUT and HIGH CUT
   (Butterworth on the wet, redesigned every sample while they glide).
 - **Programs:** each mode (and the flanger twice: through zero has its own latency and line) keeps
@@ -47,7 +55,7 @@ Kilohearts' modulation snapins, FabFilter-style display quality.
   0.3 dB).
 
 CPU (48 kHz stereo, `examples/mod_cpu`): chorus 1.1 % (2 voices) – 2.1 % (4), ensemble 1.8 %,
-flanger 0.6 %, phaser 0.4 % (4 stages) – 0.8 % (24), vibrato 0.5 % of a core.
+flanger 0.6 %, phaser 0.4 % (4 stages) – 0.8 % (24), vibrato 0.5 %, rotary 1.6 % of a core.
 
 ## 2. Main view (1280 × 760)
 
@@ -62,8 +70,13 @@ flanger 0.6 %, phaser 0.4 % (4 stages) – 0.8 % (24), vibrato 0.5 % of a core.
     pixel (a comb is dense at the top), the span the sweep covers shaded (24 LFO positions,
     cached until a setting moves); a puck: across MANUAL's first notch (1 / 2·MANUAL) or CENTRE,
     up and down FEEDBACK, a dashed line where it anchors. Wheel: FEEDBACK; double-click: back.
+- **Rotary's view:** the cabinet from above: the horn (its live bell lit, the dummy dim, its beam
+  shaded) and the drum (its scoop lit) turning past the two mics (front is down; L filled, R a
+  ring); turning fast, the beam and scoop smear wider. A click: slow ⇄ fast. The LFO strip shows
+  the rotors' speeds over 8 s instead (horn solid, drum dashed, slow and fast as faint lines);
+  RATE becomes a plaque with the speed.
 - **The mode's own controls** (right): DELAY + VOICES 1–4 (chorus); DELAY (ensemble); MANUAL,
-  FEEDBACK, THROUGH ZERO (flanger); CENTRE, FEEDBACK, STAGES (phaser); DEPTH (vibrato).
+  FEEDBACK, THROUGH ZERO (flanger); CENTRE, FEEDBACK, STAGES (phaser); DEPTH (vibrato); BALANCE, INERTIA + SLOW/FAST/BRAKE (rotary).
 - **LFO** (bottom left): the shape over the cycle playing, the left side a dot riding on it, the
   right a ring SPREAD ahead; six shape buttons drawn by `shape_at` itself; SYNC and the division
   (a menu; picking one syncs; wheel steps); the rate it runs at (a cycle's length under 1 Hz;
@@ -79,10 +92,11 @@ flanger); a puck drag event plus its draw 2.4–2.6 ms (tested under 4 ms in rel
 
 `mode`, `rate`, `sync`, `division`, `shape`, `depth`, `spread`, `feedback`, `delay`, `voices`,
 `manual`, `thru_zero`, `centre`, `stages`, `mix`, `width`, `low_cut`, `high_cut`, `out_gain`,
-`bypass` (monitoring). State 1. Appending a mode (Rotary) changes `mode`'s snapshot
-normalisation: it needs a migration then (the DeEss lesson). Presets: Init, Lush Chorus,
+`bypass` (monitoring), then `rotor`, `balance`, `inertia` (state 2). State 2 appended Rotary to
+`mode`: the snapshots store it normalised, so `migrate::v1_to_v2` re-normalises them (× 4/5);
+golden v1 (with its expected migration) and v2. Presets: Init, Lush Chorus,
 Eighties Chorus, String Ensemble, Jet Flanger, Tape Flange, Four Stage Swirl, Deep Phaser, Gentle
-Vibrato, Seasick.
+Vibrato, Seasick, Rotary Chorale, Rotary Tremolo, Warm Cabinet.
 
 ## 4. Tests
 
@@ -99,7 +113,8 @@ the division menu, groups, drag timing).
 ## 5. Slices
 
 1. (done 2026-11-05) Everything above. Not yet heard by the user.
-2. Rotary (horn and drum split at 800 Hz, each a Doppler delay plus amplitude, two mics, slow/fast
-   with each rotor's own inertia; a top-down view of the rotors) — state 2 with the `mode`
-   migration.
+2. (done 2026-11-05) Rotary, above: tested for latency (impulse), each rotor's own inertia
+   (the horn near fast in 2 s, the drum not; braking to a stop), the horn's swing at DEPTH 100 %
+   and none at 0, balance, clicks, block sizes, no allocation; the editor's pills, cabinet click
+   and a 0.6 ms draw. Not yet heard by the user.
 3. The modulation matrix (shared with Delay, Sat and Filter; deferred on Sat by the user).

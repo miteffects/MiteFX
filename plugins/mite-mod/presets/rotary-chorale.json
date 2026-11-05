@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Rotary Chorale",
+  "params": {"mode": 5.0, "rotor": 0.0, "depth": 70.0, "spread": 120.0, "mix": 100.0}
+}

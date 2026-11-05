@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Rotary Tremolo",
+  "params": {"mode": 5.0, "rotor": 1.0, "depth": 75.0, "spread": 120.0, "mix": 100.0}
+}

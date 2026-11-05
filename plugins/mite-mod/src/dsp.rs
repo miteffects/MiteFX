@@ -68,7 +68,7 @@ impl ModEngine {
         if self.fx.sample_rate() != sample_rate {
             self.fx = Mod::new(sample_rate, s);
         }
-        let longest = mite_dsp::modulation::tz_latency(sample_rate).max(mite_dsp::modulation::vibrato_latency(sample_rate)) + 1;
+        let longest = mite_dsp::modulation::tz_latency(sample_rate).max(mite_dsp::modulation::vibrato_latency(sample_rate)).max(mite_dsp::modulation::rotary_latency(sample_rate)) + 1;
         self.dry = [vec![0.0; longest], vec![0.0; longest]];
         self.slice_len = ((HISTORY_SLICE_MS * 0.001 * sample_rate).round() as usize).max(1);
         self.bypass.set_ramp(sample_rate, SWITCH_MS);
@@ -172,7 +172,7 @@ mod tests {
     fn bypass_is_the_input_at_the_latency_and_a_mono_input_fills_both_sides() {
         let x: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
         let history = HistoryTap::new(64);
-        for s in [ModSettings::default(), ModSettings { mode: Mode::Flanger, thru_zero: true, ..ModSettings::default() }, ModSettings { mode: Mode::Vibrato, ..ModSettings::default() }] {
+        for s in [ModSettings::default(), ModSettings { mode: Mode::Flanger, thru_zero: true, ..ModSettings::default() }, ModSettings { mode: Mode::Vibrato, ..ModSettings::default() }, ModSettings { mode: Mode::Rotary, ..ModSettings::default() }] {
             let out = Output { bypass: true, ..Output::default() };
             let mut e = ModEngine::new(48_000.0, &s, &out);
             let lat = e.latency();

@@ -5,14 +5,18 @@
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
 use mite_core::{BoolSpec, ChoiceSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::modulation::{ModSettings, Mode, Shape, DIVISIONS, MAX_DELAY_MS, MIN_DELAY_MS, MIN_MANUAL_MS, STAGE_COUNTS, TZ_MAX_MS};
+use mite_dsp::modulation::{ModSettings, Mode, Rotor, Shape, DIVISIONS, MAX_DELAY_MS, MIN_DELAY_MS, MIN_MANUAL_MS, STAGE_COUNTS, TZ_MAX_MS};
 use mite_plugin::{bool_param, choice_param, float_param};
 use nih_plug::prelude::*;
 
 use crate::dsp::Output;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 1 (2026-11-05): the five modes.
+/// - 2 (2026-11-05): the rotary, appended to `mode` (snapshots re-normalised: `migrate`), and its
+///   `rotor`, `balance` and `inertia`, appended.
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -51,6 +55,9 @@ pub const MANUAL: ParamSpec = spec("manual", "Manual", "ms", MIN_MANUAL_MS, TZ_M
 pub const THRU_ZERO: BoolSpec = BoolSpec { id: "thru_zero", name: "Through Zero", default: false };
 pub const CENTRE: ParamSpec = spec("centre", "Centre", "Hz", 50.0, 8000.0, 800.0, ParamScale::Log, 0, LOG_WHEEL, ParamDisplay::Frequency);
 pub const STAGES: ChoiceSpec = ChoiceSpec { id: "stages", name: "Stages", choices: &["2", "4", "6", "8", "12", "16", "24"], default: 1 };
+pub const ROTOR: ChoiceSpec = ChoiceSpec { id: "rotor", name: "Rotor Speed", choices: &Rotor::NAMES, default: 0 };
+pub const BALANCE: ParamSpec = spec("balance", "Balance", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+pub const INERTIA: ParamSpec = spec("inertia", "Inertia", "%", 0.0, 100.0, 50.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
 
 // ---- Sound --------------------------------------------------------------------------------------
 
@@ -64,7 +71,7 @@ pub const HIGH_CUT: ParamSpec = spec("high_cut", "High Cut", "Hz", 1000.0, 20_00
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 
-const CONTINUOUS: [ParamSpec; 12] = [RATE, DEPTH, SPREAD, FEEDBACK, DELAY, MANUAL, CENTRE, MIX, WIDTH, LOW_CUT, HIGH_CUT, OUT_GAIN];
+const CONTINUOUS: [ParamSpec; 14] = [RATE, DEPTH, SPREAD, FEEDBACK, DELAY, MANUAL, CENTRE, MIX, WIDTH, LOW_CUT, HIGH_CUT, OUT_GAIN, BALANCE, INERTIA];
 
 pub fn manifest() -> String {
     [
@@ -88,6 +95,9 @@ pub fn manifest() -> String {
         HIGH_CUT.manifest_line(),
         OUT_GAIN.manifest_line(),
         BYPASS.manifest_line(),
+        ROTOR.manifest_line(),
+        BALANCE.manifest_line(),
+        INERTIA.manifest_line(),
     ]
     .join("\n")
         + "\n"
@@ -132,6 +142,9 @@ pub struct ModParams {
     pub high_cut: FloatParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
+    pub rotor: IntParam,
+    pub balance: FloatParam,
+    pub inertia: FloatParam,
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -163,6 +176,9 @@ impl Default for ModParams {
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: flag(&BYPASS),
+            rotor: choice(&ROTOR),
+            balance: float_param(&BALANCE),
+            inertia: float_param(&INERTIA),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -191,6 +207,9 @@ pub fn mod_settings(p: impl Fn(&str) -> f32) -> ModSettings {
         thru_zero: p(THRU_ZERO.id) >= 0.5,
         centre_hz: p(CENTRE.id),
         stages: STAGE_COUNTS[index(STAGES.id).min(STAGE_COUNTS.len() - 1)],
+        rotor: Rotor::from_index(index(ROTOR.id)),
+        balance: p(BALANCE.id) / 100.0,
+        inertia: p(INERTIA.id) / 100.0,
     }
 }
 
@@ -216,6 +235,9 @@ impl ModParams {
             "width" => self.width.value(),
             "low_cut" => self.low_cut.value(),
             "high_cut" => self.high_cut.value(),
+            "rotor" => self.rotor.value() as f32,
+            "balance" => self.balance.value(),
+            "inertia" => self.inertia.value(),
             _ => 0.0,
         }
     }
@@ -264,6 +286,9 @@ unsafe impl Params for ModParams {
             p(HIGH_CUT.id, self.high_cut.as_ptr(), "Sound"),
             p(OUT_GAIN.id, self.out_gain.as_ptr(), ""),
             p(BYPASS.id, self.bypass.as_ptr(), ""),
+            p(ROTOR.id, self.rotor.as_ptr(), "Mode"),
+            p(BALANCE.id, self.balance.as_ptr(), "Mode"),
+            p(INERTIA.id, self.inertia.as_ptr(), "Mode"),
         ]
     }
 }
