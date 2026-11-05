@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_core::{BoolSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::melody::{Analysis, Note, NoteEdit};
+use mite_dsp::melody::{legato, pitch_offset, Analysis, Note, NoteEdit, TRANSITION_MAX_MS};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::glow_stroke;
 use mite_ui::peniko::Fill;
@@ -41,8 +41,11 @@ const HEADER: f64 = 56.0;
 const DISPLAY_TOP: f64 = HEADER;
 const HELP_TOP: f64 = DISPLAY_TOP + 620.0;
 const FOOTER_TOP: f64 = HELP_TOP + 28.0;
-const KEYS: Rect = Rect::new(0.0, DISPLAY_TOP, 64.0, HELP_TOP - 26.0);
-const ROLL: Rect = Rect::new(64.0, DISPLAY_TOP, VIEW_W, HELP_TOP - 26.0);
+const LANE_H: f64 = 64.0;
+const KEYS: Rect = Rect::new(0.0, DISPLAY_TOP, 64.0, HELP_TOP - 26.0 - LANE_H);
+const ROLL: Rect = Rect::new(64.0, DISPLAY_TOP, VIEW_W, HELP_TOP - 26.0 - LANE_H);
+/// The waveform lane: what plays, under the notes.
+const LANE: Rect = Rect::new(64.0, HELP_TOP - 26.0 - LANE_H, VIEW_W, HELP_TOP - 26.0);
 const RULER: Rect = Rect::new(64.0, HELP_TOP - 26.0, VIEW_W, HELP_TOP);
 const TRANSFER: Rect = Rect::new(16.0, FOOTER_TOP + 14.0, 156.0, FOOTER_TOP + 42.0);
 /// The snap's three buttons, from here, each this wide.
@@ -89,11 +92,12 @@ pub enum Tool {
     Vibrato,
     Drift,
     Formant,
-    Level,
+        Level,
+    Transition,
     Split,
 }
 
-pub const TOOLS: [Tool; 6] = [Tool::Main, Tool::Vibrato, Tool::Drift, Tool::Formant, Tool::Level, Tool::Split];
+pub const TOOLS: [Tool; 7] = [Tool::Main, Tool::Vibrato, Tool::Drift, Tool::Formant, Tool::Level, Tool::Transition, Tool::Split];
 
 impl Tool {
     fn glyph(self) -> &'static str {
@@ -102,7 +106,8 @@ impl Tool {
             Tool::Vibrato => "M3 12 C5 6.5 7 6.5 9 12 C11 17.5 13 17.5 15 12 C17 6.5 19 6.5 21 12",
             Tool::Drift => "M3 8 C8 8 9.5 16 14 16 C17.5 16 18.5 12 21 12",
             Tool::Formant => "M3 18 C5 18 6 7 8.5 7 C11 7 11 14 13 14 C15 14 15.5 9.5 17.5 9.5 C19.5 9.5 20 18 21 18",
-            Tool::Level => "M5.5 18 V14 M10 18 V10 M14.5 18 V7 M19 18 V4",
+                        Tool::Level => "M5.5 18 V14 M10 18 V10 M14.5 18 V7 M19 18 V4",
+            Tool::Transition => "M3 17 H7.5 C12 17 12 7 16.5 7 H21",
             Tool::Split => "M12 3 V21 M10 8.5 H7 C4.5 8.5 3 10 3 12 C3 14 4.5 15.5 7 15.5 H10 M14 8.5 H17 C19.5 8.5 21 10 21 12 C21 14 19.5 15.5 17 15.5 H14",
         }
     }
@@ -114,7 +119,8 @@ impl Tool {
             Tool::Drift => "Drift (3) — drag a note up for more of its slow slides and sags, down for less; double-click: as sung",
             Tool::Formant => "Formant (4) — drag a note up or down to move its formants (the voice's size); double-click: as sung",
             Tool::Level => "Level (5) — drag a note up or down to make it louder or quieter; double-click: as sung",
-            Tool::Split => "Split (6) — click a note to split it there; click where two notes meet to join them",
+                        Tool::Transition => "Transition (6) — drag from a note's start: how long it glides in from the note before it; double-click: a step",
+            Tool::Split => "Split (7) — click a note to split it there; click where two notes meet to join them",
         }
     }
 }
@@ -167,13 +173,17 @@ enum Grip {
     Body(Option<bool>),
     /// An edge (true: the right).
     Edge(bool),
-    /// The vertical tools.
+        /// The vertical tools.
     Amount,
+    /// The transition tool: the glide runs from the note's start to the pointer.
+    Transition,
 }
 
 #[derive(Debug, Clone)]
 struct Drag {
     grip: Grip,
+    /// The note grabbed.
+    grab: usize,
     start: Point,
     /// The notes it moves and their edits when it began.
     notes: Vec<(usize, NoteEdit)>,
@@ -585,8 +595,7 @@ impl PitchView {
                     started = false;
                     continue;
                 }
-                let sl = n.slow.get(f).copied().unwrap_or(0.0);
-                let c = n.cents + e.shift_cents + e.drift * sl + e.modulation * (d - sl);
+                                let c = n.cents + d + pitch_offset(&a, &edits, i, n.start as f64 + t_in);
                 let p = Point::new(self.x_of((n.start as f64 + e.offset + t_in * e.stretch) / a.fs), self.y_of(c));
                 if started {
                     curve.line_to(p);
@@ -595,7 +604,12 @@ impl PitchView {
                     started = true;
                 }
             }
-            let emph = sel || matches!(self.tool, Tool::Vibrato | Tool::Drift);
+                        // The glide's end (transition tool).
+            if self.tool == Tool::Transition && legato(&a, i) {
+                let x = self.x_of((n.start as f64 + e.offset + e.transition_ms * 1e-3 * a.fs * e.stretch) / a.fs);
+                cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, theme.text_strong.multiply_alpha(if e.transition_ms > 0.0 { 0.9 } else { 0.4 }), None, &Line::new((x, r.y0 - 5.0), (x, r.y1 + 5.0)));
+            }
+            let emph = sel || matches!(self.tool, Tool::Vibrato | Tool::Drift | Tool::Transition);
             cx.scene.stroke(&Stroke::new(if emph { 1.4 } else { 1.1 }), Affine::IDENTITY, theme.text_strong.multiply_alpha(if emph { 0.95 } else { 0.55 }), None, &curve);
         }
         // Where two notes meet (split tool, hot): the join.
@@ -625,6 +639,49 @@ impl PitchView {
             }
         }
         cx.end_clip();
+    }
+
+        /// The waveform lane: what plays (the rendered take), one low–high line per pixel.
+    fn draw_lane(&self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &LANE);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((LANE.x0, LANE.y0 + 0.5), (LANE.x1, LANE.y0 + 0.5)));
+        let s = &self.shared.session;
+        let (Some(t), peaks) = (s.take(), s.peaks()) else { return };
+        if peaks.is_empty() {
+            return;
+        }
+        let per_s = t.sample_rate / crate::session::PEAK_HOP as f64;
+        let mid = LANE.center().y;
+        let half = LANE.height() / 2.0 - 4.0;
+        let mut top = BezPath::new();
+        let mut bottom: Vec<Point> = Vec::new();
+        let columns = LANE.width() as usize;
+        for c in 0..columns {
+            let x = LANE.x0 + c as f64;
+            // At least 10 ms around the column (longer than a sung period): no notches between pulses.
+            let reach = (0.005 * per_s).max(0.5 * (self.t_of(x + 1.0) - self.t_of(x)) * per_s);
+            let centre = self.t_of(x + 0.5) * per_s;
+            let (a, b) = ((centre - reach).max(0.0) as usize, (centre + reach).max(0.0) as usize);
+            let (lo, hi) = peaks.get(a.min(peaks.len())..(b + 1).min(peaks.len())).unwrap_or(&[]).iter().fold((0.0f32, 0.0f32), |(l, h), p| (l.min(p.0), h.max(p.1)));
+            let p = Point::new(x, mid - f64::from(hi.clamp(0.0, 1.0)) * half);
+            if c == 0 {
+                top.move_to(p);
+            } else {
+                top.line_to(p);
+            }
+            bottom.push(Point::new(x, mid - f64::from(lo.clamp(-1.0, 0.0)) * half));
+        }
+        for p in bottom.iter().rev() {
+            top.line_to(*p);
+        }
+        top.close_path();
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.45), None, &top);
+        let at = (s.playhead.load(Ordering::Relaxed) - t.start) as f64 / t.sample_rate;
+        if (self.t0..=self.t0 + self.span).contains(&at) {
+            let x = self.x_of(at);
+            cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, theme.text_hi, None, &Line::new((x, LANE.y0), (x, LANE.y1)));
+        }
     }
 
     fn draw_empty(&self, cx: &mut DrawCx<'_>) {
@@ -720,9 +777,11 @@ impl PitchView {
                     Tool::Drift => Help::default().text(format!("{name} · drift ")).slot(format!("{:.0} %", e.drift * 100.0), "200 %"),
                     Tool::Formant => Help::default().text(format!("{name} · formant ")).slot(format!("{:+.1} st", e.formant_semitones), "+12.0 st"),
                     Tool::Level => Help::default().text(format!("{name} · level ")).slot(format!("{:+.1} dB", e.gain_db), "−36.0 dB"),
+                                        Tool::Transition if legato(&a, i) => Help::default().text(format!("{name} · glides in over ")).slot(format!("{:.0} ms", e.transition_ms), "500 ms"),
+                    Tool::Transition => Help::default().text(format!("{name} — no note right before it to glide from")),
                     Tool::Split => Help::default().text(format!("{name} — click to split it here")),
                 };
-                return what.text(if self.drag.is_some() || self.tool == Tool::Split { "" } else { " — Shift: fine" });
+                                return what.text(if self.drag.is_some() || matches!(self.tool, Tool::Split | Tool::Transition) { "" } else { " — Shift: fine" });
             }
         }
         match self.hot {
@@ -739,11 +798,11 @@ impl PitchView {
 
     // ---- editing ------------------------------------------------------------------------------
 
-    fn begin_drag(&mut self, grip: Grip, pos: Point) {
+        fn begin_drag(&mut self, grip: Grip, grab: usize, pos: Point) {
         let Some(undo) = self.snapshot() else { return };
         let edits = self.shared.session.edits();
         let notes = self.selected.iter().filter_map(|&i| edits.get(i).map(|e| (i, *e))).collect();
-        self.drag = Some(Drag { grip, start: pos, notes, undo });
+        self.drag = Some(Drag { grip, grab, start: pos, notes, undo });
     }
 
     fn drag_to(&mut self, pos: Point, mods: Modifiers) {
@@ -764,6 +823,14 @@ impl PitchView {
                 cur.grip = d.grip;
             }
         }
+                // The transition the pointer sets (from the grabbed note's start), ms of the take.
+        let glide = {
+            let e0 = d.notes.iter().find(|n| n.0 == d.grab).map_or(NoteEdit::default(), |n| n.1);
+            a.notes.get(d.grab).map_or(0.0, |n| {
+                let start_s = (n.start as f64 + e0.offset) / a.fs;
+                ((self.t_of(pos.x) - start_s) / e0.stretch * 1000.0).clamp(0.0, TRANSITION_MAX_MS)
+            })
+        };
         let changes: Vec<(usize, NoteEdit)> = d
             .notes
             .iter()
@@ -789,7 +856,8 @@ impl PitchView {
                     (Grip::Amount, Tool::Drift) => e.drift = (e0.drift - dy / AMOUNT_PX * 2.0).clamp(0.0, 2.0),
                     (Grip::Amount, Tool::Formant) => e.formant_semitones = (e0.formant_semitones - dy / FORMANT_PX).clamp(-FORMANT_RANGE, FORMANT_RANGE),
                     (Grip::Amount, Tool::Level) => e.gain_db = (e0.gain_db - dy / LEVEL_PX).clamp(LEVEL_RANGE.0, LEVEL_RANGE.1),
-                    (Grip::Amount, _) => {}
+                                        (Grip::Amount, _) => {}
+                    (Grip::Transition, _) => e.transition_ms = glide,
                 }
                 Some((i, e))
             })
@@ -877,7 +945,7 @@ impl PitchView {
                 self.selected.clear();
                 true
             }
-            UiEvent::KeyDown { key: Key::Character(c), mods } if !mods.ctrl && ('1'..='6').contains(&c) => {
+            UiEvent::KeyDown { key: Key::Character(c), mods } if !mods.ctrl && ('1'..='7').contains(&c) => {
                 self.tool = TOOLS[(c as u8 - b'1') as usize];
                 true
             }
@@ -956,15 +1024,19 @@ impl PitchView {
                 Some(Hot::Note(i)) => {
                     self.select(i, mods);
                     if self.selected.contains(&i) {
-                        let grip = if self.tool == Tool::Main { Grip::Body(None) } else { Grip::Amount };
-                        self.begin_drag(grip, pos);
+                                                let grip = match self.tool {
+                            Tool::Main => Grip::Body(None),
+                            Tool::Transition => Grip::Transition,
+                            _ => Grip::Amount,
+                        };
+                        self.begin_drag(grip, i, pos);
                     }
                     true
                 }
                 Some(Hot::Edge(i, right)) => {
                     self.select(i, mods);
                     if self.selected.contains(&i) {
-                        self.begin_drag(Grip::Edge(right), pos);
+                                                self.begin_drag(Grip::Edge(right), i, pos);
                     }
                     true
                 }
@@ -1027,7 +1099,8 @@ impl PitchView {
                                 Tool::Vibrato => e.modulation = d.modulation,
                                 Tool::Drift => e.drift = d.drift,
                                 Tool::Formant => e.formant_semitones = d.formant_semitones,
-                                Tool::Level => e.gain_db = d.gain_db,
+                                                                Tool::Level => e.gain_db = d.gain_db,
+                                Tool::Transition => e.transition_ms = d.transition_ms,
                                 Tool::Split => {}
                             }
                             Some((j, e))
@@ -1041,7 +1114,7 @@ impl PitchView {
                 }
                 _ => false,
             },
-            UiEvent::Wheel { pos, lines, mods } if ROLL.contains(pos) || RULER.contains(pos) || KEYS.contains(pos) => {
+            UiEvent::Wheel { pos, lines, mods } if ROLL.contains(pos) || RULER.contains(pos) || KEYS.contains(pos) || LANE.contains(pos) => {
                 let take_s = session.take().map_or(SPAN_S, |t| t.len as f64 / t.sample_rate);
                 if mods.ctrl {
                     let at = self.t_of(pos.x);
@@ -1088,7 +1161,8 @@ impl View for PitchView {
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, VIEW_W, HELP_TOP));
         self.draw_grid(cx);
-        self.draw_notes(cx);
+                self.draw_notes(cx);
+        self.draw_lane(cx);
         self.draw_empty(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
         self.footer.draw_frame(cx);

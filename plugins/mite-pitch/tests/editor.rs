@@ -360,3 +360,30 @@ fn the_correct_macro_pulls_the_selection_onto_the_snap() {
     assert!(e[3].drift.abs() < 1e-9 && e[2].drift == 1.0, "{:?}", e);
     settle(&shared);
 }
+
+#[test]
+fn the_transition_tool_sets_the_glide_from_the_pointer() {
+    let (mut view, host, shared) = ready("ed-glide");
+    let s = &shared.session;
+    // Split note 2 so its halves are legato, move the second half up.
+    let n2 = s.analysis().expect("analysis").notes[2].clone();
+    assert!(s.split(2, (n2.start + n2.end) / 2));
+    settle(&shared);
+    view.tick(&host);
+    let mut e = s.edits()[3];
+    e.shift_cents = 200.0;
+    s.set_edit(3, e);
+    view.event(&UiEvent::KeyDown { key: Key::Character('6'), mods: MODS }, &host);
+    assert_eq!(view.tool(), Tool::Transition);
+    let r = view.note_rect(3).expect("in view");
+    // From its start to 80 ms in.
+    let x80 = view.x_of(s.analysis().expect("a").notes[3].start as f64 / FS + 0.08);
+    drag(&mut view, &host, Point::new(r.x0 + 1.0, r.center().y), Point::new(x80, r.center().y), MODS);
+    let ms = s.edits()[3].transition_ms;
+    assert!((ms - 80.0).abs() < 2.0, "{ms}");
+    draw(&mut view, &host);
+    // Double-click: a step again.
+    view.event(&UiEvent::DoubleClick { pos: r.center(), mods: MODS }, &host);
+    assert_eq!(s.edits()[3].transition_ms, 0.0);
+    settle(&shared);
+}

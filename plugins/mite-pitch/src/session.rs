@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex, Weak};
 use mite_core::Handover;
 use mite_dsp::melody::{affected, analyse, detect_key, render, render_range, Analysis, NoteEdit};
 
+/// The waveform lane's resolution: one low and high per this many samples.
+pub const PEAK_HOP: usize = 128;
+
 /// The longest take a transfer records, s.
 pub const MAX_TAKE_S: f64 = 600.0;
 
@@ -165,7 +168,9 @@ pub struct State {
     pub scale: Scale,
     pub take: Option<TakeInfo>,
     pub audio: Option<Arc<Vec<f32>>>,
-    pub analysis: Option<Arc<Analysis>>,
+        pub analysis: Option<Arc<Analysis>>,
+    /// The rendered take's waveform: its lowest and highest sample in each [`PEAK_HOP`].
+    pub peaks: Arc<Vec<(f32, f32)>>,
     pub edits: Vec<NoteEdit>,
     pub status: Status,
 }
@@ -208,7 +213,8 @@ impl Session {
         let s = Arc::new(Self {
             state: Mutex::new(State { scale: Scale::default(), take: None,
                 audio: None,
-                analysis: None,
+                                analysis: None,
+                peaks: Arc::new(Vec::new()),
                 edits: Vec::new(),
                 status: Status::Empty,
             }),
@@ -480,6 +486,11 @@ impl Session {
         self.lock().analysis.clone()
     }
 
+        /// The rendered take's waveform (see [`State::peaks`]).
+    pub fn peaks(&self) -> Arc<Vec<(f32, f32)>> {
+        self.lock().peaks.clone()
+    }
+
     pub fn take(&self) -> Option<TakeInfo> {
         self.lock().take.clone()
     }
@@ -492,7 +503,7 @@ impl Session {
             .edits
             .iter()
             .map(|e| {
-                serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation])
+                serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms])
             })
             .collect();
         let bounds: Vec<[usize; 2]> = st.analysis.as_ref().map(|a| a.bounds().into_iter().map(|(s, e)| [s, e]).collect()).unwrap_or_default();
@@ -532,7 +543,7 @@ impl Session {
                             offset: g(2, 0.0),
                             stretch: g(3, 1.0),
                             formant_semitones: g(4, 0.0),
-                            gain_db: g(5, 0.0), modulation: g(6, 1.0) }
+                            gain_db: g(5, 0.0), modulation: g(6, 1.0), transition_ms: g(7, 0.0) }
                     })
                     .collect()
             })
@@ -708,10 +719,10 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                     }
                 }
             };
-            s.renders.send(Box::new(Rendered {
-                start: fresh.start,
-                audio: fresh.audio.clone(),
-            }));
+                        s.renders.send(Box::new(Rendered { start: fresh.start, audio: fresh.audio.clone() }));
+            let peaks: Vec<(f32, f32)> = fresh.audio.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect();
+            s.lock().peaks = Arc::new(peaks);
+            s.version.fetch_add(1, Ordering::AcqRel);
             current = Some(fresh);
         }
         s.busy.fetch_sub(n, Ordering::AcqRel);

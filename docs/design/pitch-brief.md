@@ -15,9 +15,21 @@ contrast checks.
   from then on plays the edited audio in that stretch in place of the input, in sync with the
   transport (outside it, the input passes). The recording lives in a file in the user's data
   folder, named by an id saved with the plugin's state (never in the state itself: it is large).
-- **ARA 2 (later slice):** the host hands the clip's audio to the plugin (no recording; edits
-  follow the clip). Needs ARA in our nih-plug fork's VST3 and CLAP wrappers (the ARA API is C).
-  Only the audio's way in changes: the analysis, the notes, the editor and the engine stay.
+- **ARA 2 (slice 5):** the host hands the clip's audio to the plugin (no recording; edits
+  follow the clip). Only the audio's way in changes: the analysis, the notes, the editor and the
+  engine stay. Checked 2026-11-05: the user's REAPER (Linux) hosts ARA over CLAP
+  (`com.celemony.ara.plugin_extension.draft/1` in its binary), so CLAP first, VST3 after. The
+  ARA SDK (Celemony/ARA_API, Apache-2.0: fine under GPL-3) is plain C headers. The work:
+  1. `crates/mite-ara`: bindgen of `ARAInterface.h`, safe wrappers (factory, document
+     controller, audio-reader access, playback renderer, archive read/write).
+  2. Our nih-plug fork: the CLAP factory `com.celemony.ara.factory` and the plugin extension
+     returning the ARA plug-in instance (the only framework change, behind a trait the plugin
+     opts into).
+  3. The document model: audio sources (read through the host's audio reader on a worker, then
+     `melody::analyse`), audio modifications (a note list and edits each), playback regions
+     (render through `render_range`, mapped from the song timeline); persistence through the
+     host's archive instead of the take file.
+  4. The editor follows the selected region; transfer stays for hosts without ARA.
 
 ## 2. The engine (`mite_dsp::melody`), offline, off the audio thread
 
@@ -58,8 +70,10 @@ edges: length), drift (drag: less or more of the wobble), formant, level; scale 
 2. The plugin: transfer (record against the timeline, the file, the state's id), analysis on a
    worker thread, playback of the rendered audio in sync.
 3. The editor: the note view, the tools, scale, undo.
-4. Polish: quality on real recordings (the user's), CPU and memory, long takes.
-5. ARA 2.
+4. Polish: quality on real recordings (the user's), CPU and memory, long takes. Done so far:
+   the resynthesis fixed (marks by correlation, grains anchored on marks), slow drift and
+   vibrato apart, split and join, key, Correct macro, transitions, waveform lane.
+5. ARA 2 (see §1).
 
 ## 5. Tests
 

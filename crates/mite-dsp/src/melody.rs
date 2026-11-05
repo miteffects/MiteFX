@@ -497,14 +497,49 @@ pub struct NoteEdit {
     /// Formants moved by this, semitones.
     pub formant_semitones: f64,
     pub gain_db: f64,
-    /// How much of the modulation (vibrato, wobble) stays: 1 as sung, 0 none.
+        /// How much of the modulation (vibrato, wobble) stays: 1 as sung, 0 none.
     pub modulation: f64,
+    /// The glide in from the note before (when they are legato, [`LEGATO_S`]): over this long
+    /// from the note's start, its shift eases (S-curve) from the note before's shift to its own,
+    /// ms; 0: a step.
+    pub transition_ms: f64,
+}
+
+/// Notes this close are legato: a transition joins them, s.
+pub const LEGATO_S: f64 = 0.03;
+/// The longest transition, ms.
+pub const TRANSITION_MAX_MS: f64 = 500.0;
+
+/// Whether note `i` follows the note before it closely enough to glide in from it.
+pub fn legato(a: &Analysis, i: usize) -> bool {
+    i > 0 && i < a.notes.len() && (a.notes[i].start as f64 - a.notes[i - 1].end as f64) < LEGATO_S * a.fs
+}
+
+/// How far note `i`'s pitch moves at input sample `t_in` (in it), cents: its shift (eased in from
+/// the note before's over its transition), its slow drift and modulation scaled. What the
+/// resynthesis plays and what the editor draws.
+pub fn pitch_offset(a: &Analysis, edits: &[NoteEdit], i: usize, t_in: f64) -> f64 {
+    let (n, e) = (&a.notes[i], edits[i]);
+    let f = ((t_in - n.start as f64) / a.hop as f64).max(0.0) as usize;
+    let d = n.drift.get(f.min(n.drift.len().saturating_sub(1))).copied().unwrap_or(0.0);
+    let sl = n.slow.get(f.min(n.slow.len().saturating_sub(1))).copied().unwrap_or(0.0);
+    let mut shift = e.shift_cents;
+    if e.transition_ms > 0.0 && legato(a, i) {
+        let u = (t_in - n.start as f64) / (e.transition_ms * 1e-3 * a.fs);
+        if u < 1.0 {
+            let u = u.max(0.0);
+            let prev = edits[i - 1].shift_cents;
+            shift = prev + (shift - prev) * u * u * (3.0 - 2.0 * u);
+        }
+    }
+    shift + (e.drift - 1.0) * sl + (e.modulation - 1.0) * (d - sl)
 }
 
 impl Default for NoteEdit {
     fn default() -> Self {
         Self {
-            modulation: 1.0,
+                        modulation: 1.0,
+            transition_ms: 0.0,
             shift_cents: 0.0,
             drift: 1.0,
             offset: 0.0,
@@ -700,16 +735,7 @@ pub fn render_range(
                 (None, None) => (fallback, fallback),
             };
             // The pitch moves by the note's shift and its drift scaled: a ratio on the period.
-            let ratio = match note {
-                Some(i) => {
-                    let n = &a.notes[i];
-                    let f = ((t_in - n.start as f64) / a.hop as f64).max(0.0) as usize;
-                    let d = n.drift.get(f.min(n.drift.len().saturating_sub(1))).copied().unwrap_or(0.0);
-                    let sl = n.slow.get(f.min(n.slow.len().saturating_sub(1))).copied().unwrap_or(0.0);
-                    2f64.powf((e.shift_cents + (e.drift - 1.0) * sl + (e.modulation - 1.0) * (d - sl)) / 1200.0)
-                }
-                None => 1.0,
-            };
+                        let ratio = note.map_or(1.0, |i| 2f64.powf(pitch_offset(a, edits, i, t_in) / 1200.0));
             let fr = 2f64.powf(e.formant_semitones / 12.0);
             // The grain: the input from the mark before to the mark after (Hann halves),
             // resampled by the formant ratio, centred at t_out.
@@ -1064,6 +1090,40 @@ mod tests {
         edits[0].drift = 0.0;
         let (_, sd) = spread(&render(&x, &a, &edits), s, e);
         assert!((0.8 * sung..1.2 * sung).contains(&sd), "drift 0: spread {sd:.1} (sung {sung:.1})");
+    }
+
+        #[test]
+    fn a_transition_glides_from_the_note_before() {
+        // Two notes sung legato (no gap), the second moved up a tone.
+        let n = |cents: f64, seconds: f64| Sung { cents, seconds, vibrato_cents: 0.0, vibrato_hz: 5.5, db: -12.0 };
+        let (x, _) = sing(&[n(5700.0, 0.5), n(5700.0, 0.5)], 0.0, FS);
+        let mut a = analyse(&x, FS);
+                // Two notes (or one, split in the middle as the user would).
+        if a.notes.len() == 1 {
+            let mid = (a.notes[0].start + a.notes[0].end) / 2;
+            assert!(a.split(&x, 0, mid));
+        }
+        assert_eq!(a.notes.len(), 2);
+        assert!(legato(&a, 1));
+        let mut edits = vec![NoteEdit::default(); 2];
+        edits[1].shift_cents = 200.0;
+        let s1 = a.notes[1].start as f64;
+        let at = |e: &[NoteEdit], ms: f64| pitch_offset(&a, e, 1, s1 + ms * 1e-3 * FS);
+        // A step without one.
+        assert!((at(&edits, 1.0) - 200.0).abs() < 1.0);
+        edits[1].transition_ms = 100.0;
+        assert!(at(&edits, 0.0).abs() < 1.0, "{}", at(&edits, 0.0));
+        assert!((at(&edits, 50.0) - 100.0).abs() < 1.0);
+        assert!((at(&edits, 100.0) - 200.0).abs() < 1.0);
+        // It plays: the pitch 25 ms into the note is under the target, at 150 ms on it.
+        let y = render(&x, &a, &edits);
+        let b = analyse(&y, FS);
+        let c = |ms: f64| b.frames[((s1 + ms * 1e-3 * FS) / b.hop as f64) as usize].cents.unwrap_or(0.0);
+        assert!(c(25.0) < 5700.0 + 120.0 && c(25.0) > 5700.0 + 5.0, "{}", c(25.0));
+        assert!((c(150.0) - 5900.0).abs() < 10.0, "{}", c(150.0));
+        // No more than a step's worth of change from one frame to the next through the glide.
+        let jumps = (0..30).map(|k| (c(k as f64 * 5.0 + 5.0) - c(k as f64 * 5.0)).abs()).fold(0.0, f64::max);
+        assert!(jumps < 60.0, "{jumps}");
     }
 
     #[test]

@@ -484,7 +484,11 @@ double-click = onto the snap), vibrato, drift, formant, level (vertical drags, d
 as sung), split (click = split, click a seam = join); selection by click, Shift, Ctrl, box,
 Ctrl+A; snap semitone / scale / free (Alt inverts, Shift fine, 1/10); key menu; Correct macro
 (Centre: pull onto the snap by %, Drift: take slow drift out by %) on the selection or all;
-undo/redo covers splits. Next: pitch transitions between notes, a waveform lane, ARA 2.
+undo/redo covers splits. Then: transitions (`NoteEdit::transition_ms`, state index 7: a
+legato note's shift eases in from the note before's over that long; `melody::pitch_offset` is
+the one function the resynthesis and the drawn curve share; transition tool) and a waveform lane
+of the rendered take (peaks per 128 samples, each column at least 10 ms wide so pulses do not
+notch it). Next: ARA 2 over CLAP (REAPER Linux hosts it; plan in the brief §1).
 
 ### 15. Mite Amp (later)
 
