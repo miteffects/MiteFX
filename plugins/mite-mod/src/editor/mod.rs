@@ -1,6 +1,6 @@
 //! The Mite Mod editor (docs/design/mod-brief.md §2), in 1280×760 design units.
 //!
-//! On top the six modes, each a tile with a picture of what it does. Under them the mode's own
+//! On top the seven modes, each a tile with a picture of what it does. Under them the mode's own
 //! view: chorus, ensemble and vibrato draw their voices' readings scrolling in time (the delays,
 //! or vibrato's pitch), drag up and down for DELAY (DEPTH for vibrato); flanger and phaser draw
 //! their response as it moves, with the span the sweep covers shaded, and a puck to drag (across:
@@ -9,7 +9,8 @@
 //! SYNC and the division. Bottom right MOTION (RATE, DEPTH, SPREAD) and SOUND (MIX, WIDTH, the
 //! wet's LOW and HIGH CUT). The rotary sets its own motion: its view is the cabinet from above
 //! (the horn and the drum turning past the two mics; a click switches slow and fast), and the
-//! LFO's strip shows the rotors' speeds instead.
+//! LFO's strip shows the rotors' speeds instead. Micro (the pitch shifter) draws each side's shift
+//! in cents scrolling, like vibrato; a drag sets DETUNE.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -43,7 +44,7 @@ const FOOTER_TOP: f64 = HELP_TOP + 28.0;
 
 /// The mode tiles.
 const TILE_Y: (f64, f64) = (DISPLAY_TOP + 10.0, DISPLAY_TOP + 58.0);
-const TILE_W: f64 = 164.0;
+const TILE_W: f64 = 156.0;
 const TILE_GAP: f64 = 8.0;
 /// The mode's view and its own controls.
 const PLOT: Rect = Rect::new(0.0, DISPLAY_TOP + 68.0, 880.0, DISPLAY_TOP + 366.0);
@@ -183,9 +184,9 @@ struct Group {
 }
 
 const ALL: &[Mode] = &Mode::ALL;
-const NOT_VIBRATO: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Rotary];
+const NOT_VIBRATO: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Rotary, Mode::Micro];
 /// The modes the LFO moves (the rotary turns by itself).
-const LFO_MODES: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato];
+const LFO_MODES: &[Mode] = &[Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato, Mode::Micro];
 /// The rotors' speed strip: this many seconds across, up to this many rotations a second.
 const ROTOR_SECONDS: f64 = 8.0;
 const ROTOR_TOP_HZ: f64 = 8.0;
@@ -239,6 +240,8 @@ impl ModView {
         dials.push(dial(DELAY, "DELAY", KnobKind::Unipolar, at(mg, 0, 1, 96.0), &[Mode::Ensemble]));
         dials.push(dial(BALANCE, "BALANCE", KnobKind::Bipolar, at(mg, 0, 2, 96.0), &[Mode::Rotary]));
         dials.push(dial(INERTIA, "INERTIA", KnobKind::Unipolar, at(mg, 1, 2, 96.0), &[Mode::Rotary]));
+        dials.push(dial(DETUNE, "DETUNE", KnobKind::Unipolar, at(mg, 0, 2, 96.0), &[Mode::Micro]));
+        dials.push(dial(DELAY, "DELAY", KnobKind::Unipolar, at(mg, 1, 2, 96.0), &[Mode::Micro]));
         let groups = vec![
             Group { name: "MOTION", words: "how fast, how far, and how far apart the two sides move", rect: MOTION },
             Group { name: "SOUND", words: "how much of it, how wide, and the wet's lows and highs", rect: SOUND },
@@ -415,6 +418,7 @@ impl ModView {
             Mode::Chorus => paths.extend([wave(0.0, 1.5, 0.9, 0.0), wave(0.12, 1.5, 0.9, 0.0)]),
             Mode::Ensemble => paths.extend([wave(0.0, 1.5, 0.9, 0.0), wave(0.1, 1.5, 0.75, 0.0), wave(0.2, 1.5, 0.6, 0.0)]),
             Mode::Vibrato => paths.push(wave(0.0, 2.5, 0.9, 3.0)),
+            Mode::Micro => paths.extend([wave(0.0, 1.35, 0.9, 0.0), wave(0.0, 1.65, 0.9, 0.0)]),
             Mode::Rotary => {
                 // The cabinet from above: a ring, and the horn across it (its bell flared).
                 let c = r.center();
@@ -496,6 +500,10 @@ impl ModView {
                 let (a, b) = around(m::ensemble_delay_ms(s, -1.0, -1.0), m::ensemble_delay_ms(s, 1.0, 1.0));
                 (a, b, "ms", 3)
             }
+            Mode::Micro => {
+                let reach = (f64::from(m::micro_cents(s, 1, 1.0)) * 1.3).max(5.0);
+                (-reach, reach, "ct", 1)
+            }
             _ => {
                 let rate = m::rate_hz(s, self.tempo());
                 let amp = f64::from(m::vibrato_amp_ms(s, rate)) * 0.001;
@@ -517,11 +525,17 @@ impl ModView {
             v += step;
         }
         cx.text.draw(cx.scene, if unit == "ms" { "DELAY · ms" } else { "PITCH · cents" }, PLOT.x0 + 12.0, PLOT.y0 + 8.0, TextStyle::LABEL.sized(9.0), theme.text_mid, Align::Left);
-        // What the settings allow: each voice's band, shaded, and its middle dashed.
-        for v in 0..voices {
+        // What the settings allow: each voice's band, shaded, and its middle dashed (micro: each
+        // side's, below and above zero).
+        let bands = if s.mode == Mode::Micro { 2 } else { voices };
+        for v in 0..bands {
             let (a, b) = match s.mode {
                 Mode::Chorus => (m::chorus_delay_ms(s, v, -1.0), m::chorus_delay_ms(s, v, 1.0)),
                 Mode::Ensemble => (m::ensemble_delay_ms(s, -1.0, -1.0), m::ensemble_delay_ms(s, 1.0, 1.0)),
+                Mode::Micro => {
+                    let (p, q) = (m::micro_cents(s, v, -1.0), m::micro_cents(s, v, 1.0));
+                    (p.min(q), p.max(q))
+                }
                 _ => {
                     let r = (hi / 1.3) as f32;
                     (-r, r)
@@ -976,6 +990,7 @@ impl ModView {
                     Mode::Flanger => "Flanger — a short delay swept against the dry: a comb of notches moving (through zero: the wet passes the dry, the tape flange)",
                     Mode::Phaser => "Phaser — 2 to 24 allpass stages swept: a few wide notches moving",
                     Mode::Vibrato => "Vibrato — the pitch swayed, nothing of the dry left",
+                    Mode::Micro => "Micro — a micro pitch shift: the left a few cents down, the right as many up, each a little behind: wide and thick without a sway",
                     Mode::Rotary => "Rotary — a spinning speaker: the horn and the drum turning past two mics, each speeding up and slowing down at its own pace",
                 });
             }
@@ -997,6 +1012,9 @@ impl ModView {
                 let fb = Self::plain(host, FEEDBACK.id);
                 let (what, value, widest) = if s.mode == Mode::Phaser { ("Centre", CENTRE.format(s.centre_hz), "8.00 kHz") } else { ("Manual", MANUAL.format(s.manual_ms), "5.00 ms") };
                 return Help::default().text(format!("{what} ")).slot(value, widest).text(" · feedback ").slot(FEEDBACK.format(fb), "−95 %").text(" — drag: across where it sweeps, up and down how hard it rings");
+            }
+            Some(Hot::Time) if s.mode == Mode::Micro => {
+                return Help::default().text("Detune ").slot(DETUNE.format(s.detune_cents), "50.0 ct").text(" — drag up and down: how far each side is shifted (the bands: how far the LFO sways it)");
             }
             Some(Hot::Time) => {
                 return if s.mode == Mode::Vibrato {
@@ -1113,7 +1131,7 @@ impl ModView {
                     Some(Drag::Time { start, value }) => {
                         // Up: more (a log spec moves by its position, so DELAY feels even).
                         let d = (start.y - pos.y) / PLOT_IN.height() * fine;
-                        let id = if mode == Mode::Vibrato { DEPTH.id } else { DELAY.id };
+                        let id = time_spec(mode).id;
                         let n = (host.normalize(id, value) + d as f32).clamp(0.0, 1.0);
                         host.set_normalized(id, n);
                         return true;
@@ -1163,7 +1181,7 @@ impl ModView {
                     true
                 }
                 Some(Hot::Time) => {
-                    let id = if mode == Mode::Vibrato { DEPTH.id } else { DELAY.id };
+                    let id = time_spec(mode).id;
                     host.begin_gesture(id);
                     self.drag = Some(Drag::Time { start: pos, value: Self::plain(host, id) });
                     true
@@ -1177,7 +1195,7 @@ impl ModView {
                     true
                 }
                 Some(Drag::Time { .. }) => {
-                    host.end_gesture(if mode == Mode::Vibrato { DEPTH.id } else { DELAY.id });
+                    host.end_gesture(time_spec(mode).id);
                     true
                 }
                 None => false,
@@ -1192,7 +1210,7 @@ impl ModView {
                 }
                 Some(Hot::Time) => {
                     self.drag = None;
-                    let spec = if mode == Mode::Vibrato { DEPTH } else { DELAY };
+                    let spec = time_spec(mode);
                     Self::gesture(host, spec.id, spec.default);
                     true
                 }
@@ -1229,6 +1247,15 @@ fn response(s: &ModSettings, tone: &m::Tone, reading: f32, f: f64, fs: f64) -> f
     if s.mode == Mode::Phaser { m::phaser_response_with(s, tone, reading, f, fs) } else { m::flanger_response_with(s, tone, reading, f, fs) }
 }
 
+/// What a drag on the time view sets: vibrato's DEPTH, micro's DETUNE, otherwise DELAY.
+fn time_spec(mode: Mode) -> ParamSpec {
+    match mode {
+        Mode::Vibrato => DEPTH,
+        Mode::Micro => DETUNE,
+        _ => DELAY,
+    }
+}
+
 /// A grid step of 1, 2 or 5 × a power of ten near `raw`.
 fn nice_step(raw: f64) -> f64 {
     let p = 10f64.powf(raw.max(1e-6).log10().floor());
@@ -1245,6 +1272,7 @@ fn knob_words(id: &str, mode: Mode) -> &'static str {
             Mode::Flanger => " — how far the comb sweeps (through zero: from 50 % the wet passes the dry)",
             Mode::Phaser => " — how far the notches sweep (±3 octaves at 100 %)",
             Mode::Vibrato => " — how far the pitch sways (100 %: a semitone at the sine's steepest)",
+            Mode::Micro => " — how much the LFO sways the shift (0: steady; 100 %: half again either way)",
             Mode::Rotary => " — how much the turning moves the sound (the Doppler sway and the swell as each rotor passes a mic)",
         },
         "spread" if mode == Mode::Rotary => " — the two mics' angle around the cabinet (0: one place; 180°: either side, the widest)",
@@ -1252,7 +1280,9 @@ fn knob_words(id: &str, mode: Mode) -> &'static str {
         "balance" => " — the horn against the drum (−: more drum, the body; +: more horn, the swirl)",
         "inertia" => " — how slowly the rotors change speed (50 %: as built; the drum is always the slower)",
         "feedback" => " — how hard it rings (negative: the other notches)",
+        "delay" if mode == Mode::Micro => " — how far behind the shifted voices sit (the right 1.5 × the left)",
         "delay" => " — how far behind the voices sit",
+        "detune" => " — how far each side is shifted: the left down, the right up (a few cents: wide and thick; more: out of tune)",
         "manual" => " — where the comb sits (its first notch at 1 / (2 × this))",
         "centre" => " — where the notches sit",
         "mix" => " — how much of the effect against the dry (50 %: the deepest notches)",

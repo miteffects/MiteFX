@@ -1,4 +1,4 @@
-mode | choice | Chorus, Ensemble, Flanger, Phaser, Vibrato, Rotary | 0
+mode | choice | Chorus, Ensemble, Flanger, Phaser, Vibrato, Rotary, Micro | 0
 rate | Hz | 0.02 | 20 | 0.6 | Log
 sync | bool | false
 division | choice | 4 bars, 2 bars, 1 bar, 1/2, 1/2., 1/2T, 1/4, 1/4., 1/4T, 1/8, 1/8., 1/8T, 1/16, 1/16T, 1/32 | 6
@@ -21,3 +21,4 @@ bypass | bool | false
 rotor | choice | Slow, Fast, Brake | 0
 balance | % | -100 | 100 | 0 | Linear
 inertia | % | 0 | 100 | 50 | Linear
+detune | ct | 0 | 50 | 9 | Linear

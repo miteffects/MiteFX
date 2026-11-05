@@ -1,6 +1,7 @@
 //! Modulation effects behind Mite Mod (docs/design/mod-brief.md): chorus, ensemble, flanger
 //! (through-zero too), phaser (2…24 stages) and vibrato, on one LFO; and a rotary speaker
-//! (horn and drum, each spinning with its own inertia; it sets its own motion, not the LFO).
+//! (horn and drum, each spinning with its own inertia; it sets its own motion, not the LFO); and a
+//! micro pitch shifter (each side a few cents off, down on the left and up on the right).
 //!
 //! Ideas from Nova's NovaChorus, NovaFlanger and NovaPhaser; the code is new. What is new here:
 //!
@@ -80,12 +81,29 @@ pub const ROTOR_FAST_HZ: [f32; 2] = [6.7, 5.8];
 /// slowing down; horn then drum (the drum is heavy: it takes several seconds).
 pub const ROTOR_TIMES_S: [[f32; 2]; 2] = [[0.7, 1.1], [3.2, 4.2]];
 
+/// Micro: each voice reads its line through one tap sliding along a window this long, ms (a little
+/// faster or slower than the input runs, so the pitch moves). At the window's end a new tap takes
+/// over: where its waveform best matches the old one's (a correlation search over
+/// [`MICRO_SEARCH_MS`] either way), crossfaded over [`MICRO_FADE_MS`]. Two taps a fixed half
+/// window apart, always crossfading (the classic shifter), cancel whenever they meet out of
+/// phase: a tone dipped 2.9 dB, and some frequencies drop out for a moment.
+pub const MICRO_WINDOW_MS: f32 = 50.0;
+pub const MICRO_FADE_MS: f32 = 10.0;
+pub const MICRO_SEARCH_MS: f32 = 7.0;
+/// How much of the past the search compares, ms.
+const MICRO_MATCH_MS: f32 = 5.0;
+/// The right voice sits this many times further back than DELAY (the left).
+pub const MICRO_RIGHT_DELAY: f32 = 1.5;
+/// DETUNE's top, cents.
+pub const MICRO_MAX_CENTS: f32 = 50.0;
+
 /// The sinc reaches this many samples either side of a reading.
 const SINC_REACH: f64 = 15.0;
 /// Under this, Lagrange alone (between, a crossfade).
 const LAGRANGE_BELOW: f64 = 11.0;
-/// The longest any line is read, ms (chorus: 40 ms × 1.41 + its sweep).
-const LINE_MS: f32 = 64.0;
+/// The longest any line is read, ms (micro: 40 ms × 1.5, its window, the search either side and
+/// the stretch it compares).
+const LINE_MS: f32 = 140.0;
 /// Glides: settings, the delays (slower: a fast change of delay is a pitch blip), switching.
 const GLIDE_MS: f32 = 20.0;
 const DELAY_GLIDE_MS: f32 = 120.0;
@@ -104,11 +122,12 @@ pub enum Mode {
     Phaser,
     Vibrato,
     Rotary,
+    Micro,
 }
 
 impl Mode {
-    pub const NAMES: [&'static str; 6] = ["Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato", "Rotary"];
-    pub const ALL: [Mode; 6] = [Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato, Mode::Rotary];
+    pub const NAMES: [&'static str; 7] = ["Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato", "Rotary", "Micro"];
+    pub const ALL: [Mode; 7] = [Mode::Chorus, Mode::Ensemble, Mode::Flanger, Mode::Phaser, Mode::Vibrato, Mode::Rotary, Mode::Micro];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -229,6 +248,8 @@ pub struct ModSettings {
     pub rotor: Rotor,
     pub balance: f32,
     pub inertia: f32,
+    /// Micro: how far each side is shifted, cents (the left down, the right up).
+    pub detune_cents: f32,
 }
 
 impl Default for ModSettings {
@@ -255,6 +276,7 @@ impl Default for ModSettings {
             rotor: Rotor::Slow,
             balance: 0.0,
             inertia: 0.5,
+            detune_cents: 9.0,
         }
     }
 }
@@ -392,6 +414,18 @@ pub fn rotary_balance(balance: f32) -> [f32; 2] {
     let b = balance.clamp(-1.0, 1.0);
     let tilt = 10f32.powf(6.0 * b / 20.0);
     [tilt * (1.0 + b).min(1.0), (1.0 - b).min(1.0) / tilt]
+}
+
+/// Micro: the shift a side plays for an LFO value, cents (the left down, the right up; DEPTH
+/// sways it by up to half either way).
+pub fn micro_cents(s: &ModSettings, side: usize, lfo: f32) -> f32 {
+    let sign = if side == 0 { -1.0 } else { 1.0 };
+    sign * s.detune_cents.clamp(0.0, MICRO_MAX_CENTS) * (1.0 + 0.5 * s.depth.clamp(0.0, 1.0) * lfo)
+}
+
+/// Micro: a side's delay, ms (where its window starts).
+pub fn micro_delay_ms(s: &ModSettings, side: usize) -> f32 {
+    s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS) * if side == 0 { 1.0 } else { MICRO_RIGHT_DELAY }
 }
 
 /// Samples vibrato delays the voice at `fs`.
@@ -557,7 +591,7 @@ impl Glide {
     }
 }
 
-const PROGRAMS: usize = 7;
+const PROGRAMS: usize = 8;
 
 /// The programs: each mode, and the flanger twice (through zero has its own latency and state).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -569,6 +603,7 @@ enum Program {
     Phaser,
     Vibrato,
     Rotary,
+    Micro,
 }
 
 impl Program {
@@ -581,6 +616,7 @@ impl Program {
             Mode::Phaser => Self::Phaser,
             Mode::Vibrato => Self::Vibrato,
             Mode::Rotary => Self::Rotary,
+            Mode::Micro => Self::Micro,
         }
     }
 }
@@ -594,7 +630,8 @@ pub struct ModTelemetry {
     /// The mode's readings, left then right: chorus, each voice's delay (ms, 4 + 4); ensemble,
     /// each voice's (3 + 3); flanger, the delay between wet and dry (ms); phaser, the corner (Hz);
     /// vibrato, the pitch (cents); rotary, the horn's and the drum's place in their turn
-    /// (cycles, 0…1: 0 faces front) and their speeds (rotations a second).
+    /// (cycles, 0…1: 0 faces front) and their speeds (rotations a second); micro, each side's
+    /// shift (cents, left then right).
     pub values: [f32; 8],
 }
 
@@ -630,6 +667,12 @@ pub struct Mod {
     rot_angle: [f64; 2],
     rot_speed: [f32; 2],
     balance: Glide,
+    /// Micro, per side: the playing tap's delay (samples), the incoming one's and the crossfade
+    /// between them (1: none), and the detune gliding.
+    micro_tap: [f64; 2],
+    micro_next: [f64; 2],
+    micro_fade: [f32; 2],
+    detune: Glide,
     cur: Program,
     prev: Program,
     fade: f32,
@@ -688,6 +731,10 @@ impl Mod {
             rot_angle: [0.0, 0.3],
             rot_speed: [0.0; 2],
             balance: Glide::default(),
+            micro_tap: [0.0; 2],
+            micro_next: [0.0; 2],
+            micro_fade: [1.0; 2],
+            detune: Glide::default(),
             cur: Program::of(s),
             prev: Program::of(s),
             fade: 1.0,
@@ -768,6 +815,8 @@ impl Mod {
         self.rot_angle = [0.0, 0.3];
         self.rot_speed = [rotor_target_hz(s.rotor, 0), rotor_target_hz(s.rotor, 1)];
         self.balance.v = s.balance;
+        self.reset_micro(s);
+        self.detune.v = s.detune_cents;
         self.values = [0.0; 8];
         self.design_tone();
     }
@@ -779,6 +828,55 @@ impl Mod {
         }
         self.rot_split_z = [[BiquadState::default(); 2]; 2];
         self.rot_beam = [0.0; 2];
+    }
+
+    /// Micro's taps in the middle of their windows.
+    fn reset_micro(&mut self, s: &ModSettings) {
+        let ms = 0.001 * f64::from(self.fs);
+        for c in 0..2 {
+            self.micro_tap[c] = (f64::from(micro_delay_ms(s, c)) + 0.5 * f64::from(MICRO_WINDOW_MS)) * ms;
+        }
+        self.micro_fade = [1.0; 2];
+    }
+
+    /// Where near `d_new` (samples back) the line's recent past best matches what the tap at
+    /// `d_old` reads: the normalised correlation over [`MICRO_MATCH_MS`], searched over
+    /// [`MICRO_SEARCH_MS`] either way (coarsely at high rates, then refined).
+    fn best_match(line: &Delay, d_old: f64, d_new: f64, fs: f32) -> f64 {
+        let ms = 0.001 * fs;
+        let len = (MICRO_MATCH_MS * ms) as usize;
+        let reach = (MICRO_SEARCH_MS * ms) as i64;
+        let stride = ((fs / 48_000.0).round() as usize).max(1);
+        let (a0, b0) = (d_old.round() as i64, d_new.round() as i64);
+        let score = |tau: i64, step: usize| {
+            let b = (b0 + tau).max(1) as usize;
+            let (mut ab, mut bb) = (0.0f32, 0.0f32);
+            for m in (0..len).step_by(step) {
+                let (x, y) = (line.tap(a0 as usize + m), line.tap(b + m));
+                ab += x * y;
+                bb += y * y;
+            }
+            ab / (bb + 1e-9).sqrt()
+        };
+        let mut best = (0i64, f32::MIN);
+        let mut tau = -reach;
+        while tau <= reach {
+            let v = score(tau, stride);
+            if v > best.1 {
+                best = (tau, v);
+            }
+            tau += stride as i64;
+        }
+        if stride > 1 {
+            let centre = best.0;
+            for tau in centre - stride as i64..=centre + stride as i64 {
+                let v = score(tau, 1);
+                if v > best.1 {
+                    best = (tau, v);
+                }
+            }
+        }
+        d_new + best.0 as f64
     }
 
     fn design_tone(&mut self) {
@@ -865,6 +963,7 @@ impl Mod {
             let mix = self.mix.next(s.mix.clamp(0.0, 1.0), k);
             let width = self.width.next(s.width.clamp(0.0, 2.0), k);
             let balance = self.balance.next(s.balance.clamp(-1.0, 1.0), k);
+            let detune = self.detune.next(s.detune_cents.clamp(0.0, MICRO_MAX_CENTS), k);
             let delay = self.delay.next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), kd);
             let manual = self.manual.next(s.manual_ms.clamp(MIN_MANUAL_MS, TZ_MAX_MS), kd);
             let centre = self.centre.next(s.centre_hz.clamp(50.0, 8000.0).log2(), kd).exp2();
@@ -878,7 +977,7 @@ impl Mod {
                 g.next(if v < s.voices.clamp(1, MAX_VOICES) { 1.0 } else { 0.0 }, k);
             }
             // The settings as they play this sample (glided), for the readings' functions.
-            let now = ModSettings { depth, spread, feedback, mix, width, balance, delay_ms: delay, manual_ms: manual, centre_hz: centre, ..*s };
+            let now = ModSettings { depth, spread, feedback, mix, width, balance, detune_cents: detune, delay_ms: delay, manual_ms: manual, centre_hz: centre, ..*s };
             let offsets = [0.0, 0.5 * f64::from(spread)];
             let lfo = [self.lfo(self.phase), self.lfo(self.phase + offsets[1])];
             let mut y = self.play(self.cur, &now, lfo, offsets, vib_amp, ms, [xl, xr]);
@@ -920,6 +1019,7 @@ impl Mod {
                 self.ap_out = [0.0; 2];
             }
             Program::Rotary => self.reset_rotary(),
+            Program::Micro => self.micro_tap = [0.0; 2],
             _ => {}
         }
         self.tone[p as usize] = [[BiquadState::default(); 2]; 2];
@@ -1045,6 +1145,48 @@ impl Mod {
                 }
                 // All wet: the vibrato is the effect (MIX does not apply).
                 self.finish(p, wet, s.width)
+            }
+            Program::Micro => {
+                let window = f64::from(MICRO_WINDOW_MS) * ms;
+                let search = f64::from(MICRO_SEARCH_MS) * ms;
+                let fade_step = 1.0 / (MICRO_FADE_MS * 0.001 * self.fs);
+                let mut wet = [0.0f32; 2];
+                for c in 0..2 {
+                    let cents = micro_cents(s, c, lfo[c]);
+                    self.values[c] = cents;
+                    // The tap slides by (1 − ratio) a sample: further back to play lower.
+                    let slide = 1.0 - 2f64.powf(f64::from(cents) / 1200.0);
+                    let lo = f64::from(micro_delay_ms(s, c)) * ms;
+                    let hi = lo + window;
+                    if self.micro_tap[c] == 0.0 {
+                        self.micro_tap[c] = 0.5 * (lo + hi);
+                    }
+                    self.micro_tap[c] += slide;
+                    if self.micro_fade[c] < 1.0 {
+                        self.micro_next[c] += slide;
+                    } else if self.micro_tap[c] < lo || self.micro_tap[c] > hi {
+                        // Out of its window: a new tap from the other end, where it matches.
+                        let to = if self.micro_tap[c] < lo { hi - search } else { lo + search };
+                        self.micro_next[c] = Self::best_match(&self.clean[c], self.micro_tap[c], to, self.fs);
+                        self.micro_fade[c] = 0.0;
+                    }
+                    let old = Self::read(&self.sinc, &self.clean[c], self.micro_tap[c]);
+                    wet[c] = if self.micro_fade[c] < 1.0 {
+                        let t = self.micro_fade[c];
+                        let g = (0.5 - 0.5 * (std::f32::consts::PI * t).cos()).clamp(0.0, 1.0);
+                        let new = Self::read(&self.sinc, &self.clean[c], self.micro_next[c]);
+                        self.micro_fade[c] += fade_step;
+                        if self.micro_fade[c] >= 1.0 {
+                            self.micro_tap[c] = self.micro_next[c];
+                            self.micro_fade[c] = 1.0;
+                        }
+                        old + (new - old) * g
+                    } else {
+                        old
+                    };
+                }
+                let w = self.finish(p, wet, s.width);
+                [x[0] * (1.0 - mix) + w[0] * mix, x[1] * (1.0 - mix) + w[1] * mix]
             }
             Program::Rotary => {
                 let fs = self.fs;

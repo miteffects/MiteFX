@@ -206,3 +206,25 @@ fn the_rotary_has_its_speed_its_cabinet_and_no_lfo() {
         assert!(per < 4.0, "{per:.2} ms");
     }
 }
+
+#[test]
+fn micro_has_detune_and_delay_and_a_drag_sets_the_detune() {
+    let (mut view, host) = setup();
+    let at = view.pill(Pill::Mode(Mode::Micro)).center();
+    click(&mut view, &host, at);
+    assert_eq!(ModView::mode(&host), Mode::Micro);
+    let groups = view.dial_groups();
+    let mode = groups.iter().find(|(n, _)| *n == "MODE").expect("mode").1;
+    for id in [DETUNE.id, DELAY.id] {
+        assert!(mode.contains(view.dial(&host, id).unwrap_or_else(|| panic!("no dial {id}"))));
+    }
+    assert!(view.dial(&host, RATE.id).is_some() && view.dial(&host, MIX.id).is_some());
+    let before = plain(&host, DETUNE.id);
+    let c = view.plot().center();
+    drag(&mut view, &host, c, c - (0.0, 60.0));
+    assert!(plain(&host, DETUNE.id) > before + 1.0, "{} → {}", before, plain(&host, DETUNE.id));
+    view.event(&UiEvent::DoubleClick { pos: c, mods: MODS }, &host);
+    assert_eq!(plain(&host, DETUNE.id), DETUNE.default);
+    // The seven tiles fit left of the meters.
+    assert!(view.pill(Pill::Mode(Mode::Micro)).x1 <= 1172.0);
+}

@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Wide Detune",
+  "params": {"mode": 6.0, "detune": 18.0, "delay": 22.0, "depth": 0.0, "mix": 60.0, "width": 150.0}
+}

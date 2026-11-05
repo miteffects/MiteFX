@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Micro Shift",
+  "params": {"mode": 6.0, "detune": 9.0, "delay": 10.0, "depth": 0.0, "mix": 50.0}
+}

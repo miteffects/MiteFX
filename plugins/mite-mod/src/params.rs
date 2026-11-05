@@ -5,7 +5,7 @@
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
 use mite_core::{BoolSpec, ChoiceSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::modulation::{ModSettings, Mode, Rotor, Shape, DIVISIONS, MAX_DELAY_MS, MIN_DELAY_MS, MIN_MANUAL_MS, STAGE_COUNTS, TZ_MAX_MS};
+use mite_dsp::modulation::{ModSettings, Mode, Rotor, Shape, DIVISIONS, MAX_DELAY_MS, MICRO_MAX_CENTS, MIN_DELAY_MS, MIN_MANUAL_MS, STAGE_COUNTS, TZ_MAX_MS};
 use mite_plugin::{bool_param, choice_param, float_param};
 use nih_plug::prelude::*;
 
@@ -16,7 +16,9 @@ use crate::dsp::Output;
 /// - 1 (2026-11-05): the five modes.
 /// - 2 (2026-11-05): the rotary, appended to `mode` (snapshots re-normalised: `migrate`), and its
 ///   `rotor`, `balance` and `inertia`, appended.
-pub const STATE_VERSION: u32 = 2;
+/// - 3 (2026-11-05): the micro pitch shifter, appended to `mode` (snapshots re-normalised again),
+///   and its `detune`, appended.
+pub const STATE_VERSION: u32 = 3;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -57,6 +59,7 @@ pub const CENTRE: ParamSpec = spec("centre", "Centre", "Hz", 50.0, 8000.0, 800.0
 pub const STAGES: ChoiceSpec = ChoiceSpec { id: "stages", name: "Stages", choices: &["2", "4", "6", "8", "12", "16", "24"], default: 1 };
 pub const ROTOR: ChoiceSpec = ChoiceSpec { id: "rotor", name: "Rotor Speed", choices: &Rotor::NAMES, default: 0 };
 pub const BALANCE: ParamSpec = spec("balance", "Balance", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+pub const DETUNE: ParamSpec = spec("detune", "Detune", "ct", 0.0, MICRO_MAX_CENTS, 9.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const INERTIA: ParamSpec = spec("inertia", "Inertia", "%", 0.0, 100.0, 50.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
 
 // ---- Sound --------------------------------------------------------------------------------------
@@ -71,7 +74,7 @@ pub const HIGH_CUT: ParamSpec = spec("high_cut", "High Cut", "Hz", 1000.0, 20_00
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 
-const CONTINUOUS: [ParamSpec; 14] = [RATE, DEPTH, SPREAD, FEEDBACK, DELAY, MANUAL, CENTRE, MIX, WIDTH, LOW_CUT, HIGH_CUT, OUT_GAIN, BALANCE, INERTIA];
+const CONTINUOUS: [ParamSpec; 15] = [RATE, DEPTH, SPREAD, FEEDBACK, DELAY, MANUAL, CENTRE, MIX, WIDTH, LOW_CUT, HIGH_CUT, OUT_GAIN, BALANCE, INERTIA, DETUNE];
 
 pub fn manifest() -> String {
     [
@@ -98,6 +101,7 @@ pub fn manifest() -> String {
         ROTOR.manifest_line(),
         BALANCE.manifest_line(),
         INERTIA.manifest_line(),
+        DETUNE.manifest_line(),
     ]
     .join("\n")
         + "\n"
@@ -145,6 +149,7 @@ pub struct ModParams {
     pub rotor: IntParam,
     pub balance: FloatParam,
     pub inertia: FloatParam,
+    pub detune: FloatParam,
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -179,6 +184,7 @@ impl Default for ModParams {
             rotor: choice(&ROTOR),
             balance: float_param(&BALANCE),
             inertia: float_param(&INERTIA),
+            detune: float_param(&DETUNE),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -210,6 +216,7 @@ pub fn mod_settings(p: impl Fn(&str) -> f32) -> ModSettings {
         rotor: Rotor::from_index(index(ROTOR.id)),
         balance: p(BALANCE.id) / 100.0,
         inertia: p(INERTIA.id) / 100.0,
+        detune_cents: p(DETUNE.id),
     }
 }
 
@@ -238,6 +245,7 @@ impl ModParams {
             "rotor" => self.rotor.value() as f32,
             "balance" => self.balance.value(),
             "inertia" => self.inertia.value(),
+            "detune" => self.detune.value(),
             _ => 0.0,
         }
     }
@@ -289,6 +297,7 @@ unsafe impl Params for ModParams {
             p(ROTOR.id, self.rotor.as_ptr(), "Mode"),
             p(BALANCE.id, self.balance.as_ptr(), "Mode"),
             p(INERTIA.id, self.inertia.as_ptr(), "Mode"),
+            p(DETUNE.id, self.detune.as_ptr(), "Mode"),
         ]
     }
 }

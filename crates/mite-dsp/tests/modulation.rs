@@ -39,6 +39,7 @@ fn modes() -> Vec<(&'static str, ModSettings)> {
         ("phaser", ModSettings { mode: Mode::Phaser, feedback: 0.5, stages: 8, ..d }),
         ("vibrato", ModSettings { mode: Mode::Vibrato, rate_hz: 5.0, ..d }),
         ("rotary", ModSettings { mode: Mode::Rotary, rotor: Rotor::Fast, depth: 0.8, ..d }),
+        ("micro", ModSettings { mode: Mode::Micro, detune_cents: 12.0, ..d }),
     ]
 }
 
@@ -197,6 +198,7 @@ fn moving_any_setting_never_clicks() {
             ("rotor brake", with(&|s| s.rotor = Rotor::Brake)),
             ("balance", with(&|s| s.balance = 0.9)),
             ("inertia", with(&|s| s.inertia = 0.0)),
+            ("detune", with(&|s| s.detune_cents = 40.0)),
             ("through zero", with(&|s| {
                 s.mode = Mode::Flanger;
                 s.thru_zero = !s.thru_zero;
@@ -302,4 +304,36 @@ fn rotary_balance_tilts_and_then_takes_the_other_rotor_away() {
     assert!((20.0 * (h / d).log10() - 12.04).abs() < 0.05, "{h} {d}");
     assert_eq!(rotary_balance(1.0)[1], 0.0);
     assert_eq!(rotary_balance(-1.0)[0], 0.0);
+}
+
+/// The frequency of `y` over `range`, Hz, from its upward zero crossings (interpolated).
+fn frequency(y: &[f32], range: std::ops::Range<usize>) -> f64 {
+    let ups: Vec<f64> = range.clone().skip(1).filter(|&i| y[i - 1] < 0.0 && y[i] >= 0.0).map(|i| i as f64 - 1.0 + f64::from(y[i - 1] / (y[i - 1] - y[i]))).collect();
+    (ups.len() - 1) as f64 / ((ups[ups.len() - 1] - ups[0]) / f64::from(FS))
+}
+
+#[test]
+fn micro_shifts_the_left_down_and_the_right_up_by_its_cents() {
+    // A tone, all wet, steady (DEPTH 0): each side plays it × 2^(∓cents/1200), and the
+    // readings say so; with DEPTH the LFO sways the shift around it.
+    let n = 48_000 * 3;
+    // 1030 Hz: not a whole number of cycles in half a window, so the two taps meet out of phase.
+    let x: Vec<f32> = (0..n).map(|i| 0.5 * (std::f32::consts::TAU * 1030.0 * i as f32 / FS).sin()).collect();
+    for cents in [9.0f32, 30.0] {
+        let s = ModSettings { mode: Mode::Micro, detune_cents: cents, depth: 0.0, mix: 1.0, ..ModSettings::default() };
+        let ([l, r], tel) = render(&s, &x, 480);
+        let want = |c: f32| 1030.0 * 2f64.powf(f64::from(c) / 1200.0);
+        let (fl, fr) = (frequency(&l, 24_000..n), frequency(&r, 24_000..n));
+        assert!((fl - want(-cents)).abs() < 0.3, "{cents} cents: left {fl:.2} Hz, want {:.2}", want(-cents));
+        assert!((fr - want(cents)).abs() < 0.3, "{cents} cents: right {fr:.2} Hz, want {:.2}", want(cents));
+        let last = tel.last().expect("tel");
+        assert_eq!((last.values[0], last.values[1]), (-cents, cents));
+        // The level holds through the splices (the new tap matched to the old: within 0.5 dB; two
+        // taps always crossfading dipped 2.9 dB here).
+        let db: Vec<f32> = l[24_000..].chunks(480).map(|c| 10.0 * (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).log10()).collect();
+        let swing = db.iter().cloned().fold(f32::MIN, f32::max) - db.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(swing < 0.5, "{cents} cents: the level swings {swing:.2} dB");
+    }
+    let s = ModSettings { mode: Mode::Micro, detune_cents: 10.0, depth: 1.0, ..ModSettings::default() };
+    assert_eq!((micro_cents(&s, 0, 1.0), micro_cents(&s, 1, -1.0)), (-15.0, 5.0));
 }

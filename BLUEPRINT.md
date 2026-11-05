@@ -115,7 +115,7 @@ MiteFX/
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
 | Pitch detection (McLeod pitch method, sub-cent), notes and cents against a reference | `mite_dsp::pitch` (`PitchDetector`, `note_of`, `note_hz`; Tuner, 2026-11-04) |
 | Doubling: per-note timing, detune, level and tone from an onset detector, switched before each note arrives; chorus; placement | `mite_dsp::doubler` (`Doubler`; Double, 2026-11-04) |
-| Modulation: one smooth LFO (six shapes, sync locked to the song), chorus, ensemble, flanger (through zero), phaser (2–24 stages), vibrato, rotary speaker (horn and drum with their own inertia), their responses for drawing; the doubler's sinc reads | `mite_dsp::modulation` (`Mod`, `shape_at`, `flanger_response`, `phaser_response`, `rotor_time_s`; Mod, 2026-11-05) |
+| Modulation: one smooth LFO (six shapes, sync locked to the song), chorus, ensemble, flanger (through zero), phaser (2–24 stages), vibrato, rotary speaker (horn and drum with their own inertia), micro pitch shift (correlation-matched splices), their responses for drawing; the doubler's sinc reads | `mite_dsp::modulation` (`Mod`, `shape_at`, `flanger_response`, `phaser_response`, `rotor_time_s`; Mod, 2026-11-05) |
 | De-essing: relative (band against the whole) or absolute detection, dynamic shelf / three-bell band / wide reduction exactly the identity at rest, lookahead, smart release | `mite_dsp::deess` (`DeEsser`, `response_db`; DeEss, 2026-11-05) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
@@ -392,7 +392,16 @@ cabinet from above (the horn's two bells and beam, the drum's scoop, turning pas
 click switches slow ⇄ fast), the rotors' speeds over 8 s where the LFO strip is, SLOW/FAST/BRAKE
 with BALANCE and INERTIA; RATE reads the speed. State 2: `mode` appended (snapshots re-normalised,
 `migrate::v1_to_v2`), `rotor`, `balance`, `inertia` appended; presets Rotary Chorale, Rotary
-Tremolo, Warm Cabinet. Next: the modulation matrix.
+Tremolo, Warm Cabinet. **Micro pitch shift (2026-11-05, user: "let's add pitchshifter like micro
+pitch shifter, can be within mod if it fits"):** a seventh mode: the left DETUNE cents down, the
+right as many up (0–50 ct), at DELAY and 1.5 × DELAY; the LFO sways the shift (DEPTH 0: steady).
+Each side one tap sliding through a 50 ms window at (1 − ratio) a sample; at the window's end a new
+tap from the other end, placed where its recent past best matches the old tap's (normalised
+correlation, ±7 ms), crossfaded over 10 ms. The classic two taps always crossfading half a window
+apart dipped 2.9 dB on a 1030 Hz tone (and drop out where they meet out of phase); this one 0.14 dB.
+Pitch tested within 0.3 Hz; 0.66 % of a core. Editor: each side's cents scrolling (a drag sets
+DETUNE), DETUNE and DELAY in MODE. State 3 (`mode` again re-normalised, `detune` appended);
+presets Micro Shift, Thicken, Wide Detune. Next: the modulation matrix.
 
 ### 14. Mite Meter and Mite Utility
 

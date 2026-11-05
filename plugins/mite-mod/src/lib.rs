@@ -1,5 +1,5 @@
 //! Mite Mod (docs/design/mod-brief.md): chorus, ensemble, flanger (through zero too), phaser and
-//! vibrato and a rotary speaker in one plugin, on one smooth LFO (`mite_dsp::modulation`), each mode with its own view.
+//! vibrato, a rotary speaker and a micro pitch shifter in one plugin, on one smooth LFO (`mite_dsp::modulation`), each mode with its own view.
 
 use std::sync::Arc;
 
@@ -79,7 +79,7 @@ impl Plugin for MiteMod {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -123,7 +123,7 @@ impl Plugin for MiteMod {
 
 impl ClapPlugin for MiteMod {
     const CLAP_ID: &'static str = "io.github.ansabic.mitefx.mod";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Chorus, ensemble, flanger, phaser, vibrato and rotary speaker");
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("Chorus, ensemble, flanger, phaser, vibrato, rotary speaker and micro pitch shift");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = Some("https://github.com/ansabic/MiteFX/issues");
     const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Stereo, ClapFeature::Mono, ClapFeature::Chorus, ClapFeature::Flanger, ClapFeature::Phaser];

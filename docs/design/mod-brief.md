@@ -44,6 +44,14 @@ Kilohearts' modulation snapins, FabFilter-style display quality.
   (horn / drum), Brake 0; each eases to its target over its own time (horn 0.7 s up, 1.1 s down;
   drum 3.2 / 4.2 s) × 4^(2·INERTIA − 1). BALANCE: a ±6 dB tilt, then the other rotor fades out
   towards the ends. It ignores the LFO (RATE, shape, sync).
+- **Micro** (slice 2b): the left shifted DETUNE cents down, the right as many up (0–50 ct, the LFO
+  swaying it by up to half × DEPTH), read at DELAY and 1.5 × DELAY. One tap per side slides
+  through a 50 ms window at (1 − ratio) a sample; past the window's end a new tap starts at the
+  other end, placed within ±7 ms where its last 5 ms best match the old tap's (normalised
+  correlation; coarse then refined above 48 kHz), and the two crossfade over 10 ms (raised
+  cosine). Two fixed taps always crossfading cancel where they meet out of phase (−2.9 dB on a
+  1030 Hz tone, dropouts at worse frequencies); matched splices hold it within 0.14 dB. DETUNE 0
+  is a clean delay.
 - **Sound:** MIX (vibrato ignores it), the wet's WIDTH (M/S, 0–200 %), LOW CUT and HIGH CUT
   (Butterworth on the wet, redesigned every sample while they glide).
 - **Programs:** each mode (and the flanger twice: through zero has its own latency and line) keeps
@@ -55,7 +63,7 @@ Kilohearts' modulation snapins, FabFilter-style display quality.
   0.3 dB).
 
 CPU (48 kHz stereo, `examples/mod_cpu`): chorus 1.1 % (2 voices) – 2.1 % (4), ensemble 1.8 %,
-flanger 0.6 %, phaser 0.4 % (4 stages) – 0.8 % (24), vibrato 0.5 %, rotary 1.6 % of a core.
+flanger 0.6 %, phaser 0.4 % (4 stages) – 0.8 % (24), vibrato 0.5 %, rotary 1.6 %, micro 0.66 % of a core.
 
 ## 2. Main view (1280 × 760)
 
@@ -76,7 +84,8 @@ flanger 0.6 %, phaser 0.4 % (4 stages) – 0.8 % (24), vibrato 0.5 %, rotary 1.6
   the rotors' speeds over 8 s instead (horn solid, drum dashed, slow and fast as faint lines);
   RATE becomes a plaque with the speed.
 - **The mode's own controls** (right): DELAY + VOICES 1–4 (chorus); DELAY (ensemble); MANUAL,
-  FEEDBACK, THROUGH ZERO (flanger); CENTRE, FEEDBACK, STAGES (phaser); DEPTH (vibrato); BALANCE, INERTIA + SLOW/FAST/BRAKE (rotary).
+  FEEDBACK, THROUGH ZERO (flanger); CENTRE, FEEDBACK, STAGES (phaser); DEPTH (vibrato); BALANCE, INERTIA + SLOW/FAST/BRAKE (rotary); DETUNE, DELAY (micro: its view is
+  each side's cents scrolling, a drag sets DETUNE).
 - **LFO** (bottom left): the shape over the cycle playing, the left side a dot riding on it, the
   right a ring SPREAD ahead; six shape buttons drawn by `shape_at` itself; SYNC and the division
   (a menu; picking one syncs; wheel steps); the rate it runs at (a cycle's length under 1 Hz;
@@ -94,9 +103,10 @@ flanger); a puck drag event plus its draw 2.4–2.6 ms (tested under 4 ms in rel
 `manual`, `thru_zero`, `centre`, `stages`, `mix`, `width`, `low_cut`, `high_cut`, `out_gain`,
 `bypass` (monitoring), then `rotor`, `balance`, `inertia` (state 2). State 2 appended Rotary to
 `mode`: the snapshots store it normalised, so `migrate::v1_to_v2` re-normalises them (× 4/5);
-golden v1 (with its expected migration) and v2. Presets: Init, Lush Chorus,
+golden v1 (with its expected migration) and v2. State 3 appended Micro to `mode` (snapshots × 5/6,
+`migrate::v2_to_v3`) and `detune`; golden v2 expected and v3. Presets: Init, Lush Chorus,
 Eighties Chorus, String Ensemble, Jet Flanger, Tape Flange, Four Stage Swirl, Deep Phaser, Gentle
-Vibrato, Seasick, Rotary Chorale, Rotary Tremolo, Warm Cabinet.
+Vibrato, Seasick, Rotary Chorale, Rotary Tremolo, Warm Cabinet, Micro Shift, Thicken, Wide Detune.
 
 ## 4. Tests
 
@@ -117,4 +127,7 @@ the division menu, groups, drag timing).
    (the horn near fast in 2 s, the drum not; braking to a stop), the horn's swing at DEPTH 100 %
    and none at 0, balance, clicks, block sizes, no allocation; the editor's pills, cabinet click
    and a 0.6 ms draw. Not yet heard by the user.
+   2b. (done 2026-11-05) Micro pitch shift, above: tested for each side's pitch (within 0.3 Hz at 9
+   and 30 ct), the level through splices (within 0.5 dB), clicks, block sizes, no allocation; the
+   editor's dials and drag. Not yet heard by the user.
 3. The modulation matrix (shared with Delay, Sat and Filter; deferred on Sat by the user).

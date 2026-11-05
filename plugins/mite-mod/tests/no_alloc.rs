@@ -15,6 +15,7 @@ fn engine_process_never_allocates() {
         s.mode = Mode::from_index((i / 40) % Mode::ALL.len());
         s.rotor = Rotor::from_index((i / 23) % 3);
         s.balance = [-1.0, 0.3, 1.0][(i / 31) % 3];
+        s.detune_cents = [0.0, 9.0, 50.0][(i / 29) % 3];
         s.thru_zero = (i / 90) % 2 == 0;
         s.shape = Shape::from_index((i / 33) % 6);
         s.voices = 1 + (i / 25) % 4;

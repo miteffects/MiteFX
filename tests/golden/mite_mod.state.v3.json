@@ -1,0 +1,81 @@
+{
+  "fields": {
+    "mitefx_state": "3",
+    "preset": "Deep Phaser",
+    "snapshots": "{\"active\":0,\"slots\":[{\"balance\":0.4,\"centre\":0.598852,\"delay\":0.6436643,\"depth\":0.5,\"detune\":0.28,\"division\":0.42857143,\"feedback\":0.81578946,\"high_cut\":1.0,\"inertia\":0.7,\"low_cut\":0.0,\"manual\":0.65979964,\"mix\":0.5,\"mode\":0.5,\"out_gain\":0.5,\"rate\":0.4946145,\"rotor\":1.0,\"shape\":0.0,\"spread\":0.5,\"stages\":0.6666667,\"sync\":1.0,\"thru_zero\":1.0,\"voices\":0.33333334,\"width\":0.5},{\"depth\":0.25},null,null]}"
+  },
+  "params": {
+    "balance": {
+      "f32": -20.0
+    },
+    "bypass": {
+      "bool": false
+    },
+    "centre": {
+      "f32": 1200.0
+    },
+    "delay": {
+      "f32": 12.0
+    },
+    "depth": {
+      "f32": 50.0
+    },
+    "detune": {
+      "f32": 14.0
+    },
+    "division": {
+      "i32": 6
+    },
+    "feedback": {
+      "f32": 60.0
+    },
+    "high_cut": {
+      "f32": 20000.0
+    },
+    "inertia": {
+      "f32": 70.0
+    },
+    "low_cut": {
+      "f32": 20.0
+    },
+    "manual": {
+      "f32": 1.5
+    },
+    "mix": {
+      "f32": 50.0
+    },
+    "mode": {
+      "i32": 3
+    },
+    "out_gain": {
+      "f32": 0.0
+    },
+    "rate": {
+      "f32": 0.6
+    },
+    "rotor": {
+      "i32": 2
+    },
+    "shape": {
+      "i32": 0
+    },
+    "spread": {
+      "f32": 90.0
+    },
+    "stages": {
+      "i32": 4
+    },
+    "sync": {
+      "bool": true
+    },
+    "thru_zero": {
+      "bool": true
+    },
+    "voices": {
+      "i32": 1
+    },
+    "width": {
+      "f32": 100.0
+    }
+  }
+}

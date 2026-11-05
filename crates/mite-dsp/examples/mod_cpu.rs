@@ -28,6 +28,7 @@ fn main() {
         ("phaser, 24 stages", ModSettings { mode: Mode::Phaser, stages: 24, ..d }),
         ("vibrato", ModSettings { mode: Mode::Vibrato, ..d }),
         ("rotary (fast)", ModSettings { mode: Mode::Rotary, rotor: mite_dsp::modulation::Rotor::Fast, depth: 0.8, ..d }),
+        ("micro", ModSettings { mode: Mode::Micro, detune_cents: 12.0, depth: 0.3, ..d }),
     ] {
         let mut m = Mod::new(fs, &s);
         let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);

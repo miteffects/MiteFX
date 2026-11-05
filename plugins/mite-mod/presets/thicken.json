@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Thicken",
+  "params": {"mode": 6.0, "detune": 6.0, "delay": 16.0, "depth": 30.0, "rate": 0.3, "mix": 35.0, "low_cut": 150.0}
+}

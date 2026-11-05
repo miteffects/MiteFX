@@ -4,7 +4,7 @@
 //!     cargo run -p mite_mod --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
 //! SNAPSHOT_VARIANT: a mode (chorus, ensemble, flanger, tz, phaser, vibrato, rotary: slow, then
-//! fast for the last 3 s) or synced.
+//! fast for the last 3 s, micro) or synced.
 //! SNAPSHOT_HOVER=x,y hovers a point.
 
 #[path = "common/riff.rs"]
@@ -56,6 +56,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             host.set_plain("depth", 70.0);
             host.set_plain("spread", 120.0);
             host.set_plain("mix", 100.0);
+        }
+        Ok("micro") => {
+            host.set_plain("mode", 6.0);
+            host.set_plain("depth", 30.0);
+            host.set_plain("rate", 0.4);
         }
         Ok("synced") => {
             host.set_plain("sync", 1.0);
