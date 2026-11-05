@@ -398,8 +398,8 @@ pub enum Smart {
     /// filter's vocal type"; its manual: "automatic knee and ratio settings, so compressing your
     /// lead vocal is as easy as choosing the right threshold"): every compressing stage plays
     /// ∞:1 over a very soft knee ([`VOCAL_KNEE_DB`]), so the further the voice goes over, the
-    /// harder it is held, and nothing gets past the threshold + half the knee. Plus Adaptive's
-    /// release and the sibilance guard. (Until 2026-11-05 it slid the thresholds to hold a target
+    /// harder it is held, and nothing gets past the threshold + half the knee. Plus the sibilance
+    /// guard; the release is RELEASE (no crest scaling: see [`adaptive_release_scale`]). (Until 2026-11-05 it slid the thresholds to hold a target
     /// reduction, a leveler that rode the voice up and down.)
     Vocal,
     /// Adaptive (gently), plus the thresholds slide slowly (up to ±9 dB).
@@ -447,9 +447,13 @@ impl Stage {
 }
 
 /// Smart's release multiplier for a crest factor (fast envelope over slow RMS, dB): spiky
-/// material releases faster, sustained material slower.
+/// material releases faster, sustained material slower. Not in Vocal (2026-11-05, user: "i move
+/// attack from 0 to 250 and i hear no difference in vocal mode"): a voice is sustained, so its
+/// release was stretched up to 3×, the reduction never let go between syllables (still −2.2 of
+/// −4.6 dB at the next one's start) and ATTACK only shaped what was left. Pro-C's Vocal releases
+/// at RELEASE.
 pub fn adaptive_release_scale(crest_db: f32, smart: Smart, amount: f32) -> f32 {
-    if smart == Smart::Off {
+    if matches!(smart, Smart::Off | Smart::Vocal) {
         return 1.0;
     }
     let raw = 2f32.powf((CREST_REF_DB - crest_db.clamp(0.0, 24.0)) / 8.0);
@@ -1778,6 +1782,7 @@ mod tests {
         let steady = adaptive_release_scale(3.0, Smart::Adaptive, 1.0);
         assert!(spiky < 1.0 && steady > 1.0, "{spiky} {steady}");
         assert_eq!(adaptive_release_scale(20.0, Smart::Off, 1.0), 1.0);
+        assert_eq!(adaptive_release_scale(3.0, Smart::Vocal, 1.0), 1.0, "Vocal releases at RELEASE");
     }
 
     #[test]

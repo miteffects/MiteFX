@@ -1640,7 +1640,7 @@ impl CompView {
             return Help::default().text(match Self::smart(host) {
                 Smart::Off => "Smart · Off — nothing adapts",
                 Smart::Adaptive => "Smart · Adaptive — bends the release to the material",
-                Smart::Vocal => "Smart · Vocal — automatic ratio and knee (∞:1 over a very soft knee): set the threshold and the voice is brought to the front; the release follows the voice and the detector eases off esses (SIBILANCE)",
+                Smart::Vocal => "Smart · Vocal — automatic ratio and knee (∞:1 over a very soft knee): set the threshold and the voice is brought to the front; ATTACK and RELEASE act as set; the detector eases off esses (SIBILANCE)",
                 Smart::Master => "Smart · Master — the curve follows the mix gently to hold the target",
             });
         }

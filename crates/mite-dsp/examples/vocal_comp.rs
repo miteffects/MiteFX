@@ -59,7 +59,72 @@ fn phrase_db(y: &[f32], tag: &[Option<usize>], n: usize) -> Vec<f64> {
     acc.iter().map(|(e, c)| 10.0 * (e / (*c).max(1) as f64).max(1e-20).log10()).collect()
 }
 
+/// How different two renders are: the difference's level against the first's, dB.
+fn diff_db(a: &[f32], b: &[f32]) -> f64 {
+    let e: f64 = a.iter().zip(b).map(|(x, y)| f64::from(x - y).powi(2)).sum();
+    let p: f64 = a.iter().map(|x| f64::from(*x).powi(2)).sum();
+    10.0 * (e / p.max(1e-20)).max(1e-20).log10()
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("attack") {
+        let (x, _) = voice(&[(6.0, -20.0), (6.0, -14.0)]);
+        let amount: f32 = std::env::var("AMOUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.7);
+        let det = match std::env::var("DET").as_deref() { Ok("peak") => mite_dsp::dynamics::Detector::Peak, _ => mite_dsp::dynamics::Detector::Rms };
+        let auto = std::env::var("AUTO").map_or(true, |v| v != "0");
+        let render = |smart: Smart, attack: f32, ratio: f32, knee: f32| {
+            let mut stages = [Stage::default(); STAGES];
+            stages[0] = Stage { on: true, threshold_db: -24.0, ratio, knee_db: knee, attack_ms: attack, release_ms: 120.0, detector: det, ..Stage::default() };
+            let s = CompSettings { stages, smart, auto_makeup: auto, smart_amount: amount, sibilance: 0.5, ..CompSettings::default() };
+            let mut c = Compressor::new(FS);
+            c.prepare(FS, &s);
+            let mut y = x.clone();
+            for b in y.chunks_mut(512) {
+                c.process(&mut [b], None, &s);
+            }
+            y
+        };
+        // Each syllable's first 30 ms against its whole, dB (how much of the attack gets through).
+        let (_, tag) = voice(&[(6.0, -20.0), (6.0, -14.0)]);
+        let onsets: Vec<usize> = (1..tag.len()).filter(|&i| tag[i].is_some() && tag[i - 1].is_none()).collect();
+        let punch = |y: &[f32]| {
+            let rms = |r: std::ops::Range<usize>| (y[r.clone()].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / r.len() as f64).sqrt();
+            let mut acc = 0.0;
+            for &o in &onsets {
+                let mut end = o;
+                while end < tag.len() && tag[end].is_some() {
+                    end += 1;
+                }
+                if end - o > 4800 {
+                    acc += 20.0 * (rms(o..o + 1440) / rms(o + 2400..end)).log10();
+                }
+            }
+            acc / onsets.len() as f64
+        };
+        println!("input: onsets {:+.1} dB against the syllable", punch(&x));
+        // The gain at times after an onset that follows a long gap (the 10th syllable), dB.
+        let o = onsets[10];
+        for att in [0.05, 10.0, 50.0, 250.0] {
+            let y = render(Smart::Vocal, att, 4.0, 6.0);
+            let g = |ms: f64| {
+                let i = o + (ms * 48.0) as usize;
+                let r = |v: &[f32]| (v[i - 48..i + 48].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>()).sqrt();
+                20.0 * (r(&y) / r(&x)).log10()
+            };
+            let pts: Vec<String> = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 300.0].iter().map(|&t| format!("{:6.1}", g(t))).collect();
+            println!("vocal attack {att:6.2}: gain at 2,5,10,20,50,100,200,300 ms: {}", pts.join(" "));
+        }
+        for (name, smart, ratio, knee) in [("off 4:1", Smart::Off, 4.0, 6.0), ("vocal", Smart::Vocal, 4.0, 6.0)] {
+            for att in [0.05, 10.0, 50.0, 250.0] {
+                println!("{name:10} attack {att:6.2} ms: onsets {:+.2} dB against the syllable", punch(&render(smart, att, ratio, knee)));
+            }
+            let a = render(smart, 0.05, ratio, knee);
+            let b = render(smart, 250.0, ratio, knee);
+            let reduced = diff_db(&x, &a);
+            println!("{name:10} attack 0.05 vs 250 ms: difference {:6.1} dB under the output; the compression itself {:6.1} dB", diff_db(&a, &b), reduced);
+        }
+        return;
+    }
     let phrases = [(6.0, -30.0), (6.0, -20.0), (6.0, -12.0), (6.0, -26.0), (6.0, -16.0), (6.0, -34.0)];
     let (x, tag) = voice(&phrases);
     let n = phrases.len();
