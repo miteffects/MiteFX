@@ -540,8 +540,32 @@ impl CompView {
         }
     }
 
+    /// The stages as they play (Smart · Vocal sets a compressing stage's ratio and knee).
     fn stages(host: &dyn ParamHost) -> [Stage; STAGES] {
-        std::array::from_fn(|i| Self::stage(host, i))
+        let smart = Self::smart(host);
+        std::array::from_fn(|i| Self::stage(host, i).played(smart))
+    }
+
+    /// Whether a stage's ratio and knee are set by Smart (Vocal), not by hand.
+    fn auto_curve(host: &dyn ParamHost, slot: usize) -> bool {
+        Self::smart(host).sets_ratio_and_knee() && Self::stage(host, slot).played(Smart::Vocal) != Self::stage(host, slot)
+    }
+
+    /// Whether a dial is a ratio or knee that Smart sets (it is not drawn or turned: AUTO shows).
+    fn auto_dial(host: &dyn ParamHost, id: &str) -> bool {
+        let Some((slot, param)) = id.strip_prefix('s').and_then(|r| r.split_once('_')) else { return false };
+        let Some(slot) = slot.parse::<usize>().ok().and_then(|n| n.checked_sub(1)) else { return false };
+        slot < STAGES && (param == S_RATIO.id || param == S_KNEE.id) && Self::auto_curve(host, slot)
+    }
+
+    /// Where a dial would be: AUTO, in the accent, in a ring like the dial's.
+    fn draw_auto_dial(cx: &mut DrawCx<'_>, k: &Knob) {
+        let theme = cx.theme;
+        let c = k.center;
+        let r = 0.5 * k.diameter;
+        cx.scene.stroke(&Stroke::new(1.2).with_dashes(0.0, [3.0, 3.0]), Affine::IDENTITY, theme.accent.multiply_alpha(0.55), None, &Circle::new(c, r));
+        cx.text.draw(cx.scene, "AUTO", c.x, c.y - 6.0, TextStyle::LABEL.sized(10.0).weighted(700.0), theme.accent, Align::Center);
+        cx.text.draw(cx.scene, k.label, c.x, c.y + r + 4.0, TextStyle::LABEL, theme.text_lo, Align::Center);
     }
 
     /// Stages that are on, in threshold order (slot indices): stage n in the UI is `ranked[n − 1]`.
@@ -1141,7 +1165,11 @@ impl CompView {
             k.percent = k.id == release && s.auto_release;
         }
         for k in &self.compact_knobs {
-            k.draw(cx);
+            if Self::auto_dial(cx.host, &k.id) {
+                Self::draw_auto_dial(cx, k);
+            } else {
+                k.draw(cx);
+            }
         }
         self.compact_hits = hits;
     }
@@ -1400,7 +1428,11 @@ impl CompView {
             }
         }
         for k in &self.panel_knobs {
-            k.draw(cx);
+            if Self::auto_dial(cx.host, &k.id) {
+                Self::draw_auto_dial(cx, k);
+            } else {
+                k.draw(cx);
+            }
         }
         self.hits = hits;
     }
@@ -1608,7 +1640,7 @@ impl CompView {
             return Help::default().text(match Self::smart(host) {
                 Smart::Off => "Smart · Off — nothing adapts",
                 Smart::Adaptive => "Smart · Adaptive — bends the release to the material",
-                Smart::Vocal => "Smart · Vocal — the curve follows the voice to hold the target; dashed lines are where you set it",
+                Smart::Vocal => "Smart · Vocal — automatic ratio and knee (∞:1 over a very soft knee): set the threshold and the voice is brought to the front; the release follows the voice and the detector eases off esses (SIBILANCE)",
                 Smart::Master => "Smart · Master — the curve follows the mix gently to hold the target",
             });
         }
@@ -1623,6 +1655,9 @@ impl CompView {
         if let Some(panel) = self.panel {
             if self.hits.rect.contains(p) {
                 if let Some(k) = self.panel_knobs.iter().find(|k| k.bounds().contains(p)) {
+                if Self::auto_dial(host, &k.id) {
+                    return Help::default().text(format!("{} · automatic — Smart · Vocal sets it (∞:1 over a very soft knee: the harder the voice pushes, the firmer it is held). Only the threshold matters.", k.label));
+                }
                     let (value, unit) = k.value_text(host);
                     let words = if k.percent { " — relative under auto release: right is slower; drag; double-click resets" } else { " — drag; double-click resets" };
                     return Help::default().text(format!("{} · ", k.label)).slot(format!("{value} {unit}"), k.spec.format(k.spec.max)).text(words);
@@ -1671,6 +1706,9 @@ impl CompView {
         }
         if self.single(host) {
             if let Some(k) = self.compact_knobs.iter().find(|k| k.bounds().contains(p)) {
+                if Self::auto_dial(host, &k.id) {
+                    return Help::default().text(format!("{} · automatic — Smart · Vocal sets it (∞:1 over a very soft knee: the harder the voice pushes, the firmer it is held). Only the threshold matters.", k.label));
+                }
                 let (value, unit) = k.value_text(host);
                 let words = if k.percent { " — relative under auto release: right is slower; drag; double-click resets" } else { " — drag; double-click resets" };
                 return Help::default().text(format!("{} · ", k.label)).slot(format!("{value} {unit}"), k.spec.format(k.spec.max)).text(words);
@@ -1858,7 +1896,7 @@ impl CompView {
                 true
             }
             Key::PageUp | Key::PageDown => {
-                let Some(slot) = self.selected else { return false };
+                let Some(slot) = self.selected.filter(|&slot| !Self::auto_curve(host, slot)) else { return false };
                 let r = S_RATIO.wheel(stages[slot].ratio, if key == Key::PageUp { 1.0 } else { -1.0 }, mods.fine());
                 Self::set(host, &stage_id(slot, S_RATIO.id), r);
                 true
@@ -1926,13 +1964,13 @@ impl CompView {
             return true;
         }
         for k in &mut self.panel_knobs {
-            if k.event(event, host) {
+            if !Self::auto_dial(host, &k.id) && k.event(event, host) {
                 return true;
             }
         }
         if self.single(host) {
             for k in &mut self.compact_knobs {
-                if k.event(event, host) {
+                if !Self::auto_dial(host, &k.id) && k.event(event, host) {
                     return true;
                 }
             }
@@ -1960,7 +1998,7 @@ impl CompView {
             UiEvent::Wheel { pos, lines, mods } => {
                 let fine = mods.fine();
                 match self.hot_at(host, pos) {
-                    Some(Hot::Node(slot)) => {
+                    Some(Hot::Node(slot)) if !Self::auto_curve(host, slot) => {
                         let r = S_RATIO.wheel(stages[slot].ratio, lines, fine);
                         Self::set(host, &stage_id(slot, S_RATIO.id), r);
                         true
@@ -2152,7 +2190,8 @@ impl CompView {
         match drag {
             Drag::Node { slot, start, threshold, knee, lock } => {
                 let s = stages[slot];
-                if mods.alt {
+                let auto = Self::auto_curve(host, slot);
+                if mods.alt && !auto {
                     // Knee: 0–24 dB over 120 px, horizontal.
                     let k = (knee + ((pos.x - start.x) / 120.0 * 24.0 * fine) as f32).clamp(0.0, 24.0);
                     Self::set_raw(host, &stage_id(slot, S_KNEE.id), k);
@@ -2171,7 +2210,7 @@ impl CompView {
                     let t = (threshold + (along * fine) as f32).clamp(-60.0, 0.0);
                     Self::set_raw(host, &stage_id(slot, S_THRESH.id), t);
                 }
-                if lock != Some(true) {
+                if lock != Some(true) && !auto {
                     // Against what the stages below make of the node's input.
                     let (_, y) = sq_db(pos);
                     let x = Self::node_input(stages, slot, 0.0);

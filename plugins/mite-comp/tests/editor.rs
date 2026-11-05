@@ -330,3 +330,23 @@ fn a_range_picked_by_hand_never_hides_a_deeper_threshold() {
     let after = stages(&host)[0].threshold_db;
     assert!((after + 35.0).abs() < 0.5, "dragged to {after}");
 }
+
+#[test]
+fn smart_vocal_sets_ratio_and_knee_so_their_dials_show_auto() {
+    // Pro-C's Vocal: automatic knee and ratio, only the threshold matters. The RATIO dial under
+    // the square (second of the top row) does nothing then; with Smart off it turns again.
+    let (mut view, host, _) = setup();
+    let ratio = stage_id(0, S_RATIO.id);
+    let dial = Point::new(796.0 + 384.0 / 3.0 * 1.5, 56.0 + 420.0 + 70.0);
+    let before = plain(&host, &ratio);
+    host.set_plain(mite_comp::params::SMART.id, 2.0);
+    draw(&mut view, &host);
+    drag(&mut view, &host, dial, dial - (0.0, 80.0));
+    assert_eq!(plain(&host, &ratio), before, "Vocal: the ratio is automatic");
+    view.event(&UiEvent::KeyDown { key: Key::PageUp, mods: MODS }, &host);
+    assert_eq!(plain(&host, &ratio), before);
+    host.set_plain(mite_comp::params::SMART.id, 0.0);
+    draw(&mut view, &host);
+    drag(&mut view, &host, dial, dial - (0.0, 80.0));
+    assert!(plain(&host, &ratio) > before, "Off: the dial turns the ratio");
+}

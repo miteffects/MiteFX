@@ -66,13 +66,22 @@ pub const AUTO_MAKEUP_REF_DB: f32 = -12.0;
 /// matching only the hits would leave the result louder. The trim is a closed loop (2026-11-04):
 /// it meters the output after the auto makeup and integrates what is still missing, so the
 /// prediction's bias on spiky material (its makeup swings with a level that follows the hits)
-/// is made up too. The meters hold in silence (the 20 ms mean square under [`AUTO_FLOOR_DB`];
-/// until 2026-11-04 the floor was compared as an amplitude, so it held under −35 dB).
+/// is made up too. The meters hold in silence (the 20 ms mean square under [`AUTO_FLOOR_DB`]).
+///
+/// 2026-11-05 (user: "sometimes too loud and sometimes too quiet"): the meters followed the music
+/// within 0.4…3 s, so every phrase was brought back to the loudness it went in at, undoing the
+/// compression between phrases (a sung line with phrases 21.5 dB apart came out 21 dB apart at
+/// 4:1, 13.9 dB without auto makeup; `examples/vocal_comp`). Their times now grow with the
+/// sound heard: as quick as before at first (the level, the meters and the trim at 0.4, 1 and
+/// 3 s), then as long as the seconds of sound so far, up to [`AUTO_LONG_S`] for the level and
+/// three times that for the trim: the song's loudness, not the phrase's.
 const AUTO_LEVEL_MS: f32 = 400.0;
 const AUTO_TRIM_MS: f32 = 3000.0;
 /// The trim's meters (in, and out after the auto makeup), ms: a third of the trim's time, so
 /// the loop settles without ringing (damping about 0.87).
 const AUTO_METER_MS: f32 = 1000.0;
+/// The level's and the meters' longest time, s (the trim's is three times it).
+pub const AUTO_LONG_S: f32 = 10.0;
 const AUTO_SHORT_MS: f32 = 20.0;
 const AUTO_FLOOR_DB: f32 = -70.0;
 const AUTO_TRIM_LIMIT_DB: f32 = 9.0;
@@ -385,8 +394,13 @@ pub enum Smart {
     Off,
     /// The release follows the material (crest factor).
     Adaptive,
-    /// Adaptive, plus the thresholds slide to hold the target GR (up to ±24 dB), plus the
-    /// sibilance guard.
+    /// FabFilter Pro-C 2's Vocal style (user, 2026-11-05: "as similar as possible to fab
+    /// filter's vocal type"; its manual: "automatic knee and ratio settings, so compressing your
+    /// lead vocal is as easy as choosing the right threshold"): every compressing stage plays
+    /// ∞:1 over a very soft knee ([`VOCAL_KNEE_DB`]), so the further the voice goes over, the
+    /// harder it is held, and nothing gets past the threshold + half the knee. Plus Adaptive's
+    /// release and the sibilance guard. (Until 2026-11-05 it slid the thresholds to hold a target
+    /// reduction, a leveler that rode the voice up and down.)
     Vocal,
     /// Adaptive (gently), plus the thresholds slide slowly (up to ±9 dB).
     Master,
@@ -406,7 +420,29 @@ impl Smart {
 
     /// Whether it slides the thresholds.
     pub fn tracks_threshold(self) -> bool {
-        matches!(self, Self::Vocal | Self::Master)
+        self == Self::Master
+    }
+
+    /// Whether it sets the compressing stages' ratio and knee itself (they show as automatic).
+    pub fn sets_ratio_and_knee(self) -> bool {
+        self == Self::Vocal
+    }
+}
+
+/// Vocal's knee, dB. With ∞:1 the ratio rises smoothly with the level: 1:1 at the threshold
+/// − 18 dB, 2:1 at the threshold (4.5 dB of reduction there), 4:1 at + 9 dB, ∞:1 from + 18 dB
+/// (the output never above the threshold).
+pub const VOCAL_KNEE_DB: f32 = 36.0;
+
+impl Stage {
+    /// The stage as `smart` plays it: Vocal sets a compressing stage's ratio and knee (one left
+    /// at 1:1, the editor's way of switching a stage off, stays off).
+    pub fn played(self, smart: Smart) -> Self {
+        if smart.sets_ratio_and_knee() && self.quadrant == Quadrant::Compress && self.ratio > 1.001 {
+            Self { ratio: RATIO_MAX, knee_db: VOCAL_KNEE_DB, ..self }
+        } else {
+            self
+        }
     }
 }
 
@@ -481,6 +517,12 @@ impl CompSettings {
     /// Samples of lookahead at `sample_rate` (the latency the plugin reports).
     pub fn latency(&self, sample_rate: f32) -> usize {
         (self.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * sample_rate).round() as usize
+    }
+
+    /// The settings as they play: the stages as Smart sets them ([`Stage::played`]). The audio
+    /// thread and the editor both use this, so the curve drawn is the one applied.
+    pub fn played(&self) -> Self {
+        Self { stages: self.stages.map(|st| st.played(self.smart)), ..*self }
     }
 
     /// The makeup in force, dB: the set makeup plus `auto_db` (what auto makeup measured, when
@@ -736,6 +778,10 @@ pub struct Compressor {
     auto_trim: f32,
     auto_db: f32,
     auto_count: u32,
+    /// Seconds of sound auto makeup has heard (its meters' times grow with it).
+    auto_heard: f32,
+    /// The meters' coefficients now (level, trim meters) and the trim's step.
+    auto_k: (f32, f32, f32),
     /// The stages' thresholds and knees in the level they work on, while nothing glides.
     levels: [(f32, f32); STAGES],
     levels_valid: bool,
@@ -778,6 +824,8 @@ impl Compressor {
             auto_trim: 0.0,
             auto_db: 0.0,
             auto_count: 0,
+            auto_heard: 0.0,
+            auto_k: (0.0, 0.0, 0.0),
             levels: [(0.0, 0.0); STAGES],
             levels_valid: false,
             prepared: false,
@@ -844,7 +892,8 @@ impl Compressor {
         self.sib_guard = 0.0;
         self.offset_db = 0.0;
         (self.auto_level, self.auto_in, self.auto_out, self.auto_short) = (0.0, 0.0, 0.0, 0.0);
-        (self.auto_trim, self.auto_db, self.auto_count) = (0.0, 0.0, 0);
+        (self.auto_trim, self.auto_db, self.auto_count, self.auto_heard) = (0.0, 0.0, 0, 0.0);
+        self.auto_k = (0.0, 0.0, 0.0);
         self.levels_valid = false;
         self.makeup.reset(s.makeup_total_db(0.0));
     }
@@ -895,6 +944,8 @@ impl Compressor {
     /// Processes `channels` (one or two) in place. `key` is the sidechain input (one or two
     /// channels, at least as long), used when `s.external_key` is on; without it the key is silent.
     pub fn process(&mut self, channels: &mut [&mut [f32]], key: Option<&[&[f32]]>, s: &CompSettings) -> CompTelemetry {
+        let played = s.played();
+        let s = &played;
         let mut t = CompTelemetry::default();
         let n_ch = channels.len().min(2);
         if n_ch == 0 || !self.prepared {
@@ -955,12 +1006,20 @@ impl Compressor {
         let sib_depth = if s.smart == Smart::Vocal { s.sibilance.clamp(0.0, 1.0) } else { 0.0 };
         let program_gate = db_to_gain(PROGRAM_GATE_DB);
         self.makeup.set_target(s.makeup_total_db(self.auto_db));
-        let auto_level_k = 1.0 - coef(AUTO_LEVEL_MS, fs);
-        let auto_trim_k = 1.0 - coef(AUTO_METER_MS, fs);
+        // The meters' times grow with the sound heard (see AUTO_LEVEL_MS).
+        let auto_times = |heard: f32| {
+            let t = (heard * 1000.0).clamp(0.0, AUTO_LONG_S * 1000.0);
+            let level = t.max(AUTO_LEVEL_MS);
+            let meter = t.max(AUTO_METER_MS);
+            (1.0 - coef(level, fs), 1.0 - coef(meter, fs), 1.0 - coef((3.0 * t).max(AUTO_TRIM_MS), fs / AUTO_EVERY as f32))
+        };
+        if self.auto_k.0 == 0.0 {
+            self.auto_k = auto_times(self.auto_heard);
+        }
         let auto_short_k = 1.0 - coef(AUTO_SHORT_MS, fs);
+        let heard_step = AUTO_EVERY as f32 / fs;
         // The meters hold mean squares: the floor is a power (it was the amplitude, −35 dB).
         let auto_floor = db_to_gain(AUTO_FLOOR_DB).powi(2);
-        let auto_step = 1.0 - coef(AUTO_TRIM_MS, fs / AUTO_EVERY as f32);
         let set_makeup_sq = db_to_gain(s.makeup_db).powi(2);
 
         let uses = |d: Detector| s.stages.iter().any(|st| st.on && st.detector == d);
@@ -1242,14 +1301,21 @@ impl Compressor {
             // After the auto part of the makeup (not the set part): the trim closes the loop on it.
             let p_out = power(out) / set_makeup_sq;
             self.auto_short += (p_in - self.auto_short) * auto_short_k;
-            if self.auto_short > auto_floor && !s.listen {
-                self.auto_level += (p_in - self.auto_level) * auto_level_k;
-                self.auto_in += (p_in - self.auto_in) * auto_trim_k;
-                self.auto_out += (p_out - self.auto_out) * auto_trim_k;
+            let sounding = self.auto_short > auto_floor && !s.listen;
+            if sounding {
+                let (level_k, meter_k, _) = self.auto_k;
+                self.auto_level += (p_in - self.auto_level) * level_k;
+                self.auto_in += (p_in - self.auto_in) * meter_k;
+                self.auto_out += (p_out - self.auto_out) * meter_k;
             }
             self.auto_count += 1;
             if self.auto_count >= AUTO_EVERY {
                 self.auto_count = 0;
+                if sounding && self.auto_heard < AUTO_LONG_S {
+                    self.auto_heard += heard_step;
+                    self.auto_k = auto_times(self.auto_heard);
+                }
+                let auto_step = self.auto_k.2;
                 if s.auto_makeup && self.auto_level > 0.0 {
                     // The curve's gain at the music's level, then the trim towards what is measured.
                     let level = 10.0 * self.auto_level.log10();
@@ -1631,8 +1697,9 @@ mod tests {
     #[test]
     fn auto_makeup_matches_the_loudness_going_in() {
         let rms = |v: &[f32]| (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
-        let n = 10 * FS as usize;
-        let tail = 6 * FS as usize..;
+        // Long enough for its meters to reach their song-long times (AUTO_LONG_S).
+        let n = 40 * FS as usize;
+        let tail = 30 * FS as usize..;
         for (threshold, ratio) in [(-24.0, 4.0), (-30.0, 8.0), (-12.0, 2.0)] {
             for (hits, peak) in [(true, -6.0), (true, -20.0), (false, -6.0)] {
                 let st = Stage { attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms, ..stage(Quadrant::Compress, threshold, ratio) };
@@ -1656,18 +1723,53 @@ mod tests {
     }
 
     #[test]
-    fn smart_vocal_holds_the_target_through_a_level_change() {
-        let st = Stage { release_ms: 80.0, ..stage(Quadrant::Compress, -18.0, 4.0) };
-        let s = CompSettings { smart: Smart::Vocal, smart_amount: 1.0, target_gr_db: 6.0, sibilance: 0.0, ..settings(&[st]) };
-        let mut c = Compressor::new(FS);
-        c.prepare(FS, &s);
-        for level in [-30.0, -18.0] {
+    fn smart_vocal_sets_the_ratio_and_knee_like_pro_c() {
+        // Whatever ratio and knee the stage has, Vocal plays ∞:1 over a 36 dB knee: 4.5 dB of
+        // reduction at the threshold, none 18 dB under it, the output held at the threshold from
+        // 18 dB over it; the curve drawn (`played`) is the one heard.
+        let st = Stage { release_ms: 80.0, attack_ms: 5.0, ..stage(Quadrant::Compress, -24.0, 2.0) };
+        let s = CompSettings { smart: Smart::Vocal, smart_amount: 0.0, sibilance: 0.0, ..settings(&[st]) };
+        let played = s.played().stages[0];
+        assert_eq!((played.ratio, played.knee_db), (RATIO_MAX, VOCAL_KNEE_DB));
+        assert!((curve_db(&s.played().stages, -24.0, 0.0) + 28.5).abs() < 0.01);
+        assert!((curve_db(&s.played().stages, 0.0, 0.0) + 24.0).abs() < 0.01);
+        for level in [-42.0, -30.0, -24.0, -12.0, 0.0] {
+            let want = curve_db(&s.played().stages, level, 0.0) - level;
+            let mut c = Compressor::new(FS);
+            c.prepare(FS, &s);
             let x = db_to_gain(level);
-            let mut buf = vec![x; (FS * 4.0) as usize];
+            let mut buf = vec![x; (FS * 2.0) as usize];
             c.process(&mut [&mut buf], None, &s);
             let g = gain_to_db(buf[buf.len() - 1] / x);
-            assert!((g + 6.0).abs() < 1.0, "at {level} dB the GR is {g}");
+            assert!((g - want).abs() < 0.3, "at {level} dB the gain is {g:.2}, the curve says {want:.2}");
         }
+        // An expanding stage keeps its own ratio and knee; Off leaves the compressor's alone.
+        let ex = stage(Quadrant::Expand, -50.0, 3.0);
+        assert_eq!(ex.played(Smart::Vocal), ex);
+        assert_eq!(st.played(Smart::Off), st);
+        let inert = Stage { ratio: 1.0, ..st };
+        assert_eq!(inert.played(Smart::Vocal), inert);
+    }
+
+    #[test]
+    fn auto_makeup_does_not_ride_the_phrases() {
+        // Once it has heard the song, auto makeup holds: a quiet section and a loud one come out
+        // as far apart as the compressor alone makes them (it used to bring each back to its own
+        // loudness, undoing the compression).
+        let rms = |v: &[f32]| 20.0 * (v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / v.len() as f64).sqrt().log10();
+        let sec = FS as usize;
+        let mut x = material(30 * sec, -12.0, true);
+        let quiet = material(6 * sec, -30.0, true);
+        let loud = material(6 * sec, -10.0, true);
+        x.extend_from_slice(&quiet);
+        x.extend_from_slice(&loud);
+        let st = Stage { attack_ms: 10.0, release_ms: 120.0, detector: Detector::Rms, ..stage(Quadrant::Compress, -24.0, 4.0) };
+        let gap = |auto: bool| {
+            let y = run_blocks(&CompSettings { auto_makeup: auto, ..settings(&[st]) }, &x, 512);
+            rms(&y[36 * sec + sec..]) - rms(&y[30 * sec + sec..36 * sec])
+        };
+        let (with, without) = (gap(true), gap(false));
+        assert!((with - without).abs() < 1.0, "loud − quiet: {with:.1} dB with auto makeup, {without:.1} dB without");
     }
 
     #[test]

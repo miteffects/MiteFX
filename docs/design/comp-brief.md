@@ -86,8 +86,8 @@ Defaults for stages 2–4 when first made: a leveller (upward compress at −32 
 |---|---|---|---|
 | **Character** | Clean · Punch · FET · Opto · Bus · Vari-Mu · Custom | Clean | 7 choices, each needs a **glyph** |
 | Custom character | attack ×0.1–4, release ×0.1–4, detector drive −6…+12 dB, slow tail %, program dependence %, ratio bend % | as Clean | only with Custom; six dials |
-| **Smart** | Off · Adaptive · Vocal · Master | Off | glyphs needed; Adaptive bends the release to the material, Vocal and Master also slide the whole curve to hold a target |
-| Target GR | 0 … 24 dB | 6 dB | Vocal and Master only: the average gain reduction Smart holds |
+| **Smart** | Off · Adaptive · Vocal · Master | Off | glyphs needed; Adaptive bends the release to the material; Vocal (2026-11-05, as Pro-C 2's) sets ratio and knee itself (∞:1 over a 36 dB knee, the dials read AUTO) and keeps the adaptive release and sibilance guard; Master also slides the whole curve to hold a target |
+| Target GR | 0 … 24 dB | 6 dB | Master only (Vocal until 2026-11-05): the average gain reduction Smart holds |
 | Smart amount | 0 … 100 % | 70 % | |
 | Sibilance guard | 0 … 100 % | 50 % | Smart: eases the detector off esses |
 | Hold | 0 … 500 ms | 0 | |
