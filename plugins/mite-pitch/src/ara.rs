@@ -39,6 +39,7 @@ unsafe extern "C" fn ext_factory(_plugin: *const c_void) -> *const ARAFactory {
 }
 
 unsafe extern "C" fn ext_bind(plugin: *const c_void, dc: ARADocumentControllerRef, known: ARAPlugInInstanceRoleFlags, assigned: ARAPlugInInstanceRoleFlags) -> *const ARAPlugInExtensionInstance {
+    log(&format!("ara bind: dc null {}, known {known}, assigned {assigned}", dc.is_null()));
     if dc.is_null() {
         return std::ptr::null();
     }
@@ -58,6 +59,18 @@ unsafe extern "C" fn ext_bind(plugin: *const c_void, dc: ARADocumentControllerRe
 }
 
 static CLAP_EXTENSION: ClapAraPluginExtension = ClapAraPluginExtension { get_factory: ext_factory, bind_to_document_controller: ext_bind };
+
+/// Diagnostics: each ARA binding and the roles the host gave, appended to
+/// `<data dir>/MiteFX/Pitch/ara-log.txt` (main-thread calls only, never the audio thread).
+pub fn log(what: &str) {
+    use std::io::Write;
+    let dir = crate::session::data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("ara-log.txt")) {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let _ = writeln!(f, "{t} {what}");
+    }
+}
 
 /// `ClapPlugin::clap_factory`.
 pub fn clap_factory(id: &CStr) -> *const c_void {

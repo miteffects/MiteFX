@@ -67,7 +67,10 @@ fn a_clip_plays_where_its_region_sits_and_edits_persist_through_the_archive() {
     let n1 = &a.notes[1];
     let moved = edited[n1.start..n1.end].iter().zip(&x[n1.start..n1.end]).map(|(o, v)| (o - v).abs()).fold(0.0f32, f32::max);
     assert!(moved > 0.01, "{moved}");
+    host.notify_model_updates();
     assert!(mite_ara::testing::calls().iter().any(|c| c == "data changed"));
+    host.edit_cycle();
+    assert_eq!(mite_ara::testing::violations(), Vec::<String>::new(), "ARA's threading rules");
     let archive = host.store(&[md]);
     // A fresh document (the project reopened): restored before the plugin binds.
     let mut host2 = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
@@ -116,4 +119,33 @@ fn moving_the_region_moves_what_plays() {
     }
     // The editor's take starts where the clip's start would be: 3 − 0.5 s.
     assert_eq!(s.take().expect("take").start, (2.5 * FS) as i64);
+}
+
+#[test]
+fn bound_with_the_editor_roles_only_as_reaper_does_it_plays_what_it_shows() {
+    let x = take();
+    let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+    let dur = x.len() as f64 / FS;
+    let (_src, _md, rg) = host.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-r", c"mod-r", 1.0, 0.0, dur);
+    let s = session("ara-reaper");
+    // known 7, assigned 6: editor renderer and view, no playback renderer.
+    let inst = unsafe { mite_ara::bind(host.dc, 7, 6) };
+    host.give(inst.extension(), rg);
+    assert!(inst.document.wait_reads(Duration::from_secs(10)));
+    s.bind_ara(inst);
+    assert!(s.wait_idle(Duration::from_secs(30)));
+    s.set_edit(0, NoteEdit { shift_cents: 100.0, ..NoteEdit::default() });
+    assert!(s.wait_idle(Duration::from_secs(30)));
+    let mut e = PitchEngine::new(FS as f32);
+    song(&mut e, &s, 0, 480);
+    let out = song(&mut e, &s, 0, 48_000 + x.len());
+    // Before the clip the input passes (0.5); in it, the edited clip.
+    assert!(out[..48_000 - 241].iter().all(|v| (*v - 0.5).abs() < 1e-6));
+    let a = s.analysis().expect("analysis");
+    let n0 = &a.notes[0];
+    let moved = out[48_000 + n0.start..48_000 + n0.end].iter().zip(&x[n0.start..n0.end]).map(|(o, v)| (o - v).abs()).fold(0.0f32, f32::max);
+    assert!(moved > 0.01, "{moved}");
+    host.notify_model_updates();
+    host.edit_cycle();
+    assert_eq!(mite_ara::testing::violations(), Vec::<String>::new());
 }

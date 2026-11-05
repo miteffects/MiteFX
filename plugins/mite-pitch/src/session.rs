@@ -742,8 +742,13 @@ impl AraState {
             return (false, None);
         }
         self.seen = v;
-        let model = inst.document.snapshot();
-        let st = inst.state();
+                let model = inst.document.snapshot();
+        let mut st = inst.state();
+        // REAPER (2026-11-05) binds with the editor roles only (assigned 6): then the clips this
+        // instance shows are the ones it plays.
+        if !Self::renders(&inst) {
+            st.playback = st.editor.clone();
+        }
         let current_region = st.selection.iter().filter(|id| st.editor.contains(id) || st.playback.contains(id)).chain(st.editor.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
         let mut wanted: Vec<u64> = st.playback.iter().filter_map(|id| model.regions.get(id).map(|r| r.modification)).collect();
         if let Some(r) = &current_region {
@@ -848,6 +853,13 @@ impl AraState {
         c.state = state.clone();
         inst.document.set_state(m, state, edits.iter().all(NoteEdit::is_neutral));
         self.seen = inst.document.version.load(Ordering::Acquire).wrapping_add(inst.version.load(Ordering::Acquire));
+    }
+
+        /// Whether the host made this instance a playback renderer (then the regions are all that
+    /// plays, silence elsewhere); otherwise it plays the clips it shows over its input, as a
+    /// transfer does.
+    fn renders(inst: &mite_ara::Instance) -> bool {
+        inst.roles & mite_ara::sys::kARAPlaybackRendererRole as i32 != 0
     }
 
     fn segments(&self) -> Vec<Segment> {
@@ -964,7 +976,7 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                         if rendering {
                             ara.edited(&s, &inst, shared.clone());
                         }
-                        Rendered { segments: ara.segments(), ara: true, take: None }
+                        Rendered { segments: ara.segments(), ara: AraState::renders(&inst), take: None }
                     }
                     None => Rendered { segments: vec![Segment { start: *start, offset: 0, len: r.len(), audio: shared.clone() }], ara: false, take: Some(shared) },
                 };
@@ -972,8 +984,8 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                 let peaks: Vec<(f32, f32)> = r.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect();
                 s.lock().peaks = Arc::new(peaks);
                 s.version.fetch_add(1, Ordering::AcqRel);
-            } else if s.ara().is_some() {
-                s.renders.send(Box::new(Rendered { segments: ara.segments(), ara: true, take: None }));
+            } else if let Some(inst) = s.ara() {
+                s.renders.send(Box::new(Rendered { segments: ara.segments(), ara: AraState::renders(&inst), take: None }));
             }
         }
         s.busy.fetch_sub(n, Ordering::AcqRel);

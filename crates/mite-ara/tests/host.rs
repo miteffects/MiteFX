@@ -189,6 +189,8 @@ fn a_document_is_read_bound_archived_and_restored() {
     // The plug-in's edits for the modification: the host hears the document changed.
     let mid = *m.modifications.keys().next().unwrap();
     doc.set_state(mid, "{\"edits\":[1,2,3]}".into(), false);
+    assert!(!CALLS.lock().unwrap().iter().any(|c| c == "data changed"), "not outside notifyModelUpdates");
+    unsafe { dc.i.notifyModelUpdates.unwrap()(dc.r) };
     assert!(CALLS.lock().unwrap().iter().any(|c| c == "data changed"));
     assert_eq!(unsafe { dc.i.isAudioModificationPreservingAudioSourceSignal.unwrap()(dc.r, md) }, 0);
 

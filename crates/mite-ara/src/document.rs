@@ -146,10 +146,13 @@ struct Host(ARADocumentControllerHostInstance);
 unsafe impl Send for Host {}
 unsafe impl Sync for Host {}
 
-/// A source's audio being read: cancelled when access is withdrawn, the reading done a chunk at a
-/// time under `busy` so withdrawing waits for the chunk in flight.
+/// A source's audio being read: the host's reader (made and destroyed on the model thread, as
+/// ARA requires; only the reading runs on the worker), cancelled when access is withdrawn, the
+/// reading done a chunk at a time under `busy` so withdrawing waits for the chunk in flight.
 struct ReadJob {
+    reader: usize,
     cancel: AtomicBool,
+    done: AtomicBool,
     busy: Mutex<()>,
 }
 
@@ -159,8 +162,11 @@ pub struct Document {
     /// Bumped on every change the plug-in may care about.
     pub version: AtomicU64,
     reads: Mutex<BTreeMap<u64, Arc<ReadJob>>>,
-    /// Plug-in instances bound to this document.
+        /// Plug-in instances bound to this document.
     instances: Mutex<Vec<std::sync::Weak<Instance>>>,
+    /// The document's data changed: tell the host in its next `notifyModelUpdates()` (the only
+    /// place ARA allows it).
+    dirty: AtomicBool,
 }
 
 /// The chunk an audio reader reads at a time, frames.
@@ -196,11 +202,24 @@ impl Document {
         };
         if changed {
             self.touch();
-            let h = self.host.0;
-            if let (false, Some(f)) = (h.modelUpdateControllerInterface.is_null(), unsafe { h.modelUpdateControllerInterface.as_ref() }.and_then(|i| { let i: ARAModelUpdateControllerInterface = unsafe { std::ptr::read_unaligned(i) }; i.notifyDocumentDataChanged })) {
-                // SAFETY: the host's interface, with its own ref.
-                unsafe { f(h.modelUpdateControllerHostRef) };
-            }
+            self.dirty.store(true, Ordering::Release);
+        }
+    }
+
+    /// The host's `notifyModelUpdates()`: pending notifications go out (model thread).
+    fn notify_model_updates(&self) {
+        if !self.dirty.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        let h = self.host.0;
+        if h.modelUpdateControllerInterface.is_null() {
+            return;
+        }
+        // SAFETY: the host's interface, called from inside its notifyModelUpdates().
+        let mu: ARAModelUpdateControllerInterface = unsafe { std::ptr::read_unaligned(h.modelUpdateControllerInterface) };
+        if let Some(f) = mu.notifyDocumentDataChanged {
+            // SAFETY: as above.
+            unsafe { f(h.modelUpdateControllerHostRef) };
         }
     }
 
@@ -240,34 +259,34 @@ impl Document {
         (!p.is_null()).then(|| unsafe { std::ptr::read_unaligned(p) })
     }
 
-    /// Starts reading a source's audio on a worker.
+    fn audio_access(&self) -> Option<ARAAudioAccessControllerInterface> {
+        let p = self.host.0.audioAccessControllerInterface;
+        // SAFETY: a host interface pointer.
+        (!p.is_null()).then(|| unsafe { std::ptr::read_unaligned(p) })
+    }
+
+    /// Starts reading a source's audio: the reader is made here (model thread), the reading
+    /// runs on a worker.
     fn start_reading(self: &Arc<Self>, id: u64) {
-        let (host_ref, channels, count, fs) = {
+        self.stop_reading(id);
+        let (host_ref, channels, count) = {
             let m = self.lock();
             let Some(s) = m.sources.get(&id) else { return };
-            (s.host_ref, s.channels.max(1) as usize, s.sample_count.max(0), s.sample_rate)
+            (s.host_ref, s.channels.max(1) as usize, s.sample_count.max(0))
         };
-        let job = Arc::new(ReadJob { cancel: AtomicBool::new(false), busy: Mutex::new(()) });
-        if let Some(old) = self.reads.lock().unwrap_or_else(|e| e.into_inner()).insert(id, job.clone()) {
-            old.cancel.store(true, Ordering::Release);
+        let Some(ac) = self.audio_access() else { return };
+        let (Some(create), Some(read)) = (ac.createAudioReaderForSource, ac.readAudioSamples) else { return };
+        let ctl = self.host.0.audioAccessControllerHostRef as usize;
+        // SAFETY: the host's interface, on the model thread inside an audio source call or
+        // endEditing (ARA's rule); 32-bit float samples.
+        let reader = unsafe { create(ctl as ARAAudioAccessControllerHostRef, host_ref as ARAAudioSourceHostRef, 0) };
+        if reader.is_null() {
+            return;
         }
+        let job = Arc::new(ReadJob { reader: reader as usize, cancel: AtomicBool::new(false), done: AtomicBool::new(false), busy: Mutex::new(()) });
+        self.reads.lock().unwrap_or_else(|e| e.into_inner()).insert(id, job.clone());
         let doc = Arc::clone(self);
         let _ = std::thread::Builder::new().name("mite-ara-reader".into()).spawn(move || {
-            let host = doc.host.0;
-            // SAFETY: the host's audio access interface; the reader is used on this thread only.
-            let ac: ARAAudioAccessControllerInterface = unsafe { std::ptr::read_unaligned(host.audioAccessControllerInterface) };
-            let (Some(create), Some(read), Some(destroy)) = (ac.createAudioReaderForSource, ac.readAudioSamples, ac.destroyAudioReader) else { return };
-            let reader = {
-                let _g = job.busy.lock().unwrap_or_else(|e| e.into_inner());
-                if job.cancel.load(Ordering::Acquire) {
-                    return;
-                }
-                // SAFETY: as above; 32-bit float samples.
-                unsafe { create(host.audioAccessControllerHostRef, host_ref as ARAAudioSourceHostRef, 0) }
-            };
-            if reader.is_null() {
-                return;
-            }
             let mut mono = vec![0.0f32; count as usize];
             let mut bufs: Vec<Vec<f32>> = vec![vec![0.0f32; READ_CHUNK as usize]; channels];
             let mut pos = 0i64;
@@ -280,8 +299,9 @@ impl Document {
                 }
                 let n = READ_CHUNK.min(count - pos);
                 let ptrs: Vec<*mut c_void> = bufs.iter_mut().map(|b| b.as_mut_ptr().cast()).collect();
-                // SAFETY: one buffer of `n` floats per channel.
-                if unsafe { read(host.audioAccessControllerHostRef, reader, pos, n, ptrs.as_ptr()) } == 0 {
+                // SAFETY: reading may run on any non-realtime thread, one thread per reader; one
+                // buffer of `n` floats per channel.
+                if unsafe { read(ctl as ARAAudioAccessControllerHostRef, job.reader as ARAAudioReaderHostRef, pos, n, ptrs.as_ptr()) } == 0 {
                     ok = false;
                     break;
                 }
@@ -290,26 +310,44 @@ impl Document {
                 }
                 pos += n;
             }
-            {
-                let _g = job.busy.lock().unwrap_or_else(|e| e.into_inner());
-                // SAFETY: the reader made above.
-                unsafe { destroy(host.audioAccessControllerHostRef, reader) };
-            }
             if ok {
-                let _ = fs;
                 if let Some(s) = doc.lock().sources.get_mut(&id) {
                     s.audio = Some(Arc::new(mono));
                 }
                 doc.touch();
             }
+            job.done.store(true, Ordering::Release);
         });
     }
 
-    /// Stops reading a source (waits for the chunk in flight).
+    /// Stops reading a source (waits for the chunk in flight) and destroys its reader (model
+    /// thread).
     fn stop_reading(&self, id: u64) {
-        if let Some(job) = self.reads.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+        let job = self.reads.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        if let Some(job) = job {
             job.cancel.store(true, Ordering::Release);
             let _g = job.busy.lock().unwrap_or_else(|e| e.into_inner());
+            self.destroy_reader(&job);
+        }
+    }
+
+    fn destroy_reader(&self, job: &ReadJob) {
+        if let Some(destroy) = self.audio_access().and_then(|ac| ac.destroyAudioReader) {
+            // SAFETY: the reader we made, not in use (cancelled or finished), on the model thread.
+            unsafe { destroy(self.host.0.audioAccessControllerHostRef, job.reader as ARAAudioReaderHostRef) };
+        }
+    }
+
+    /// Destroys the readers of finished reads (from endEditing, on the model thread).
+    fn reap_readers(&self) {
+        let done: Vec<Arc<ReadJob>> = {
+            let mut reads = self.reads.lock().unwrap_or_else(|e| e.into_inner());
+            let ids: Vec<u64> = reads.iter().filter(|(_, j)| j.done.load(Ordering::Acquire)).map(|(id, _)| *id).collect();
+            ids.into_iter().filter_map(|id| reads.remove(&id)).collect()
+        };
+        for job in done {
+            let _g = job.busy.lock().unwrap_or_else(|e| e.into_inner());
+            self.destroy_reader(&job);
         }
     }
 
@@ -422,7 +460,7 @@ static INTERFACE: Interface = Interface(ARADocumentControllerInterface {
     getFactory: Some(dc_get_factory),
     beginEditing: Some(dc_noop),
     endEditing: Some(dc_end_editing),
-    notifyModelUpdates: Some(dc_noop),
+        notifyModelUpdates: Some(dc_notify),
     beginRestoringDocumentFromArchive: Some(dc_begin_restore),
     endRestoringDocumentFromArchive: Some(dc_end_restore),
     storeDocumentToArchive: Some(dc_store_document),
@@ -480,7 +518,7 @@ unsafe extern "C" fn create_document_controller(host: *const ARADocumentControll
     }
     // SAFETY: the host passes a valid host instance.
     let host = Host(unsafe { std::ptr::read_unaligned(host) });
-    let doc = Arc::new(Document { host, model: Mutex::new(Model::default()), version: AtomicU64::new(0), reads: Mutex::new(BTreeMap::new()), instances: Mutex::new(Vec::new()) });
+    let doc = Arc::new(Document { host, model: Mutex::new(Model::default()), version: AtomicU64::new(0), reads: Mutex::new(BTreeMap::new()), instances: Mutex::new(Vec::new()), dirty: AtomicBool::new(false) });
     let r = Arc::into_raw(doc) as ARADocumentControllerRef;
     // The instance struct lives as long as the document (freed in `dc_destroy`).
     let inst = Box::new(ARADocumentControllerInstance { structSize: std::mem::size_of::<ARADocumentControllerInstance>(), documentControllerRef: r, documentControllerInterface: &INTERFACE.0 });
@@ -520,8 +558,13 @@ unsafe extern "C" fn dc_get_factory(_r: ARADocumentControllerRef) -> *const ARAF
 
 unsafe extern "C" fn dc_noop(_r: ARADocumentControllerRef) {}
 
+unsafe extern "C" fn dc_notify(r: ARADocumentControllerRef) {
+    doc!(r).notify_model_updates();
+}
+
 unsafe extern "C" fn dc_end_editing(r: ARADocumentControllerRef) {
     let d = doc!(r);
+    d.reap_readers();
     d.touch();
     d.notify_instances();
 }

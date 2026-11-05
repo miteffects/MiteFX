@@ -16,7 +16,31 @@ pub struct Audio {
     pub r: Vec<f32>,
 }
 
-unsafe extern "C" fn create_reader(_c: ARAAudioAccessControllerHostRef, s: ARAAudioSourceHostRef, _b64: ARABool) -> ARAAudioReaderHostRef {
+/// The thread the document is driven from (ARA's model thread), and whether the host is inside
+/// `notifyModelUpdates()`: calls the rules forbid elsewhere are recorded as violations.
+/// Per host: its model thread (the audio access controller's host ref points at it).
+struct HostCtx {
+    model: std::thread::ThreadId,
+}
+
+thread_local! {
+    static IN_NOTIFY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn on_model_thread(ctx: ARAAudioAccessControllerHostRef, what: &str) {
+    let ctx = ctx as *const HostCtx;
+    if !ctx.is_null() && unsafe { (*ctx).model } != std::thread::current().id() {
+        call(format!("VIOLATION: {what} off the model thread"));
+    }
+}
+
+/// The ARA threading rules broken so far (empty: none).
+pub fn violations() -> Vec<String> {
+    calls().into_iter().filter(|c| c.starts_with("VIOLATION")).collect()
+}
+
+unsafe extern "C" fn create_reader(c: ARAAudioAccessControllerHostRef, s: ARAAudioSourceHostRef, _b64: ARABool) -> ARAAudioReaderHostRef {
+    on_model_thread(c, "createAudioReaderForSource");
     s.cast()
 }
 unsafe extern "C" fn read_samples(_c: ARAAudioAccessControllerHostRef, reader: ARAAudioReaderHostRef, pos: ARASamplePosition, n: ARASampleCount, bufs: *const *mut c_void) -> ARABool {
@@ -27,7 +51,9 @@ unsafe extern "C" fn read_samples(_c: ARAAudioAccessControllerHostRef, reader: A
     }
     1
 }
-unsafe extern "C" fn destroy_reader(_c: ARAAudioAccessControllerHostRef, _r: ARAAudioReaderHostRef) {}
+unsafe extern "C" fn destroy_reader(c: ARAAudioAccessControllerHostRef, _r: ARAAudioReaderHostRef) {
+    on_model_thread(c, "destroyAudioReader");
+}
 
 static AUDIO_ACCESS: ARAAudioAccessControllerInterface = ARAAudioAccessControllerInterface { structSize: std::mem::size_of::<ARAAudioAccessControllerInterface>(), createAudioReaderForSource: Some(create_reader), readAudioSamples: Some(read_samples), destroyAudioReader: Some(destroy_reader) };
 
@@ -80,6 +106,9 @@ unsafe extern "C" fn mu_source(_c: ARAModelUpdateControllerHostRef, _s: ARAAudio
 unsafe extern "C" fn mu_mod(_c: ARAModelUpdateControllerHostRef, _s: ARAAudioModificationHostRef, _r: *const ARAContentTimeRange, _f: ARAContentUpdateFlags) {}
 unsafe extern "C" fn mu_region(_c: ARAModelUpdateControllerHostRef, _s: ARAPlaybackRegionHostRef, _r: *const ARAContentTimeRange, _f: ARAContentUpdateFlags) {}
 unsafe extern "C" fn mu_data(_c: ARAModelUpdateControllerHostRef) {
+    if !IN_NOTIFY.with(std::cell::Cell::get) {
+        call("VIOLATION: notifyDocumentDataChanged outside notifyModelUpdates".into());
+    }
     call("data changed".into());
 }
 static MODEL_UPDATE: ARAModelUpdateControllerInterface = ARAModelUpdateControllerInterface { structSize: std::mem::size_of::<ARAModelUpdateControllerInterface>(), notifyAudioSourceAnalysisProgress: Some(mu_progress), notifyAudioSourceContentChanged: Some(mu_source), notifyAudioModificationContentChanged: Some(mu_mod), notifyPlaybackRegionContentChanged: Some(mu_region), notifyDocumentDataChanged: Some(mu_data) };
@@ -125,10 +154,12 @@ macro_rules! call {
 
 impl TestHost {
     pub fn new(factory: *const ARAFactory) -> Self {
+        let ctx = Box::leak(Box::new(HostCtx { model: std::thread::current().id() }));
         let f = unsafe { std::ptr::read_unaligned(factory) };
         let config = ARAInterfaceConfiguration { structSize: std::mem::size_of::<ARAInterfaceConfiguration>(), desiredApiGeneration: kARAAPIGeneration_2_0_Final as ARAAPIGeneration, assertFunctionAddress: std::ptr::null_mut() };
         unsafe { f.initializeARAWithConfiguration.expect("init")(&config) };
-        let h = host();
+        let mut h = host();
+        h.audioAccessControllerHostRef = (ctx as *mut HostCtx).cast();
         let props = ARADocumentProperties { structSize: std::mem::size_of::<ARADocumentProperties>(), name: c"Song".as_ptr() };
         let inst = unsafe { std::ptr::read_unaligned(f.createDocumentControllerWithDocument.expect("create")(&h, &props)) };
         let mut me = Self { dc: inst.documentControllerRef, i: unsafe { std::ptr::read_unaligned(inst.documentControllerInterface) }, ctx: std::ptr::null_mut(), seq: std::ptr::null_mut(), audio: Vec::new() };
@@ -180,6 +211,19 @@ impl TestHost {
                 vw.notifySelection.expect("sel")(ext.editorViewRef, &sel);
             }
         }
+    }
+
+    /// What a host does every so often while idle: lets the plug-in send its notifications.
+    pub fn notify_model_updates(&self) {
+        IN_NOTIFY.with(|f| f.set(true));
+        call!(self.notifyModelUpdates());
+        IN_NOTIFY.with(|f| f.set(false));
+    }
+
+    /// An empty edit cycle (hosts run them often): finished readers are destroyed in it.
+    pub fn edit_cycle(&self) {
+        call!(self.beginEditing());
+        call!(self.endEditing());
     }
 
     /// Moves region `rg` to song time `play_start`.
