@@ -39,6 +39,16 @@ controller.
 
 A5 needs the user in REAPER (no headless REAPER here); A1–A4 are proved by tests.
 
+Status 2026-11-05: A1–A5 built. `crates/mite-ara` (bindings with compile-time layout checks,
+document controller, instances, `testing::TestHost`); the fork's CLAP hooks (`clap_factory`,
+`clap_extension`, `clap_extension_context`, nih-plug 190d4dd); Mite Pitch offers the factory and
+the extension, binds, analyses each clip's source, renders per modification, plays regions at
+their song time (silence elsewhere), writes edits to the document (archived by the host), and
+drives the host's transport. Tests: a Rust host plays REAPER's part (clip in, null, edit, archive,
+reopen, region moved; no allocation on the audio thread). Not yet seen in REAPER. clap-validator:
+32 passed, 2 failed (param-set-*: its fixed-seed random value for the only parameter, Bypass,
+rounds to the default; Tuner passes all 34).
+
 ### 1b. Time in the plugin (user: "timeframe control so I don't have to control time in
 REAPER but in plugin too")
 

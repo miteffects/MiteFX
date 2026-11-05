@@ -1,0 +1,12 @@
+[package]
+name = "mite-ara"
+description = "MiteFX's ARA 2 layer: the ARA C API, a document model, the plug-in side of ARA (no plug-in framework)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde_json.workspace = true

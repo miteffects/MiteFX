@@ -8,6 +8,7 @@ use std::sync::Arc;
 use mite_core::AtomicF32;
 use nih_plug::prelude::*;
 
+pub mod ara;
 pub mod dsp;
 pub mod editor;
 pub mod params;
@@ -136,8 +137,19 @@ impl ClapPlugin for MitePitch {
         ClapFeature::AudioEffect,
         ClapFeature::Stereo,
         ClapFeature::Mono,
-        ClapFeature::PitchCorrection,
-    ];
+        ClapFeature::PitchCorrection, ClapFeature::Custom("ara:supported")];
+
+    fn clap_factory(id: &std::ffi::CStr) -> *const std::ffi::c_void {
+        ara::clap_factory(id)
+    }
+
+    fn clap_extension(id: &std::ffi::CStr) -> *const std::ffi::c_void {
+        ara::clap_extension(id)
+    }
+
+    fn clap_extension_context(&self) -> *const std::ffi::c_void {
+        Arc::as_ptr(&self.shared).cast()
+    }
 }
 
 impl Vst3Plugin for MitePitch {

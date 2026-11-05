@@ -1491,6 +1491,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mite-ara"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "mite-core"
 version = "0.1.0"
 dependencies = [
@@ -1703,6 +1710,7 @@ version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
  "baseview",
+ "mite-ara",
  "mite-core",
  "mite-dsp",
  "mite-plugin",
@@ -1856,7 +1864,7 @@ dependencies = [
 [[package]]
 name = "nih_plug"
 version = "0.0.0"
-source = "git+https://github.com/ansabic/nih-plug?rev=2d0eca3e4395f82af0ba6794228462f9ccf5e6fe#2d0eca3e4395f82af0ba6794228462f9ccf5e6fe"
+source = "git+https://github.com/ansabic/nih-plug?rev=190d4dd9e9534cdec166523da77e79dabbd97f75#190d4dd9e9534cdec166523da77e79dabbd97f75"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -1887,7 +1895,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_derive"
 version = "0.1.0"
-source = "git+https://github.com/ansabic/nih-plug?rev=2d0eca3e4395f82af0ba6794228462f9ccf5e6fe#2d0eca3e4395f82af0ba6794228462f9ccf5e6fe"
+source = "git+https://github.com/ansabic/nih-plug?rev=190d4dd9e9534cdec166523da77e79dabbd97f75#190d4dd9e9534cdec166523da77e79dabbd97f75"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1897,7 +1905,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_xtask"
 version = "0.1.0"
-source = "git+https://github.com/ansabic/nih-plug?rev=2d0eca3e4395f82af0ba6794228462f9ccf5e6fe#2d0eca3e4395f82af0ba6794228462f9ccf5e6fe"
+source = "git+https://github.com/ansabic/nih-plug?rev=190d4dd9e9534cdec166523da77e79dabbd97f75#190d4dd9e9534cdec166523da77e79dabbd97f75"
 dependencies = [
  "anyhow",
  "cargo_metadata",

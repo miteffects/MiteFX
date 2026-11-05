@@ -487,13 +487,27 @@ impl PitchView {
         let s = &self.shared.session;
         let Some(take) = s.take() else { return };
         let k = (t.max(0.0) * take.sample_rate) as i64;
-        s.cue.store(k.min(take.len as i64), Ordering::Release);
+                s.cue.store(k.min(take.len as i64), Ordering::Release);
         s.seek.store(true, Ordering::Release);
+        // Bound to ARA: the host's transport goes there.
+        if let Some(inst) = s.ara() {
+            inst.document.request_position((take.start + k) as f64 / take.sample_rate);
+        }
     }
 
-    fn toggle_play(&mut self) {
+        fn toggle_play(&mut self) {
         let s = &self.shared.session;
         if s.take().is_none() {
+            return;
+        }
+        if let Some(inst) = s.ara() {
+            let playing = s.playing.load(Ordering::Relaxed);
+            if !playing {
+                if let Some(t) = s.take() {
+                    inst.document.request_position((t.start + s.cue.load(Ordering::Acquire)) as f64 / t.sample_rate);
+                }
+            }
+            inst.document.request_play(!playing);
             return;
         }
         let on = s.local_play.load(Ordering::Acquire);
@@ -511,7 +525,17 @@ impl PitchView {
                 s.loop_end.store((b * t.sample_rate) as i64, Ordering::Release);
             }
         }
-        s.loop_on.store(!on, Ordering::Release);
+                s.loop_on.store(!on, Ordering::Release);
+        self.loop_to_host();
+    }
+
+    /// Bound to ARA: the host loops the same range.
+    fn loop_to_host(&self) {
+        let s = &self.shared.session;
+        if let (Some(inst), Some(t)) = (s.ara(), s.take()) {
+            let (a, b) = (s.loop_start.load(Ordering::Acquire), s.loop_end.load(Ordering::Acquire));
+            inst.document.request_cycle((t.start + a) as f64 / t.sample_rate, (b - a).max(0) as f64 / t.sample_rate, s.loop_on.load(Ordering::Acquire));
+        }
     }
 
     /// Where pitch snaps while dragging (Alt: the other way).
@@ -806,6 +830,7 @@ impl PitchView {
     fn draw_empty(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let (title, words) = match self.shared.session.status() {
+                        Status::Empty if self.shared.session.ara().is_some() => ("No clip", "Select a clip that has Mite Pitch as its ARA plug-in."),
             Status::Empty => ("No take yet", "Click TRANSFER, then play the part you want to edit: it is recorded from where the transport starts until it stops."),
             Status::Armed => ("Armed", "Press play in the host: the take is recorded from where the transport starts until it stops."),
             Status::Recording => ("Recording", "Stop the transport to finish the take."),
@@ -833,7 +858,8 @@ impl PitchView {
         } else {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if hot { theme.text_hi } else { theme.well_border }, None, &rr);
         }
-        let label = match status {
+                let label = match status {
+            _ if self.shared.session.ara().is_some() => "ARA",
             Status::Recording => "RECORDING",
             Status::Armed => "ARMED",
             _ => "TRANSFER",
@@ -861,7 +887,7 @@ impl PitchView {
         draw_dropdown_button(cx, KEY_BUTTON, key, self.key_menu.is_some(), self.hot == Some(Hot::KeyButton), |scene, at| draw_glyph(scene, snap_glyph(Snap::Scale), at + (8.0, 6.0), 18.0, accent, 1.5));
                 // The plugin's own transport.
         let s = &self.shared.session;
-        let playing = s.local_play.load(Ordering::Acquire);
+                let playing = if s.ara().is_some() { s.playing.load(Ordering::Relaxed) } else { s.local_play.load(Ordering::Acquire) };
         let looping = s.loop_on.load(Ordering::Acquire);
         for (r, glyph, on, h) in [(PLAY, if playing { STOP_GLYPH } else { PLAY_GLYPH }, playing, Hot::Play), (LOOP, LOOP_GLYPH, looping, Hot::Loop)] {
             let hot = self.hot == Some(h);
@@ -921,8 +947,10 @@ impl PitchView {
         match self.hot {
                         Some(Hot::Seam(_)) => Help::default().text("Click to join these two notes"),
             Some(Hot::Ruler) => Help::default().text("Click: the play cursor here; drag: a loop range"),
+                        Some(Hot::Play) if self.shared.session.ara().is_some() => Help::default().text("Play from the cursor, or stop (Space) — the host's transport"),
             Some(Hot::Play) => Help::default().text("Play from the cursor, or stop (Space) — the plugin plays the take itself while the host is stopped"),
             Some(Hot::Loop) => Help::default().text("Loop the range on the ruler (L); drag along the ruler to set it"),
+                        Some(Hot::Transfer) if self.shared.session.ara().is_some() => Help::default().text("ARA — the host gives the clip's audio; edits are saved with the project"),
             Some(Hot::Transfer) => Help::default().text("Transfer — record the next stretch the transport plays (it replaces the take); click again to cancel"),
             Some(Hot::Tool(t)) => Help::default().text(t.words()),
             Some(Hot::Snap(sn)) => Help::default().text(snap_words(sn)),
@@ -1114,9 +1142,12 @@ impl PitchView {
                 true
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => match self.hot_at(pos) {
-                Some(Hot::Transfer) => {
-                    let armed = matches!(session.status(), Status::Armed);
-                    session.set_armed(!armed);
+                                Some(Hot::Transfer) => {
+                    // Bound to ARA the host gives the audio: nothing to record.
+                    if session.ara().is_none() {
+                        let armed = matches!(session.status(), Status::Armed);
+                        session.set_armed(!armed);
+                    }
                     true
                 }
                 Some(Hot::Tool(t)) => {
@@ -1213,8 +1244,9 @@ impl PitchView {
                         if let Some(t) = session.take() {
                             session.loop_start.store((from.min(to).max(0.0) * t.sample_rate) as i64, Ordering::Release);
                             session.loop_end.store((from.max(to).max(0.0) * t.sample_rate) as i64, Ordering::Release);
-                            session.loop_on.store(true, Ordering::Release);
+                                                        session.loop_on.store(true, Ordering::Release);
                         }
+                        self.loop_to_host();
                     } else {
                         self.set_cue(from);
                     }

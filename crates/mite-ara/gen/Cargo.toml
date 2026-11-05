@@ -1,0 +1,13 @@
+# Regenerates ../src/sys.rs from the vendored ARA headers. Not part of the workspace (it needs
+# libclang); run it by hand after updating ../ara_api:
+#     cargo run --manifest-path crates/mite-ara/gen/Cargo.toml
+[package]
+name = "mite-ara-gen"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+bindgen = "0.72"

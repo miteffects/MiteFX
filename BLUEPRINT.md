@@ -488,7 +488,12 @@ undo/redo covers splits. Then: transitions (`NoteEdit::transition_ms`, state ind
 legato note's shift eases in from the note before's over that long; `melody::pitch_offset` is
 the one function the resynthesis and the drawn curve share; transition tool) and a waveform lane
 of the rendered take (peaks per 128 samples, each column at least 10 ms wide so pulses do not
-notch it). Next: ARA 2 over CLAP (REAPER Linux hosts it; plan in the brief §1).
+notch it). The plugin's own transport (ruler click = cursor, drag = loop,
+Space / play button, L), playing the take while the host is stopped. ARA 2 over CLAP built
+(brief §1a, steps A1–A5): `crates/mite-ara` (generated bindings, document controller, instances,
+test host), our nih-plug fork's CLAP hooks for extra factories and extensions (190d4dd), and
+Mite Pitch bound to the host's document (clips without transfer, regions on the song timeline,
+edits archived by the host, transport through the host). Not yet tried in REAPER.
 
 ### 15. Mite Amp (later)
 

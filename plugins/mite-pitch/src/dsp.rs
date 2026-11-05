@@ -150,46 +150,44 @@ impl PitchEngine {
             s.local_active.store(false, Ordering::Release);
         }
         s.local_play.store(false, Ordering::Release);
-        // Playback of the take in its stretch of the timeline.
-        let (Some(r), Some(pos), true) = (&self.rendered, t.pos, t.playing && !bypass) else {
+        // Playback: the rendered stretches where they sit on the timeline (crossfaded with the
+        // input at their ends; bound to ARA, with silence: the clips are all that plays).
+        let (Some(r), Some(pos), true) = (&self.rendered, t.pos, !bypass) else {
             self.blend = 0.0;
             return;
         };
-        let end = r.start + r.audio.len() as i64;
-        if self.blend == 0.0 && (pos + (len as i64) < r.start || pos > end) {
+        let ara = r.ara;
+        let end = pos + len as i64;
+        let near = r.segments.iter().any(|g| g.start < end && g.start + g.len as i64 > pos);
+        if !near && self.blend == 0.0 {
+            if ara {
+                for ch in channels.iter_mut().take(n_ch) {
+                    ch[..len].fill(0.0);
+                }
+            }
             return;
         }
         for i in 0..len {
             let at = pos + i as i64;
-            let inside = at >= r.start && at < end;
-            self.blend = if inside {
-                (self.blend + self.blend_step).min(1.0)
-            } else {
-                (self.blend - self.blend_step).max(0.0)
-            };
-            if self.blend == 0.0 {
-                continue;
-            }
-            let v = if inside {
-                r.audio[(at - r.start) as usize]
-            } else {
-                0.0
-            };
+            let seg = r.segments.iter().find(|g| at >= g.start && at < g.start + g.len as i64);
+            self.blend = if seg.is_some() { (self.blend + self.blend_step).min(1.0) } else { (self.blend - self.blend_step).max(0.0) };
+            let v = seg.map_or(0.0, |g| g.audio.get(g.offset + (at - g.start) as usize).copied().unwrap_or(0.0));
             for ch in channels.iter_mut().take(n_ch) {
-                ch[i] = ch[i] * (1.0 - self.blend) + v * self.blend;
+                let dry = if ara { 0.0 } else { ch[i] };
+                ch[i] = dry * (1.0 - self.blend) + v * self.blend;
             }
         }
     }
 
-        /// The take (as rendered) from the cue, looping if asked, faded in and out over
+    /// The take (as rendered) from the cue, looping if asked, faded in and out over
     /// [`EDGE_MS`]; the input under it as the fade lets it through.
     fn play_local(&mut self, channels: &mut [&mut [f32]], n_ch: usize, len: usize, s: &Session) {
         let want = s.local_play.load(Ordering::Acquire);
-        let Some(r) = &self.rendered else {
+                let Some(take) = self.rendered.as_ref().and_then(|r| r.take.as_ref()) else {
             s.local_play.store(false, Ordering::Release);
             return;
         };
-        let n = r.audio.len() as i64;
+        let n = take.len() as i64;
         if want && !self.local {
             self.local = true;
             self.local_gain = 0.0;
@@ -215,7 +213,7 @@ impl PitchEngine {
                 s.local_play.store(false, Ordering::Release);
             }
             self.local_gain = if want { (self.local_gain + self.blend_step).min(1.0) } else { (self.local_gain - self.blend_step).max(0.0) };
-            let v = if self.local_pos >= 0 && self.local_pos < n { r.audio[self.local_pos as usize] } else { 0.0 };
+            let v = if self.local_pos >= 0 && self.local_pos < n { take[self.local_pos as usize] } else { 0.0 };
             for ch in channels.iter_mut().take(n_ch) {
                 ch[i] = ch[i] * (1.0 - self.local_gain) + v * self.local_gain;
             }

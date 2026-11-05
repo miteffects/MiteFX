@@ -15,16 +15,18 @@ mite-dsp = { path = "crates/mite-dsp" }
 mite-core = { path = "crates/mite-core" }
 mite-ui = { path = "crates/mite-ui" }
 mite-plugin = { path = "crates/mite-plugin" }
+mite-ara = { path = "crates/mite-ara" }
 
 # nih-plug has no crates.io releases. We pin our fork's `mitefx` branch: upstream de42101 plus
 # two CLAP state fixes (untrusted length prefix; value rescan after state load), host->plugin
-# GUI resizing for CLAP and VST3, and CLAP latency changes reported only from activate(). See
+# GUI resizing for CLAP and VST3, CLAP latency changes reported only from activate(), the
+# CLAP track-info extension, and CLAP hooks for extra factories and extensions (ARA). See
 # https://github.com/ansabic/nih-plug/commits/mitefx. Only `crates/mite-plugin` and `plugins/*`
 # may use it.
-nih_plug = { git = "https://github.com/ansabic/nih-plug", rev = "2d0eca3e4395f82af0ba6794228462f9ccf5e6fe", features = ["assert_process_allocs"] }
+nih_plug = { git = "https://github.com/ansabic/nih-plug", rev = "190d4dd9e9534cdec166523da77e79dabbd97f75", features = ["assert_process_allocs"] }
 # CLAP's C API, for the test host in mite-plugin (the revision nih-plug uses).
 clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
-nih_plug_xtask = { git = "https://github.com/ansabic/nih-plug", rev = "2d0eca3e4395f82af0ba6794228462f9ccf5e6fe" }
+nih_plug_xtask = { git = "https://github.com/ansabic/nih-plug", rev = "190d4dd9e9534cdec166523da77e79dabbd97f75" }
 
 baseview = "0.4.1"
 keyboard-types = "0.8.3"

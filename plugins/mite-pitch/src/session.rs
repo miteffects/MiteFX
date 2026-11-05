@@ -95,8 +95,21 @@ pub struct TakeInfo {
 
 /// The rendered take, handed to the audio thread.
 pub struct Rendered {
+    /// What plays where on the host's timeline.
+    pub segments: Vec<Segment>,
+    /// Bound to an ARA document: the regions replace the input (silence elsewhere).
+    pub ara: bool,
+    /// The take as rendered, for the plugin's own transport (transfer only).
+    pub take: Option<Arc<Vec<f32>>>,
+}
+
+/// A stretch of rendered audio on the host's timeline: from timeline sample `start`, `len`
+/// samples of `audio` from `offset`.
+pub struct Segment {
     pub start: i64,
-    pub audio: Vec<f32>,
+    pub offset: usize,
+    pub len: usize,
+    pub audio: Arc<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,7 +194,9 @@ enum Job {
     /// Read a saved take back, analyse it, render it with these edits.
         Load(TakeInfo, Vec<NoteEdit>, Option<Vec<(usize, usize)>>),
     /// Re-render the samples of note `i`'s edit (or everything).
-    Render(Option<usize>),
+        Render(Option<usize>),
+    /// Look at the ARA document now.
+    Sync,
 }
 
 pub struct Session {
@@ -216,6 +231,8 @@ pub struct Session {
     /// Bumped whenever the notes or edits change (the editor redraws).
     pub version: AtomicU64,
     sample_rate: Mutex<f32>,
+        /// The ARA plug-in instance, when the host bound this plugin to its document.
+    ara: Mutex<Option<Arc<mite_ara::Instance>>>,
     /// Where this session keeps takes (`data_dir()` unless set: tests).
     dir: Mutex<std::path::PathBuf>,
 }
@@ -249,7 +266,8 @@ impl Session {
             busy: AtomicUsize::new(0),
             version: AtomicU64::new(0),
             sample_rate: Mutex::new(48_000.0),
-            dir: Mutex::new(data_dir()),
+                        dir: Mutex::new(data_dir()),
+            ara: Mutex::new(None),
         });
         let (tx, rx) = mpsc::channel();
         *s.jobs.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
@@ -271,6 +289,24 @@ impl Session {
                 self.busy.fetch_sub(1, Ordering::AcqRel);
             }
         }
+    }
+
+        /// Binds to an ARA document (the host's call, through the CLAP plugin extension): from now on
+    /// the take is the clip the host gives, not a transfer.
+    pub fn bind_ara(&self, inst: Arc<mite_ara::Instance>) {
+        *self.ara.lock().unwrap_or_else(|e| e.into_inner()) = Some(inst);
+        self.armed.store(false, Ordering::Release);
+        self.lock().status = Status::Analysing;
+        self.send(Job::Sync);
+    }
+
+    pub fn ara(&self) -> Option<Arc<mite_ara::Instance>> {
+        self.ara.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Looks at the ARA document now (tests; the worker also looks every 40 ms).
+    pub fn sync_ara(&self) {
+        self.send(Job::Sync);
     }
 
     /// Keeps takes in `dir` instead of the data folder (tests).
@@ -516,7 +552,11 @@ impl Session {
     }
 
     /// What the plugin's state keeps: the take's id, place, rate, length and the edits (JSON).
-    pub fn to_json(&self) -> Option<String> {
+        pub fn to_json(&self) -> Option<String> {
+        if self.ara().is_some() {
+            // The host's ARA archive keeps the edits.
+            return None;
+        }
         let st = self.lock();
         let t = st.take.as_ref()?;
         let edits: Vec<serde_json::Value> = st
@@ -627,17 +667,223 @@ fn new_id() -> String {
     format!("take-{:016x}", h.finish())
 }
 
+/// An audio modification's edits as JSON (what the ARA archive keeps for it).
+pub fn edits_json(edits: &[NoteEdit], a: &Analysis, scale: Scale) -> String {
+    let e: Vec<serde_json::Value> = edits.iter().map(|e| serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms])).collect();
+    let bounds: Vec<[usize; 2]> = a.bounds().into_iter().map(|(s, e)| [s, e]).collect();
+    let snap = match scale.snap {
+        Snap::Semitone => 0,
+        Snap::Scale => 1,
+        Snap::Off => 2,
+    };
+    serde_json::json!({"edits": e, "bounds": bounds, "key": scale.tonic, "minor": scale.minor, "snap": snap}).to_string()
+}
+
+/// [`edits_json`] read back onto analysis `a` (its notes rebuilt over the kept bounds): the
+/// edits (one per note, neutral when they do not fit) and the scale (`None`: not kept).
+pub fn parse_edits_json(json: &str, x: &[f32], a: &mut Analysis) -> (Vec<NoteEdit>, Option<Scale>) {
+    let neutral = |a: &Analysis| vec![NoteEdit::default(); a.notes.len()];
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return (neutral(a), None) };
+    if let Some(b) = v["bounds"].as_array() {
+        let b: Vec<(usize, usize)> = b.iter().filter_map(|p| Some((p.get(0)?.as_u64()? as usize, p.get(1)?.as_u64()? as usize))).collect();
+        a.set_bounds(x, &b);
+    }
+    let edits: Vec<NoteEdit> = v["edits"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|e| {
+                    let g = |k: usize, d: f64| e.get(k).and_then(serde_json::Value::as_f64).unwrap_or(d);
+                    NoteEdit { shift_cents: g(0, 0.0), drift: g(1, 1.0), offset: g(2, 0.0), stretch: g(3, 1.0), formant_semitones: g(4, 0.0), gain_db: g(5, 0.0), modulation: g(6, 1.0), transition_ms: g(7, 0.0) }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let snap = match v["snap"].as_u64() {
+        Some(1) => Snap::Scale,
+        Some(2) => Snap::Off,
+        _ => Snap::Semitone,
+    };
+    let scale = v["key"].as_u64().map(|k| Scale { tonic: k as usize % 12, minor: v["minor"].as_bool().unwrap_or(false), snap });
+    (if edits.len() == a.notes.len() { edits } else { neutral(a) }, scale)
+}
+
+/// One audio modification, worked out: its source's audio and analysis (notes rebuilt as its
+/// edits keep them), its edits, its render, and the state string they came from.
+struct ModCache {
+    audio: Arc<Vec<f32>>,
+    analysis: Arc<Analysis>,
+    edits: Vec<NoteEdit>,
+    scale: Scale,
+    render: Arc<Vec<f32>>,
+    state: String,
+}
+
+/// The worker's view of the ARA document.
+#[derive(Default)]
+struct AraState {
+    seen: u64,
+    /// Analyses by audio source, with the audio they came from.
+    sources: std::collections::HashMap<u64, (Arc<Vec<f32>>, Arc<Analysis>)>,
+    mods: std::collections::HashMap<u64, ModCache>,
+    /// The modification the editor shows, and the timeline sample its source starts at.
+    current: Option<(u64, i64)>,
+    /// The regions this instance plays: (modification, timeline start, offset, length), samples.
+    regions: Vec<(u64, i64, usize, usize)>,
+}
+
+impl AraState {
+    /// Brings the caches up to date with the document. Returns whether anything that plays or
+    /// shows changed, and the current take's render when the editor's take was replaced.
+    fn sync(&mut self, s: &Session, force: bool) -> (bool, Option<Vec<f32>>) {
+        let Some(inst) = s.ara() else { return (false, None) };
+        let v = inst.document.version.load(Ordering::Acquire).wrapping_add(inst.version.load(Ordering::Acquire));
+        if v == self.seen && !force {
+            return (false, None);
+        }
+        self.seen = v;
+        let model = inst.document.snapshot();
+        let st = inst.state();
+        let current_region = st.selection.iter().filter(|id| st.editor.contains(id) || st.playback.contains(id)).chain(st.editor.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
+        let mut wanted: Vec<u64> = st.playback.iter().filter_map(|id| model.regions.get(id).map(|r| r.modification)).collect();
+        if let Some(r) = &current_region {
+            wanted.push(r.modification);
+        }
+        let mut changed = false;
+        let mut pending = false;
+        for &m in &wanted {
+            let (Some(md), true) = (model.modifications.get(&m), true) else { continue };
+            let Some(src) = model.sources.get(&md.source) else { continue };
+            let Some(audio) = src.audio.clone() else {
+                pending = true;
+                continue;
+            };
+            let fresh_source = !self.sources.get(&src.id).is_some_and(|(a, _)| Arc::ptr_eq(a, &audio));
+            if fresh_source {
+                let a = analyse(&audio, src.sample_rate);
+                self.sources.insert(src.id, (audio.clone(), Arc::new(a)));
+            }
+            let stale = fresh_source || !self.mods.get(&m).is_some_and(|c| c.state == md.state && Arc::ptr_eq(&c.audio, &audio));
+            if stale {
+                let mut a = (*self.sources[&src.id].1).clone();
+                let (edits, scale) = parse_edits_json(&md.state, &audio, &mut a);
+                let scale = scale.unwrap_or_else(|| {
+                    let (tonic, minor) = detect_key(&a.notes);
+                    Scale { tonic, minor, snap: Snap::Semitone }
+                });
+                let mut r = render(&audio, &a, &edits);
+                r.resize(audio.len(), 0.0);
+                self.mods.insert(m, ModCache { audio: audio.clone(), analysis: Arc::new(a), edits, scale, render: Arc::new(r), state: md.state.clone() });
+                changed = true;
+            }
+        }
+        self.mods.retain(|m, _| model.modifications.contains_key(m));
+        self.sources.retain(|id, _| model.sources.contains_key(id));
+        // Where each played region sits.
+        let regions: Vec<(u64, i64, usize, usize)> = st
+            .playback
+            .iter()
+            .filter_map(|id| {
+                let r = model.regions.get(id)?;
+                let fs = model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate)?;
+                Some((r.modification, (r.start_in_playback * fs).round() as i64, (r.start_in_modification * fs).round().max(0.0) as usize, (r.duration_in_playback * fs).round().max(0.0) as usize))
+            })
+            .collect();
+        if regions != self.regions {
+            self.regions = regions;
+            changed = true;
+        }
+        // The editor's take: the current region's modification.
+        let current = current_region.as_ref().and_then(|r| {
+            let fs = model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate)?;
+            Some((r.modification, ((r.start_in_playback - r.start_in_modification) * fs).round() as i64))
+        });
+        let mut take = None;
+        if let Some((m, start)) = current {
+            if let Some(c) = self.mods.get(&m) {
+                if self.current != current || changed {
+                    let name = current_region.as_ref().map(|r| r.name.clone()).unwrap_or_default();
+                    let fs = c.analysis.fs;
+                    let mut stl = s.lock();
+                    stl.take = Some(TakeInfo { id: format!("ara:{name}"), start, sample_rate: fs, len: c.audio.len() });
+                    stl.audio = Some(c.audio.clone());
+                    stl.analysis = Some(c.analysis.clone());
+                    stl.edits = c.edits.clone();
+                    stl.scale = c.scale;
+                    stl.status = Status::Ready;
+                    drop(stl);
+                    self.current = current;
+                    take = Some((*c.render).clone());
+                    changed = true;
+                }
+            }
+        } else if self.current.is_some() || pending {
+            self.current = None;
+            let mut stl = s.lock();
+            stl.take = None;
+            stl.analysis = None;
+            stl.audio = None;
+            stl.status = if pending { Status::Analysing } else { Status::Empty };
+            changed = true;
+        }
+        if changed {
+            s.version.fetch_add(1, Ordering::AcqRel);
+        }
+        (changed, take)
+    }
+
+    /// The editor changed the current modification's edits: keep them and tell the document.
+    fn edited(&mut self, s: &Session, inst: &mite_ara::Instance, render: Arc<Vec<f32>>) {
+        let Some((m, _)) = self.current else { return };
+        let (analysis, edits, scale) = {
+            let st = s.lock();
+            (st.analysis.clone(), st.edits.clone(), st.scale)
+        };
+        let (Some(a), Some(c)) = (analysis, self.mods.get_mut(&m)) else { return };
+        let state = edits_json(&edits, &a, scale);
+        c.analysis = a;
+        c.edits = edits.clone();
+        c.scale = scale;
+        c.render = render;
+        c.state = state.clone();
+        inst.document.set_state(m, state, edits.iter().all(NoteEdit::is_neutral));
+        self.seen = inst.document.version.load(Ordering::Acquire).wrapping_add(inst.version.load(Ordering::Acquire));
+    }
+
+    fn segments(&self) -> Vec<Segment> {
+        self.regions
+            .iter()
+            .filter_map(|&(m, start, offset, len)| {
+                let c = self.mods.get(&m)?;
+                let len = len.min(c.render.len().saturating_sub(offset));
+                Some(Segment { start, offset, len, audio: c.render.clone() })
+            })
+            .collect()
+    }
+}
+
 fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
-    // The current render, kept here so an edit re-renders only its stretch.
-    let mut current: Option<Rendered> = None;
-    while let Ok(job) = rx.recv() {
+    // The current take's render, kept here so an edit re-renders only its stretch.
+    let mut current: Option<(i64, Vec<f32>)> = None;
+    let mut ara = AraState::default();
+    loop {
+        let first = match rx.recv_timeout(std::time::Duration::from_millis(40)) {
+            Ok(j) => Some(j),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
         let Some(s) = session.upgrade() else { return };
-        // Several renders waiting: one full one does for all.
-        let mut jobs = vec![job];
+        let mut jobs: Vec<Job> = first.into_iter().collect();
         while let Ok(more) = rx.try_recv() {
             jobs.push(more);
         }
         let n = jobs.len();
+        let force = jobs.iter().any(|j| matches!(j, Job::Sync));
+        let (ara_changed, ara_take) = ara.sync(&s, force);
+        if let Some(r) = ara_take {
+            let start = s.take().map_or(0, |t| t.start);
+            current = Some((start, r));
+        }
         let mut render_all = false;
         let mut notes: Vec<usize> = Vec::new();
         for job in jobs {
@@ -645,34 +891,17 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                 Job::Recorded(audio, start, fs) => {
                     let id = new_id();
                     let dir = s.dir();
-                    let problem = std::fs::create_dir_all(&dir)
-                        .and_then(|_| {
-                            std::fs::write(
-                                take_path(&dir, &id),
-                                audio
-                                    .iter()
-                                    .flat_map(|v| v.to_le_bytes())
-                                    .collect::<Vec<u8>>(),
-                            )
-                        })
-                        .err();
-                                        let a = analyse(&audio, fs);
+                    let problem = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(take_path(&dir, &id), audio.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>())).err();
+                    let a = analyse(&audio, fs);
                     let (tonic, minor) = detect_key(&a.notes);
                     let mut st = s.lock();
                     st.scale = Scale { tonic, minor, snap: st.scale.snap };
                     st.edits = vec![NoteEdit::default(); a.notes.len()];
-                    st.take = Some(TakeInfo {
-                        id,
-                        start,
-                        sample_rate: fs,
-                        len: audio.len(),
-                    });
+                    st.take = Some(TakeInfo { id, start, sample_rate: fs, len: audio.len() });
                     st.audio = Some(Arc::new(audio));
                     st.analysis = Some(Arc::new(a));
                     st.status = match problem {
-                        Some(e) => Status::Problem(format!(
-                            "the take could not be saved ({e}); it plays until the project is closed"
-                        )),
+                        Some(e) => Status::Problem(format!("the take could not be saved ({e}); it plays until the project is closed")),
                         None => Status::Ready,
                     };
                     drop(st);
@@ -687,11 +916,7 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                             a.set_bounds(&audio, &b);
                         }
                         let mut st = s.lock();
-                        st.edits = if edits.len() == a.notes.len() {
-                            edits
-                        } else {
-                            vec![NoteEdit::default(); a.notes.len()]
-                        };
+                        st.edits = if edits.len() == a.notes.len() { edits } else { vec![NoteEdit::default(); a.notes.len()] };
                         st.take = Some(info);
                         st.audio = Some(Arc::new(audio));
                         st.analysis = Some(Arc::new(a));
@@ -700,50 +925,56 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                         s.version.fetch_add(1, Ordering::AcqRel);
                         render_all = true;
                     }
-                    Err(e) => {
-                        s.lock().status = Status::Problem(format!(
-                            "the take's file is missing ({e}): transfer it again"
-                        ))
-                    }
+                    Err(e) => s.lock().status = Status::Problem(format!("the take's file is missing ({e}): transfer it again")),
                 },
                 Job::Render(None) => render_all = true,
                 Job::Render(Some(i)) => notes.push(i),
+                Job::Sync => {}
             }
         }
+        let rendering = render_all || !notes.is_empty();
         let (audio, analysis, edits, take) = {
             let st = s.lock();
-            (
-                st.audio.clone(),
-                st.analysis.clone(),
-                st.edits.clone(),
-                st.take.clone(),
-            )
+            (st.audio.clone(), st.analysis.clone(), st.edits.clone(), st.take.clone())
         };
-        if let (Some(x), Some(a), Some(t)) = (audio, analysis, take) {
+        if let (true, Some(x), Some(a), Some(t)) = (rendering, audio, analysis, take.clone()) {
             let len = x.len();
             let fresh = match current.take() {
-                Some(mut r) if !render_all && r.start == t.start && r.audio.len() == len => {
+                Some((start, mut r)) if !render_all && start == t.start && r.len() == len => {
                     for i in notes {
                         let range = affected(&a, i, len);
                         let part = render_range(&x, &a, &edits, range.clone());
-                        r.audio[range].copy_from_slice(&part);
+                        r[range].copy_from_slice(&part);
                     }
                     r
                 }
                 _ => {
-                    let mut audio = render(&x, &a, &edits);
-                    audio.resize(len, 0.0);
-                    Rendered {
-                        start: t.start,
-                        audio,
-                    }
+                    let mut r = render(&x, &a, &edits);
+                    r.resize(len, 0.0);
+                    r
                 }
             };
-                        s.renders.send(Box::new(Rendered { start: fresh.start, audio: fresh.audio.clone() }));
-            let peaks: Vec<(f32, f32)> = fresh.audio.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect();
-            s.lock().peaks = Arc::new(peaks);
-            s.version.fetch_add(1, Ordering::AcqRel);
-            current = Some(fresh);
+            current = Some((t.start, fresh));
+        }
+        if rendering || ara_changed {
+            if let Some((start, r)) = &current {
+                let shared = Arc::new(r.clone());
+                let rendered = match s.ara() {
+                    Some(inst) => {
+                        if rendering {
+                            ara.edited(&s, &inst, shared.clone());
+                        }
+                        Rendered { segments: ara.segments(), ara: true, take: None }
+                    }
+                    None => Rendered { segments: vec![Segment { start: *start, offset: 0, len: r.len(), audio: shared.clone() }], ara: false, take: Some(shared) },
+                };
+                s.renders.send(Box::new(rendered));
+                let peaks: Vec<(f32, f32)> = r.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect();
+                s.lock().peaks = Arc::new(peaks);
+                s.version.fetch_add(1, Ordering::AcqRel);
+            } else if s.ara().is_some() {
+                s.renders.send(Box::new(Rendered { segments: ara.segments(), ara: true, take: None }));
+            }
         }
         s.busy.fetch_sub(n, Ordering::AcqRel);
     }
