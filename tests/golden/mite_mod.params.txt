@@ -1,0 +1,20 @@
+mode | choice | Chorus, Ensemble, Flanger, Phaser, Vibrato | 0
+rate | Hz | 0.02 | 20 | 0.6 | Log
+sync | bool | false
+division | choice | 4 bars, 2 bars, 1 bar, 1/2, 1/2., 1/2T, 1/4, 1/4., 1/4T, 1/8, 1/8., 1/8T, 1/16, 1/16T, 1/32 | 6
+shape | choice | Sine, Triangle, Ramp Up, Ramp Down, Square, Random | 0
+depth | % | 0 | 100 | 50 | Linear
+spread | ° | 0 | 180 | 90 | Linear
+feedback | % | -95 | 95 | 0 | Linear
+delay | ms | 1 | 40 | 12 | Log
+voices | choice | 1, 2, 3, 4 | 1
+manual | ms | 0.1 | 5 | 1.5 | Log
+thru_zero | bool | false
+centre | Hz | 50 | 8000 | 800 | Log
+stages | choice | 2, 4, 6, 8, 12, 16, 24 | 1
+mix | % | 0 | 100 | 50 | Linear
+width | % | 0 | 200 | 100 | Linear
+low_cut | Hz | 20 | 2000 | 20 | Log
+high_cut | Hz | 1000 | 20000 | 20000 | Log
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false

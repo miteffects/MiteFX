@@ -115,6 +115,7 @@ MiteFX/
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
 | Pitch detection (McLeod pitch method, sub-cent), notes and cents against a reference | `mite_dsp::pitch` (`PitchDetector`, `note_of`, `note_hz`; Tuner, 2026-11-04) |
 | Doubling: per-note timing, detune, level and tone from an onset detector, switched before each note arrives; chorus; placement | `mite_dsp::doubler` (`Doubler`; Double, 2026-11-04) |
+| Modulation: one smooth LFO (six shapes, sync locked to the song), chorus, ensemble, flanger (through zero), phaser (2–24 stages), vibrato, their responses for drawing; the doubler's sinc reads | `mite_dsp::modulation` (`Mod`, `shape_at`, `flanger_response`, `phaser_response`; Mod, 2026-11-05) |
 | De-essing: relative (band against the whole) or absolute detection, dynamic shelf / three-bell band / wide reduction exactly the identity at rest, lookahead, smart release | `mite_dsp::deess` (`DeEsser`, `response_db`; DeEss, 2026-11-05) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
@@ -370,6 +371,18 @@ Nova Shaper ported:
 - Chorus, ensemble, flanger (through-zero), phaser (2–24 stages), vibrato and rotary in one plugin.
 - Each mode has its own deep editor.
 - Nova's LFO shapes plus the modulation matrix.
+
+**Status (2026-11-05): slice 1 built** (`docs/design/mod-brief.md`; accent lilac). `mite_dsp::modulation`:
+chorus (1–4 voices), ensemble (slow sweep + fast shimmer), flanger (through zero: the dry waits
+5 ms, reported), phaser (2–24 stages), vibrato (all wet around 5 ms, its cents tested) on one LFO
+whose six shapes are all continuous (Random glides to alternating random heights), free or synced
+and phase-locked to the song position; every swept read by the doubler's 32-tap sinc (Lagrange
+crossfaded in only under 15 samples); modes switch by crossfading programs (no click, tested);
+the editor draws from the same functions the engine plays (flanger and phaser responses tested
+against tones). Editor: mode tiles, each mode's view (scrolling voice delays or pitch; a live
+response with the sweep shaded and a MANUAL/CENTRE × FEEDBACK puck), the LFO strip, MOTION and
+SOUND groups. 0.4–2.1 % of a core, 118 fps. Next: Rotary (state 2 with a `mode` migration), then
+the modulation matrix.
 
 ### 14. Mite Meter and Mite Utility
 

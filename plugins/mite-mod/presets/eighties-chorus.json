@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Eighties Chorus",
+  "params": {"mode": 0.0, "voices": 1.0, "delay": 7.0, "depth": 45.0, "rate": 0.9, "shape": 1.0, "spread": 180.0, "mix": 50.0, "high_cut": 9000.0}
+}

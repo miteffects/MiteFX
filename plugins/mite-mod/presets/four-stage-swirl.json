@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Four Stage Swirl",
+  "params": {"mode": 3.0, "stages": 1.0, "centre": 700.0, "depth": 70.0, "rate": 0.5, "feedback": 15.0, "spread": 0.0, "mix": 50.0}
+}

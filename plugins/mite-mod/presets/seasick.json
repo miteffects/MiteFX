@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Seasick",
+  "params": {"mode": 4.0, "depth": 60.0, "rate": 0.7, "shape": 5.0, "spread": 60.0}
+}

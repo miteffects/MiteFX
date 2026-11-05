@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "String Ensemble",
+  "params": {"mode": 1.0, "delay": 6.0, "depth": 70.0, "rate": 0.6, "spread": 120.0, "mix": 60.0, "width": 130.0}
+}

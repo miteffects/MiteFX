@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Jet Flanger",
+  "params": {"mode": 2.0, "manual": 1.2, "depth": 85.0, "rate": 0.12, "feedback": 70.0, "spread": 30.0, "mix": 50.0}
+}

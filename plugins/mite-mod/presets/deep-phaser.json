@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Deep Phaser",
+  "params": {"mode": 3.0, "stages": 4.0, "centre": 900.0, "depth": 80.0, "rate": 0.15, "feedback": 65.0, "spread": 90.0, "mix": 50.0}
+}

@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Tape Flange",
+  "params": {"mode": 2.0, "thru_zero": 1.0, "manual": 2.5, "depth": 55.0, "rate": 0.08, "shape": 1.0, "feedback": 0.0, "spread": 0.0, "mix": 50.0}
+}

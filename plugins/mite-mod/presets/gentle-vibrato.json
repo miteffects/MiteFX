@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Gentle Vibrato",
+  "params": {"mode": 4.0, "depth": 25.0, "rate": 5.5, "spread": 0.0}
+}

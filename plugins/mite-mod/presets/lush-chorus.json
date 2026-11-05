@@ -1,0 +1,6 @@
+{
+  "plugin": "Mite Mod",
+  "version": 1,
+  "name": "Lush Chorus",
+  "params": {"mode": 0.0, "voices": 3.0, "delay": 14.0, "depth": 60.0, "rate": 0.45, "spread": 180.0, "mix": 50.0, "width": 140.0}
+}

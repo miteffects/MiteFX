@@ -322,12 +322,12 @@ impl Voice {
 }
 
 /// The windowed-sinc reading (see `SINC_TAPS`): coefficients per fraction, each set summing to 1.
-struct Sinc {
+pub(crate) struct Sinc {
     table: Vec<[f32; SINC_TAPS]>,
 }
 
 impl Sinc {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let half = (SINC_TAPS / 2) as f64;
         let i0 = |x: f64| {
             // The zeroth-order modified Bessel function, by its series.
@@ -362,7 +362,7 @@ impl Sinc {
 
     /// The signal `d` samples ago on `line` (d ≥ SINC_TAPS / 2).
     #[inline]
-    fn read(&self, line: &Delay, d: f64) -> f32 {
+    pub(crate) fn read(&self, line: &Delay, d: f64) -> f32 {
         let whole = d.floor();
         let pos = (d - whole) * SINC_PHASES as f64;
         let p = (pos as usize).min(SINC_PHASES - 1);
