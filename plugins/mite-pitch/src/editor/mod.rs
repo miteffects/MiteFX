@@ -680,11 +680,23 @@ impl PitchView {
         let (v0, v1) = (self.t0, self.t0 + self.span);
         for (i, n) in a.notes.iter().enumerate() {
             let e = edits.get(i).copied().unwrap_or_default();
-            let (ts, te) = Self::span_of(n, &e, a.fs);
-            if te < v0 || ts > v1 {
+                        let (ts, te) = Self::span_of(n, &e, a.fs);
+            let (lead_s, tail_s) = (n.lead as f64 / a.fs, n.tail as f64 / a.fs);
+            if te + tail_s < v0 || ts - lead_s > v1 {
                 continue;
             }
             let r = self.rect_of(n, &e, a.fs);
+            // Its consonants (unpitched: they move with it, unstretched, at no pitch of their
+            // own): a faint, thinner lead-in and tail.
+            let thin = (r.height() * 0.32).max(3.0);
+                        for (has, x0, x1) in [(n.lead > 0, self.x_of(ts - lead_s), r.x0), (n.tail > 0, r.x1, self.x_of(te + tail_s))] {
+                if has && x1 - x0 > 1.0 {
+                    let band = Rect::new(x0, r.center().y - thin / 2.0, x1, r.center().y + thin / 2.0);
+                                        // Square where it meets the note, round at its free end.
+                    let rr = if x1 == r.x0 { RoundedRect::from_rect(band, (thin / 2.0, 0.0, 0.0, thin / 2.0)) } else { RoundedRect::from_rect(band, (0.0, thin / 2.0, thin / 2.0, 0.0)) };
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.16), None, &rr);
+                }
+            }
             let sel = self.selected.contains(&i);
             let hot = matches!(self.hot, Some(Hot::Note(j) | Hot::Edge(j, _)) if j == i);
             // Where it was sung, when it has moved.

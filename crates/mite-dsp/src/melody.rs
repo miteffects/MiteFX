@@ -70,8 +70,19 @@ pub struct Note {
     /// The slow part of the drift (smoothed over about a vibrato cycle: slides, sags, the
     /// approach), one per frame; the rest (`drift − slow`) is the modulation (vibrato, wobble).
     pub slow: Vec<f64>,
-    /// Its RMS, dBFS.
+        /// Its RMS, dBFS.
     pub db: f64,
+    /// The unpitched sound it carries: just before it (a leading consonant, "s" of "sing") and
+    /// just after it (a phrase's final consonant), samples. It moves with the note, unstretched.
+    pub lead: usize,
+    pub tail: usize,
+}
+
+impl Note {
+    /// Where its sound begins and ends, its consonants included, samples.
+    pub fn span(&self) -> (usize, usize) {
+        (self.start.saturating_sub(self.lead), self.end + self.tail)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,7 +92,9 @@ pub struct Analysis {
     pub frames: Vec<Frame>,
     pub notes: Vec<Note>,
     /// Pitch marks: one sample per period through every voiced stretch, sorted.
-    pub marks: Vec<usize>,
+        pub marks: Vec<usize>,
+    /// The level that counts as sound (the voicing gate), dBFS.
+    pub gate_db: f64,
 }
 
 impl Analysis {
@@ -177,7 +190,8 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
         })
         .collect();
     clean_pitch(&mut frames);
-    let notes = find_notes(&frames, hop, x, fs);
+        let mut notes = find_notes(&frames, hop, x, fs);
+    attach_consonants(&mut notes, &frames, hop, fs, gate);
     let marks = find_marks(x, fs, hop, &frames);
     Analysis {
         fs,
@@ -185,6 +199,7 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
         frames,
         notes,
         marks,
+        gate_db: gate,
     }
 }
 
@@ -340,7 +355,40 @@ fn make_note(frames: &[Frame], hop: usize, x: &[f32], fs: f64, a: usize, b: usiz
     let slow = average(&once, &|_| true);
     let (s0, s1) = (a * hop, (b * hop).min(x.len()));
     let rms = (x[s0..s1].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / (s1 - s0).max(1) as f64).sqrt();
-    Note { start: s0, end: s1, cents: centre, drift, slow, db: 20.0 * rms.max(1e-12).log10() }
+    Note { start: s0, end: s1, cents: centre, drift, slow, db: 20.0 * rms.max(1e-12).log10(), lead: 0, tail: 0 }
+}
+
+/// The longest leading and final consonants a note carries, s.
+pub const LEAD_MAX_S: f64 = 0.35;
+pub const TAIL_MAX_S: f64 = 0.25;
+
+/// Gives each note the unpitched sound around it (frames above the gate with no pitch): before it
+/// back to the note before (a leading consonant), and after it (a final consonant) up to where
+/// the next note's lead begins.
+fn attach_consonants(notes: &mut [Note], frames: &[Frame], hop: usize, fs: f64, gate: f64) {
+    let per_s = fs / hop as f64;
+    let sound = |k: usize| frames.get(k).is_some_and(|f| f.cents.is_none() && f.db > gate);
+    let (lead_max, tail_max) = ((LEAD_MAX_S * per_s) as usize, (TAIL_MAX_S * per_s) as usize);
+    for i in 0..notes.len() {
+        let floor = if i == 0 { 0 } else { notes[i - 1].end.div_ceil(hop) };
+        let mut k = notes[i].start / hop;
+        let mut n = 0;
+        while k > floor && n < lead_max && sound(k - 1) {
+            k -= 1;
+            n += 1;
+        }
+        notes[i].lead = n * hop;
+    }
+    for i in 0..notes.len() {
+        let ceil = notes.get(i + 1).map_or(frames.len(), |m| m.start.saturating_sub(m.lead) / hop);
+        let mut k = notes[i].end.div_ceil(hop);
+        let mut n = 0;
+        while k < ceil && n < tail_max && sound(k) {
+            k += 1;
+            n += 1;
+        }
+        notes[i].tail = n * hop;
+    }
 }
 
 /// The slow drift: the drift through two moving averages this long, s.
@@ -364,7 +412,8 @@ impl Analysis {
             return false;
         }
         let fs = self.fs;
-        self.notes = bounds.iter().map(|&(s, e)| make_note(&self.frames, self.hop, x, fs, s / self.hop, e.div_ceil(self.hop).min(n))).collect();
+                self.notes = bounds.iter().map(|&(s, e)| make_note(&self.frames, self.hop, x, fs, s / self.hop, e.div_ceil(self.hop).min(n))).collect();
+        attach_consonants(&mut self.notes, &self.frames, self.hop, fs, self.gate_db);
         true
     }
 
@@ -570,17 +619,24 @@ pub struct TimeMap {
 impl TimeMap {
     pub fn new(notes: &[Note], edits: &[NoteEdit], len: usize) -> Self {
         let mut anchors = vec![(0.0, 0.0)];
-        for (n, e) in notes.iter().zip(edits) {
+                for (n, e) in notes.iter().zip(edits) {
             let (s, t) = (n.start as f64, n.end as f64);
-            let out_s = s + e.offset;
-            let out_e = out_s + (t - s) * e.stretch;
+            let (lead, tail) = (n.lead as f64, n.tail as f64);
             let last = anchors.last().copied().unwrap_or((0.0, 0.0));
-            // Kept increasing: a note cannot start before the last anchor.
-            let out_s = out_s.max(last.0 + 1.0);
-            let out_e = out_e.max(out_s + 1.0);
-            if s > last.1 {
+            // Its consonants move with it, unstretched. Kept increasing: a note cannot start
+            // before the last anchor.
+            let out_s0 = (s - lead + e.offset).max(last.0 + 1.0);
+            let out_s = out_s0 + lead;
+            let out_e = (out_s + (t - s) * e.stretch).max(out_s + 1.0);
+            if s - lead > last.1 {
+                if lead > 0.0 {
+                    anchors.push((out_s0, s - lead));
+                }
                 anchors.push((out_s, s));
                 anchors.push((out_e, t));
+                if tail > 0.0 {
+                    anchors.push((out_e + tail, t + tail));
+                }
             }
         }
         let last = anchors.last().copied().unwrap_or((0.0, 0.0));
@@ -625,12 +681,12 @@ pub fn affected(a: &Analysis, i: usize, len: usize) -> std::ops::Range<usize> {
     let lo = i
         .checked_sub(1)
         .and_then(|j| a.notes.get(j))
-        .map_or(0, |n| n.start)
+                .map_or(0, |n| n.span().0)
         .saturating_sub(margin);
     let hi = a
         .notes
         .get(i + 1)
-        .map_or(len, |n| n.end)
+                .map_or(len, |n| n.span().1)
         .saturating_add(margin)
         .min(len);
     lo..hi
@@ -645,7 +701,7 @@ fn affect_margin(fs: f64) -> usize {
 fn sync_points(a: &Analysis) -> Vec<f64> {
     let m = affect_margin(a.fs);
     let mut s: Vec<f64> = std::iter::once(0.0)
-        .chain(a.notes.iter().map(|n| n.start.saturating_sub(m) as f64))
+                .chain(a.notes.iter().map(|n| n.span().0.saturating_sub(m) as f64))
         .collect();
     s.sort_by(f64::total_cmp);
     s.dedup();
@@ -677,9 +733,11 @@ pub fn render_range(
     let mut acc = vec![0.0f64; span + 1];
     let mut wsum = vec![0.0f64; span + 1];
     // Which note (if any) an input sample belongs to (the notes are sorted and apart).
+        // Which note (its consonants included) an input sample belongs to (the notes are sorted
+    // and apart).
     let note_of_in = |t: f64| {
-        let i = a.notes.partition_point(|n| (n.start as f64) <= t);
-        i.checked_sub(1).filter(|&j| t < a.notes[j].end as f64)
+        let i = a.notes.partition_point(|n| (n.span().0 as f64) <= t);
+        i.checked_sub(1).filter(|&j| t < a.notes[j].span().1 as f64)
     };
     let noise_len = ((NOISE_GRAIN_S * fs) as usize).max(8);
     let lay = |acc: &mut [f64], wsum: &mut [f64], o: f64, w: f64, v: f64| {
@@ -780,7 +838,7 @@ pub fn render_range(
         .iter()
         .zip(&a.notes)
         .filter(|(e, _)| e.moves_time())
-        .map(|(_, n)| (n.start as f64 - fade as f64, n.end as f64 + fade as f64))
+                .map(|(_, n)| (n.span().0 as f64 - fade as f64, n.span().1 as f64 + fade as f64))
         .collect();
     let neutral: Vec<bool> = (lo..hi)
         .map(|o| {
@@ -1124,6 +1182,40 @@ mod tests {
         // No more than a step's worth of change from one frame to the next through the glide.
         let jumps = (0..30).map(|k| (c(k as f64 * 5.0 + 5.0) - c(k as f64 * 5.0)).abs()).fold(0.0, f64::max);
         assert!(jumps < 60.0, "{jumps}");
+    }
+
+        #[test]
+    fn consonants_belong_to_the_note_after_them_and_move_with_it() {
+        let (x, _) = line();
+        let a = analyse(&x, FS);
+        // The line puts a breathy consonant in the gap before each note: the notes after the
+        // first carry it as their lead (about the audible two thirds of the 80 ms gap).
+        for n in &a.notes[1..] {
+            let ms = n.lead as f64 / FS * 1000.0;
+            assert!((25.0..=80.0).contains(&ms), "lead {ms} ms");
+        }
+        // Note 2 later by 60 ms: its consonant arrives 60 ms later, as long as it was.
+        let n = a.notes[2].clone();
+        let mut edits = vec![NoteEdit::default(); a.notes.len()];
+        edits[2].offset = 0.06 * FS;
+        let y = render(&x, &a, &edits);
+        // The burst's middle (energy-weighted time) inside the lead, before and after.
+        let centre = |v: &[f32], from: usize, to: usize| {
+            let (mut num, mut den) = (0.0, 0.0);
+            for k in from..to {
+                let e = f64::from(v[k]).powi(2);
+                num += k as f64 * e;
+                den += e;
+            }
+            num / den.max(1e-30)
+        };
+        let shift = (0.06 * FS) as usize;
+        let was = centre(&x, n.start - n.lead, n.start);
+        let now = centre(&y, n.start - n.lead + shift, n.start + shift);
+        assert!((now - was - shift as f64).abs() < 0.004 * FS, "moved {:.1} ms", (now - was) / FS * 1000.0);
+        let level = |v: &[f32], from: usize, to: usize| (v[from..to].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / (to - from) as f64).sqrt();
+        let (a0, a1) = (level(&x, n.start - n.lead, n.start), level(&y, n.start - n.lead + shift, n.start + shift));
+        assert!((a1 / a0 - 1.0).abs() < 0.15, "consonant level {a0} → {a1}");
     }
 
     #[test]
