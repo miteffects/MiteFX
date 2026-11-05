@@ -930,8 +930,11 @@ pub struct InstanceState {
     pub playback: Vec<u64>,
     /// Playback regions shown by this instance's editor.
     pub editor: Vec<u64>,
-    /// The host's selection (playback regions).
+        /// The host's selection (playback regions).
     pub selection: Vec<u64>,
+    /// Region sequences (tracks) shown by this instance's editor, and those selected.
+    pub sequences: Vec<u64>,
+    pub selected_sequences: Vec<u64>,
 }
 
 impl Instance {
@@ -1037,8 +1040,14 @@ unsafe extern "C" fn ed_remove(r: ARAEditorRendererRef, p: ARAPlaybackRegionRef)
     // SAFETY: refs we made.
     unsafe { instance(r) }.edit(|s| s.editor.retain(|&x| x != id_of(p)));
 }
-unsafe extern "C" fn ed_add_sequence(_r: ARAEditorRendererRef, _s: ARARegionSequenceRef) {}
-unsafe extern "C" fn ed_remove_sequence(_r: ARAEditorRendererRef, _s: ARARegionSequenceRef) {}
+unsafe extern "C" fn ed_add_sequence(r: ARAEditorRendererRef, q: ARARegionSequenceRef) {
+    // SAFETY: refs we made.
+    unsafe { instance(r) }.edit(|s| s.sequences.push(id_of(q)));
+}
+unsafe extern "C" fn ed_remove_sequence(r: ARAEditorRendererRef, q: ARARegionSequenceRef) {
+    // SAFETY: refs we made.
+    unsafe { instance(r) }.edit(|s| s.sequences.retain(|&x| x != id_of(q)));
+}
 unsafe extern "C" fn view_selection(r: ARAEditorViewRef, sel: *const ARAViewSelection) {
     if sel.is_null() {
         return;
@@ -1051,8 +1060,17 @@ unsafe extern "C" fn view_selection(r: ARAEditorViewRef, sel: *const ARAViewSele
         // SAFETY: `count` refs.
         (0..s.playbackRegionRefsCount).map(|i| id_of(unsafe { *s.playbackRegionRefs.add(i) })).collect()
     };
+        let seqs: Vec<u64> = if s.regionSequenceRefs.is_null() {
+        Vec::new()
+    } else {
+        // SAFETY: `count` refs.
+        (0..s.regionSequenceRefsCount).map(|i| id_of(unsafe { *s.regionSequenceRefs.add(i) })).collect()
+    };
     // SAFETY: refs we made.
-    unsafe { instance(r) }.edit(|st| st.selection = ids);
+    unsafe { instance(r) }.edit(|st| {
+        st.selection = ids;
+        st.selected_sequences = seqs;
+    });
 }
 unsafe extern "C" fn view_hide(_r: ARAEditorViewRef, _n: ARASize, _s: *const ARARegionSequenceRef) {}
 

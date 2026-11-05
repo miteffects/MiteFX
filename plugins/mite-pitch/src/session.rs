@@ -748,7 +748,10 @@ impl AraState {
         if !Self::renders(&inst) {
             st.playback.clear();
         }
-        let current_region = st.selection.iter().filter(|id| st.editor.contains(id) || st.playback.contains(id)).chain(st.editor.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
+                // The regions this instance's editor shows: those given to it, and those on the tracks
+        // (region sequences) given to it (REAPER gives the editor its track, not the clips).
+        let shown: Vec<u64> = st.editor.iter().copied().chain(model.regions.values().filter(|r| st.sequences.contains(&r.sequence) || st.selected_sequences.contains(&r.sequence)).map(|r| r.id)).collect();
+        let current_region = st.selection.iter().filter(|id| shown.contains(id) || st.playback.contains(id)).chain(shown.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
         let mut wanted: Vec<u64> = st.playback.iter().filter_map(|id| model.regions.get(id).map(|r| r.modification)).collect();
         if let Some(r) = &current_region {
             wanted.push(r.modification);
@@ -820,8 +823,7 @@ impl AraState {
                     take = Some((*c.render).clone());
                     changed = true;
                 }
-            }
-        } else if self.current.is_some() || pending {
+            }        } else if self.current.is_some() || pending || matches!(s.status(), Status::Analysing) {
             self.current = None;
             let mut stl = s.lock();
             stl.take = None;

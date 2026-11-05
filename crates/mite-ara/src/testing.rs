@@ -226,6 +226,23 @@ impl TestHost {
         call!(self.endEditing());
     }
 
+        /// Hands the document's track (region sequence) to a plug-in instance's editor renderer, as
+    /// REAPER does for the visible FX (it never hands that one the clips).
+    pub fn show_track(&self, ext: *const ARAPlugInExtensionInstance) {
+        let ext = unsafe { std::ptr::read_unaligned(ext) };
+        if !ext.editorRendererInterface.is_null() {
+            let ed = unsafe { std::ptr::read_unaligned(ext.editorRendererInterface) };
+            unsafe { ed.addRegionSequence.expect("add sequence")(ext.editorRendererRef, self.seq) };
+        }
+    }
+
+    /// Hands region `rg` to a plug-in instance's playback renderer only.
+    pub fn render(&self, ext: *const ARAPlugInExtensionInstance, rg: ARAPlaybackRegionRef) {
+        let ext = unsafe { std::ptr::read_unaligned(ext) };
+        let pb = unsafe { std::ptr::read_unaligned(ext.playbackRendererInterface) };
+        unsafe { pb.addPlaybackRegion.expect("add")(ext.playbackRendererRef, rg) };
+    }
+
     /// Moves region `rg` to song time `play_start`.
     pub fn move_region(&self, md: ARAAudioModificationRef, rg: ARAPlaybackRegionRef, play_start: f64, mod_start: f64, duration: f64) {
         let _ = md;

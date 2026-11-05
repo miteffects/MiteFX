@@ -132,8 +132,9 @@ fn an_editor_instance_and_a_playback_instance_as_reaper_binds_them_over_vst3() {
     let player = session("ara-pl");
     let inst_ed = unsafe { mite_ara::bind(host.dc, 7, 6) };
     let inst_pl = unsafe { mite_ara::bind(host.dc, 7, 1) };
-    host.give(inst_ed.extension(), rg);
-    host.give(inst_pl.extension(), rg);
+        // As REAPER: the editor gets the track, the player the clip.
+    host.show_track(inst_ed.extension());
+    host.render(inst_pl.extension(), rg);
     assert!(inst_ed.document.wait_reads(Duration::from_secs(10)));
     editor.bind_ara(inst_ed);
     player.bind_ara(inst_pl);
