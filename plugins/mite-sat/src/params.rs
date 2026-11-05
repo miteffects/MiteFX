@@ -77,26 +77,10 @@ pub const DRIVE_DIAL: DialCurve = DialCurve(&[(0.0, 0.0), (0.5, 12.0), (0.8, 24.
 
 // ---- Modulation (slice 7) -----------------------------------------------------------------
 
-pub const LFO_RATE: ParamSpec = spec("rate", "Rate", "Hz", 0.02, 40.0, 1.0, ParamScale::Log, 2, (0.25, 1.0 / 16.0), ParamDisplay::Number);
-pub const LFO_SYNC: BoolSpec = BoolSpec { id: "sync", name: "Sync", default: false };
-pub const LFO_DIV: ChoiceSpec = ChoiceSpec {
-    id: "div",
-    name: "Division",
-    choices: &["1/32", "1/16T", "1/16", "1/16D", "1/8T", "1/8", "1/8D", "1/4T", "1/4", "1/4D", "1/2T", "1/2", "1/2D", "1 bar", "2 bars", "4 bars"],
-    default: 8,
-};
-pub const LFO_SHAPE: ChoiceSpec = ChoiceSpec { id: "shape", name: "Shape", choices: &["Sine", "Triangle", "Saw up", "Saw down", "Square", "Smooth random", "Sample & hold"], default: 0 };
-pub const LFO_PHASE: ParamSpec = spec("phase", "Phase", "°", 0.0, 360.0, 0.0, ParamScale::Linear, 0, (15.0, 1.0), ParamDisplay::Number);
-pub const ENV_ATT: ParamSpec = spec("env_att", "Envelope Attack", "ms", 0.1, 500.0, 10.0, ParamScale::Log, 1, (0.25, 1.0 / 16.0), ParamDisplay::Time);
-pub const ENV_REL: ParamSpec = spec("env_rel", "Envelope Release", "ms", 5.0, 2000.0, 200.0, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::Time);
-pub const ENV_GAIN: ParamSpec = spec("env_gain", "Envelope Gain", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
-pub const ENV_SRC: ChoiceSpec = ChoiceSpec { id: "env_src", name: "Envelope Source", choices: &["Input", "Sidechain"], default: 0 };
-pub const MOD_SLOTS: usize = 8;
-pub const M_SRC: ChoiceSpec = ChoiceSpec { id: "src", name: "Source", choices: &["Off", "LFO 1", "LFO 2", "Envelope"], default: 0 };
+pub use mite_core::modmatrix::{lfo_id, mod_id, ENV_ATT, ENV_GAIN, ENV_REL, ENV_SRC, LFO_DIV, LFO_PHASE, LFO_RATE, LFO_SHAPE, LFO_SYNC, MOD_SLOTS, M_AMT, M_SRC};
 /// What a slot moves: an index into [`MOD_TARGET_IDS`] (frozen, append only; not automatable, so
 /// growing the list never moves host automation).
 pub const M_DST: ChoiceSpec = ChoiceSpec { id: "dst", name: "Target", choices: &MOD_TARGETS, default: 0 };
-pub const M_AMT: ParamSpec = spec("amt", "Amount", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 
 pub static MOD_TARGETS: [&str; 44] = [
     "None",
@@ -192,6 +176,36 @@ pub static MOD_TARGET_IDS: [&str; 44] = [
     "out_gain",
 ];
 
+pub const TARGETS: mite_core::modmatrix::Targets = mite_core::modmatrix::Targets { names: &MOD_TARGETS, ids: &MOD_TARGET_IDS };
+
+/// The matrix's `offsets` (one per target in [`MOD_TARGETS`]) applied to the settings and the
+/// output: each target moved along its knob from where the settings have it. A crossover that is
+/// off stays off.
+pub fn modulate_settings(s: &mut SatSettings, out: &mut crate::dsp::Output, offsets: &[f32]) {
+    use mite_core::modmatrix::modulate;
+    let off = |t: usize| offsets.get(t).copied().unwrap_or(0.0);
+    for (b, band) in s.bands.iter_mut().enumerate() {
+        let t = 1 + b * 6;
+        if (t..t + 6).all(|k| off(k) == 0.0) {
+            continue;
+        }
+        band.drive_db = modulate(&B_DRIVE, band.drive_db, off(t));
+        band.bias = modulate(&B_BIAS, band.bias * 100.0, off(t + 1)) / 100.0;
+        band.tone_db = modulate(&B_TONE, band.tone_db, off(t + 2));
+        band.mix = modulate(&B_MIX, band.mix * 100.0, off(t + 3)) / 100.0;
+        band.out_db = modulate(&B_OUT, band.out_db, off(t + 4));
+        band.dyn_amount = modulate(&B_DYN, band.dyn_amount * 100.0, off(t + 5)) / 100.0;
+    }
+    for (k, x) in s.crossovers.iter_mut().enumerate() {
+        if let Some(f) = x {
+            *f = modulate(&X_FREQS[k], *f, off(1 + BANDS * 6 + k));
+        }
+    }
+    let t = 1 + BANDS * 6 + CROSSOVERS;
+    out.mix = modulate(&MIX, out.mix * 100.0, off(t)) / 100.0;
+    out.gain_db = modulate(&OUT_GAIN, out.gain_db, off(t + 1));
+}
+
 /// A crossover parameter's host id, e.g. `x2_freq` (`slot` from 0).
 pub fn cross_id(slot: usize, param: &str) -> String {
     format!("x{}_{param}", slot + 1)
@@ -200,16 +214,6 @@ pub fn cross_id(slot: usize, param: &str) -> String {
 /// A band parameter's host id, e.g. `b3_drive` (`band` from 0).
 pub fn band_id(band: usize, param: &str) -> String {
     format!("b{}_{param}", band + 1)
-}
-
-/// An LFO parameter's host id, e.g. `lfo2_rate` (`lfo` from 0).
-pub fn lfo_id(lfo: usize, param: &str) -> String {
-    format!("lfo{}_{param}", lfo + 1)
-}
-
-/// A modulation slot parameter's host id, e.g. `m3_amt` (`slot` from 0).
-pub fn mod_id(slot: usize, param: &str) -> String {
-    format!("m{}_{param}", slot + 1)
 }
 
 /// The continuous band parameters, in host order.
@@ -237,22 +241,7 @@ pub fn manifest() -> String {
             lines.push(prefix(spec.manifest_line()));
         }
     }
-    for l in 0..2 {
-        let prefix = |line: String| format!("lfo{}_{line}", l + 1);
-        lines.push(prefix(LFO_RATE.manifest_line()));
-        lines.push(prefix(LFO_SYNC.manifest_line()));
-        lines.push(prefix(LFO_DIV.manifest_line()));
-        lines.push(prefix(LFO_SHAPE.manifest_line()));
-        lines.push(prefix(LFO_PHASE.manifest_line()));
-    }
-    lines.extend([ENV_ATT, ENV_REL, ENV_GAIN].iter().map(ParamSpec::manifest_line));
-    lines.push(ENV_SRC.manifest_line());
-    for m in 0..MOD_SLOTS {
-        let prefix = |line: String| format!("m{}_{line}", m + 1);
-        lines.push(prefix(M_SRC.manifest_line()));
-        lines.push(prefix(M_DST.manifest_line()));
-        lines.push(prefix(M_AMT.manifest_line()));
-    }
+    lines.extend(mite_core::modmatrix::manifest_lines(&M_DST, true));
     lines.join("\n") + "\n"
 }
 
@@ -335,44 +324,6 @@ impl BandParams {
     }
 }
 
-pub struct LfoParams {
-    pub rate: FloatParam,
-    pub sync: BoolParam,
-    pub div: IntParam,
-    pub shape: IntParam,
-    pub phase: FloatParam,
-}
-
-impl LfoParams {
-    fn new(lfo: usize) -> Self {
-        let name = |what: &str| format!("LFO {} {what}", lfo + 1);
-        Self {
-            rate: float_param_named(&LFO_RATE, name("Rate")),
-            sync: bool_param(&LFO_SYNC, name("Sync")),
-            div: choice_param(&LFO_DIV, name("Division")),
-            shape: choice_param(&LFO_SHAPE, name("Shape")),
-            phase: float_param_named(&LFO_PHASE, name("Phase")),
-        }
-    }
-}
-
-pub struct ModParams {
-    pub src: IntParam,
-    pub dst: IntParam,
-    pub amt: FloatParam,
-}
-
-impl ModParams {
-    fn new(slot: usize) -> Self {
-        let name = |what: &str| format!("Mod {} {what}", slot + 1);
-        Self {
-            src: choice_param(&M_SRC, name("Source")).non_automatable(),
-            dst: choice_param(&M_DST, name("Target")).non_automatable(),
-            amt: float_param_named(&M_AMT, name("Amount")),
-        }
-    }
-}
-
 pub struct SatParams {
     pub oversampling: IntParam,
     pub auto_gain: BoolParam,
@@ -383,12 +334,8 @@ pub struct SatParams {
     pub bypass: BoolParam,
     pub crossovers: [CrossParams; CROSSOVERS],
     pub bands: [BandParams; BANDS],
-    pub lfos: [LfoParams; 2],
-    pub env_att: FloatParam,
-    pub env_rel: FloatParam,
-    pub env_gain: FloatParam,
-    pub env_src: IntParam,
-    pub mods: [ModParams; MOD_SLOTS],
+    /// The modulation matrix (`mite_plugin::matrix`).
+    pub matrix: mite_plugin::matrix::MatrixParams,
     /// Snapshots A–D and the current preset's name (not parameters: saved with the state through
     /// `serialize_fields`).
     pub snapshots: std::sync::Arc<Snapshots>,
@@ -411,12 +358,7 @@ impl Default for SatParams {
             bypass: flag(&BYPASS),
             crossovers: std::array::from_fn(CrossParams::new),
             bands: std::array::from_fn(BandParams::new),
-            lfos: std::array::from_fn(LfoParams::new),
-            env_att: float_param(&ENV_ATT),
-            env_rel: float_param(&ENV_REL),
-            env_gain: float_param(&ENV_GAIN),
-            env_src: choice_param(&ENV_SRC, ENV_SRC.name.to_owned()),
-            mods: std::array::from_fn(ModParams::new),
+            matrix: mite_plugin::matrix::MatrixParams::new(&M_DST, true),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -476,25 +418,7 @@ unsafe impl Params for SatParams {
             map.push((band_id(i, B_MUTE.id), b.mute.as_ptr(), group.clone()));
             map.push((band_id(i, B_SOLO.id), b.solo.as_ptr(), group));
         }
-        for (i, l) in self.lfos.iter().enumerate() {
-            let group = format!("LFO {}", i + 1);
-            map.push((lfo_id(i, LFO_RATE.id), l.rate.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_SYNC.id), l.sync.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_DIV.id), l.div.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_SHAPE.id), l.shape.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_PHASE.id), l.phase.as_ptr(), group));
-        }
-        let group = "Envelope".to_owned();
-        map.push((ENV_ATT.id.to_owned(), self.env_att.as_ptr(), group.clone()));
-        map.push((ENV_REL.id.to_owned(), self.env_rel.as_ptr(), group.clone()));
-        map.push((ENV_GAIN.id.to_owned(), self.env_gain.as_ptr(), group.clone()));
-        map.push((ENV_SRC.id.to_owned(), self.env_src.as_ptr(), group));
-        for (i, m) in self.mods.iter().enumerate() {
-            let group = "Modulation".to_owned();
-            map.push((mod_id(i, M_SRC.id), m.src.as_ptr(), group.clone()));
-            map.push((mod_id(i, M_DST.id), m.dst.as_ptr(), group.clone()));
-            map.push((mod_id(i, M_AMT.id), m.amt.as_ptr(), group));
-        }
+        self.matrix.param_map(&mut map);
         map
     }
 }

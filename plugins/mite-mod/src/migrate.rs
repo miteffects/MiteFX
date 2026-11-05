@@ -8,6 +8,9 @@
 //!
 //! **2 → 3 (2026-11-05): the micro pitch shifter.** `mode` gained a seventh choice: the same
 //! re-normalisation (× 5 / 6); `detune` is new.
+//!
+//! **3 → 4 (2026-11-05): the modulation matrix.** Its parameters are new and empty by default:
+//! nothing to change.
 
 use nih_plug::wrapper::state::PluginState;
 
@@ -20,6 +23,8 @@ pub fn v1_to_v2(state: &mut PluginState) {
 pub fn v2_to_v3(state: &mut PluginState) {
     lift_mode(state, 6);
 }
+
+pub fn v3_to_v4(_state: &mut PluginState) {}
 
 /// Every stored snapshot's `mode`, normalised over `count` choices, normalised over one more.
 fn lift_mode(state: &mut PluginState, count: usize) {

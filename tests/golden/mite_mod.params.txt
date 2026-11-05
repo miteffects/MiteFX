@@ -22,3 +22,40 @@ rotor | choice | Slow, Fast, Brake | 0
 balance | % | -100 | 100 | 0 | Linear
 inertia | % | 0 | 100 | 50 | Linear
 detune | ct | 0 | 50 | 9 | Linear
+lfo1_rate | Hz | 0.02 | 40 | 1 | Log
+lfo1_sync | bool | false
+lfo1_div | choice | 1/32, 1/16T, 1/16, 1/16D, 1/8T, 1/8, 1/8D, 1/4T, 1/4, 1/4D, 1/2T, 1/2, 1/2D, 1 bar, 2 bars, 4 bars | 8
+lfo1_shape | choice | Sine, Triangle, Saw up, Saw down, Square, Smooth random, Sample & hold | 0
+lfo1_phase | ° | 0 | 360 | 0 | Linear
+lfo2_rate | Hz | 0.02 | 40 | 1 | Log
+lfo2_sync | bool | false
+lfo2_div | choice | 1/32, 1/16T, 1/16, 1/16D, 1/8T, 1/8, 1/8D, 1/4T, 1/4, 1/4D, 1/2T, 1/2, 1/2D, 1 bar, 2 bars, 4 bars | 8
+lfo2_shape | choice | Sine, Triangle, Saw up, Saw down, Square, Smooth random, Sample & hold | 0
+lfo2_phase | ° | 0 | 360 | 0 | Linear
+env_att | ms | 0.1 | 500 | 10 | Log
+env_rel | ms | 5 | 2000 | 200 | Log
+env_gain | dB | -24 | 24 | 0 | Linear
+m1_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m1_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m1_amt | % | -100 | 100 | 0 | Linear
+m2_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m2_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m2_amt | % | -100 | 100 | 0 | Linear
+m3_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m3_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m3_amt | % | -100 | 100 | 0 | Linear
+m4_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m4_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m4_amt | % | -100 | 100 | 0 | Linear
+m5_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m5_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m5_amt | % | -100 | 100 | 0 | Linear
+m6_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m6_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m6_amt | % | -100 | 100 | 0 | Linear
+m7_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m7_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m7_amt | % | -100 | 100 | 0 | Linear
+m8_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m8_dst | choice | None, Rate, Depth, Spread, Feedback, Delay, Manual, Centre, Mix, Width, Low Cut, High Cut, Output, Balance, Inertia, Detune | 0
+m8_amt | % | -100 | 100 | 0 | Linear

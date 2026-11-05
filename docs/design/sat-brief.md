@@ -244,8 +244,8 @@ the editor does not show it.
 4. Harmonics probe and bars (done 2026-11-01).
 5. Per-band stereo modes (done 2026-11-01).
 6. Per-band dynamics (done 2026-11-03).
-7. Modulation matrix (shared with Delay, Filter and Mod): deferred (user, 2026-11-03); its
-   parameters stay at their neutral defaults.
+7. (done 2026-11-05) Modulation matrix, shared with Delay and Mod (BLUEPRINT §13), on the
+   parameters frozen in slice 1; `env_src` unused (no sidechain input). Not yet heard.
 8. Aliasing and THD report, CPU table, presets, validators (done 2026-11-03):
    `docs/dsp/sat-aliasing.md` (from `mite_dsp::sat::distortion`, regression-tested), the half-band's
    first stage vectorised (six Tube bands at 4×: 8.9 → 7.7 %), five presets that use dynamics,

@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 mite-core.workspace = true
+mite-dsp.workspace = true
 mite-ui.workspace = true
 
 baseview.workspace = true

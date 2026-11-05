@@ -6,6 +6,7 @@
 //! shells in `plugins/*`.
 
 mod editor;
+pub mod matrix;
 mod params;
 pub mod state;
 pub mod testing;

@@ -28,6 +28,7 @@ pub mod reverb_quality;
 pub mod sat;
 pub mod meter;
 pub mod min_phase;
+pub mod modmatrix;
 pub mod modulation;
 pub mod multiband;
 pub mod shape;

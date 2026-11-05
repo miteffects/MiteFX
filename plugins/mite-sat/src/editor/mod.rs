@@ -26,7 +26,7 @@ use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::footer::draw_dropdown_button;
 use mite_ui::widgets::rail::{draw_badge, draw_glyph, glyph as rail_glyph, hatch, BandMenu, MenuAsk, Rail, RailHot, RailParams};
-use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::{active_routes, draw_matrix_button, knob_modulation, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, MatrixConfig, MatrixPanel, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::record;
@@ -56,6 +56,10 @@ const PLOT_X1: f64 = PLOT_X0 + PLOT_W;
 /// Meter release (tokens.json `meter.releaseDbPerSec`).
 const METER_RELEASE_DB_S: f32 = 20.0;
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
+/// The modulation matrix: its button (footer, after the oversampling and the latency) and the
+/// panel it opens over the cards.
+const MATRIX_BUTTON: Rect = Rect::new(268.0, FOOTER_TOP + 15.0, 364.0, FOOTER_TOP + 41.0);
+const MATRIX_PANEL: Rect = Rect::new(8.0, DISPLAY_TOP + 226.0, 1172.0, HELP_TOP - 4.0);
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 /// The bands' peaks on their curves: 60 ms up, 300 ms down (as the spectrum).
 const PEAK_RISE_S: f64 = 0.06;
@@ -282,6 +286,9 @@ enum Hot {
 
 pub struct SatView {
     shared: Arc<SatShared>,
+    matrix: MatrixPanel,
+    matrix_open: bool,
+    matrix_button_hot: bool,
     session: Session,
     footer: Footer,
     /// The crossovers, band regions and the selection.
@@ -369,6 +376,10 @@ impl SatView {
             auto: [1.0; BANDS],
             dynamics: [1.0; BANDS],
             threshold: [0.0; BANDS],
+            // Sat has no sidechain input: its `env_src` stays on the input.
+            matrix: MatrixPanel::new(MatrixConfig { targets: TARGETS, sidechain: false }, MATRIX_PANEL),
+            matrix_open: false,
+            matrix_button_hot: false,
             shared,
         }
     }
@@ -793,6 +804,9 @@ impl SatView {
         }
         for k in &self.knobs {
             k.draw(cx);
+            if let Some((lo, hi, live)) = knob_modulation(cx.host, &TARGETS, &self.shared.matrix, &k.id) {
+                k.draw_modulation(cx, (lo, hi), live);
+            }
             if !k.value_inside {
                 // Small dials: the name and value beside them.
                 let v = Self::plain(cx.host, &k.id);
@@ -841,6 +855,7 @@ impl SatView {
         let sample_rate = f64::from(self.shared.sample_rate.load()).max(1.0);
         self.footer.draw_latency(cx, 142.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
         self.footer.draw_controls(cx);
+        draw_matrix_button(cx, MATRIX_BUTTON, self.matrix_open, self.matrix_button_hot, active_routes(cx.host));
         if let Some(list) = &self.os_menu {
             list.draw(cx, theme.accent, |scene, i, at, ink| {
                 // Each factor's icon: as many waves as it oversamples.
@@ -872,7 +887,21 @@ impl SatView {
 
     // ---- help -------------------------------------------------------------------------------
 
+    pub fn matrix_button(&self) -> Rect {
+        MATRIX_BUTTON
+    }
+
+    pub fn matrix_panel(&self) -> Option<&MatrixPanel> {
+        self.matrix_open.then_some(&self.matrix)
+    }
+
     fn help_text(&self, host: &dyn ParamHost) -> Help {
+        if self.matrix_open && (self.pointer.is_some_and(|p| MATRIX_PANEL.contains(p)) || self.matrix.busy()) {
+            return self.matrix.help(host).unwrap_or_else(|| Help::default().text("The modulation matrix: two LFOs and an envelope, each slot moving one control by a share of its travel (its dial shows the reach and where it is now)."));
+        }
+        if self.matrix_button_hot {
+            return Help::default().text("Modulation — open the matrix: two LFOs and an envelope follower, routed to any band's controls, the crossovers, mix and output");
+        }
         let layout = Self::layout(host);
         let number = |b: usize| layout.position(b).map_or(1, |p| p + 1);
         let values = |b: usize| (f64::from(Self::plain(host, &band_id(b, B_DRIVE.id))), f64::from(Self::plain(host, &band_id(b, B_BIAS.id))), f64::from(Self::plain(host, &band_id(b, B_TONE.id))));
@@ -990,7 +1019,7 @@ impl SatView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy() || (self.matrix_open && self.matrix.busy())
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
@@ -1147,7 +1176,34 @@ impl SatView {
 
     fn handle_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         if let UiEvent::KeyDown { key, mods } = *event {
+            if self.matrix_open && self.matrix.event(event, host).is_some() {
+                return true;
+            }
+            if self.matrix_open && key == Key::Escape {
+                self.matrix_open = false;
+                return true;
+            }
             return self.key_event(key, mods, host);
+        }
+        if self.matrix_open && self.os_menu.is_none() && self.stereo_menu.is_none() && self.menu.is_none() {
+            if let Some(handled) = self.matrix.event(event, host) {
+                if !handled {
+                    self.matrix_open = false;
+                }
+                if let UiEvent::PointerMove { pos, .. } = *event {
+                    self.pointer = Some(pos);
+                    self.hot = None;
+                }
+                return true;
+            }
+        }
+        match *event {
+            UiEvent::PointerMove { pos, .. } => self.matrix_button_hot = MATRIX_BUTTON.contains(pos),
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if MATRIX_BUTTON.contains(pos) && self.os_menu.is_none() && self.stereo_menu.is_none() => {
+                self.matrix_open = !self.matrix_open;
+                return true;
+            }
+            _ => {}
         }
         if let Some(list) = &mut self.os_menu {
             if let UiEvent::PointerMove { pos, .. } = *event {
@@ -1322,6 +1378,10 @@ impl View for SatView {
         let l = lanes(self.grow);
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
+        let matrix_hole = self.matrix_open.then(|| RoundedRect::from_rect(MATRIX_PANEL, 12.0));
+        if let Some(h) = matrix_hole {
+            cx.begin_glow_hole(h);
+        }
         self.draw_spectrum(cx, &layout, l.spectrum);
         let breath: [f32; BANDS] = std::array::from_fn(|b| Self::engagement(cx.host, b) * self.peak[b].min(1.0));
         self.rail.draw_under(cx, &layout, &breath);
@@ -1332,6 +1392,12 @@ impl View for SatView {
         self.draw_meters(cx);
         self.draw_states(cx, l.spectrum);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
+        if matrix_hole.is_some() {
+            cx.end_glow_hole();
+        }
+        if self.matrix_open {
+            self.matrix.draw(cx, &self.shared.matrix);
+        }
         self.draw_footer(cx);
         if let Some((_, list)) = &self.stereo_menu {
             list.draw(cx, theme.accent, |scene, i, at, ink| glyphs::draw_stereo(scene, i, at + (11.0, 12.0), 22.0, ink));
@@ -1408,6 +1474,6 @@ impl View for SatView {
         let probe = self.update_probe(host, &layout, dt);
         let spectrum = self.spectrum.update(&self.shared, dt);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || moved || grew || probe || spectrum || self.busy() || self.meters.iter().any(|&m| m > -149.0)
+        fresh || flowing || moved || grew || probe || spectrum || self.busy() || self.matrix_open || self.meters.iter().any(|&m| m > -149.0)
     }
 }

@@ -130,4 +130,8 @@ the division menu, groups, drag timing).
    2b. (done 2026-11-05) Micro pitch shift, above: tested for each side's pitch (within 0.3 Hz at 9
    and 30 ct), the level through splices (within 0.5 dB), clicks, block sizes, no allocation; the
    editor's dials and drag. Not yet heard by the user.
-3. The modulation matrix (shared with Delay, Sat and Filter; deferred on Sat by the user).
+3. (done 2026-11-05) The modulation matrix, shared with Delay and Sat (BLUEPRINT §13): two LFOs, an
+   envelope follower, eight slots moving Mod's targets (rate, depth, spread, feedback, delay,
+   manual, centre, mix, width, low and high cut, output, balance, inertia, detune) by a share of
+   their knobs' travel; a MOD button in the footer opens the panel; modulated dials show their
+   reach. State 4. Not yet heard by the user.

@@ -25,7 +25,7 @@ use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::eq_icons::draw_type_icon;
 use mite_ui::widgets::history;
-use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::{active_routes, draw_matrix_button, knob_modulation, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, MatrixConfig, MatrixPanel, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::{record, HISTORY_RECORDS};
@@ -81,6 +81,9 @@ const WELLS: [f64; 2] = [1206.0, 1238.0];
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 const METER_RANGE: f64 = 60.0;
+/// The modulation matrix: its button (footer, left) and the panel it opens over the lower view.
+const MATRIX_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 15.0, 112.0, FOOTER_TOP + 41.0);
+const MATRIX_PANEL: Rect = Rect::new(8.0, DISPLAY_TOP + 226.0, 1172.0, HELP_TOP - 4.0);
 const METER_RELEASE_DB_S: f32 = 20.0;
 const SILENT: f32 = -150.0;
 
@@ -267,6 +270,9 @@ pub struct DelayView {
     history: VecDeque<[f32; record::WIDTH]>,
     seen: usize,
     last_tick: Instant,
+    matrix: MatrixPanel,
+    matrix_open: bool,
+    matrix_button_hot: bool,
 }
 
 impl DelayView {
@@ -323,6 +329,9 @@ impl DelayView {
             history: VecDeque::with_capacity(HISTORY_RECORDS),
             seen: 0,
             last_tick: Instant::now(),
+            matrix: MatrixPanel::new(MatrixConfig { targets: TARGETS, sidechain: false }, MATRIX_PANEL),
+            matrix_open: false,
+            matrix_button_hot: false,
             shared,
         };
         view.select(0);
@@ -806,7 +815,21 @@ impl DelayView {
             .text(if dragging { " — Shift is fine." } else { " — drag: time and level; wheel: pan; right-click: sync, ping-pong, remove; double-click removes it." })
     }
 
+    pub fn matrix_button(&self) -> Rect {
+        MATRIX_BUTTON
+    }
+
+    pub fn matrix_panel(&self) -> Option<&MatrixPanel> {
+        self.matrix_open.then_some(&self.matrix)
+    }
+
     fn help_text(&self, host: &dyn ParamHost) -> Help {
+        if self.matrix_open && (self.pointer.is_some_and(|p| MATRIX_PANEL.contains(p)) || self.matrix.busy()) {
+            return self.matrix.help(host).unwrap_or_else(|| Help::default().text("The modulation matrix: two LFOs and an envelope, each slot moving one control by a share of its travel (its dial shows the reach and where it is now)."));
+        }
+        if self.matrix_button_hot {
+            return Help::default().text("Modulation — open the matrix: two LFOs and an envelope follower, routed to any control");
+        }
         if let Some((what, list)) = &self.menu {
             let i = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))).map(|k| list.shown[k]);
             return match (i, what) {
@@ -882,7 +905,7 @@ impl DelayView {
     // ---- events -----------------------------------------------------------------------------
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.menu.is_some() || self.knobs.iter().chain(&self.tap_knobs).any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.menu.is_some() || self.knobs.iter().chain(&self.tap_knobs).any(Knob::is_dragging) || self.footer.busy() || (self.matrix_open && self.matrix.busy())
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
@@ -1094,10 +1117,37 @@ impl DelayView {
             return self.menu_event(event, host);
         }
         if let UiEvent::KeyDown { key, mods } = *event {
+            if self.matrix_open && self.matrix.event(event, host).is_some() {
+                return true;
+            }
+            if self.matrix_open && key == mite_ui::Key::Escape {
+                self.matrix_open = false;
+                return true;
+            }
             return self.session.key(key, mods, host).unwrap_or(false);
         }
         if let Some(answer) = self.session.event(event, host) {
             return answer;
+        }
+        if self.matrix_open {
+            if let Some(handled) = self.matrix.event(event, host) {
+                if !handled {
+                    self.matrix_open = false;
+                }
+                if let UiEvent::PointerMove { pos, .. } = *event {
+                    self.pointer = Some(pos);
+                    self.hot = None;
+                }
+                return true;
+            }
+        }
+        match *event {
+            UiEvent::PointerMove { pos, .. } => self.matrix_button_hot = MATRIX_BUTTON.contains(pos),
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if MATRIX_BUTTON.contains(pos) => {
+                self.matrix_open = !self.matrix_open;
+                return true;
+            }
+            _ => {}
         }
         if self.footer.event(event, host) {
             return true;
@@ -1249,18 +1299,32 @@ impl View for DelayView {
         if let Some(h) = hole {
             cx.begin_glow_hole(h);
         }
+        let matrix_hole = self.matrix_open.then(|| RoundedRect::from_rect(MATRIX_PANEL, 12.0));
+        if let Some(h) = matrix_hole {
+            cx.begin_glow_hole(h);
+        }
         self.draw_echoes(cx, &s);
         self.draw_eq(cx, &s);
         self.draw_groups(cx, &s);
         for k in self.knobs.iter().chain(&self.tap_knobs) {
             k.draw(cx);
+            if let Some((lo, hi, live)) = knob_modulation(cx.host, &TARGETS, &self.shared.matrix, &k.id) {
+                k.draw_modulation(cx, (lo, hi), live);
+            }
         }
         self.draw_meters(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
         self.footer.draw_frame(cx);
         self.footer.draw_controls(cx);
+        draw_matrix_button(cx, MATRIX_BUTTON, self.matrix_open, self.matrix_button_hot, active_routes(cx.host));
+        if matrix_hole.is_some() {
+            cx.end_glow_hole();
+        }
         if hole.is_some() {
             cx.end_glow_hole();
+        }
+        if self.matrix_open {
+            self.matrix.draw(cx, &self.shared.matrix);
         }
         self.draw_menu(cx);
         self.session.draw_menu(cx);
@@ -1304,6 +1368,6 @@ impl View for DelayView {
             }
         }
         let spectrum = self.spectrum.update(&self.shared, f64::from(dt));
-        fresh || spectrum || busy || self.meters.iter().any(|&m| m > SILENT + 1.0)
+        fresh || spectrum || busy || self.matrix_open || self.meters.iter().any(|&m| m > SILENT + 1.0)
     }
 }

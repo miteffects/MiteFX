@@ -29,6 +29,8 @@ pub struct SatShared {
     /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
     pub snapshots: Arc<Snapshots>,
     pub preset: Arc<CurrentPreset>,
+    /// The modulation matrix now (sources, LFO places, offsets).
+    pub matrix: mite_core::modmatrix::MatrixTap,
 }
 
 impl SatShared {
@@ -45,6 +47,7 @@ impl SatShared {
             latency: AtomicF32::new(mite_dsp::oversample::Oversampler::latency_for(2) as f32),
             snapshots,
             preset,
+            matrix: mite_core::modmatrix::MatrixTap::new(),
         }
     }
 }
@@ -58,6 +61,7 @@ impl Default for SatShared {
 pub struct MiteSat {
     params: Arc<SatParams>,
     engine: SatEngine,
+    matrix: mite_plugin::matrix::MatrixRunner,
     shared: Arc<SatShared>,
     /// The latency last reported to the host, samples.
     reported_latency: u32,
@@ -75,7 +79,7 @@ impl Default for MiteSat {
         let params = Arc::new(SatParams::default());
         let engine = SatEngine::new(48_000.0, params.factor(), &params.settings());
         let shared = Arc::new(SatShared::with_stores(params.snapshots.clone(), params.preset.clone()));
-        Self { params, engine, shared, reported_latency: 0 }
+        Self { params, engine, matrix: Default::default(), shared, reported_latency: 0 }
     }
 }
 
@@ -113,6 +117,7 @@ impl Plugin for MiteSat {
         let settings = self.params.settings();
         self.engine.prepare(config.sample_rate, self.params.factor(), &settings, &self.output());
         self.shared.sample_rate.store(config.sample_rate);
+        self.matrix.prepare(config.sample_rate, config.max_buffer_size as usize);
         self.reported_latency = self.engine.latency() as u32;
         context.set_latency_samples(self.reported_latency);
         self.shared.latency.store(self.reported_latency as f32);
@@ -123,12 +128,24 @@ impl Plugin for MiteSat {
         let settings = self.params.settings();
         let output = self.output();
         self.engine.reset(&settings, &output);
+        self.matrix.reset();
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
-        let settings = self.params.settings();
-        let output = self.output();
-        self.engine.process(buffer.as_slice(), &settings, self.params.factor(), &output, &self.shared.history, Some([&self.shared.spectrum, &self.shared.post]));
+        let t = context.transport();
+        let transport = mite_dsp::modulation::Transport { tempo: t.tempo.filter(|v| v.is_finite() && *v > 0.0), beats: t.pos_beats(), playing: t.playing };
+        let (settings, output, factor) = (self.params.settings(), self.output(), self.params.factor());
+        let ms = self.params.matrix.settings();
+        let (engine, shared) = (&mut self.engine, &self.shared);
+        self.matrix.run(&ms, &transport, buffer.as_slice(), None, &self.shared.matrix, params::MOD_TARGETS.len(), |sub, _, offsets| {
+            if offsets.iter().any(|o| *o != 0.0) {
+                let (mut s, mut out) = (settings, output);
+                params::modulate_settings(&mut s, &mut out, offsets);
+                engine.process(sub, &s, factor, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
+            } else {
+                engine.process(sub, &settings, factor, &output, &shared.history, Some([&shared.spectrum, &shared.post]));
+            }
+        });
         // An oversampling change switched the latency behind its dip: tell the host.
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {

@@ -6,6 +6,9 @@ use assert_no_alloc::assert_no_alloc as process_wrapper;
 use mite_core::{HistoryTap, SpectrumTap};
 use mite_dsp::sat::{Model, SatSettings};
 use mite_sat::dsp::{record, Output, SatEngine};
+use mite_core::modmatrix::MatrixTap;
+use mite_dsp::modmatrix::{MatrixSettings, Slot, Source};
+use mite_plugin::matrix::MatrixRunner;
 
 #[test]
 fn engine_process_never_allocates() {
@@ -16,6 +19,9 @@ fn engine_process_never_allocates() {
     let spectrum = SpectrumTap::new(8192);
     let mut engine = SatEngine::new(sr, 2, &s);
     let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
+    let mut runner = MatrixRunner::default();
+    runner.prepare(sr, 256);
+    let tap = MatrixTap::new();
     for i in 0..2400 {
         // Everything switching all along: bands made and removed, models, drive to and from 0
         // (bands waking up), bypass, solo and mute, oversampling, auto gain and the output stage.
@@ -44,8 +50,23 @@ fn engine_process_never_allocates() {
             *b = -x * 0.7;
         }
         let block = if i % 3 == 0 { 256 } else { 100 };
+        // Through the matrix, routed half the time (a drive, a crossover, the output).
+        let mut ms = MatrixSettings::default();
+        if (i / 70) % 2 == 1 {
+            ms.slots[0] = Slot { source: Source::Lfo1, target: 1, amount: 0.5 };
+            ms.slots[1] = Slot { source: Source::Envelope, target: 38, amount: -0.3 };
+            ms.slots[2] = Slot { source: Source::Lfo2, target: 43, amount: 0.2 };
+        }
         process_wrapper(|| {
-            engine.process(&mut [&mut l[..block], &mut r[..block]], &s, factor, &out, &history, Some([&spectrum, &spectrum]));
+            runner.run(&ms, &mite_dsp::modulation::Transport::default(), &mut [&mut l[..block], &mut r[..block]], None, &tap, 44, |sub, _, offsets| {
+                if offsets.iter().any(|o| *o != 0.0) {
+                    let (mut sm, mut om) = (s, out);
+                    mite_sat::params::modulate_settings(&mut sm, &mut om, offsets);
+                    engine.process(sub, &sm, factor, &om, &history, Some([&spectrum, &spectrum]));
+                } else {
+                    engine.process(sub, &s, factor, &out, &history, Some([&spectrum, &spectrum]));
+                }
+            });
         });
         if i % 50 == 0 {
             process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, factor, &out, &history, Some([&spectrum, &spectrum])));

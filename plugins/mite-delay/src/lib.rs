@@ -27,6 +27,8 @@ pub struct DelayShared {
     /// The host's tempo (bpm; 120 until a host says), for synced taps in the editor.
     pub tempo: AtomicF32,
     pub snapshots: Arc<Snapshots>,
+    /// The modulation matrix now (sources, LFO places, offsets).
+    pub matrix: mite_core::modmatrix::MatrixTap,
     pub preset: Arc<CurrentPreset>,
 }
 
@@ -36,7 +38,7 @@ impl DelayShared {
     }
 
     pub fn with_stores(snapshots: Arc<Snapshots>, preset: Arc<CurrentPreset>) -> Self {
-        Self { history: HistoryTap::new(HISTORY_RECORDS), spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), wet: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), sample_rate: AtomicF32::new(48_000.0), tempo: AtomicF32::new(DEFAULT_TEMPO), snapshots, preset }
+        Self { history: HistoryTap::new(HISTORY_RECORDS), spectrum: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), wet: SpectrumTap::new(mite_dsp::analyzer::ANALYZER_SIZE), sample_rate: AtomicF32::new(48_000.0), tempo: AtomicF32::new(DEFAULT_TEMPO), snapshots, preset, matrix: mite_core::modmatrix::MatrixTap::new() }
     }
 }
 
@@ -52,6 +54,7 @@ pub const DEFAULT_TEMPO: f32 = 120.0;
 pub struct MiteDelay {
     params: Arc<DelayParams>,
     engine: DelayEngine,
+    matrix: mite_plugin::matrix::MatrixRunner,
     shared: Arc<DelayShared>,
 }
 
@@ -60,9 +63,12 @@ impl Default for MiteDelay {
         let params = Arc::new(DelayParams::default());
         let engine = DelayEngine::new(48_000.0, &params.settings(DEFAULT_TEMPO), &params.output());
         let shared = Arc::new(DelayShared::with_stores(params.snapshots.clone(), params.preset.clone()));
-        Self { params, engine, shared }
+        Self { params, engine, matrix: Default::default(), shared }
     }
 }
+
+/// 1 → 2 (2026-11-05): the modulation matrix, new and empty by default: nothing to change.
+fn migrate_v1_to_v2(_state: &mut PluginState) {}
 
 impl MiteDelay {
     fn tempo(&self) -> f32 {
@@ -88,7 +94,7 @@ impl Plugin for MiteDelay {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate_v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -103,20 +109,30 @@ impl Plugin for MiteDelay {
     fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {
         self.engine.prepare(config.sample_rate, &self.params.settings(self.tempo()), &self.params.output());
         self.shared.sample_rate.store(config.sample_rate);
+        self.matrix.prepare(config.sample_rate, config.max_buffer_size as usize);
         context.set_latency_samples(0);
         true
     }
 
     fn reset(&mut self) {
         self.engine.reset(&self.params.settings(self.tempo()), &self.params.output());
+        self.matrix.reset();
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
-        if let Some(bpm) = context.transport().tempo.filter(|t| t.is_finite() && *t > 0.0) {
+        let t = context.transport();
+        let host_tempo = t.tempo.filter(|v| v.is_finite() && *v > 0.0);
+        if let Some(bpm) = host_tempo {
             self.shared.tempo.store(bpm as f32);
         }
-        let (settings, out) = (self.params.settings(self.tempo()), self.params.output());
-        self.engine.process(buffer.as_slice(), &settings, &out, &self.shared.history, Some([&self.shared.spectrum, &self.shared.wet]));
+        let transport = mite_dsp::modulation::Transport { tempo: host_tempo, beats: t.pos_beats(), playing: t.playing };
+        let tempo = self.tempo();
+        let ms = self.params.matrix.settings();
+        let (params, engine, shared) = (&self.params, &mut self.engine, &self.shared);
+        self.matrix.run(&ms, &transport, buffer.as_slice(), None, &self.shared.matrix, params::MOD_TARGETS.len(), |sub, _, offsets| {
+            let (settings, out) = if offsets.iter().any(|o| *o != 0.0) { params.modulated(tempo, offsets) } else { (params.settings(tempo), params.output()) };
+            engine.process(sub, &settings, &out, &shared.history, Some([&shared.spectrum, &shared.wet]));
+        });
         // Echoes ring on after the input stops.
         ProcessStatus::KeepAlive
     }

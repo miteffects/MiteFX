@@ -205,6 +205,37 @@ impl Knob {
         );
     }
 
+    /// What the modulation matrix does to this dial: an arc just outside the ticks over its reach
+    /// (`lo`…`hi`, shares of the travel from where the dial sits) and a dot where it plays now
+    /// (`live`). Call after [`Knob::draw`].
+    pub fn draw_modulation(&self, cx: &mut DrawCx<'_>, reach: (f32, f32), live: f32) {
+        let s = self.scale();
+        let color = self.color.unwrap_or(cx.theme.accent);
+        let base = cx.host.normalized(&self.id);
+        let at = |off: f32| {
+            let n = (base + off).clamp(0.0, 1.0);
+            let p = match self.curve {
+                Some(c) => c.to_position(cx.host.plain(&self.id, n)),
+                None => n,
+            };
+            -SWEEP_DEG / 2.0 + SWEEP_DEG * f64::from(p)
+        };
+        let (d0, d1) = (at(reach.0), at(reach.1));
+        let steps = (((d1 - d0).abs() / 4.0).ceil() as usize).max(1);
+        let mut arc = BezPath::new();
+        for i in 0..=steps {
+            let p = self.point(d0 + (d1 - d0) * i as f64 / steps as f64, 33.0);
+            if i == 0 {
+                arc.move_to(p);
+            } else {
+                arc.line_to(p);
+            }
+        }
+        cx.scene.stroke(&Stroke::new(2.0 * s).with_caps(vello::kurbo::Cap::Round), vello::kurbo::Affine::IDENTITY, color.multiply_alpha(0.45), None, &arc);
+        let dot = Circle::new(self.point(at(live), 33.0), 2.6 * s);
+        cx.scene.fill(Fill::NonZero, vello::kurbo::Affine::IDENTITY, cx.theme.text_strong, None, &dot);
+    }
+
     /// Handles input. Returns `true` when the knob needs a redraw.
     pub fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         let id = self.id.as_str();

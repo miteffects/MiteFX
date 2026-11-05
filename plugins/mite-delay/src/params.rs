@@ -13,7 +13,11 @@ use nih_plug::prelude::*;
 use crate::dsp::Output;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 1 (2026-11-04): the four taps, the machines, the loop EQ.
+/// - 2 (2026-11-05): the modulation matrix (`mite_core::modmatrix`: `lfo{N}_*`, `env_*`,
+///   `m{N}_*`), appended; older states get it empty.
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -89,6 +93,31 @@ pub fn nearest_note(ms: f32, tempo: f32) -> usize {
     (0..NOTES.len()).min_by(|&a, &b| (note_ms(a, tempo).ln() - target).abs().total_cmp(&(note_ms(b, tempo).ln() - target).abs())).unwrap_or(QUARTER)
 }
 
+/// What the modulation matrix can move (`m{N}_dst`): frozen, append only. A tap's time moves the
+/// time it plays (a synced note's too).
+pub static MOD_TARGETS: [&str; 43] = [
+    "None", "Drive", "Modulation", "Modulation Rate", "Diffusion", "Width", "Ducking", "Mix", "Output",
+    "Tap 1 Time", "Tap 1 Level", "Tap 1 Feedback", "Tap 1 Pan",
+    "Tap 2 Time", "Tap 2 Level", "Tap 2 Feedback", "Tap 2 Pan",
+    "Tap 3 Time", "Tap 3 Level", "Tap 3 Feedback", "Tap 3 Pan",
+    "Tap 4 Time", "Tap 4 Level", "Tap 4 Feedback", "Tap 4 Pan",
+    "Band 1 Freq", "Band 1 Gain", "Band 1 Q", "Band 2 Freq", "Band 2 Gain", "Band 2 Q",
+    "Band 3 Freq", "Band 3 Gain", "Band 3 Q", "Band 4 Freq", "Band 4 Gain", "Band 4 Q",
+    "Band 5 Freq", "Band 5 Gain", "Band 5 Q", "Band 6 Freq", "Band 6 Gain", "Band 6 Q",
+];
+pub static MOD_TARGET_IDS: [&str; 43] = [
+    "none", "drive", "mod_depth", "mod_rate", "diffusion", "width", "duck", "mix", "out_gain",
+    "t1_time", "t1_level", "t1_feedback", "t1_pan",
+    "t2_time", "t2_level", "t2_feedback", "t2_pan",
+    "t3_time", "t3_level", "t3_feedback", "t3_pan",
+    "t4_time", "t4_level", "t4_feedback", "t4_pan",
+    "e1_freq", "e1_gain", "e1_q", "e2_freq", "e2_gain", "e2_q",
+    "e3_freq", "e3_gain", "e3_q", "e4_freq", "e4_gain", "e4_q",
+    "e5_freq", "e5_gain", "e5_q", "e6_freq", "e6_gain", "e6_q",
+];
+pub const TARGETS: mite_core::modmatrix::Targets = mite_core::modmatrix::Targets { names: &MOD_TARGETS, ids: &MOD_TARGET_IDS };
+pub const M_DST: ChoiceSpec = ChoiceSpec { id: "dst", name: "Target", choices: &MOD_TARGETS, default: 0 };
+
 const CONTINUOUS: [ParamSpec; 11] = [DRIVE, MOD_DEPTH, MOD_RATE, DIFFUSION, WIDTH, DUCK, DUCK_THRESH, DUCK_RELEASE, MIX, OUT_GAIN, T_TIME];
 
 /// Every parameter's manifest line, in host order.
@@ -107,6 +136,7 @@ pub fn manifest() -> String {
         let prefix = |line: String| format!("e{}_{line}", b + 1);
         lines.extend([E_ON.manifest_line(), E_TYPE.manifest_line(), E_FREQ.manifest_line(), E_GAIN.manifest_line(), E_Q.manifest_line(), E_SLOPE.manifest_line()].map(prefix));
     }
+    lines.extend(mite_core::modmatrix::manifest_lines(&M_DST, false));
     lines.join("\n") + "\n"
 }
 
@@ -141,6 +171,9 @@ fn split_id(id: &str) -> Option<(char, usize, &str)> {
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
     if let Some(s) = CONTINUOUS[..10].iter().find(|s| s.id == id) {
         return Some(*s);
+    }
+    if let Some(s) = mite_core::modmatrix::spec_for(id) {
+        return Some(s);
     }
     match split_id(id)? {
         ('t', _, "time") => Some(T_TIME),
@@ -232,6 +265,7 @@ pub struct DelayParams {
     pub bypass: BoolParam,
     pub taps: [TapParams; TAPS],
     pub bands: [BandParams; LOOP_BANDS],
+    pub matrix: mite_plugin::matrix::MatrixParams,
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -255,10 +289,35 @@ impl Default for DelayParams {
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()),
             taps: std::array::from_fn(TapParams::new),
             bands: std::array::from_fn(BandParams::new),
+            matrix: mite_plugin::matrix::MatrixParams::new(&M_DST, false),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
     }
+}
+
+/// The settings and output from plain values by id at `tempo`, with the matrix's `offsets` (one
+/// per target) applied: each target moved along its knob; a tap's time moves the time it plays
+/// (a synced note's too), along the time knob.
+pub fn modulated_settings(p: impl Fn(&str) -> f32, tempo: f32, offsets: &[f32]) -> (DelaySettings, Output) {
+    let off = |id: &str| TARGETS.index(id).and_then(|t| offsets.get(t).copied()).unwrap_or(0.0);
+    let at = |id: &str| {
+        let v = p(id);
+        let o = off(id);
+        if o == 0.0 || id.ends_with("_time") {
+            return v;
+        }
+        spec_for(id).map_or(v, |spec| mite_core::modmatrix::modulate(&spec, v, o))
+    };
+    let mut s = delay_settings(at, tempo);
+    for (t, tap) in s.taps.iter_mut().enumerate() {
+        let o = off(&tap_id(t, T_TIME.id));
+        if o != 0.0 {
+            tap.time_ms = mite_core::modmatrix::modulate(&T_TIME, tap.time_ms, o);
+        }
+    }
+    let out = Output { mix: at(MIX.id) / 100.0, gain_db: at(OUT_GAIN.id), bypass: p(BYPASS.id) >= 0.5 };
+    (s, out)
 }
 
 /// The engine's settings from plain values by id at `tempo` (bpm; the plugin and the editor's
@@ -303,7 +362,7 @@ pub fn delay_settings(p: impl Fn(&str) -> f32, tempo: f32) -> DelaySettings {
 }
 
 impl DelayParams {
-    fn plain(&self, id: &str) -> f32 {
+    pub fn plain(&self, id: &str) -> f32 {
         let f = |p: &FloatParam| p.value();
         let flag = |p: &BoolParam| f32::from(u8::from(p.value()));
         let int = |p: &IntParam| p.value() as f32;
@@ -317,6 +376,9 @@ impl DelayParams {
             "duck" => f(&self.duck),
             "duck_thresh" => f(&self.duck_thresh),
             "duck_release" => f(&self.duck_release),
+            "mix" => f(&self.mix),
+            "out_gain" => f(&self.out_gain),
+            "bypass" => flag(&self.bypass),
             _ => match split_id(id) {
                 Some(('t', t, short)) => {
                     let tap = &self.taps[t];
@@ -355,6 +417,11 @@ impl DelayParams {
 
     pub fn output(&self) -> Output {
         Output { mix: self.mix.value() / 100.0, gain_db: self.out_gain.value(), bypass: self.bypass.value() }
+    }
+
+    /// The settings and output with the matrix's `offsets` (one per target) applied.
+    pub fn modulated(&self, tempo: f32, offsets: &[f32]) -> (DelaySettings, Output) {
+        modulated_settings(|id| self.plain(id), tempo, offsets)
     }
 }
 
@@ -406,6 +473,7 @@ unsafe impl Params for DelayParams {
                 map.push((band_id(b, id), ptr, "Loop EQ".to_owned()));
             }
         }
+        self.matrix.param_map(&mut map);
         map
     }
 }

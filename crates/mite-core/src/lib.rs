@@ -5,6 +5,7 @@
 //! host parameters; tests turn them into the frozen golden manifest (BLUEPRINT §5 rule 5).
 
 pub mod handover;
+pub mod modmatrix;
 pub mod param;
 pub mod presets;
 pub mod registry;

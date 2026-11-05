@@ -18,7 +18,9 @@ use crate::dsp::Output;
 ///   `rotor`, `balance` and `inertia`, appended.
 /// - 3 (2026-11-05): the micro pitch shifter, appended to `mode` (snapshots re-normalised again),
 ///   and its `detune`, appended.
-pub const STATE_VERSION: u32 = 3;
+/// - 4 (2026-11-05): the modulation matrix (`mite_core::modmatrix`: `lfo{N}_*`, `env_*`,
+///   `m{N}_*`), appended; older states get it empty.
+pub const STATE_VERSION: u32 = 4;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -74,10 +76,16 @@ pub const HIGH_CUT: ParamSpec = spec("high_cut", "High Cut", "Hz", 1000.0, 20_00
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 
+/// What the modulation matrix can move (`m{N}_dst`): frozen, append only.
+pub static MOD_TARGETS: [&str; 16] = ["None", "Rate", "Depth", "Spread", "Feedback", "Delay", "Manual", "Centre", "Mix", "Width", "Low Cut", "High Cut", "Output", "Balance", "Inertia", "Detune"];
+pub static MOD_TARGET_IDS: [&str; 16] = ["none", "rate", "depth", "spread", "feedback", "delay", "manual", "centre", "mix", "width", "low_cut", "high_cut", "out_gain", "balance", "inertia", "detune"];
+pub const TARGETS: mite_core::modmatrix::Targets = mite_core::modmatrix::Targets { names: &MOD_TARGETS, ids: &MOD_TARGET_IDS };
+pub const M_DST: ChoiceSpec = ChoiceSpec { id: "dst", name: "Target", choices: &MOD_TARGETS, default: 0 };
+
 const CONTINUOUS: [ParamSpec; 15] = [RATE, DEPTH, SPREAD, FEEDBACK, DELAY, MANUAL, CENTRE, MIX, WIDTH, LOW_CUT, HIGH_CUT, OUT_GAIN, BALANCE, INERTIA, DETUNE];
 
 pub fn manifest() -> String {
-    [
+    let mut lines = vec![
         MODE.manifest_line(),
         RATE.manifest_line(),
         SYNC.manifest_line(),
@@ -102,9 +110,9 @@ pub fn manifest() -> String {
         BALANCE.manifest_line(),
         INERTIA.manifest_line(),
         DETUNE.manifest_line(),
-    ]
-    .join("\n")
-        + "\n"
+    ];
+    lines.extend(mite_core::modmatrix::manifest_lines(&M_DST, false));
+    lines.join("\n") + "\n"
 }
 
 pub fn ids() -> Vec<String> {
@@ -122,7 +130,7 @@ pub fn sound_ids() -> Vec<String> {
 
 /// Every continuous spec by its id, for stand-in hosts.
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
-    CONTINUOUS.iter().find(|s| s.id == id).copied()
+    CONTINUOUS.iter().find(|s| s.id == id).copied().or_else(|| mite_core::modmatrix::spec_for(id))
 }
 
 pub struct ModParams {
@@ -150,6 +158,7 @@ pub struct ModParams {
     pub balance: FloatParam,
     pub inertia: FloatParam,
     pub detune: FloatParam,
+    pub matrix: mite_plugin::matrix::MatrixParams,
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -185,6 +194,7 @@ impl Default for ModParams {
             balance: float_param(&BALANCE),
             inertia: float_param(&INERTIA),
             detune: float_param(&DETUNE),
+            matrix: mite_plugin::matrix::MatrixParams::new(&M_DST, false),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -220,8 +230,21 @@ pub fn mod_settings(p: impl Fn(&str) -> f32) -> ModSettings {
     }
 }
 
+/// The settings and output from plain values by id, with the matrix's `offsets` (one per target)
+/// applied: each target moved along its knob (`mite_core::modmatrix::modulate`).
+pub fn modulated_settings(p: impl Fn(&str) -> f32, offsets: &[f32]) -> (ModSettings, Output) {
+    let at = |id: &str| {
+        let v = p(id);
+        match TARGETS.index(id) {
+            Some(t) if offsets.get(t).is_some_and(|o| *o != 0.0) => spec_for(id).map_or(v, |spec| mite_core::modmatrix::modulate(&spec, v, offsets[t])),
+            _ => v,
+        }
+    };
+    (mod_settings(at), Output { gain_db: at(OUT_GAIN.id), bypass: p(BYPASS.id) >= 0.5 })
+}
+
 impl ModParams {
-    fn plain(&self, id: &str) -> f32 {
+    pub fn plain(&self, id: &str) -> f32 {
         let flag = |p: &BoolParam| f32::from(u8::from(p.value()));
         match id {
             "mode" => self.mode.value() as f32,
@@ -246,6 +269,8 @@ impl ModParams {
             "balance" => self.balance.value(),
             "inertia" => self.inertia.value(),
             "detune" => self.detune.value(),
+            "out_gain" => self.out_gain.value(),
+            "bypass" => f32::from(u8::from(self.bypass.value())),
             _ => 0.0,
         }
     }
@@ -256,6 +281,11 @@ impl ModParams {
 
     pub fn output(&self) -> Output {
         Output { gain_db: self.out_gain.value(), bypass: self.bypass.value() }
+    }
+
+    /// The settings and output with the matrix's `offsets` (one per target) applied.
+    pub fn modulated(&self, offsets: &[f32]) -> (ModSettings, Output) {
+        modulated_settings(|id| self.plain(id), offsets)
     }
 }
 
@@ -273,7 +303,7 @@ unsafe impl Params for ModParams {
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
         let p = |id: &str, ptr: ParamPtr, group: &str| (id.to_owned(), ptr, group.to_owned());
-        vec![
+        let mut map = vec![
             p(MODE.id, self.mode.as_ptr(), ""),
             p(RATE.id, self.rate.as_ptr(), "Motion"),
             p(SYNC.id, self.sync.as_ptr(), "Motion"),
@@ -298,6 +328,8 @@ unsafe impl Params for ModParams {
             p(BALANCE.id, self.balance.as_ptr(), "Mode"),
             p(INERTIA.id, self.inertia.as_ptr(), "Mode"),
             p(DETUNE.id, self.detune.as_ptr(), "Mode"),
-        ]
+        ];
+        self.matrix.param_map(&mut map);
+        map
     }
 }

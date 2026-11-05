@@ -62,6 +62,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             host.set_plain("depth", 30.0);
             host.set_plain("rate", 0.4);
         }
+        Ok("matrix") => {
+            host.set_plain("m1_src", 1.0);
+            host.set_plain("m1_dst", 8.0);
+            host.set_plain("m1_amt", 40.0);
+            host.set_plain("m2_src", 3.0);
+            host.set_plain("m2_dst", 2.0);
+            host.set_plain("m2_amt", -60.0);
+            host.set_plain("lfo1_rate", 0.7);
+            host.set_plain("lfo2_shape", 5.0);
+            host.set_plain("lfo2_sync", 1.0);
+        }
         Ok("synced") => {
             host.set_plain("sync", 1.0);
             host.set_plain("shape", 5.0);
@@ -79,6 +90,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = ModEngine::new(fs as f32, &s, &out);
     let x = riff::riff(6.0, fs);
     let rotary = std::env::var("SNAPSHOT_VARIANT").as_deref() == Ok("rotary");
+    let matrix = std::env::var("SNAPSHOT_VARIANT").as_deref() == Ok("matrix");
+    let ms = mite_plugin::matrix::matrix_settings(|id| mite_ui::ParamHost::plain(&host, id, mite_ui::ParamHost::normalized(&host, id)));
+    let mut runner = mite_plugin::matrix::MatrixRunner::default();
+    runner.prepare(fs as f32, 480);
     for (k, block) in x.chunks(480).enumerate() {
         let (mut l, mut r) = (block.to_vec(), vec![0.0f32; block.len()]);
         let fast = mite_dsp::modulation::ModSettings { rotor: mite_dsp::modulation::Rotor::Fast, ..s };
@@ -86,12 +101,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if rotary && k * 480 == 3 * 48_000 {
             host.set_plain("rotor", 1.0);
         }
+        if matrix {
+            let p = |id: &str| mite_ui::ParamHost::plain(&host, id, mite_ui::ParamHost::normalized(&host, id));
+            runner.run(&ms, &mite_dsp::modulation::Transport::default(), &mut [&mut l, &mut r], None, &shared.matrix, 16, |sub, _, offsets| {
+                let (s, out) = mite_mod::params::modulated_settings(p, offsets);
+                engine.process(sub, false, &s, &out, &mite_dsp::modulation::Transport::default(), &shared.history);
+            });
+            continue;
+        }
         engine.process(&mut [&mut l, &mut r], false, &s, &out, &mite_dsp::modulation::Transport::default(), &shared.history);
     }
     let mut view = ModView::new(shared.clone());
     view.tick(&host);
     let theme_obj = Theme::load(theme, ACCENT);
     render_view(&mut view, &host, &theme_obj, 1.0)?;
+    if matrix {
+        let b = view.matrix_button().center();
+        view.event(&UiEvent::PointerDown { pos: b, button: mite_ui::MouseButton::Left, mods: Modifiers::default() }, &host);
+    }
     if let Ok(p) = std::env::var("SNAPSHOT_HOVER") {
         if let Some((x, y)) = p.split_once(',') {
             view.event(&UiEvent::PointerMove { pos: Point::new(x.trim().parse()?, y.trim().parse()?), mods: Modifiers::default() }, &host);

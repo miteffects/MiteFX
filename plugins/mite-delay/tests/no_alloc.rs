@@ -5,6 +5,9 @@ use mite_core::{HistoryTap, SpectrumTap};
 use mite_delay::dsp::{record, DelayEngine, Output};
 use mite_dsp::delay::{DelaySettings, Mode, TapSettings};
 use mite_dsp::eq::{BandSettings, BandType};
+use mite_core::modmatrix::MatrixTap;
+use mite_dsp::modmatrix::{MatrixSettings, Slot, Source};
+use mite_plugin::matrix::MatrixRunner;
 
 #[test]
 fn engine_process_never_allocates() {
@@ -14,6 +17,9 @@ fn engine_process_never_allocates() {
     let mut engine = DelayEngine::new(sr, &s, &Output::default());
     let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
     let taps = [SpectrumTap::new(8192), SpectrumTap::new(8192)];
+    let mut runner = MatrixRunner::default();
+    runner.prepare(sr, 256);
+    let tap = MatrixTap::new();
     for i in 0..1600 {
         s.mode = Mode::from_index((i / 40) % 3);
         s.taps[0].time_ms = [10.0, 250.0, 5000.0][(i / 70) % 3];
@@ -32,7 +38,18 @@ fn engine_process_never_allocates() {
             *b = -x * 0.7;
         }
         let block = if i % 3 == 0 { 256 } else { 100 };
-        process_wrapper(|| engine.process(&mut [&mut l[..block], &mut r[..block]], &s, &out, &history, Some([&taps[0], &taps[1]])));
+        // Through the matrix, routed half the time.
+        let mut ms = MatrixSettings::default();
+        if (i / 60) % 2 == 1 {
+            ms.slots[0] = Slot { source: Source::Lfo1, target: 10, amount: 0.4 };
+            ms.slots[1] = Slot { source: Source::Envelope, target: 9, amount: -0.2 };
+        }
+        process_wrapper(|| {
+            runner.run(&ms, &mite_dsp::modulation::Transport::default(), &mut [&mut l[..block], &mut r[..block]], None, &tap, 43, |sub, _, offsets| {
+                let s = if offsets.iter().any(|o| *o != 0.0) { DelaySettings { drive: (s.drive + offsets[1]).clamp(0.0, 1.0), ..s } } else { s };
+                engine.process(sub, &s, &out, &history, Some([&taps[0], &taps[1]]));
+            })
+        });
         if i % 50 == 0 {
             process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, &out, &history, None));
         }

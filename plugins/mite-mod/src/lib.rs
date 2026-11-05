@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
+use mite_core::modmatrix::MatrixTap;
 use mite_core::{AtomicF32, HistoryTap};
 use mite_dsp::modulation::Transport;
 use nih_plug::prelude::*;
@@ -26,6 +27,8 @@ pub struct ModShared {
     pub tempo: AtomicF32,
     pub snapshots: Arc<Snapshots>,
     pub preset: Arc<CurrentPreset>,
+    /// The modulation matrix now (sources, LFO places, offsets).
+    pub matrix: MatrixTap,
 }
 
 impl ModShared {
@@ -34,7 +37,7 @@ impl ModShared {
     }
 
     pub fn with_stores(snapshots: Arc<Snapshots>, preset: Arc<CurrentPreset>) -> Self {
-        Self { history: HistoryTap::new(HISTORY_RECORDS), sample_rate: AtomicF32::new(48_000.0), tempo: AtomicF32::new(0.0), snapshots, preset }
+        Self { history: HistoryTap::new(HISTORY_RECORDS), sample_rate: AtomicF32::new(48_000.0), tempo: AtomicF32::new(0.0), snapshots, preset, matrix: MatrixTap::new() }
     }
 }
 
@@ -47,6 +50,7 @@ impl Default for ModShared {
 pub struct MiteMod {
     params: Arc<ModParams>,
     engine: ModEngine,
+    matrix: mite_plugin::matrix::MatrixRunner,
     shared: Arc<ModShared>,
     stereo_in: bool,
     reported_latency: u32,
@@ -57,7 +61,7 @@ impl Default for MiteMod {
         let params = Arc::new(ModParams::default());
         let engine = ModEngine::new(48_000.0, &params.settings(), &params.output());
         let shared = Arc::new(ModShared::with_stores(params.snapshots.clone(), params.preset.clone()));
-        Self { params, engine, shared, stereo_in: true, reported_latency: 0 }
+        Self { params, engine, matrix: Default::default(), shared, stereo_in: true, reported_latency: 0 }
     }
 }
 
@@ -79,7 +83,7 @@ impl Plugin for MiteMod {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3, migrate::v3_to_v4]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -94,6 +98,7 @@ impl Plugin for MiteMod {
     fn initialize(&mut self, layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {
         self.stereo_in = layout.main_input_channels.map_or(0, NonZeroU32::get) >= 2;
         self.engine.prepare(config.sample_rate, &self.params.settings(), &self.params.output());
+        self.matrix.prepare(config.sample_rate, config.max_buffer_size as usize);
         self.shared.sample_rate.store(config.sample_rate);
         self.reported_latency = self.engine.latency() as u32;
         context.set_latency_samples(self.reported_latency);
@@ -102,6 +107,7 @@ impl Plugin for MiteMod {
 
     fn reset(&mut self) {
         self.engine.reset(&self.params.settings(), &self.params.output());
+        self.matrix.reset();
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
@@ -109,8 +115,13 @@ impl Plugin for MiteMod {
         let tempo = t.tempo.filter(|v| v.is_finite() && *v > 0.0);
         let transport = Transport { tempo, beats: t.pos_beats(), playing: t.playing };
         self.shared.tempo.store(tempo.unwrap_or(0.0) as f32);
-        let (s, out) = (self.params.settings(), self.params.output());
-        self.engine.process(buffer.as_slice(), self.stereo_in, &s, &out, &transport, &self.shared.history);
+        let ms = self.params.matrix.settings();
+        let fs = f64::from(self.shared.sample_rate.load());
+        let (params, engine, shared, stereo_in) = (&self.params, &mut self.engine, &self.shared, self.stereo_in);
+        self.matrix.run(&ms, &transport, buffer.as_slice(), None, &self.shared.matrix, params::MOD_TARGETS.len(), |sub, r, offsets| {
+            let (s, out) = if offsets.iter().any(|o| *o != 0.0) { params.modulated(offsets) } else { (params.settings(), params.output()) };
+            engine.process(sub, stereo_in, &s, &out, &dsp::transport_at(&transport, r.start, fs), &shared.history);
+        });
         // Through zero, vibrato or the rotary in or out: tell the host.
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {

@@ -78,3 +78,40 @@ e6_freq | Hz | 20 | 20000 | 1000 | Log
 e6_gain | dB | -24 | 24 | 0 | Linear
 e6_q |  | 0.1 | 10 | 0.70710677 | Log
 e6_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+lfo1_rate | Hz | 0.02 | 40 | 1 | Log
+lfo1_sync | bool | false
+lfo1_div | choice | 1/32, 1/16T, 1/16, 1/16D, 1/8T, 1/8, 1/8D, 1/4T, 1/4, 1/4D, 1/2T, 1/2, 1/2D, 1 bar, 2 bars, 4 bars | 8
+lfo1_shape | choice | Sine, Triangle, Saw up, Saw down, Square, Smooth random, Sample & hold | 0
+lfo1_phase | ° | 0 | 360 | 0 | Linear
+lfo2_rate | Hz | 0.02 | 40 | 1 | Log
+lfo2_sync | bool | false
+lfo2_div | choice | 1/32, 1/16T, 1/16, 1/16D, 1/8T, 1/8, 1/8D, 1/4T, 1/4, 1/4D, 1/2T, 1/2, 1/2D, 1 bar, 2 bars, 4 bars | 8
+lfo2_shape | choice | Sine, Triangle, Saw up, Saw down, Square, Smooth random, Sample & hold | 0
+lfo2_phase | ° | 0 | 360 | 0 | Linear
+env_att | ms | 0.1 | 500 | 10 | Log
+env_rel | ms | 5 | 2000 | 200 | Log
+env_gain | dB | -24 | 24 | 0 | Linear
+m1_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m1_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m1_amt | % | -100 | 100 | 0 | Linear
+m2_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m2_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m2_amt | % | -100 | 100 | 0 | Linear
+m3_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m3_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m3_amt | % | -100 | 100 | 0 | Linear
+m4_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m4_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m4_amt | % | -100 | 100 | 0 | Linear
+m5_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m5_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m5_amt | % | -100 | 100 | 0 | Linear
+m6_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m6_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m6_amt | % | -100 | 100 | 0 | Linear
+m7_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m7_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m7_amt | % | -100 | 100 | 0 | Linear
+m8_src | choice | Off, LFO 1, LFO 2, Envelope | 0
+m8_dst | choice | None, Drive, Modulation, Modulation Rate, Diffusion, Width, Ducking, Mix, Output, Tap 1 Time, Tap 1 Level, Tap 1 Feedback, Tap 1 Pan, Tap 2 Time, Tap 2 Level, Tap 2 Feedback, Tap 2 Pan, Tap 3 Time, Tap 3 Level, Tap 3 Feedback, Tap 3 Pan, Tap 4 Time, Tap 4 Level, Tap 4 Feedback, Tap 4 Pan, Band 1 Freq, Band 1 Gain, Band 1 Q, Band 2 Freq, Band 2 Gain, Band 2 Q, Band 3 Freq, Band 3 Gain, Band 3 Q, Band 4 Freq, Band 4 Gain, Band 4 Q, Band 5 Freq, Band 5 Gain, Band 5 Q, Band 6 Freq, Band 6 Gain, Band 6 Q | 0
+m8_amt | % | -100 | 100 | 0 | Linear

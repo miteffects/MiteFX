@@ -228,3 +228,37 @@ fn micro_has_detune_and_delay_and_a_drag_sets_the_detune() {
     // The seven tiles fit left of the meters.
     assert!(view.pill(Pill::Mode(Mode::Micro)).x1 <= 1172.0);
 }
+
+#[test]
+fn the_matrix_opens_routes_a_target_and_sets_its_amount() {
+    let (mut view, host) = setup();
+    let button = view.matrix_button().center();
+    click(&mut view, &host, button);
+    let panel = view.matrix_panel().expect("open");
+    let target = panel.slot_target_rect(0).center();
+    click(&mut view, &host, target);
+    // The sheet: pick Mix (a fresh route listens to LFO 1 at 25 %).
+    let mix = MOD_TARGETS.iter().position(|t| *t == "Mix").expect("mix");
+    let cell = view.matrix_panel().expect("open").pick_rects()[mix].center();
+    click(&mut view, &host, cell);
+    assert_eq!(plain(&host, "m1_dst"), mix as f32);
+    assert_eq!(plain(&host, "m1_src"), 1.0);
+    assert_eq!(plain(&host, "m1_amt"), 25.0);
+    // The amount: drag across to the right end, double-click back to 0.
+    let bar = view.matrix_panel().expect("open").slot_amount_rect(0);
+    drag(&mut view, &host, bar.center(), Point::new(bar.x1 + 200.0, bar.center().y));
+    assert_eq!(plain(&host, "m1_amt"), 100.0);
+    view.event(&UiEvent::DoubleClick { pos: bar.center(), mods: MODS }, &host);
+    assert_eq!(plain(&host, "m1_amt"), 0.0);
+    // The source steps; an LFO's shape is picked from its card.
+    let src = view.matrix_panel().expect("open").slot_source_rect(0).center();
+    click(&mut view, &host, src);
+    assert_eq!(plain(&host, "m1_src"), 2.0);
+    let shape = view.matrix_panel().expect("open").shape_rect(1, mite_dsp::modmatrix::LfoShape::SampleHold).center();
+    click(&mut view, &host, shape);
+    assert_eq!(plain(&host, "lfo2_shape"), 6.0);
+    // Escape closes it; the routes stay.
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
+    assert!(view.matrix_panel().is_none());
+    assert_eq!(plain(&host, "m1_dst"), mix as f32);
+}

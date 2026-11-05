@@ -139,5 +139,7 @@ no allocation in `process`; every factory preset names only real sound parameter
    taps made (four at most) and removed, the tap menu (free and back without moving, ping-pong,
    remove), the pills, the wheel's pan, loop bands, the groups, selecting a tap. Not yet heard by
    the user.
-2. The modulation matrix (LFO, envelope follower, MIDI and XY sources), shared with Sat and Filter.
+2. (done 2026-11-05) The modulation matrix (two LFOs and an envelope follower; MIDI and XY sources
+   later), shared with Sat and Mod: targets the machine's dials, each tap's time (a synced note's
+   too), level, feedback and pan, and the loop bands' frequency, gain and Q. State 2.
 3. The granular/pitch smear stage; per-tap EQ on the spectrum display.

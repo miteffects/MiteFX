@@ -271,3 +271,20 @@ fn grabbing_another_tap_selects_it() {
     assert_eq!(view.selected(), 0);
     assert!(view.dial("t1_level").is_some() && view.dial("t2_level").is_none());
 }
+
+#[test]
+fn the_matrix_opens_and_routes_a_tap() {
+    let (mut view, host) = setup();
+    let button = view.matrix_button().center();
+    click(&mut view, &host, button, MouseButton::Left);
+    let target = view.matrix_panel().expect("open").slot_target_rect(3).center();
+    click(&mut view, &host, target, MouseButton::Left);
+    let t = MOD_TARGETS.iter().position(|n| *n == "Tap 1 Feedback").expect("target");
+    let cell = view.matrix_panel().expect("open").pick_rects()[t].center();
+    click(&mut view, &host, cell, MouseButton::Left);
+    assert_eq!((plain(&host, "m4_dst").round(), plain(&host, "m4_src"), plain(&host, "m4_amt")), (t as f32, 1.0, 25.0));
+    // The button closes it again; the route stays.
+    click(&mut view, &host, button, MouseButton::Left);
+    assert!(view.matrix_panel().is_none());
+    assert_eq!(plain(&host, "m4_dst").round(), t as f32);
+}

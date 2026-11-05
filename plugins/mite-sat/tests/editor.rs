@@ -352,3 +352,23 @@ fn the_dynamics_dials_sit_on_the_wide_card_and_not_the_narrow_ones() {
     assert!(view.dial(&band_id(1, B_DYN.id)).is_none(), "a narrow card does not");
     assert!(view.dial(&band_id(1, B_DRIVE.id)).is_some());
 }
+
+#[test]
+fn the_matrix_opens_and_routes_a_band() {
+    let (mut view, host) = setup();
+    let click = |view: &mut SatView, at: Point| {
+        view.event(&UiEvent::PointerMove { pos: at, mods: Modifiers::default() }, &host);
+        view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: Modifiers::default() }, &host);
+        view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: Modifiers::default() }, &host);
+    };
+    let button = view.matrix_button().center();
+    click(&mut view, button);
+    let target = view.matrix_panel().expect("open").slot_target_rect(0).center();
+    click(&mut view, target);
+    let t = mite_sat::params::MOD_TARGETS.iter().position(|n| *n == "Band 1 Drive").expect("target");
+    let cell = view.matrix_panel().expect("open").pick_rects()[t].center();
+    click(&mut view, cell);
+    assert_eq!((plain(&host, "m1_dst").round(), plain(&host, "m1_src"), plain(&host, "m1_amt")), (t as f32, 1.0, 25.0));
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: Modifiers::default() }, &host);
+    assert!(view.matrix_panel().is_none());
+}

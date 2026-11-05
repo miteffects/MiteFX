@@ -20,6 +20,11 @@ fn configured_state() -> Vec<u8> {
     let params = state["params"].as_object_mut().expect("params");
     for (id, v) in [
         ("mode", json!({"i32": 1})),
+        ("lfo1_shape", json!({"i32": 1})),
+        ("lfo1_sync", json!({"bool": true})),
+        ("m1_src", json!({"i32": 1})),
+        ("m1_dst", json!({"i32": 9})),
+        ("m1_amt", json!({"f32": 12.0})),
         ("drive", json!({"f32": 30.0})),
         ("t1_note", json!({"i32": 10})),
         ("t1_feedback", json!({"f32": 55.0})),

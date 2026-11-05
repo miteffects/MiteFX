@@ -22,6 +22,12 @@ pub mod record {
 }
 
 pub const HISTORY_SLICE_MS: f32 = 5.0;
+
+/// The transport `offset` samples into a block at `fs` (the song position moves with them).
+pub fn transport_at(t: &Transport, offset: usize, fs: f64) -> Transport {
+    let per_sample = t.tempo.map_or(0.0, |bpm| bpm / 60.0 / fs);
+    Transport { beats: t.beats.map(|b| b + offset as f64 * per_sample), ..*t }
+}
 pub const HISTORY_RECORDS: usize = 1600;
 const SWITCH_MS: f32 = 10.0;
 const GLIDE_MS: f32 = 20.0;
