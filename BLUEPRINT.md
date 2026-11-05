@@ -431,6 +431,15 @@ tone, the switch done in the gap before the note reaches the double so each atta
 and up to three doubles; the source and each double placed in a stereo field (pucks), a mono
 correlation strip, TIMING and PITCH lanes showing every note's lag and cents. 2026-11-05 (user: "sounds actually ok … less distorted", "auto gain"): the readings by a 32-tap windowed sinc (the sliding detune no longer roughens the treble: 10 kHz junk −34 → −64 dB), equal-gain switch fades as long as there is room, auto gain from the settings (on by default; the doubles trimmed as a group so takes 2 and 3 add width, not level), mono bass (under 150 Hz the output is the source's lows on both sides, in phase: the user's "correlation issues" were the doubles' lows cancelling 5–6 dB at moments). 0.5–1.2 % of a core.
 
+### 14d. Mite Console (tried and dropped, 2026-11-05)
+
+A master-bus overview of every Mite plugin in the mix (a shared-memory bus all instances report
+to, chains found from the signals, levels, each chain's share of the master, masking, a bus-wide
+audition) was built the same day and dropped by the user ("drop this plugin it's too buggy"),
+after its editor froze REAPER (a name-shortening loop that never ended on long track names). None
+of it is in the code; the plugins report to nothing. The nih-plug fork keeps the track-info hook
+it added (ansabic/nih-plug 75780dc), unused: MiteFX stays pinned to 2d0eca3.
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).
