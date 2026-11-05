@@ -1202,8 +1202,8 @@ mod tests {
         // The burst's middle (energy-weighted time) inside the lead, before and after.
         let centre = |v: &[f32], from: usize, to: usize| {
             let (mut num, mut den) = (0.0, 0.0);
-            for k in from..to {
-                let e = f64::from(v[k]).powi(2);
+                        for (k, s) in v.iter().enumerate().take(to).skip(from) {
+                let e = f64::from(*s).powi(2);
                 num += k as f64 * e;
                 den += e;
             }
