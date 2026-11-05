@@ -960,8 +960,11 @@ pub unsafe fn bind(r: ARADocumentControllerRef, _known: ARAPlugInInstanceRoleFla
     // SAFETY: as the caller promises.
     let document = unsafe { document(r) };
     let inst = Arc::new(Instance { document: document.clone(), roles: assigned, version: AtomicU64::new(0), state: Mutex::new(InstanceState::default()), c: Mutex::new(None) });
-    let me = Arc::as_ptr(&inst) as *mut c_void;
-    let has = |role: u32| assigned & role as ARAPlugInInstanceRoleFlags != 0;
+        let me = Arc::as_ptr(&inst) as *mut c_void;
+    // Every role's interface, whatever the host assigned: hosts use them anyway (REAPER, assigning
+    // only the editor roles, calls the playback renderer and crashes on a null one, 2026-11-05),
+    // and ARA's own library always fills all three.
+    let has = |_role: u32| true;
     let c = Box::new(ARAPlugInExtensionInstance {
         structSize: std::mem::size_of::<ARAPlugInExtensionInstance>(),
         plugInExtensionRef: me.cast(),

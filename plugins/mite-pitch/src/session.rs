@@ -743,9 +743,9 @@ impl AraState {
         }
         self.seen = v;
                 let model = inst.document.snapshot();
-        let mut st = inst.state();
-        // REAPER (2026-11-05) binds with the editor roles only (assigned 6): then the clips this
-        // instance shows are the ones it plays.
+                let mut st = inst.state();
+        // A host that gives this instance no regions to render: the clips it shows are the ones
+        // it plays (over its input).
         if !Self::renders(&inst) {
             st.playback = st.editor.clone();
         }
@@ -858,8 +858,9 @@ impl AraState {
         /// Whether the host made this instance a playback renderer (then the regions are all that
     /// plays, silence elsewhere); otherwise it plays the clips it shows over its input, as a
     /// transfer does.
-    fn renders(inst: &mite_ara::Instance) -> bool {
-        inst.roles & mite_ara::sys::kARAPlaybackRendererRole as i32 != 0
+        fn renders(inst: &mite_ara::Instance) -> bool {
+        // REAPER assigns only the editor roles yet hands the playback renderer its regions.
+        inst.roles & mite_ara::sys::kARAPlaybackRendererRole as i32 != 0 || !inst.state().playback.is_empty()
     }
 
     fn segments(&self) -> Vec<Segment> {

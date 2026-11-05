@@ -122,14 +122,17 @@ fn moving_the_region_moves_what_plays() {
 }
 
 #[test]
-fn bound_with_the_editor_roles_only_as_reaper_does_it_plays_what_it_shows() {
+fn bound_with_the_editor_roles_only_as_reaper_does_it_still_renders() {
     let x = take();
     let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
     let dur = x.len() as f64 / FS;
     let (_src, _md, rg) = host.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-r", c"mod-r", 1.0, 0.0, dur);
     let s = session("ara-reaper");
-    // known 7, assigned 6: editor renderer and view, no playback renderer.
+    // known 7, assigned 6: editor renderer and view, no playback renderer; REAPER calls the
+    // playback renderer all the same (null, it crashed): every interface is there.
     let inst = unsafe { mite_ara::bind(host.dc, 7, 6) };
+    let ext = unsafe { std::ptr::read_unaligned(inst.extension()) };
+    assert!(!ext.playbackRendererInterface.is_null() && !ext.editorRendererInterface.is_null() && !ext.editorViewInterface.is_null());
     host.give(inst.extension(), rg);
     assert!(inst.document.wait_reads(Duration::from_secs(10)));
     s.bind_ara(inst);
@@ -139,8 +142,8 @@ fn bound_with_the_editor_roles_only_as_reaper_does_it_plays_what_it_shows() {
     let mut e = PitchEngine::new(FS as f32);
     song(&mut e, &s, 0, 480);
     let out = song(&mut e, &s, 0, 48_000 + x.len());
-    // Before the clip the input passes (0.5); in it, the edited clip.
-    assert!(out[..48_000 - 241].iter().all(|v| (*v - 0.5).abs() < 1e-6));
+    // Given regions to render: they are all that plays (silence before the clip).
+    assert!(out[..48_000 - 241].iter().all(|v| *v == 0.0));
     let a = s.analysis().expect("analysis");
     let n0 = &a.notes[0];
     let moved = out[48_000 + n0.start..48_000 + n0.end].iter().zip(&x[n0.start..n0.end]).map(|(o, v)| (o - v).abs()).fold(0.0f32, f32::max);
