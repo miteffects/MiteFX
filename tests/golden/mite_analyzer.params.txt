@@ -1,0 +1,5 @@
+target | choice | Streaming −14, Apple Music −16, EBU R128 −23, ATSC A/85 −24, Club −9 | 0
+view | choice | Stereo, Mid / Side, Left / Right | 0
+tilt | choice | Flat, 3 dB/oct, 4.5 dB/oct | 2
+speed | choice | Fast, Normal, Slow | 1
+hold | bool | true

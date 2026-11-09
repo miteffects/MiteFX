@@ -1,0 +1,8 @@
+{
+  "plugin": "Mite Analyzer",
+  "version": 1,
+  "name": "Mid Side",
+  "params": {
+    "view": 1.0
+  }
+}

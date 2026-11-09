@@ -412,10 +412,12 @@ Pitch tested within 0.3 Hz; 0.66 % of a core. Editor: each side's cents scrollin
 DETUNE), DETUNE and DELAY in MODE. State 3 (`mode` again re-normalised, `detune` appended);
 presets Micro Shift, Thicken, Wide Detune. **Modulation matrix (2026-11-05, user: "let's do the modulation matrix", for Mod, Sat and Delay at once):** the shared component (DSP table): two LFOs, an envelope follower (−60…0 dB after its gain read as 0…100 %), eight slots (source, target, amount); a slot moves its target as a hand on its knob would (the amount a share of the knob's travel, held inside it), applied before the engine sees the settings, so every target glides as its knob does. The plugin runs in 32-sample control steps from the start, so the output is the same for every block size (tested through each engine at blocks 1, 7, 333, 512; the LFOs move once a step completes, by a whole step: a phase summed per host block rounded differently, 3e−8 off after 16 000 samples); nothing routed is one call with the plain settings, bit for bit as before (tested). Editor: a MOD button in the footer (lit, with the count, while routes play) opens the panel over the lower view: LFO cards (the cycle playing with a dot, seven shapes drawn by `lfo_at`, SYNC and division, rate or division, phase), the envelope (its level, attack, release, gain), eight slots (source pill steps Off/LFO 1/LFO 2/ENV, target from a sheet of the plugin's targets, amount bar dragged across with a tick where it plays now); a modulated dial shows its reach as an arc and where it plays as a dot. Escape or × closes it; the routes keep playing. Mod's targets: rate, depth, spread, feedback, delay, manual, centre, mix, width, low and high cut, output, balance, inertia, detune (state 4, appended).
 
-### 14. Mite Meter and Mite Utility
+### 14. Mite Analyzer and Mite Utility
 
-- **Mite Meter:** loudness (R128 with history graph), true peak, spectrum, spectrogram, phase scope, correlation and stereo imager.
+- **Mite Analyzer** (named Mite Meter until 2026-11-09, user: "rename it as analyzer"): loudness (R128 with history graph), true peak, spectrum, spectrogram, phase scope, correlation and stereo imager.
 - **Mite Utility:** gain, pan law, width, mono, phase, swap, DC and bass-mono below a set frequency.
+
+**Mite Analyzer status (2026-11-09): v1 built** (`docs/design/analyzer-brief.md`; accent pewter). Pass-through; on the audio thread BS.1770 loudness (momentary, short-term, integrated, range) and 4× true peak, a history record every 100 ms, the raw L/R streams (`SpectrumTap`) for the editor. Editor: spectrum (8192 FFT, sum / mid-side / left-right, tilt, speed, peak hold, hover with note) over a spectrogram on the same axis (8 s, heat scale, drawn as one image), loudness panel (integrated vs target, M, S, LRA, TP, PLR, last minute), stereo panel (vectorscope, correlation, balance, correlation per band). Tested: −23 LUFS tone reads −23 ±0.3, true peak, a record per 100 ms, reset; mono vs out-of-phase lows per band; menus, HOLD, RESET; no allocation. 120 fps, 0.25 ms scene + 0.64 ms render a frame. Untried by the user.
 
 ### 14b. Mite Tuner (2026-11-04)
 
@@ -575,7 +577,7 @@ Shared engines across the suite:
 - **Dynamics cell:** Comp, Multiband, Gate, DeEss and EQ dynamic bands.
 - **Spectral engine** (`mite-dsp::spectral`): EQ, Soothe and DeEss.
 - **Modulation matrix:** Delay, Sat, Filter and Mod.
-- **Loudness:** Limit, Meter, auto-gain everywhere.
+- **Loudness:** Limit, Analyzer, auto-gain everywhere.
 
 ---
 
@@ -641,7 +643,7 @@ FabFilter's strengths:
 - Collision/masking overlay.
 - Transfer-curve editor (Comp).
 - Waveform history with a gain-reduction overlay (Limit, Comp, Gate, Shape).
-- Spectrogram (Meter, DeEss, Soothe).
+- Spectrogram (Analyzer, DeEss, Soothe).
 
 **Chrome and panels:**
 - Header and footer bars.

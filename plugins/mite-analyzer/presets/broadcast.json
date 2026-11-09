@@ -1,0 +1,9 @@
+{
+  "plugin": "Mite Analyzer",
+  "version": 1,
+  "name": "Broadcast",
+  "params": {
+    "target": 2.0,
+    "speed": 2.0
+  }
+}

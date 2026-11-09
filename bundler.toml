@@ -46,3 +46,6 @@ name = "Mite Pitch"
 
 [mite_denoise]
 name = "Mite DeNoise"
+
+[mite_analyzer]
+name = "Mite Analyzer"

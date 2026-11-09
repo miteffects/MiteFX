@@ -204,7 +204,7 @@ mod tests {
 
     const PLUGINS: [&str; 19] = [
         "eq", "comp", "limit", "multiband", "verb", "delay", "sat", "deess", "gate", "shape", "soothe", "filter", "mod",
-        "meter", "utility", "tuner", "double", "pitch", "denoise",
+        "analyzer", "utility", "tuner", "double", "pitch", "denoise",
     ];
 
     #[test]
