@@ -14,7 +14,7 @@
 
 use crate::eq::{BandProcessor, BandSettings, BandType};
 use crate::filter::Coeffs;
-use crate::shimmer::SpectralShifter;
+use crate::shimmer::{PlateSettings, ShimmerPlate};
 use crate::smooth::LinearSmoother;
 
 pub const LINES: usize = 32;
@@ -55,20 +55,12 @@ const SIZE_GLIDE_MS: f32 = 200.0;
 const PREDELAY_FADE_MS: f32 = 30.0;
 const FREEZE_MS: f32 = 50.0;
 const DUCK_ATTACK_MS: f32 = 2.0;
-/// Ahead of the shift, the sub-bass goes (Hz, 6 dB/oct): shifted down it would only rumble.
-const SHIM_SUB_HZ: f32 = 40.0;
-/// The range dials' ends, Hz. The high cut (24 dB/oct, after the shift) is what makes the cascade
-/// fade: the octave over it is 24 dB down each pass. Wider than 150 Hz–6.5 kHz brightens it (8 kHz
-/// put 37 % of a late tail over 6 kHz).
+/// The shimmer plate's level at SHIMMER 100 % (it fades in as the square root of the dial).
+const SHIM_LEVEL: f32 = 1.0;
+/// The shimmer plate's gain per half pass at SHIMMER 0 and 100 % (along the square root).
+const SHIM_DECAY: (f32, f32) = (0.7, 0.95);
+/// The shimmer's range dials' ends, Hz.
 pub const SHIM_RANGE_HZ: (f32, f32) = (20.0, 20_000.0);
-/// The shifted tail's diffusers per side, ms, and their coefficient: the vocoder's output is a
-/// sum of steady partials; smeared before it goes back in, it joins the tail as a wash.
-const SHIM_DIFF_MS: [[f32; 4]; 2] = [[4.71, 7.33, 11.13, 17.93], [5.27, 8.09, 12.41, 16.87]];
-const SHIM_DIFF_G: f32 = 0.6;
-/// The shimmer's two voices (left, right) sit this far either side of the interval, cents.
-const SHIM_DETUNE_CENTS: f32 = 6.0;
-/// The fed-back tail's ceiling (soft), full scale.
-const SHIM_CEILING: f32 = 0.3;
 /// The interval glides with this time constant, ms.
 const SHIM_GLIDE_MS: f32 = 15.0;
 
@@ -289,12 +281,11 @@ pub struct ReverbSettings {
     pub duck_db: f32,
     pub duck_thresh_db: f32,
     pub duck_release_ms: f32,
-    /// Shimmer, 0…1 (0: off): the tail, shifted by `shimmer_pitch` semitones and darkened, fed
-    /// back into the room. Each octave comes back softer and darker than the one before.
+    /// Shimmer (`crate::shimmer`), 0…1 (0: off): a Dattorro plate beside the room whose tank
+    /// shifts its tail by `shimmer_pitch` semitones every pass; how long it sustains and how
+    /// loud it is. `shimmer_low_hz`/`shimmer_high_hz`: the tank's damping.
     pub shimmer: f32,
     pub shimmer_pitch: f32,
-    /// The shimmer's range as heard (after the shift), Hz: a low cut (12 dB/oct) and a high cut
-    /// (24 dB/oct) on what goes back in.
     pub shimmer_low_hz: f32,
     pub shimmer_high_hz: f32,
 }
@@ -930,38 +921,6 @@ fn unpack(
     }
 }
 
-/// A second-order Butterworth low- or highpass at `fc` (b0, b1, b2, a1, a2; a0 = 1).
-fn butterworth(fc: f32, fs: f32, high: bool) -> [f32; 5] {
-    let w = std::f32::consts::TAU * fc / fs;
-    let (sn, cs) = w.sin_cos();
-    let alpha = sn / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
-    let a0 = 1.0 + alpha;
-    let (a1, a2) = (-2.0 * cs / a0, (1.0 - alpha) / a0);
-    if high {
-        let b = (1.0 + cs) / 2.0 / a0;
-        [b, -2.0 * b, b, a1, a2]
-    } else {
-        let b = (1.0 - cs) / 2.0 / a0;
-        [b, 2.0 * b, b, a1, a2]
-    }
-}
-
-/// The shimmer's feedback at 100 % for a 1 s tail (÷ √T60: a longer tail holds more energy). At
-/// 8 s, 100 % blooms about 5–10 dB over the reverb alone and still decays; twice it runs into
-/// the ceiling (measured with `examples/shimmer_probe.rs`, 2026-11-09).
-const SHIM_K: f32 = 1.4;
-
-/// The shimmer's feedback gain for `amount` (0…1) at a decay of `decay_s`, shifting by
-/// `semitones`. Under two semitones it fades out: unshifted, the feedback lands on the tail's
-/// own resonances and a held note builds up (no interval is no shimmer anyway).
-fn shim_gain(amount: f32, decay_s: f32, semitones: f32) -> f32 {
-    let amount = amount.clamp(0.0, 1.0);
-    if amount <= 0.0 {
-        return 0.0;
-    }
-    amount * SHIM_K / decay_s.max(0.1).sqrt() * (semitones.abs() / 2.0).min(1.0)
-}
-
 /// What the last block did, for the editor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReverbTelemetry {
@@ -1019,19 +978,13 @@ pub struct Reverb {
     duck_k: f32,
     phase: usize,
     designed: Option<(ReverbSettings, f32)>,
-    /// Shimmer: the shifters, what goes back in next sample, the band's filter states per side
-    /// (low cut, two lowpass poles), the feedback gain (as `er`), the ratio, its lowpass
-    /// coefficient, and the fixed coefficients (low cut, glide).
-    shift: SpectralShifter,
-    /// The shifted tail's own diffusers per side, before it goes back in.
-    shim_diff: [[Allpass; 4]; 2],
-    shim_fb: [f32; 2],
-    shim_f: [[f32; 7]; 2],
+    /// Shimmer: the plate, whether it is running, its settings, its level (as `er`), and the
+    /// interval's glide coefficient.
+    plate: ShimmerPlate,
+    plate_on: bool,
+    plate_s: PlateSettings,
     shim: [f32; 2],
-    shim_ratio: f32,
-    shim_lp: [f32; 5],
-    shim_hp: [f32; 5],
-    shim_k: (f32, f32),
+    shim_glide: f32,
 }
 
 impl Reverb {
@@ -1076,18 +1029,11 @@ impl Reverb {
             duck_k: 1.0 - (-1.0 / (0.003 * fs)).exp(),
             phase: 0,
             designed: None,
-            shift: SpectralShifter::new(fs),
-            shim_diff: std::array::from_fn(|c| std::array::from_fn(|k| Allpass::new(ms(SHIM_DIFF_MS[c][k])))),
-            shim_fb: [0.0; 2],
-            shim_f: [[0.0; 7]; 2],
+            plate: ShimmerPlate::new(fs),
+            plate_on: false,
+            plate_s: PlateSettings { decay: 0.5, ratio: 2.0, low_hz: 150.0, high_hz: 6500.0 },
             shim: [0.0; 2],
-            shim_ratio: 2.0,
-            shim_lp: [1.0, 0.0, 0.0, 0.0, 0.0],
-            shim_hp: [1.0, 0.0, 0.0, 0.0, 0.0],
-            shim_k: (
-                1.0 - (-std::f32::consts::TAU * SHIM_SUB_HZ / fs).exp(),
-                1.0 - (-(CONTROL as f32) / (SHIM_GLIDE_MS * 0.001 * fs)).exp(),
-            ),
+            shim_glide: 1.0 - (-(CONTROL as f32) / (SHIM_GLIDE_MS * 0.001 * fs)).exp(),
         };
         let control_rate = fs / CONTROL as f32;
         for (k, sm) in r.smooth.iter_mut().enumerate() {
@@ -1134,12 +1080,8 @@ impl Reverb {
         self.phase = 0;
         self.duck_g = 1.0;
         self.designed = None;
-        self.shift.reset();
-        for a in self.shim_diff.iter_mut().flatten() {
-            a.line.reset();
-        }
-        self.shim_fb = [0.0; 2];
-        self.shim_f = [[0.0; 7]; 2];
+        self.plate.reset();
+        self.plate_on = false;
         self.control(s, true);
         self.control(s, true);
     }
@@ -1206,12 +1148,14 @@ impl Reverb {
             }
             self.designed = Some((g, freeze));
         }
+        // Shimmer: the plate's sustain and level from the dial, the interval gliding.
+        let amount = s.shimmer.clamp(0.0, 1.0);
         let to = (s.shimmer_pitch.clamp(-24.0, 24.0) / 12.0).exp2();
-        self.shim_ratio = if jump { to } else { self.shim_ratio + (to - self.shim_ratio) * self.shim_k.1 };
-        // Butterworth sections (b0, b1, b2, a1, a2): the high cut runs twice (24 dB/oct).
-        let (lo, hi) = (s.shimmer_low_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1), s.shimmer_high_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1));
-        self.shim_lp = butterworth(hi.min(0.45 * fs), fs, false);
-        self.shim_hp = butterworth(lo.min(0.45 * fs), fs, true);
+        let ps = &mut self.plate_s;
+        ps.ratio = if jump { to } else { ps.ratio + (to - ps.ratio) * self.shim_glide };
+        ps.decay = SHIM_DECAY.0 + (SHIM_DECAY.1 - SHIM_DECAY.0) * amount.sqrt();
+        ps.low_hz = s.shimmer_low_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1);
+        ps.high_hz = s.shimmer_high_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1);
         let d = g.diffusion.clamp(0.0, 1.0);
         let next = [
             g.mod_depth * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
@@ -1220,7 +1164,7 @@ impl Reverb {
             g.early,
             g.early_send.clamp(0.0, 1.0),
             g.width,
-            shim_gain(s.shimmer, g.decay_s, s.shimmer_pitch),
+            SHIM_LEVEL * amount.sqrt(),
         ];
         for (v, n) in [
             &mut self.depth,
@@ -1307,6 +1251,7 @@ impl Reverb {
             // The early field and the diffused input to the tank, per side.
             let mut early = [0.0f32; 2];
             let mut into = [0.0f32; 2];
+            let mut plate_in = 0.0f32;
             let sides = if stereo { 2 } else { 1 };
             let needs_early =
                 self.early[0].max(self.early[1]) > 0.0 || self.send[0].max(self.send[1]) > 0.0;
@@ -1341,6 +1286,7 @@ impl Reverb {
                 }
                 x *= feed;
                 e *= feed;
+                plate_in += x;
                 for a in &mut self.diff[c] {
                     x = a.process(x, diff_g);
                 }
@@ -1351,13 +1297,6 @@ impl Reverb {
             if !stereo {
                 early[1] = early[0];
                 into[1] = into[0];
-            }
-            // Shimmer: last sample's shifted tail goes in with the input (not while frozen).
-            let shimmering = self.shim[0] > 0.0 || self.shim[1] > 0.0;
-            if shimmering {
-                for c in 0..2 {
-                    into[c] += self.shim_fb[c] * feed * IN_GAIN * (16.0 / LINES as f32).sqrt();
-                }
             }
             // The tank: each line's main delay (modulated), then its two allpasses.
             let mut v = [0.0f32; LINES];
@@ -1381,42 +1320,21 @@ impl Reverb {
                 let x = self.topo.in_sign[i] * into[i & 1];
                 self.lines[i].write(y + x);
             }
-            if shimmering {
-                let g = lerp(self.shim);
-                let (lc, lp, hp) = (self.shim_k.0, self.shim_lp, self.shim_hp);
-                let mut pre = [0.0f32; 2];
-                for (c, x) in [ol * OUT_GAIN, or * OUT_GAIN].into_iter().enumerate() {
-                    let f = &mut self.shim_f[c];
-                    f[0] += (x - f[0]) * lc;
-                    pre[c] = x - f[0];
-                }
-                let [pl, pr] = &mut pre;
-                // The sides a few cents apart: two voices beating slowly against each other, a
-                // chorus in the octave, wide (one voice on both sides sounds thin).
-                let spread = (SHIM_DETUNE_CENTS / 1200.0).exp2();
-                self.shift.process(std::slice::from_mut(pl), std::slice::from_mut(pr), [self.shim_ratio / spread, self.shim_ratio * spread]);
-                for (c, &shifted) in pre.iter().enumerate() {
-                    let f = &mut self.shim_f[c];
-                    let mut v = shifted;
-                    // After the shift: what goes back in stays within the range.
-                    for (z, [b0, b1, b2, a1, a2]) in [(1, lp), (3, lp), (5, hp)] {
-                        let y = b0 * v + f[z];
-                        f[z] = b1 * v - a1 * y + f[z + 1];
-                        f[z + 1] = b2 * v - a2 * y;
-                        v = y;
-                    }
-                    for a in &mut self.shim_diff[c] {
-                        v = a.process(v, SHIM_DIFF_G);
-                    }
-                    let y = g * v;
-                    // A soft ceiling: clean at a tail's levels, a firm brake on a build-up.
-                    self.shim_fb[c] = y / (1.0 + (y / SHIM_CEILING).powi(2)).sqrt();
-                }
-            } else {
-                self.shim_fb = [0.0; 2];
-            }
             let mut l = ol * OUT_GAIN + early[0];
             let mut r = or * OUT_GAIN + early[1];
+            // Shimmer: the plate beside the room, fed what the room is fed (before its diffusers).
+            if self.shim[0] > 0.0 || self.shim[1] > 0.0 {
+                if !self.plate_on {
+                    self.plate.reset();
+                    self.plate_on = true;
+                }
+                let level = lerp(self.shim);
+                let p = self.plate.process(plate_in / sides as f32, &self.plate_s);
+                l += p[0] * level;
+                r += p[1] * level;
+            } else {
+                self.plate_on = false;
+            }
             if stereo {
                 let m = 0.5 * (l + r);
                 let side = 0.5 * (l - r) * width;
