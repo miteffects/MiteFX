@@ -6,7 +6,7 @@ use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
 use mite_core::{BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{BandSettings, BandType, DEFAULT_SLOPE};
-use mite_dsp::reverb::{DecayBand, DecayShape, ReverbSettings, DECAY_BANDS, TONE_BANDS};
+use mite_dsp::reverb::{DecayBand, DecayShape, ReverbKind, ReverbSettings, DECAY_BANDS, TONE_BANDS};
 use mite_plugin::{bool_param, choice_param, float_param, float_param_named};
 use nih_plug::prelude::*;
 
@@ -25,7 +25,9 @@ use crate::dsp::Output;
 ///   their defaults (off).
 /// - 5 (2026-11-09): the shimmer's range (`shimmer_low`, `shimmer_high`) appended; a version 4
 ///   state gets 150 Hz–6.5 kHz, what version 4 had built in.
-pub const STATE_VERSION: u32 = 5;
+/// - 6 (2026-11-09): the reverb's type (`reverb_type`: Room, Hall, Plate, Chamber, Spring)
+///   appended; a version 5 state gets Room, what it was.
+pub const STATE_VERSION: u32 = 6;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -44,6 +46,10 @@ pub const MOD_RATE: ParamSpec = spec("mod_rate", "Modulation Rate", "Hz", 0.05, 
 pub const WIDTH: ParamSpec = spec("width", "Width", "%", 0.0, 150.0, 100.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
 pub const EARLY_SIZE: ParamSpec = spec("early_size", "Early Size", "ms", 2.0, 200.0, 35.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Time);
 pub const EARLY_SEND: ParamSpec = spec("early_send", "Early Send", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+
+// ---- Type ----------------------------------------------------------------------------------------
+
+pub const REVERB_TYPE: ChoiceSpec = ChoiceSpec { id: "reverb_type", name: "Type", choices: &ReverbKind::NAMES, default: 0 };
 
 // ---- Shimmer -----------------------------------------------------------------------------------
 
@@ -117,6 +123,7 @@ pub fn manifest() -> String {
         lines.extend([E_ON.manifest_line(), E_TYPE.manifest_line(), E_FREQ.manifest_line(), E_GAIN.manifest_line(), E_Q.manifest_line(), E_SLOPE.manifest_line()].map(prefix));
     }
     lines.extend([SHIMMER.manifest_line(), SHIMMER_PITCH.manifest_line(), SHIMMER_LOW.manifest_line(), SHIMMER_HIGH.manifest_line()]);
+    lines.push(REVERB_TYPE.manifest_line());
     lines.join("\n") + "\n"
 }
 
@@ -165,6 +172,9 @@ pub fn spec_for(id: &str) -> Option<ParamSpec> {
 
 /// Every choice spec by its id, for stand-in hosts.
 pub fn choice_for(id: &str) -> Option<ChoiceSpec> {
+    if id == REVERB_TYPE.id {
+        return Some(REVERB_TYPE);
+    }
     match split_band_id(id)? {
         ('d', _, "type") => Some(D_TYPE),
         ('e', _, "type") => Some(E_TYPE),
@@ -233,6 +243,7 @@ pub struct VerbParams {
     pub shimmer_pitch: FloatParam,
     pub shimmer_low: FloatParam,
     pub shimmer_high: FloatParam,
+    pub reverb_type: IntParam,
     pub bands: [DecayBandParams; DECAY_BANDS],
     pub tone: [ToneBandParams; TONE_BANDS],
     pub snapshots: std::sync::Arc<Snapshots>,
@@ -266,6 +277,7 @@ impl Default for VerbParams {
             shimmer_pitch: float_param(&SHIMMER_PITCH),
             shimmer_low: float_param(&SHIMMER_LOW),
             shimmer_high: float_param(&SHIMMER_HIGH),
+            reverb_type: choice_param(&REVERB_TYPE, REVERB_TYPE.name.to_owned()),
             bands: std::array::from_fn(DecayBandParams::new),
             tone: std::array::from_fn(ToneBandParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
@@ -279,6 +291,7 @@ impl Default for VerbParams {
 pub fn reverb_settings(p: impl Fn(&str) -> f32) -> ReverbSettings {
     let index = |v: f32| v.round().max(0.0) as usize;
     ReverbSettings {
+        kind: ReverbKind::from_index(index(p(REVERB_TYPE.id))),
         predelay_ms: p(PREDELAY.id),
         size: p(SIZE.id) / 100.0,
         decay_s: p(DECAY.id),
@@ -340,6 +353,7 @@ impl VerbParams {
             "shimmer_pitch" => f(&self.shimmer_pitch),
             "shimmer_low" => f(&self.shimmer_low),
             "shimmer_high" => f(&self.shimmer_high),
+            "reverb_type" => int(&self.reverb_type),
             _ => match split_band_id(id) {
                 Some(('d', b, short)) => {
                     let band = &self.bands[b];
@@ -425,6 +439,7 @@ unsafe impl Params for VerbParams {
         map.push(p(SHIMMER_PITCH.id, self.shimmer_pitch.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_LOW.id, self.shimmer_low.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_HIGH.id, self.shimmer_high.as_ptr(), "Shimmer"));
+        map.push(p(REVERB_TYPE.id, self.reverb_type.as_ptr(), ""));
         map
     }
 }

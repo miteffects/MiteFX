@@ -1,0 +1,19 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Studio Chamber",
+  "params": {
+    "reverb_type": 3.0,
+    "predelay": 8.0,
+    "size": 45.0,
+    "decay": 1.3,
+    "d1_on": 1.0,
+    "d1_type": 2.0,
+    "d1_freq": 6000.0,
+    "d1_mult": 0.6,
+    "d1_q": 0.71,
+    "diffusion": 75.0,
+    "early": 60.0,
+    "mix": 25.0
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Spring Tank",
+  "params": {
+    "reverb_type": 4.0,
+    "predelay": 0.0,
+    "size": 50.0,
+    "decay": 2.2,
+    "early": 0.0,
+    "mix": 30.0
+  }
+}

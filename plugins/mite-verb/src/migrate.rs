@@ -28,6 +28,9 @@ pub fn v3_to_v4(_state: &mut PluginState) {}
 /// version 4 had built in.
 pub fn v4_to_v5(_state: &mut PluginState) {}
 
+/// **5 → 6 (2026-11-09):** the reverb's type appended; a version 5 state gets Room, what it was.
+pub fn v5_to_v6(_state: &mut PluginState) {}
+
 const fn old(id: &'static str, min: f32, max: f32, default: f32) -> ParamSpec {
     ParamSpec { id, name: id, unit: "", min, max, default, scale: ParamScale::Log, smoothing_ms: 20.0, decimals: 0, wheel_step: 0.0, wheel_step_fine: 0.0, display: ParamDisplay::Number }
 }

@@ -1,0 +1,15 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Bright Plate",
+  "params": {
+    "reverb_type": 2.0,
+    "predelay": 0.0,
+    "size": 60.0,
+    "decay": 1.8,
+    "diffusion": 80.0,
+    "early": 0.0,
+    "mod_depth": 30.0,
+    "mix": 25.0
+  }
+}

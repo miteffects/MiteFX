@@ -107,3 +107,4 @@ shimmer | % | 0 | 100 | 0 | Linear
 shimmer_pitch | st | -24 | 24 | 12 | Linear
 shimmer_low | Hz | 20 | 2000 | 150 | Log
 shimmer_high | Hz | 1000 | 20000 | 6500 | Log
+reverb_type | choice | Room, Hall, Plate, Chamber, Spring | 0

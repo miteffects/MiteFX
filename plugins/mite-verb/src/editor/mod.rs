@@ -21,6 +21,7 @@ use std::time::Instant;
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{analog_response_db, BandSettings, BandType, SLOPES_DB};
 use mite_dsp::reverb::{DecayModel, DecayShape, ReverbSettings, DECAY_BANDS, TONE_BANDS};
+use mite_ui::widgets::footer::draw_dropdown_button;
 use mite_ui::widgets::history;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel};
@@ -47,6 +48,8 @@ const DISPLAY_TOP: f64 = HEADER;
 const DISPLAY_H: f64 = 620.0;
 const HELP_TOP: f64 = DISPLAY_TOP + DISPLAY_H;
 const FOOTER_TOP: f64 = HELP_TOP + 28.0;
+/// The reverb type's dropdown, left in the footer.
+const TYPE_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 176.0, FOOTER_TOP + 47.0);
 
 /// The plot.
 const PLOT: Rect = Rect::new(0.0, DISPLAY_TOP, 1180.0, DISPLAY_TOP + 392.0);
@@ -86,6 +89,18 @@ const METER_TOP: f64 = DISPLAY_TOP + 20.0;
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 const METER_RELEASE_DB_S: f32 = 20.0;
 const SILENT: f32 = -150.0;
+
+/// The reverb types, as the menu lists them.
+const REVERB_TYPE_NAMES: [&str; 5] = mite_dsp::reverb::ReverbKind::NAMES;
+
+/// What each type is, for the help line.
+const TYPE_WORDS: [&str; 5] = [
+    "a room: dense at once, natural",
+    "a hall: a slower, wider, smoother build and more drift",
+    "a plate (Dattorro's): bright and smooth, no room around it",
+    "a chamber: small and dense, a tight first reflection",
+    "a spring tank: falling chirps, drip and flutter",
+];
 
 /// The shape menus: every shape, then Remove.
 const DECAY_MENU: [&str; 5] = ["Bell", "Low Shelf", "High Shelf", "Tilt", "Remove"];
@@ -216,6 +231,7 @@ enum Drag {
 enum Hot {
     Node(Node),
     Layer(Layer),
+    TypeMenu,
 }
 
 /// What an open shape menu is for.
@@ -225,6 +241,8 @@ enum MenuFor {
     Band(Node),
     /// A new band of the picked shape where the plot was right-clicked.
     New(Layer, Point),
+    /// The reverb's type.
+    Type,
 }
 
 /// A panel of dials that work together.
@@ -678,6 +696,10 @@ impl VerbView {
 
     fn draw_menu(&self, cx: &mut DrawCx<'_>) {
         let Some((what, list)) = &self.menu else { return };
+        if *what == MenuFor::Type {
+            list.draw(cx, cx.theme.accent, |_, _, _, _| {});
+            return;
+        }
         let tone = matches!(what, MenuFor::Band(Node::Tone(_)) | MenuFor::New(Layer::Tone, _));
         let color = if tone { cx.theme.curve } else { cx.theme.accent };
         let remove = list.items.len() - 1;
@@ -734,6 +756,8 @@ impl VerbView {
         if let Some((what, list)) = &self.menu {
             let i = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))).map(|k| list.shown[k]);
             return match (i, what) {
+                (Some(i), MenuFor::Type) => Help::default().text(format!("{} — {}", list.items[i], TYPE_WORDS[i.min(4)])),
+                (None, MenuFor::Type) => Help::default().text("Pick the reverb's type; click elsewhere to close."),
                 (Some(i), _) if i == list.items.len() - 1 => Help::default().text("Remove — the band stops (its settings are kept for when it comes back)"),
                 (Some(i), MenuFor::New(..)) => Help::default().text(format!("{} — a new band of this shape where you clicked", list.items[i])),
                 (Some(i), MenuFor::Band(_)) => Help::default().text(format!("{} — this band takes the shape", list.items[i])),
@@ -746,6 +770,7 @@ impl VerbView {
         }
         match self.hot {
             Some(Hot::Node(node)) => return self.node_help(host, node, false),
+            Some(Hot::TypeMenu) => return Help::default().text("Type — the space: Room, Hall, Plate, Chamber or Spring. Every dial and both EQs act on each."),
             Some(Hot::Layer(Layer::Decay)) => return Help::default().text("Decay EQ — how long each frequency rings. Double-click the plot for a band; right-click for its shape."),
             Some(Hot::Layer(Layer::Tone)) => return Help::default().text("Tone EQ — the reverb's own EQ (cuts, shelves, bells…); the dry signal is untouched. Double-click the plot for a band; right-click for its shape."),
             None => {}
@@ -786,6 +811,9 @@ impl VerbView {
             if self.layer_pill(layer).inflate(2.0, 2.0).contains(p) {
                 return Some(Hot::Layer(layer));
             }
+        }
+        if TYPE_BUTTON.contains(p) {
+            return Some(Hot::TypeMenu);
         }
         if PLOT.contains(p) {
             for node in self.nodes(host).into_iter().rev() {
@@ -834,6 +862,11 @@ impl VerbView {
         match self.hot_at(host, pos) {
             Some(Hot::Layer(layer)) => {
                 self.layer = layer;
+                true
+            }
+            Some(Hot::TypeMenu) => {
+                let current = Self::plain(host, REVERB_TYPE.id).round().max(0.0) as usize;
+                self.menu = Some((MenuFor::Type, Dropdown::new(TYPE_BUTTON, &REVERB_TYPE_NAMES, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(160.0)));
                 true
             }
             Some(Hot::Node(node)) => {
@@ -926,6 +959,11 @@ impl VerbView {
             DropdownEvent::Picked(i) => {
                 self.menu = None;
                 match what {
+                    MenuFor::Type => {
+                        host.begin_gesture(REVERB_TYPE.id);
+                        Self::set(host, REVERB_TYPE.id, i as f32);
+                        host.end_gesture(REVERB_TYPE.id);
+                    }
                     MenuFor::New(layer, at) => {
                         self.add_band(host, layer, i, at);
                     }
@@ -1003,7 +1041,7 @@ impl VerbView {
                 match hot {
                     Some(Hot::Node(Node::Decay(b))) => Self::set(host, &band_id(b, D_ON.id), 0.0),
                     Some(Hot::Node(Node::Tone(b))) => Self::set(host, &tone_id(b, E_ON.id), 0.0),
-                    Some(Hot::Layer(_)) => return false,
+                    Some(Hot::Layer(_)) | Some(Hot::TypeMenu) => return false,
                     None if PLOT.contains(pos) => return self.add_band(host, self.layer, 0, pos),
                     None => return false,
                 }
@@ -1101,6 +1139,9 @@ impl View for VerbView {
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
         self.footer.draw_frame(cx);
         self.footer.draw_controls(cx);
+        let kind = Self::plain(cx.host, REVERB_TYPE.id).round().clamp(0.0, 4.0) as usize;
+        let open = matches!(self.menu, Some((MenuFor::Type, _)));
+        draw_dropdown_button(cx, TYPE_BUTTON, REVERB_TYPE_NAMES[kind], open, self.hot == Some(Hot::TypeMenu), |_, _| {});
         if hole.is_some() {
             cx.end_glow_hole();
         }

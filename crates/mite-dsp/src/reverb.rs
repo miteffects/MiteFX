@@ -14,7 +14,10 @@
 
 use crate::eq::{BandProcessor, BandSettings, BandType};
 use crate::filter::Coeffs;
-use crate::shimmer::{PlateSettings, ShimmerPlate};
+use crate::shimmer::{
+    Allpass as PAllpass, Line as PLine, PlateSettings, ShimmerPlate, DATTORRO_FS, DECAY_DIFF as PDECAY_DIFF, EXCURSION, IN_DIFF,
+    TANK as PTANK, TAPS as PTAPS,
+};
 use crate::smooth::LinearSmoother;
 
 pub const LINES: usize = 32;
@@ -63,6 +66,11 @@ const SHIM_DECAY: (f32, f32) = (0.7, 0.95);
 pub const SHIM_RANGE_HZ: (f32, f32) = (20.0, 20_000.0);
 /// The interval glides with this time constant, ms.
 const SHIM_GLIDE_MS: f32 = 15.0;
+/// A type change fades the old tank out and the new one in, ms each way.
+const KIND_FADE_MS: f32 = 25.0;
+/// The plate's and the spring's output gains (level-matched to the room, measured).
+const PLATE_OUT: f32 = 1.33;
+const SPRING_OUT: f32 = 1.58;
 
 /// The network's fixed random draws (deterministic): each line's main delay at the largest size
 /// and its allpasses (ms), the input's signs (the left input feeds the even lines, the right the
@@ -139,8 +147,8 @@ impl Topology {
         t
     }
 
-    fn main_len(&self, i: usize, size: f32, fs: f32) -> f32 {
-        self.main_ms[i] * tank_scale(size) * 0.001 * fs
+    fn main_len_scaled(&self, i: usize, size: f32, fs: f32, scale: f32) -> f32 {
+        self.main_ms[i] * tank_scale(size) * scale * 0.001 * fs
     }
 
     fn ap_len(&self, i: usize, k: usize, fs: f32) -> usize {
@@ -150,7 +158,12 @@ impl Topology {
     /// Line `i`'s whole loop at `size`, samples: its main delay and its allpasses' (whose mean
     /// group delay is their length).
     pub fn line_len(&self, i: usize, size: f32, fs: f32) -> f32 {
-        self.main_len(i, size, fs) + (self.ap_len(i, 0, fs) + self.ap_len(i, 1, fs)) as f32
+        self.line_len_scaled(i, size, fs, 1.0)
+    }
+
+    /// [`Self::line_len`] with the main delay scaled by `scale` (a type's voicing).
+    pub fn line_len_scaled(&self, i: usize, size: f32, fs: f32, scale: f32) -> f32 {
+        self.main_len_scaled(i, size, fs, scale) + (self.ap_len(i, 0, fs) + self.ap_len(i, 1, fs)) as f32
     }
 }
 
@@ -253,8 +266,65 @@ impl DecayBand {
     }
 }
 
+/// The reverb's type: three voicings of the 32-line network, a plate and a spring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReverbKind {
+    #[default]
+    Room,
+    Hall,
+    Plate,
+    Chamber,
+    Spring,
+}
+
+impl ReverbKind {
+    pub const NAMES: [&'static str; 5] = ["Room", "Hall", "Plate", "Chamber", "Spring"];
+
+    pub fn from_index(i: usize) -> Self {
+        [Self::Room, Self::Hall, Self::Plate, Self::Chamber, Self::Spring][i.min(4)]
+    }
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether it runs on the 32-line network.
+    pub fn network(self) -> bool {
+        matches!(self, Self::Room | Self::Hall | Self::Chamber)
+    }
+
+    fn voicing(self) -> Voicing {
+        match self {
+            // A hall: lines nearly twice as long (a slower, smoother build), more drift, a wider
+            // early field.
+            Self::Hall => Voicing { scale: 1.9, modulation: 1.6, early: 1.8, loop_g: 0.05, diffusion: 1.0, gain: 1.29 },
+            // A chamber: short lines, dense at once, a tight early field, little drift.
+            Self::Chamber => Voicing { scale: 0.7, modulation: 0.6, early: 0.6, loop_g: 0.1, diffusion: 1.1, gain: 0.86 },
+            _ => Voicing { scale: 1.0, modulation: 1.0, early: 1.0, loop_g: 0.0, diffusion: 1.0, gain: 1.0 },
+        }
+    }
+}
+
+/// How a network type differs from the room: its lines' length, modulation and early field
+/// (factors), its in-loop allpasses' coefficient (added) and its input diffusion (factor).
+#[derive(Debug, Clone, Copy)]
+struct Voicing {
+    scale: f32,
+    modulation: f32,
+    early: f32,
+    loop_g: f32,
+    diffusion: f32,
+    /// Output gain, level-matched to the room (measured with `examples/verb_types.rs`).
+    gain: f32,
+}
+
+/// The longest voicing's scale on the lines and its modulation (the buffers are sized for them).
+const MAX_VOICE_SCALE: f32 = 1.9;
+const MAX_VOICE_MOD: f32 = 1.6;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReverbSettings {
+    pub kind: ReverbKind,
     pub predelay_ms: f32,
     /// 0…1.
     pub size: f32,
@@ -293,6 +363,7 @@ pub struct ReverbSettings {
 impl Default for ReverbSettings {
     fn default() -> Self {
         Self {
+            kind: ReverbKind::Room,
             predelay_ms: 10.0,
             size: 0.5,
             decay_s: 2.0,
@@ -462,8 +533,9 @@ pub fn decay_at(s: &ReverbSettings, freq: f64, fs: f64) -> f64 {
 pub fn decay_curve(s: &ReverbSettings, freqs: &[f64], fs: f64, out: &mut [f64]) {
     out.iter_mut().for_each(|v| *v = 0.0);
     let topo = Topology::new();
+    let scale = s.kind.voicing().scale;
     for i in 0..LINES {
-        let len = f64::from(topo.line_len(i, s.size, fs as f32));
+        let len = f64::from(topo.line_len_scaled(i, s.size, fs as f32, scale));
         let a = design_absorption(len, s, fs, 0.0);
         for (o, &f) in out.iter_mut().zip(freqs) {
             let w = std::f64::consts::TAU * (f / fs).clamp(0.0, 0.5);
@@ -493,8 +565,9 @@ pub struct DecayModel {
 impl DecayModel {
     pub fn new(s: &ReverbSettings, fs: f64) -> Self {
         let topo = Topology::new();
+        let scale = s.kind.voicing().scale;
         let len = (0..LINES)
-            .map(|i| f64::from(topo.line_len(i, s.size, fs as f32)))
+            .map(|i| f64::from(topo.line_len_scaled(i, s.size, fs as f32, scale)))
             .sum::<f64>()
             / LINES as f64;
         Self {
@@ -977,11 +1050,18 @@ pub struct Reverb {
     duck_g: f32,
     duck_k: f32,
     phase: usize,
-    designed: Option<(ReverbSettings, f32)>,
+    designed: Option<(ReverbSettings, f32, ReverbKind)>,
     /// Shimmer: the plate, whether it is running, its settings, its level (as `er`), and the
     /// interval's glide coefficient.
     plate: ShimmerPlate,
     plate_on: bool,
+    /// The type running, the gain fading it out and in on a change (its step per sample), and
+    /// the plate and spring tanks.
+    kind: ReverbKind,
+    kind_g: f32,
+    kind_step: f32,
+    plate_tank: PlateTank,
+    spring: SpringTank,
     plate_s: PlateSettings,
     shim: [f32; 2],
     shim_glide: f32,
@@ -1001,7 +1081,7 @@ impl Reverb {
             }),
             taps: EarlyTaps::new(),
             topo,
-            lines: std::array::from_fn(|i| Delay::new(ms(topo.main_ms[i] + MOD_MS) + 8)),
+            lines: std::array::from_fn(|i| Delay::new(ms(topo.main_ms[i] * MAX_VOICE_SCALE + MOD_MS * MAX_VOICE_MOD) + 8)),
             reads: [AllpassRead::default(); LINES],
             loop_ap: std::array::from_fn(|i| {
                 std::array::from_fn(|k| Allpass::new(topo.ap_len(i, k, fs)))
@@ -1031,6 +1111,11 @@ impl Reverb {
             designed: None,
             plate: ShimmerPlate::new(fs),
             plate_on: false,
+            kind: s.kind,
+            kind_g: 1.0,
+            kind_step: 1.0 / (KIND_FADE_MS * 0.001 * fs),
+            plate_tank: PlateTank::new(fs),
+            spring: SpringTank::new(fs),
             plate_s: PlateSettings { decay: 0.5, ratio: 2.0, low_hz: 150.0, high_hz: 6500.0 },
             shim: [0.0; 2],
             shim_glide: 1.0 - (-(CONTROL as f32) / (SHIM_GLIDE_MS * 0.001 * fs)).exp(),
@@ -1082,8 +1167,28 @@ impl Reverb {
         self.designed = None;
         self.plate.reset();
         self.plate_on = false;
+        self.kind = s.kind;
+        self.kind_g = 1.0;
+        self.reset_tanks();
         self.control(s, true);
         self.control(s, true);
+    }
+
+    /// Silences every tank (the network's lines, the plate, the spring), as a type change does
+    /// while faded out.
+    fn reset_tanks(&mut self) {
+        for d in &mut self.lines {
+            d.reset();
+        }
+        for a in self.loop_ap.iter_mut().flatten() {
+            a.line.reset();
+        }
+        for f in &mut self.filters {
+            f.reset();
+        }
+        self.reads = [AllpassRead::default(); LINES];
+        self.plate_tank.reset();
+        self.spring.reset();
     }
 
     /// Moves to the next control step: glides the settings, designs what moved, and sets each
@@ -1121,32 +1226,44 @@ impl Reverb {
             self.pd_fade = Some(0.0);
         }
         self.er[0] = self.er[1];
-        self.er[1] = g.early_size_ms.clamp(1.0, MAX_EARLY_MS) * 0.001 * fs;
+        let v = self.kind.voicing();
+        self.er[1] = (g.early_size_ms * v.early).clamp(1.0, MAX_EARLY_MS) * 0.001 * fs;
         for i in 0..LINES {
             self.len[0][i] = self.len[1][i];
-            self.len[1][i] = self.topo.main_len(i, g.size, fs);
+            self.len[1][i] = self.topo.main_len_scaled(i, g.size, fs, v.scale);
         }
         if jump {
             self.er[0] = self.er[1];
             self.len[0] = self.len[1];
         }
-        if self.designed != Some((g, freeze)) {
-            for i in 0..LINES {
-                self.filters[i].set(
-                    &design_absorption(
-                        f64::from(self.topo.line_len(i, g.size, fs)),
-                        &g,
-                        f64::from(fs),
-                        f64::from(freeze),
-                    ),
-                    !jump,
-                );
+        if self.designed != Some((g, freeze, self.kind)) {
+            let design = |len: f32| design_absorption(f64::from(len), &g, f64::from(fs), f64::from(freeze));
+            match self.kind {
+                ReverbKind::Plate => {
+                    self.plate_tank.size(g.size);
+                    for h in 0..2 {
+                        let a = design(self.plate_tank.half_len(h));
+                        self.plate_tank.filt[h].set(&a, !jump);
+                    }
+                }
+                ReverbKind::Spring => {
+                    self.spring.size(g.size);
+                    for c in 0..2 {
+                        let a = design(self.spring.loop_len(c));
+                        self.spring.filt[c].set(&a, !jump);
+                    }
+                }
+                _ => {
+                    for i in 0..LINES {
+                        self.filters[i].set(&design(self.topo.line_len_scaled(i, g.size, fs, v.scale)), !jump);
+                    }
+                }
             }
             let step = g.mod_rate.max(0.01) / fs;
             for w in &mut self.wander {
                 w.step = step;
             }
-            self.designed = Some((g, freeze));
+            self.designed = Some((g, freeze, self.kind));
         }
         // Shimmer: the plate's sustain and level from the dial, the interval gliding.
         let amount = s.shimmer.clamp(0.0, 1.0);
@@ -1158,9 +1275,9 @@ impl Reverb {
         ps.high_hz = s.shimmer_high_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1);
         let d = g.diffusion.clamp(0.0, 1.0);
         let next = [
-            g.mod_depth * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
-            d * DIFF_MAX,
-            0.3 + 0.35 * d,
+            g.mod_depth * v.modulation * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
+            (d * DIFF_MAX * v.diffusion).min(0.8),
+            (0.3 + 0.35 * d + v.loop_g).min(0.75),
             g.early,
             g.early_send.clamp(0.0, 1.0),
             g.width,
@@ -1188,6 +1305,34 @@ impl Reverb {
         if jump {
             self.duck[0] = self.duck[1];
         }
+    }
+
+    /// One sample of the 32-line network: each line's main delay (modulated), then its two
+    /// allpasses; the outputs read inside the lines; the mix; the absorption; the input.
+    #[allow(clippy::needless_range_loop)] // the lines' parallel arrays, by line
+    fn network(&mut self, into: &[f32; 2], t: f32, depth: f32, loop_g: f32) -> (f32, f32) {
+        let mut v = [0.0f32; LINES];
+        let (mut ol, mut or) = (0.0f32, 0.0f32);
+        for i in 0..LINES {
+            let len = self.len[0][i] + (self.len[1][i] - self.len[0][i]) * t;
+            let m = self.wander[i].next();
+            let d = self.reads[i].read(&self.lines[i], len - 1.0 + depth * m);
+            let a = self.loop_ap[i][0].process(d, loop_g);
+            v[i] = self.loop_ap[i][1].process(a, -loop_g);
+            ol += self.topo.out[0][i] * self.lines[i].read_linear(len * self.topo.out_at[0][i]);
+            or += self.topo.out[1][i] * self.lines[i].read_linear(len * self.topo.out_at[1][i]);
+        }
+        let mut h = [0.0f32; LINES];
+        for i in 0..LINES {
+            h[i] = v[i] * self.topo.mix_sign[i];
+        }
+        hadamard(&mut h);
+        for i in 0..LINES {
+            let y = self.filters[i].process(h[self.topo.mix_perm[i]]);
+            let x = self.topo.in_sign[i] * into[i & 1];
+            self.lines[i].write(y + x);
+        }
+        (ol, or)
     }
 
     /// Writes the reverb of `input` (one or two channels) into `wet` (as many). Never allocates.
@@ -1252,6 +1397,7 @@ impl Reverb {
             let mut early = [0.0f32; 2];
             let mut into = [0.0f32; 2];
             let mut plate_in = 0.0f32;
+            let mut into_raw = [0.0f32; 2];
             let sides = if stereo { 2 } else { 1 };
             let needs_early =
                 self.early[0].max(self.early[1]) > 0.0 || self.send[0].max(self.send[1]) > 0.0;
@@ -1287,6 +1433,7 @@ impl Reverb {
                 x *= feed;
                 e *= feed;
                 plate_in += x;
+                into_raw[c] = x;
                 for a in &mut self.diff[c] {
                     x = a.process(x, diff_g);
                 }
@@ -1297,29 +1444,42 @@ impl Reverb {
             if !stereo {
                 early[1] = early[0];
                 into[1] = into[0];
+                into_raw[1] = into_raw[0];
             }
-            // The tank: each line's main delay (modulated), then its two allpasses.
-            let mut v = [0.0f32; LINES];
-            let (mut ol, mut or) = (0.0f32, 0.0f32);
-            for i in 0..LINES {
-                let len = self.len[0][i] + (self.len[1][i] - self.len[0][i]) * t;
-                let m = self.wander[i].next();
-                let d = self.reads[i].read(&self.lines[i], len - 1.0 + depth * m);
-                let a = self.loop_ap[i][0].process(d, loop_g);
-                v[i] = self.loop_ap[i][1].process(a, -loop_g);
-                ol += self.topo.out[0][i] * self.lines[i].read_linear(len * self.topo.out_at[0][i]);
-                or += self.topo.out[1][i] * self.lines[i].read_linear(len * self.topo.out_at[1][i]);
+            // A type change: the tank fades out, the new one starts silent and fades in.
+            if self.kind != s.kind {
+                self.kind_g -= self.kind_step;
+                if self.kind_g <= 0.0 {
+                    self.kind_g = 0.0;
+                    self.kind = s.kind;
+                    self.reset_tanks();
+                    self.designed = None;
+                }
+            } else if self.kind_g < 1.0 {
+                self.kind_g = (self.kind_g + self.kind_step).min(1.0);
             }
-            let mut h = [0.0f32; LINES];
-            for i in 0..LINES {
-                h[i] = v[i] * self.topo.mix_sign[i];
-            }
-            hadamard(&mut h);
-            for i in 0..LINES {
-                let y = self.filters[i].process(h[self.topo.mix_perm[i]]);
-                let x = self.topo.in_sign[i] * into[i & 1];
-                self.lines[i].write(y + x);
-            }
+            let (ol, or) = match self.kind {
+                ReverbKind::Plate => {
+                    // MODULATION's default (30 %) is Dattorro's own excursion: his tank relies on it
+                    // to smear the echo of its modulated allpasses (at a third of it the tail
+                    // repeated at the 908-sample one, periodicity 0.16).
+                    let m = depth / (MOD_MS * 0.001 * fs).max(1e-3) / 0.3;
+                    // Fed the input before the room's diffusers (through them as well, the tail turned
+                    // dense in 35 ms instead of 340 but peaky, 0.33 % against 0.044 %).
+                    let p = self.plate_tank.process(plate_in / sides as f32, diff_g / DIFF_MAX, m, s.mod_rate, fs);
+                    (p[0] * PLATE_OUT / OUT_GAIN, p[1] * PLATE_OUT / OUT_GAIN)
+                }
+                ReverbKind::Spring => {
+                    let p = self.spring.process(into_raw);
+                    (p[0] * SPRING_OUT / OUT_GAIN, p[1] * SPRING_OUT / OUT_GAIN)
+                }
+                _ => {
+                    let (a, b) = self.network(&into, t, depth, loop_g);
+                    let g = self.kind.voicing().gain;
+                    (a * g, b * g)
+                }
+            };
+            let (ol, or) = (ol * self.kind_g, or * self.kind_g);
             let mut l = ol * OUT_GAIN + early[0];
             let mut r = or * OUT_GAIN + early[1];
             // Shimmer: the plate beside the room, fed what the room is fed (before its diffusers).
@@ -1365,6 +1525,249 @@ impl Reverb {
         }
         tel.freeze = self.freeze.current();
         tel
+    }
+}
+
+// ---- Plate and spring ----------------------------------------------------------------------------
+
+/// The plate's size: Dattorro's delays times this at SIZE 0 and 100 %.
+const PLATE_SCALE: (f32, f32) = (0.5, 1.5);
+/// The plate's first decay diffusion: Dattorro's 0.70 rang at its modulated allpasses' length
+/// (periodicity 0.09 with his modulation); 0.55 rang more (its first echo is stronger), 0.85
+/// built slower; at 0.80, 0.064 (room: 0.028).
+const PLATE_DD1: f32 = 0.80;
+/// The plate's modulation at the most (a factor on Dattorro's excursion).
+const PLATE_MOD_MAX: f32 = 2.0;
+
+/// Jon Dattorro's plate (`crate::shimmer` has his constants), its damping and decay replaced by
+/// the decay EQ's absorption designed for each half of the tank, so every type obeys the same
+/// decay curve.
+struct PlateTank {
+    base: f32,
+    k: f32,
+    diff: [PAllpass; 4],
+    ap1: [PAllpass; 2],
+    d1: [PLine; 2],
+    ap2: [PAllpass; 2],
+    d2: [PLine; 2],
+    filt: [LineFilter; 2],
+    lfo: f32,
+    cross: [f32; 2],
+}
+
+impl PlateTank {
+    fn new(fs: f32) -> Self {
+        let base = fs / DATTORRO_FS;
+        let km = base * PLATE_SCALE.1;
+        let exc = EXCURSION * km * PLATE_MOD_MAX;
+        let mut t = Self {
+            base,
+            k: base,
+            diff: IN_DIFF.map(|(len, _)| PAllpass::new(len * km, 0.0)),
+            ap1: [PAllpass::new(PTANK[0][0] * km, exc), PAllpass::new(PTANK[1][0] * km, exc)],
+            d1: [PLine::new((PTANK[0][1] * km) as usize + 2), PLine::new((PTANK[1][1] * km) as usize + 2)],
+            ap2: [PAllpass::new(PTANK[0][2] * km, exc), PAllpass::new(PTANK[1][2] * km, exc)],
+            d2: [PLine::new((PTANK[0][3] * km) as usize + 2), PLine::new((PTANK[1][3] * km) as usize + 2)],
+            filt: [LineFilter::default(); 2],
+            lfo: 0.0,
+            cross: [0.0; 2],
+        };
+        t.size(0.5);
+        t
+    }
+
+    fn reset(&mut self) {
+        for a in self.diff.iter_mut().chain(self.ap1.iter_mut()).chain(self.ap2.iter_mut()) {
+            a.line.reset();
+        }
+        for l in self.d1.iter_mut().chain(self.d2.iter_mut()) {
+            l.reset();
+        }
+        for f in &mut self.filt {
+            f.reset();
+        }
+        self.lfo = 0.0;
+        self.cross = [0.0; 2];
+    }
+
+    /// Scales the delays for SIZE (0…1).
+    fn size(&mut self, size: f32) {
+        self.k = self.base * (PLATE_SCALE.0 + (PLATE_SCALE.1 - PLATE_SCALE.0) * size.clamp(0.0, 1.0));
+        let k = self.k;
+        for (a, &(len, _)) in self.diff.iter_mut().zip(&IN_DIFF) {
+            a.len = len * k;
+        }
+        for ((a1, a2), lens) in self.ap1.iter_mut().zip(self.ap2.iter_mut()).zip(&PTANK) {
+            a1.len = lens[0] * k;
+            a2.len = lens[2] * k;
+        }
+    }
+
+    /// A half of the tank, samples (what its absorption is designed for).
+    fn half_len(&self, h: usize) -> f32 {
+        PTANK[h].iter().sum::<f32>() * self.k
+    }
+
+    /// One (mono) sample in; left and right out. `diffusion` 0…1, `modulation` 0…~2.
+    fn process(&mut self, x: f32, diffusion: f32, modulation: f32, rate: f32, fs: f32) -> [f32; 2] {
+        let k = self.k;
+        let gd = 0.5 + 0.5 * diffusion.clamp(0.0, 1.0);
+        let mut u = x;
+        for (a, &(_, g)) in self.diff.iter_mut().zip(&IN_DIFF) {
+            u = a.process(u, g * gd, 0.0);
+        }
+        self.lfo = (self.lfo + rate.max(0.01) / fs).fract();
+        let lfo = (std::f32::consts::TAU * self.lfo).sin();
+        let exc = EXCURSION * k * modulation.clamp(0.0, PLATE_MOD_MAX);
+        let mut out = [0.0f32; 2];
+        for h in 0..2 {
+            let v = u + self.cross[1 - h];
+            let v = self.ap1[h].process(v, -PLATE_DD1, exc * if h == 0 { lfo } else { -lfo });
+            self.d1[h].write(v);
+            let t = self.filt[h].process(self.d1[h].at((PTANK[h][1] * k) as usize));
+            let lfo2 = (std::f32::consts::TAU * (self.lfo + 0.25 + 0.37 * h as f32)).sin();
+            let t = self.ap2[h].process(t, PDECAY_DIFF.1, 0.7 * exc * lfo2);
+            self.d2[h].write(t);
+            out[h] = self.d2[h].at((PTANK[h][3] * k) as usize);
+        }
+        self.cross = out;
+        let node = |n: usize, d: f32| -> f32 {
+            let d = (d * k) as usize;
+            match n {
+                0 => self.d1[0].at(d),
+                1 => self.ap2[0].line.at(d),
+                2 => self.d2[0].at(d),
+                3 => self.d1[1].at(d),
+                4 => self.ap2[1].line.at(d),
+                _ => self.d2[1].at(d),
+            }
+        };
+        let mut y = [0.0f32; 2];
+        for (side, taps) in PTAPS.iter().enumerate() {
+            y[side] = 0.6 * taps.iter().map(|&(n, d, sign)| sign * node(n, d)).sum::<f32>();
+        }
+        y
+    }
+}
+
+/// The spring's dispersion: this many stretched allpasses, their coefficient (negative: the
+/// highs arrive first and the lows after, the falling "pew" of a spring), and the frequency their
+/// stretch is set by (the chirps live under it; a lowpass at it keeps what is over it out).
+const SPRING_STAGES: usize = 40;
+const SPRING_A: f32 = -0.62;
+const SPRING_FC: f32 = 4400.0;
+/// The two springs' delays (left, right), ms at SIZE 50 %, and the factor at SIZE 0 and 100 %.
+const SPRING_MS: [f32; 2] = [38.0, 44.3];
+const SPRING_SCALE: (f32, f32) = (0.6, 1.6);
+
+/// A spring tank (after Välimäki, Parker & Abel, "Parametric Spring Reverberation Effect",
+/// JAES 2010, simplified): per side, a loop of a cascade of stretched allpasses
+/// (a + z⁻ᴷ)/(1 + a·z⁻ᴷ), a delay, a lowpass and the decay EQ's absorption.
+struct SpringTank {
+    fs: f32,
+    k: usize,
+    /// Per side: each stage's last K inputs and outputs (stage-major), the shared position.
+    xs: [Vec<f32>; 2],
+    ys: [Vec<f32>; 2],
+    pos: usize,
+    delay: [PLine; 2],
+    len: [f32; 2],
+    lp: [f32; 5],
+    lp_z: [[f32; 2]; 2],
+    dc: [f32; 2],
+    filt: [LineFilter; 2],
+    fb: [f32; 2],
+}
+
+impl SpringTank {
+    fn new(fs: f32) -> Self {
+        let k = ((fs / (2.0 * SPRING_FC)).round() as usize).max(1);
+        let max = SPRING_MS.map(|ms| (ms * SPRING_SCALE.1 * 0.001 * fs) as usize + 4);
+        // Butterworth lowpass at the chirps' top.
+        let w = std::f32::consts::TAU * SPRING_FC / fs;
+        let (sn, cs) = w.sin_cos();
+        let alpha = sn / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
+        let a0 = 1.0 + alpha;
+        let b = (1.0 - cs) / 2.0 / a0;
+        let mut t = Self {
+            fs,
+            k,
+            xs: [vec![0.0; SPRING_STAGES * k], vec![0.0; SPRING_STAGES * k]],
+            ys: [vec![0.0; SPRING_STAGES * k], vec![0.0; SPRING_STAGES * k]],
+            pos: 0,
+            delay: [PLine::new(max[0]), PLine::new(max[1])],
+            len: [0.0; 2],
+            lp: [b, 2.0 * b, b, -2.0 * cs / a0, (1.0 - alpha) / a0],
+            lp_z: [[0.0; 2]; 2],
+            dc: [0.0; 2],
+            filt: [LineFilter::default(); 2],
+            fb: [0.0; 2],
+        };
+        t.size(0.5);
+        t
+    }
+
+    fn reset(&mut self) {
+        for v in self.xs.iter_mut().chain(self.ys.iter_mut()) {
+            v.fill(0.0);
+        }
+        self.pos = 0;
+        for d in &mut self.delay {
+            d.reset();
+        }
+        self.lp_z = [[0.0; 2]; 2];
+        self.dc = [0.0; 2];
+        for f in &mut self.filt {
+            f.reset();
+        }
+        self.fb = [0.0; 2];
+    }
+
+    fn size(&mut self, size: f32) {
+        let f = SPRING_SCALE.0 + (SPRING_SCALE.1 - SPRING_SCALE.0) * size.clamp(0.0, 1.0);
+        self.len = SPRING_MS.map(|ms| ms * f * 0.001 * self.fs);
+    }
+
+    /// A side's loop, samples: its delay and the cascade's group delay at 1.5 kHz
+    /// (K(1 − a²)/(1 + 2a·cos Kω + a²) a stage). Measured: at 500 Hz the T60 came out 15 % short,
+    /// with no cascade delay at all 10 % long.
+    fn loop_len(&self, c: usize) -> f32 {
+        let (a, k) = (SPRING_A, self.k as f32);
+        let kw = k * std::f32::consts::TAU * 1500.0 / self.fs;
+        let stage = k * (1.0 - a * a) / (1.0 + 2.0 * a * kw.cos() + a * a);
+        self.len[c] + SPRING_STAGES as f32 * stage
+    }
+
+    fn process(&mut self, x: [f32; 2]) -> [f32; 2] {
+        let (k, pos) = (self.k, self.pos);
+        let [b0, b1, b2, a1, a2] = self.lp;
+        let dc_k = 1.0 - (-std::f32::consts::TAU * 40.0 / self.fs).exp();
+        let mut out = [0.0f32; 2];
+        for c in 0..2 {
+            let mut v = x[c] + self.fb[c];
+            let (xs, ys) = (&mut self.xs[c], &mut self.ys[c]);
+            for st in 0..SPRING_STAGES {
+                let at = st * k + pos;
+                let y = SPRING_A * v + xs[at] - SPRING_A * ys[at];
+                xs[at] = v;
+                ys[at] = y;
+                v = y;
+            }
+            self.delay[c].write(v);
+            let mut y = self.delay[c].at(self.len[c] as usize);
+            let z = &mut self.lp_z[c];
+            let o = b0 * y + z[0];
+            z[0] = b1 * y - a1 * o + z[1];
+            z[1] = b2 * y - a2 * o;
+            y = o;
+            self.dc[c] += (y - self.dc[c]) * dc_k;
+            y -= self.dc[c];
+            y = self.filt[c].process(y);
+            self.fb[c] = y;
+            out[c] = y;
+        }
+        self.pos = (pos + 1) % k;
+        out
     }
 }
 
@@ -1554,5 +1957,96 @@ mod shimmer_tests {
         let a = render(&ReverbSettings::default(), &x);
         let b = render(&ReverbSettings { shimmer: 0.0, shimmer_pitch: -7.0, ..ReverbSettings::default() }, &x);
         assert_eq!(a, b);
+    }
+}
+
+#[cfg(test)]
+mod types_tests {
+    use super::*;
+
+    const FS: f32 = 48_000.0;
+
+    fn ir(s: &ReverbSettings, seconds: f32) -> Vec<f32> {
+        let n = (FS * seconds) as usize;
+        let mut r = Reverb::new(FS, s);
+        let mut x = vec![0.0f32; n];
+        x[0] = 1.0;
+        let (mut l, mut rr) = (vec![0.0f32; n], vec![0.0f32; n]);
+        for ((a, b), c) in l.chunks_mut(512).zip(rr.chunks_mut(512)).zip(x.chunks(512)) {
+            r.process([c, c], [a, b], true, s);
+        }
+        l
+    }
+
+    /// T60 from the energy decay (Schroeder), its −5…−35 dB slope.
+    fn t60(v: &[f32]) -> f32 {
+        let mut e: Vec<f64> = v.iter().map(|x| f64::from(*x).powi(2)).collect();
+        for i in (0..e.len() - 1).rev() {
+            e[i] += e[i + 1];
+        }
+        let at = |lvl: f64| e.iter().position(|&d| 10.0 * (d / e[0]).max(1e-30).log10() < lvl).unwrap_or(e.len()) as f32 / FS;
+        2.0 * (at(-35.0) - at(-5.0))
+    }
+
+    #[test]
+    fn every_type_rings_for_the_decay_at_the_rooms_level() {
+        let room: f64 = ir(&ReverbSettings { early: 0.0, ..ReverbSettings::default() }, 5.0).iter().map(|x| f64::from(*x).powi(2)).sum();
+        for k in 0..ReverbKind::NAMES.len() {
+            let kind = ReverbKind::from_index(k);
+            let s = ReverbSettings { kind, early: 0.0, ..ReverbSettings::default() };
+            let y = ir(&s, 5.0);
+            let t = t60(&y);
+            assert!((t - 2.0).abs() < 0.15, "{kind:?}: T60 {t:.2} s");
+            let e: f64 = y.iter().map(|x| f64::from(*x).powi(2)).sum();
+            let db = 10.0 * (e / room).log10();
+            assert!(db.abs() < 1.5, "{kind:?}: {db:+.1} dB against the room");
+        }
+    }
+
+    #[test]
+    fn a_spring_chirps_highs_first() {
+        let y = ir(&ReverbSettings { kind: ReverbKind::Spring, early: 0.0, ..ReverbSettings::default() }, 0.2);
+        // When the first pass's energy arrives in a band (its centroid in time over 0…80 ms, the
+        // second pass coming at about 85).
+        let arrival = |f: f64| {
+            let (mut num, mut den) = (0.0, 0.0);
+            let n = (0.08 * FS) as usize;
+            let w = std::f64::consts::TAU * f / f64::from(FS);
+            // A narrow band: the signal heterodyned to DC and smoothed over 2 ms.
+            let (mut c, mut s) = (0.0f64, 0.0f64);
+            let k = 1.0 / (0.002 * f64::from(FS));
+            for (i, &x) in y.iter().take(n).enumerate() {
+                c += (f64::from(x) * (w * i as f64).cos() - c) * k;
+                s += (f64::from(x) * (w * i as f64).sin() - s) * k;
+                let e = c * c + s * s;
+                num += e * i as f64;
+                den += e;
+            }
+            num / den / f64::from(FS) * 1000.0
+        };
+        let (hi, lo) = (arrival(3500.0), arrival(400.0));
+        assert!(hi + 3.0 < lo, "3.5 kHz at {hi:.1} ms, 400 Hz at {lo:.1} ms");
+    }
+
+    #[test]
+    fn switching_type_fades_without_a_jump() {
+        let s0 = ReverbSettings::default();
+        let mut r = Reverb::new(FS, &s0);
+        let mut prev = 0.0f32;
+        let mut worst = 0.0f32;
+        let mut seed = 1u32;
+        for b in 0..400 {
+            let kind = ReverbKind::from_index((b / 80) % 5);
+            let s = ReverbSettings { kind, ..s0 };
+            let x: Vec<f32> = (0..128).map(|_| { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed as f32 / u32::MAX as f32 - 0.5) * 0.2 }).collect();
+            let (mut l, mut rr) = (vec![0.0; 128], vec![0.0; 128]);
+            r.process([&x, &x], [&mut l, &mut rr], true, &s);
+            for &v in &l {
+                worst = worst.max((v - prev).abs());
+                prev = v;
+            }
+        }
+        // A noise-fed tail moves sample to sample by well under this; a hard switch would jump.
+        assert!(worst < 0.5, "largest step {worst}");
     }
 }

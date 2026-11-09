@@ -1,0 +1,21 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Concert Hall",
+  "params": {
+    "reverb_type": 1.0,
+    "predelay": 25.0,
+    "size": 80.0,
+    "decay": 3.2,
+    "d1_on": 1.0,
+    "d1_type": 2.0,
+    "d1_freq": 4000.0,
+    "d1_mult": 0.5,
+    "d1_q": 0.71,
+    "diffusion": 85.0,
+    "early": 40.0,
+    "mod_depth": 35.0,
+    "width": 120.0,
+    "mix": 30.0
+  }
+}

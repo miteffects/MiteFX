@@ -12,15 +12,15 @@
 //! Sized in [`ShimmerPlate::new`]; `process` never allocates.
 
 /// Dattorro's rate: his delays are in samples at it.
-const DATTORRO_FS: f32 = 29_761.0;
+pub(crate) const DATTORRO_FS: f32 = 29_761.0;
 /// The input diffusers (samples at `DATTORRO_FS`) and their coefficients.
-const IN_DIFF: [(f32, f32); 4] = [(142.0, 0.75), (107.0, 0.75), (379.0, 0.625), (277.0, 0.625)];
+pub(crate) const IN_DIFF: [(f32, f32); 4] = [(142.0, 0.75), (107.0, 0.75), (379.0, 0.625), (277.0, 0.625)];
 /// Each tank half: the modulated allpass, the first delay, the second allpass, the second delay.
-const TANK: [[f32; 4]; 2] = [[672.0, 4453.0, 1800.0, 3720.0], [908.0, 4217.0, 2656.0, 3163.0]];
+pub(crate) const TANK: [[f32; 4]; 2] = [[672.0, 4453.0, 1800.0, 3720.0], [908.0, 4217.0, 2656.0, 3163.0]];
 /// Decay diffusion 1 (the modulated allpasses) and 2.
-const DECAY_DIFF: (f32, f32) = (0.70, 0.50);
+pub(crate) const DECAY_DIFF: (f32, f32) = (0.70, 0.50);
 /// The modulated allpasses' excursion (samples at `DATTORRO_FS`) and rate, Hz.
-const EXCURSION: f32 = 16.0;
+pub(crate) const EXCURSION: f32 = 16.0;
 const MOD_HZ: f32 = 0.5;
 /// The pitch shifters' grain windows per half, s (different, so their grains never line up).
 const GRAIN_S: [f32; 2] = [0.093, 0.107];
@@ -33,39 +33,39 @@ const SHIFT_SHARE: f32 = 0.35;
 const DETUNE_CENTS: f32 = 6.0;
 /// The output taps (Dattorro's table 2): (node, delay at `DATTORRO_FS`, sign). Nodes: 0 left
 /// first delay, 1 left second allpass, 2 left second delay, 3–5 the same on the right.
-const TAPS: [[(usize, f32, f32); 7]; 2] = [
+pub(crate) const TAPS: [[(usize, f32, f32); 7]; 2] = [
     [(3, 266.0, 1.0), (3, 2974.0, 1.0), (4, 1913.0, -1.0), (5, 1996.0, 1.0), (0, 1990.0, -1.0), (1, 187.0, -1.0), (2, 1066.0, -1.0)],
     [(0, 353.0, 1.0), (0, 3627.0, 1.0), (1, 1228.0, -1.0), (2, 2673.0, 1.0), (3, 2111.0, -1.0), (4, 335.0, -1.0), (5, 121.0, -1.0)],
 ];
 
 /// A delay line read whole or fractional samples back.
-struct Line {
+pub(crate) struct Line {
     buf: Vec<f32>,
     pos: usize,
 }
 
 impl Line {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self { buf: vec![0.0; len.max(4) + 4], pos: 0 }
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.buf.fill(0.0);
         self.pos = 0;
     }
 
-    fn write(&mut self, x: f32) {
+    pub(crate) fn write(&mut self, x: f32) {
         self.pos = (self.pos + 1) % self.buf.len();
         self.buf[self.pos] = x;
     }
 
     /// `d` samples back (0: the last written).
-    fn at(&self, d: usize) -> f32 {
+    pub(crate) fn at(&self, d: usize) -> f32 {
         let n = self.buf.len();
         self.buf[(self.pos + n - d.min(n - 1)) % n]
     }
 
-    fn frac(&self, d: f32) -> f32 {
+    pub(crate) fn frac(&self, d: f32) -> f32 {
         let i = d.floor();
         let t = d - i;
         let a = self.at(i as usize);
@@ -74,17 +74,18 @@ impl Line {
 }
 
 /// A Schroeder allpass over a [`Line`] of `len` samples (modulated by reading it fractionally).
-struct Allpass {
-    line: Line,
-    len: f32,
+pub(crate) struct Allpass {
+    pub(crate) line: Line,
+    /// Its length, samples (settable up to what it was made for).
+    pub(crate) len: f32,
 }
 
 impl Allpass {
-    fn new(len: f32, excursion: f32) -> Self {
+    pub(crate) fn new(len: f32, excursion: f32) -> Self {
         Self { line: Line::new((len + excursion).ceil() as usize + 2), len }
     }
 
-    fn process(&mut self, x: f32, g: f32, offset: f32) -> f32 {
+    pub(crate) fn process(&mut self, x: f32, g: f32, offset: f32) -> f32 {
         let d = self.line.frac(self.len + offset - 1.0);
         let w = x + g * d;
         self.line.write(w);
