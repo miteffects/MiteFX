@@ -55,7 +55,7 @@ fn main() {
     let amounts: Vec<f32> = std::env::args().skip(1).filter_map(|a| a.parse().ok()).collect();
     let amounts = if amounts.is_empty() { vec![0.0, 0.4, 1.0] } else { amounts };
     for amt in amounts {
-        let s = ReverbSettings { shimmer: amt, shimmer_pitch: 12.0, ..base };
+        let s = ReverbSettings { kind: if amt > 0.0 { mite_dsp::reverb::ReverbKind::Shimmer } else { mite_dsp::reverb::ReverbKind::Plate }, shimmer: amt, shimmer_pitch: 12.0, ..base };
         let y = render(&s, &x);
         println!("shimmer {amt}: peaky tail {:.3} % (late {:.3} %)  periodicity {:.3}", peakiness(&y, f64::from(FS), 1.0, 3.0) * 100.0, peakiness(&y, f64::from(FS), 3.0, 6.0) * 100.0, periodicity(&y, f64::from(FS), 1.0, 3.0));
         for t in [1usize, 2, 3, 5, 8] {

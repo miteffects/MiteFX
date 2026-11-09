@@ -33,7 +33,7 @@ fn main() {
     let fs = 48_000.0;
     let mut room_e = 0.0;
     for decay in [2.0f32, 6.0] {
-        for k in 0..5 {
+        for k in 0..ReverbKind::NAMES.len() {
             let kind = ReverbKind::from_index(k);
             let s = ReverbSettings { kind, decay_s: decay, early: 0.0, ..ReverbSettings::default() };
             let l = ir(&s, fs, decay * 2.0 + 1.0);

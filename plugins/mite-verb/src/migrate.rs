@@ -31,6 +31,17 @@ pub fn v4_to_v5(_state: &mut PluginState) {}
 /// **5 → 6 (2026-11-09):** the reverb's type appended; a version 5 state gets Room, what it was.
 pub fn v5_to_v6(_state: &mut PluginState) {}
 
+/// **6 → 7 (2026-11-09): shimmer is a type.** Version 6 ran a shimmer plate beside the room
+/// whenever `shimmer` was above 0; version 7 has a Shimmer type instead. A state with shimmer on
+/// becomes that type (the nearest sound: the room it ran beside goes); one with it off keeps its
+/// type and gets `shimmer` back at 0 (which only the Shimmer type reads).
+pub fn v6_to_v7(state: &mut PluginState) {
+    let on = matches!(state.params.get("shimmer"), Some(ParamValue::F32(v)) if *v > 0.0);
+    if on {
+        state.params.insert("reverb_type".to_owned(), ParamValue::I32(mite_dsp::reverb::ReverbKind::Shimmer.index() as i32));
+    }
+}
+
 const fn old(id: &'static str, min: f32, max: f32, default: f32) -> ParamSpec {
     ParamSpec { id, name: id, unit: "", min, max, default, scale: ParamScale::Log, smoothing_ms: 20.0, decimals: 0, wheel_step: 0.0, wheel_step_fine: 0.0, display: ParamDisplay::Number }
 }
@@ -195,5 +206,15 @@ mod tests {
         assert!(a.get("lo_mult").is_none());
         // Slot 1 stored none of it.
         assert!(lifted["slots"][1].get("d5_on").is_none());
+    }
+
+    #[test]
+    fn a_shimmer_that_was_on_becomes_the_shimmer_type() {
+        let mut on = state(&[("shimmer", ParamValue::F32(40.0)), ("reverb_type", ParamValue::I32(1))]);
+        v6_to_v7(&mut on);
+        assert_eq!(val(&on.params, "reverb_type"), Some(5.0));
+        let mut off = state(&[("shimmer", ParamValue::F32(0.0)), ("reverb_type", ParamValue::I32(1))]);
+        v6_to_v7(&mut off);
+        assert_eq!(val(&off.params, "reverb_type"), Some(1.0));
     }
 }

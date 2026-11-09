@@ -91,15 +91,16 @@ const METER_RELEASE_DB_S: f32 = 20.0;
 const SILENT: f32 = -150.0;
 
 /// The reverb types, as the menu lists them.
-const REVERB_TYPE_NAMES: [&str; 5] = mite_dsp::reverb::ReverbKind::NAMES;
+const REVERB_TYPE_NAMES: [&str; 6] = mite_dsp::reverb::ReverbKind::NAMES;
 
 /// What each type is, for the help line.
-const TYPE_WORDS: [&str; 5] = [
+const TYPE_WORDS: [&str; 6] = [
     "a room: dense at once, natural",
     "a hall: a slower, wider, smoother build and more drift",
     "a plate (Dattorro's): bright and smooth, no room around it",
     "a chamber: small and dense, a tight first reflection",
     "a spring tank: falling chirps, drip and flutter",
+    "the plate, part of each pass climbing by an interval (its own panel of dials)",
 ];
 
 /// The shape menus: every shape, then Remove.
@@ -252,12 +253,63 @@ struct Group {
     rect: Rect,
 }
 
+/// The dials and their panels: SPACE and DUCK above; EARLY, SHIMMER (only for the Shimmer type)
+/// and MOD below; each panel as wide as its dials need.
+fn dial_layout(shimmer: bool) -> (Vec<Knob>, Vec<Group>) {
+    type Dial = (ParamSpec, &'static str, Option<mite_core::DialCurve>);
+    let mut layout: Vec<(&'static str, &'static str, usize, Vec<Dial>)> = vec![
+        ("SPACE", "the room itself", 0, vec![(SIZE, "SIZE", None), (DECAY, "DECAY", None), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL))]),
+        ("DUCK", "the reverb stepping back while the input plays: the ring on THRESHOLD is the input, lit where it is over", 0, vec![(DUCK, "DEPTH", None), (DUCK_THRESH, "THRESHOLD", None), (DUCK_RELEASE, "RELEASE", None)]),
+        ("EARLY", "the first reflections", 1, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
+    ];
+    if shimmer {
+        layout.push((
+            "SHIMMER",
+            "part of each pass round the plate climbs by PITCH (and PITCH 2, by BLEND); DETUNE spreads the sides; LOW and HIGH bound what climbs",
+            1,
+            vec![(SHIMMER, "AMOUNT", None), (SHIMMER_PITCH, "PITCH", None), (SHIMMER_PITCH2, "PITCH 2", None), (SHIMMER_BLEND, "BLEND", None), (SHIMMER_DETUNE, "DETUNE", None), (SHIMMER_LOW, "LOW", None), (SHIMMER_HIGH, "HIGH", None)],
+        ));
+    }
+    layout.push(("MOD", "the room's slow drift", 1, vec![(MOD_DEPTH, "DEPTH", None), (MOD_RATE, "RATE", None)]));
+    let mut rects = Vec::new();
+    for (row, &(top, bottom)) in GROUP_ROWS.iter().enumerate() {
+        let in_row: Vec<usize> = (0..layout.len()).filter(|&g| layout[g].2 == row).collect();
+        let dials: usize = in_row.iter().map(|&g| layout[g].3.len()).sum();
+        let per = (GROUPS_X.1 - GROUPS_X.0 - GROUP_GAP * (in_row.len() - 1) as f64) / dials as f64;
+        let mut x = GROUPS_X.0;
+        for &g in &in_row {
+            let w = per * layout[g].3.len() as f64;
+            rects.push((g, Rect::new(x, top, x + w, bottom)));
+            x += w + GROUP_GAP;
+        }
+    }
+    rects.sort_by_key(|r| r.0);
+    let mut knobs = Vec::new();
+    let mut groups = Vec::new();
+    for ((name, words, _, dials), (_, rect)) in layout.into_iter().zip(rects) {
+        let n = dials.len() as f64;
+        for (i, (spec, label, curve)) in dials.into_iter().enumerate() {
+            let at = Point::new(rect.x0 + rect.width() * (i as f64 + 0.5) / n, rect.y0 + DIAL_DY);
+            let kind = if spec.min < 0.0 && spec.max > 0.0 { KnobKind::Bipolar } else { KnobKind::Unipolar };
+            let k = Knob::new(spec, label, kind, at, DIAL_D);
+            knobs.push(match curve {
+                Some(c) => k.with_curve(c),
+                None => k,
+            });
+        }
+        groups.push(Group { name, words, rect });
+    }
+    (knobs, groups)
+}
+
 pub struct VerbView {
     shared: Arc<VerbShared>,
     session: Session,
     footer: Footer,
     knobs: Vec<Knob>,
     groups: Vec<Group>,
+    /// Whether the dials are laid out with the SHIMMER panel (the Shimmer type).
+    shimmer_dials: bool,
     spectrum: Spectrum,
     layer: Layer,
     /// The decay curve and the tone curve as last worked out, and what for.
@@ -293,48 +345,13 @@ impl VerbView {
                 FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" },
             ],
         );
-        type Dial = (ParamSpec, &'static str, Option<mite_core::DialCurve>);
-        // Two rows; each panel as wide as its dials need.
-        let layout: [(&'static str, &'static str, usize, Vec<Dial>); 5] = [
-            ("SPACE", "the room itself", 0, vec![(SIZE, "SIZE", None), (DECAY, "DECAY", None), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL))]),
-            ("DUCK", "the reverb stepping back while the input plays: the ring on THRESHOLD is the input, lit where it is over", 0, vec![(DUCK, "DEPTH", None), (DUCK_THRESH, "THRESHOLD", None), (DUCK_RELEASE, "RELEASE", None)]),
-            ("EARLY", "the first reflections", 1, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
-            ("SHIMMER", "the tail climbing by an interval, pass after pass; LOW and HIGH bound what climbs", 1, vec![(SHIMMER, "FEEDBACK", None), (SHIMMER_PITCH, "PITCH", None), (SHIMMER_LOW, "LOW", None), (SHIMMER_HIGH, "HIGH", None)]),
-            ("MOD", "the room's slow drift", 1, vec![(MOD_DEPTH, "DEPTH", None), (MOD_RATE, "RATE", None)]),
-        ];
-        let mut rects = Vec::new();
-        for (row, &(top, bottom)) in GROUP_ROWS.iter().enumerate() {
-            let in_row: Vec<usize> = (0..layout.len()).filter(|&g| layout[g].2 == row).collect();
-            let dials: usize = in_row.iter().map(|&g| layout[g].3.len()).sum();
-            let per = (GROUPS_X.1 - GROUPS_X.0 - GROUP_GAP * (in_row.len() - 1) as f64) / dials as f64;
-            let mut x = GROUPS_X.0;
-            for &g in &in_row {
-                let w = per * layout[g].3.len() as f64;
-                rects.push((g, Rect::new(x, top, x + w, bottom)));
-                x += w + GROUP_GAP;
-            }
-        }
-        rects.sort_by_key(|r| r.0);
-        let mut knobs = Vec::new();
-        let mut groups = Vec::new();
-        for ((name, words, _, dials), (_, rect)) in layout.into_iter().zip(rects) {
-            let n = dials.len() as f64;
-            for (i, (spec, label, curve)) in dials.into_iter().enumerate() {
-                let at = Point::new(rect.x0 + rect.width() * (i as f64 + 0.5) / n, rect.y0 + DIAL_DY);
-                let kind = if spec.min < 0.0 && spec.max > 0.0 { KnobKind::Bipolar } else { KnobKind::Unipolar };
-                let k = Knob::new(spec, label, kind, at, DIAL_D);
-                knobs.push(match curve {
-                    Some(c) => k.with_curve(c),
-                    None => k,
-                });
-            }
-            groups.push(Group { name, words, rect });
-        }
+        let (knobs, groups) = dial_layout(false);
         Self {
             session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, shared.snapshots.clone(), shared.preset.clone()),
             footer,
             knobs,
             groups,
+            shimmer_dials: false,
             spectrum: Spectrum::new(),
             layer: Layer::Decay,
             curve: vec![0.0; CURVE_POINTS],
@@ -756,7 +773,7 @@ impl VerbView {
         if let Some((what, list)) = &self.menu {
             let i = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))).map(|k| list.shown[k]);
             return match (i, what) {
-                (Some(i), MenuFor::Type) => Help::default().text(format!("{} — {}", list.items[i], TYPE_WORDS[i.min(4)])),
+                (Some(i), MenuFor::Type) => Help::default().text(format!("{} — {}", list.items[i], TYPE_WORDS[i.min(5)])),
                 (None, MenuFor::Type) => Help::default().text("Pick the reverb's type; click elsewhere to close."),
                 (Some(i), _) if i == list.items.len() - 1 => Help::default().text("Remove — the band stops (its settings are kept for when it comes back)"),
                 (Some(i), MenuFor::New(..)) => Help::default().text(format!("{} — a new band of this shape where you clicked", list.items[i])),
@@ -770,7 +787,7 @@ impl VerbView {
         }
         match self.hot {
             Some(Hot::Node(node)) => return self.node_help(host, node, false),
-            Some(Hot::TypeMenu) => return Help::default().text("Type — the space: Room, Hall, Plate, Chamber or Spring. Every dial and both EQs act on each."),
+            Some(Hot::TypeMenu) => return Help::default().text("Type — the space: Room, Hall, Plate, Chamber, Spring or Shimmer. Every dial and both EQs act on each."),
             Some(Hot::Layer(Layer::Decay)) => return Help::default().text("Decay EQ — how long each frequency rings. Double-click the plot for a band; right-click for its shape."),
             Some(Hot::Layer(Layer::Tone)) => return Help::default().text("Tone EQ — the reverb's own EQ (cuts, shelves, bells…); the dry signal is untouched. Double-click the plot for a band; right-click for its shape."),
             None => {}
@@ -1139,7 +1156,7 @@ impl View for VerbView {
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
         self.footer.draw_frame(cx);
         self.footer.draw_controls(cx);
-        let kind = Self::plain(cx.host, REVERB_TYPE.id).round().clamp(0.0, 4.0) as usize;
+        let kind = Self::plain(cx.host, REVERB_TYPE.id).round().clamp(0.0, 5.0) as usize;
         let open = matches!(self.menu, Some((MenuFor::Type, _)));
         draw_dropdown_button(cx, TYPE_BUTTON, REVERB_TYPE_NAMES[kind], open, self.hot == Some(Hot::TypeMenu), |_, _| {});
         if hole.is_some() {
@@ -1160,6 +1177,13 @@ impl View for VerbView {
     }
 
     fn tick(&mut self, host: &dyn ParamHost) -> bool {
+        // The Shimmer type brings its panel; any other takes it away (never mid-drag).
+        let shimmer = Self::plain(host, REVERB_TYPE.id).round() as usize == mite_dsp::reverb::ReverbKind::Shimmer.index();
+        let relaid = shimmer != self.shimmer_dials && !self.knobs.iter().any(Knob::is_dragging);
+        if relaid {
+            (self.knobs, self.groups) = dial_layout(shimmer);
+            self.shimmer_dials = shimmer;
+        }
         let busy = self.busy();
         self.session.follow(host, busy);
         let dt = self.last_tick.elapsed().as_secs_f32().min(0.1);
@@ -1185,6 +1209,6 @@ impl View for VerbView {
         }
         let spectrum = self.spectrum.update(&self.shared, f64::from(dt));
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        fresh || flowing || spectrum || busy || self.meters.iter().any(|&m| m > SILENT + 1.0)
+        relaid || fresh || flowing || spectrum || busy || self.meters.iter().any(|&m| m > SILENT + 1.0)
     }
 }

@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Shimmer Hall",
   "params": {
+    "reverb_type": 5.0,
     "predelay": 20.0,
     "size": 90.0,
     "decay": 8.0,

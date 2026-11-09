@@ -15,7 +15,7 @@
 use crate::eq::{BandProcessor, BandSettings, BandType};
 use crate::filter::Coeffs;
 use crate::shimmer::{
-    Allpass as PAllpass, Line as PLine, PlateSettings, ShimmerPlate, DATTORRO_FS, DECAY_DIFF as PDECAY_DIFF, EXCURSION, IN_DIFF,
+    Allpass as PAllpass, Line as PLine, Shifter, DATTORRO_FS, DECAY_DIFF as PDECAY_DIFF, EXCURSION, IN_DIFF,
     TANK as PTANK, TAPS as PTAPS,
 };
 use crate::smooth::LinearSmoother;
@@ -58,10 +58,9 @@ const SIZE_GLIDE_MS: f32 = 200.0;
 const PREDELAY_FADE_MS: f32 = 30.0;
 const FREEZE_MS: f32 = 50.0;
 const DUCK_ATTACK_MS: f32 = 2.0;
-/// The shimmer plate's level at SHIMMER 100 % (it fades in as the square root of the dial).
-const SHIM_LEVEL: f32 = 1.0;
-/// The shimmer plate's gain per half pass at SHIMMER 0 and 100 % (along the square root).
-const SHIM_DECAY: (f32, f32) = (0.7, 0.95);
+/// The share of the power crossing between the plate's halves that is shifted at SHIMMER
+/// AMOUNT 100 % (all of it climbed out of the top in 1.5 s; 70 % turned a late tail bright).
+const SHIM_SHARE_MAX: f32 = 0.5;
 /// The shimmer's range dials' ends, Hz.
 pub const SHIM_RANGE_HZ: (f32, f32) = (20.0, 20_000.0);
 /// The interval glides with this time constant, ms.
@@ -275,13 +274,20 @@ pub enum ReverbKind {
     Plate,
     Chamber,
     Spring,
+    /// The plate with pitch shifters where its tank's halves cross (`ReverbSettings::shimmer…`).
+    Shimmer,
 }
 
 impl ReverbKind {
-    pub const NAMES: [&'static str; 5] = ["Room", "Hall", "Plate", "Chamber", "Spring"];
+    pub const NAMES: [&'static str; 6] = ["Room", "Hall", "Plate", "Chamber", "Spring", "Shimmer"];
 
     pub fn from_index(i: usize) -> Self {
-        [Self::Room, Self::Hall, Self::Plate, Self::Chamber, Self::Spring][i.min(4)]
+        [Self::Room, Self::Hall, Self::Plate, Self::Chamber, Self::Spring, Self::Shimmer][i.min(5)]
+    }
+
+    /// Whether it runs on the plate's tank.
+    pub fn plate(self) -> bool {
+        matches!(self, Self::Plate | Self::Shimmer)
     }
 
     pub fn index(self) -> usize {
@@ -351,11 +357,14 @@ pub struct ReverbSettings {
     pub duck_db: f32,
     pub duck_thresh_db: f32,
     pub duck_release_ms: f32,
-    /// Shimmer (`crate::shimmer`), 0…1 (0: off): a Dattorro plate beside the room whose tank
-    /// shifts its tail by `shimmer_pitch` semitones every pass; how long it sustains and how
-    /// loud it is. `shimmer_low_hz`/`shimmer_high_hz`: the tank's damping.
+    /// The Shimmer type: how much of each pass round the tank is shifted (0…1), the two
+    /// intervals (semitones) and the blend between them (0: the first alone), the sides' spread
+    /// (cents either way), and the range of what is shifted (a low and a high cut, Hz).
     pub shimmer: f32,
     pub shimmer_pitch: f32,
+    pub shimmer_pitch2: f32,
+    pub shimmer_blend: f32,
+    pub shimmer_detune: f32,
     pub shimmer_low_hz: f32,
     pub shimmer_high_hz: f32,
 }
@@ -380,8 +389,11 @@ impl Default for ReverbSettings {
             duck_db: 0.0,
             duck_thresh_db: -30.0,
             duck_release_ms: 300.0,
-            shimmer: 0.0,
+            shimmer: 0.5,
             shimmer_pitch: 12.0,
+            shimmer_pitch2: 19.0,
+            shimmer_blend: 0.0,
+            shimmer_detune: 6.0,
             shimmer_low_hz: 150.0,
             shimmer_high_hz: 6500.0,
         }
@@ -988,6 +1000,9 @@ fn unpack(
         // Read from the settings themselves (they never redesign the lines).
         shimmer: 0.0,
         shimmer_pitch: 0.0,
+        shimmer_pitch2: 0.0,
+        shimmer_blend: 0.0,
+        shimmer_detune: 0.0,
         shimmer_low_hz: 0.0,
         shimmer_high_hz: 0.0,
         ..*s
@@ -1051,10 +1066,6 @@ pub struct Reverb {
     duck_k: f32,
     phase: usize,
     designed: Option<(ReverbSettings, f32, ReverbKind)>,
-    /// Shimmer: the plate, whether it is running, its settings, its level (as `er`), and the
-    /// interval's glide coefficient.
-    plate: ShimmerPlate,
-    plate_on: bool,
     /// The type running, the gain fading it out and in on a change (its step per sample), and
     /// the plate and spring tanks.
     kind: ReverbKind,
@@ -1062,7 +1073,7 @@ pub struct Reverb {
     kind_step: f32,
     plate_tank: PlateTank,
     spring: SpringTank,
-    plate_s: PlateSettings,
+    /// The Shimmer type's share (as `er`) and the intervals' glide coefficient.
     shim: [f32; 2],
     shim_glide: f32,
 }
@@ -1109,14 +1120,11 @@ impl Reverb {
             duck_k: 1.0 - (-1.0 / (0.003 * fs)).exp(),
             phase: 0,
             designed: None,
-            plate: ShimmerPlate::new(fs),
-            plate_on: false,
             kind: s.kind,
             kind_g: 1.0,
             kind_step: 1.0 / (KIND_FADE_MS * 0.001 * fs),
             plate_tank: PlateTank::new(fs),
             spring: SpringTank::new(fs),
-            plate_s: PlateSettings { decay: 0.5, ratio: 2.0, low_hz: 150.0, high_hz: 6500.0 },
             shim: [0.0; 2],
             shim_glide: 1.0 - (-(CONTROL as f32) / (SHIM_GLIDE_MS * 0.001 * fs)).exp(),
         };
@@ -1165,8 +1173,6 @@ impl Reverb {
         self.phase = 0;
         self.duck_g = 1.0;
         self.designed = None;
-        self.plate.reset();
-        self.plate_on = false;
         self.kind = s.kind;
         self.kind_g = 1.0;
         self.reset_tanks();
@@ -1239,7 +1245,7 @@ impl Reverb {
         if self.designed != Some((g, freeze, self.kind)) {
             let design = |len: f32| design_absorption(f64::from(len), &g, f64::from(fs), f64::from(freeze));
             match self.kind {
-                ReverbKind::Plate => {
+                ReverbKind::Plate | ReverbKind::Shimmer => {
                     self.plate_tank.size(g.size);
                     for h in 0..2 {
                         let a = design(self.plate_tank.half_len(h));
@@ -1265,14 +1271,8 @@ impl Reverb {
             }
             self.designed = Some((g, freeze, self.kind));
         }
-        // Shimmer: the plate's sustain and level from the dial, the interval gliding.
-        let amount = s.shimmer.clamp(0.0, 1.0);
-        let to = (s.shimmer_pitch.clamp(-24.0, 24.0) / 12.0).exp2();
-        let ps = &mut self.plate_s;
-        ps.ratio = if jump { to } else { ps.ratio + (to - ps.ratio) * self.shim_glide };
-        ps.decay = SHIM_DECAY.0 + (SHIM_DECAY.1 - SHIM_DECAY.0) * amount.sqrt();
-        ps.low_hz = s.shimmer_low_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1);
-        ps.high_hz = s.shimmer_high_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1);
+        // Shimmer: the intervals gliding, the voices' weights and the range.
+        self.plate_tank.shimmer_control(s, fs, if jump { 1.0 } else { self.shim_glide });
         let d = g.diffusion.clamp(0.0, 1.0);
         let next = [
             g.mod_depth * v.modulation * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
@@ -1281,7 +1281,7 @@ impl Reverb {
             g.early,
             g.early_send.clamp(0.0, 1.0),
             g.width,
-            SHIM_LEVEL * amount.sqrt(),
+            if self.kind == ReverbKind::Shimmer { (SHIM_SHARE_MAX * s.shimmer.clamp(0.0, 1.0)).sqrt() } else { 0.0 },
         ];
         for (v, n) in [
             &mut self.depth,
@@ -1458,15 +1458,16 @@ impl Reverb {
             } else if self.kind_g < 1.0 {
                 self.kind_g = (self.kind_g + self.kind_step).min(1.0);
             }
+            let share = lerp(self.shim);
             let (ol, or) = match self.kind {
-                ReverbKind::Plate => {
+                ReverbKind::Plate | ReverbKind::Shimmer => {
                     // MODULATION's default (30 %) is Dattorro's own excursion: his tank relies on it
                     // to smear the echo of its modulated allpasses (at a third of it the tail
                     // repeated at the 908-sample one, periodicity 0.16).
                     let m = depth / (MOD_MS * 0.001 * fs).max(1e-3) / 0.3;
                     // Fed the input before the room's diffusers (through them as well, the tail turned
                     // dense in 35 ms instead of 340 but peaky, 0.33 % against 0.044 %).
-                    let p = self.plate_tank.process(plate_in / sides as f32, diff_g / DIFF_MAX, m, s.mod_rate, fs);
+                    let p = self.plate_tank.process(plate_in / sides as f32, diff_g / DIFF_MAX, m, s.mod_rate, fs, share);
                     (p[0] * PLATE_OUT / OUT_GAIN, p[1] * PLATE_OUT / OUT_GAIN)
                 }
                 ReverbKind::Spring => {
@@ -1482,19 +1483,6 @@ impl Reverb {
             let (ol, or) = (ol * self.kind_g, or * self.kind_g);
             let mut l = ol * OUT_GAIN + early[0];
             let mut r = or * OUT_GAIN + early[1];
-            // Shimmer: the plate beside the room, fed what the room is fed (before its diffusers).
-            if self.shim[0] > 0.0 || self.shim[1] > 0.0 {
-                if !self.plate_on {
-                    self.plate.reset();
-                    self.plate_on = true;
-                }
-                let level = lerp(self.shim);
-                let p = self.plate.process(plate_in / sides as f32, &self.plate_s);
-                l += p[0] * level;
-                r += p[1] * level;
-            } else {
-                self.plate_on = false;
-            }
             if stereo {
                 let m = 0.5 * (l + r);
                 let side = 0.5 * (l - r) * width;
@@ -1536,6 +1524,9 @@ const PLATE_SCALE: (f32, f32) = (0.5, 1.5);
 /// (periodicity 0.09 with his modulation); 0.55 rang more (its first echo is stronger), 0.85
 /// built slower; at 0.80, 0.064 (room: 0.028).
 const PLATE_DD1: f32 = 0.80;
+/// The Shimmer type's grain windows per half and voice, s (all different, so no two voices'
+/// grains line up).
+const SHIM_GRAIN_S: [[f32; 2]; 2] = [[0.093, 0.083], [0.107, 0.097]];
 /// The plate's modulation at the most (a factor on Dattorro's excursion).
 const PLATE_MOD_MAX: f32 = 2.0;
 
@@ -1553,9 +1544,36 @@ struct PlateTank {
     filt: [LineFilter; 2],
     lfo: f32,
     cross: [f32; 2],
+    /// Shimmer: per half, the two voices' shifters; the intervals as ratios (gliding) and the
+    /// voices' weights; per half, the range's low cut and high cut states; their coefficients;
+    /// the sides' spread as a ratio.
+    shift: [[Shifter; 2]; 2],
+    ratio: [f32; 2],
+    weight: [f32; 2],
+    range: [[f32; 3]; 2],
+    range_k: (f32, f32),
+    spread: f32,
 }
 
 impl PlateTank {
+    /// The Shimmer type's settings, once a control step: the intervals glide by `glide`.
+    fn shimmer_control(&mut self, s: &ReverbSettings, fs: f32, glide: f32) {
+        let blend = s.shimmer_blend.clamp(0.0, 1.0);
+        for (v, (st, w)) in [(s.shimmer_pitch, 1.0 - blend), (s.shimmer_pitch2, blend)].into_iter().enumerate() {
+            let st = st.clamp(-24.0, 24.0);
+            let to = (st / 12.0).exp2();
+            self.ratio[v] += (to - self.ratio[v]) * glide;
+            // Within two semitones of unison a voice fades out: unshifted, it lands on the tank's
+            // own resonances (a held note built up).
+            self.weight[v] = w.sqrt() * (st.abs() / 2.0).min(1.0);
+        }
+        let lo = s.shimmer_low_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1);
+        let hi = s.shimmer_high_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1).min(0.45 * fs);
+        let k = |f: f32| 1.0 - (-std::f32::consts::TAU * f / fs).exp();
+        self.range_k = (k(lo), k(hi));
+        self.spread = (s.shimmer_detune.clamp(0.0, 100.0) / 1200.0).exp2();
+    }
+
     fn new(fs: f32) -> Self {
         let base = fs / DATTORRO_FS;
         let km = base * PLATE_SCALE.1;
@@ -1571,6 +1589,12 @@ impl PlateTank {
             filt: [LineFilter::default(); 2],
             lfo: 0.0,
             cross: [0.0; 2],
+            shift: std::array::from_fn(|h| std::array::from_fn(|v| Shifter::new(fs, SHIM_GRAIN_S[h][v]))),
+            ratio: [2.0; 2],
+            weight: [1.0, 0.0],
+            range: [[0.0; 3]; 2],
+            range_k: (0.0, 1.0),
+            spread: 1.0,
         };
         t.size(0.5);
         t
@@ -1588,6 +1612,10 @@ impl PlateTank {
         }
         self.lfo = 0.0;
         self.cross = [0.0; 2];
+        for sh in self.shift.iter_mut().flatten() {
+            sh.reset();
+        }
+        self.range = [[0.0; 3]; 2];
     }
 
     /// Scales the delays for SIZE (0…1).
@@ -1608,8 +1636,10 @@ impl PlateTank {
         PTANK[h].iter().sum::<f32>() * self.k
     }
 
-    /// One (mono) sample in; left and right out. `diffusion` 0…1, `modulation` 0…~2.
-    fn process(&mut self, x: f32, diffusion: f32, modulation: f32, rate: f32, fs: f32) -> [f32; 2] {
+    /// One (mono) sample in; left and right out. `diffusion` 0…1, `modulation` 0…~2; `share`:
+    /// sin θ of the crossing that is shifted (0: a plate).
+    #[allow(clippy::too_many_arguments)]
+    fn process(&mut self, x: f32, diffusion: f32, modulation: f32, rate: f32, fs: f32, share: f32) -> [f32; 2] {
         let k = self.k;
         let gd = 0.5 + 0.5 * diffusion.clamp(0.0, 1.0);
         let mut u = x;
@@ -1620,8 +1650,31 @@ impl PlateTank {
         let lfo = (std::f32::consts::TAU * self.lfo).sin();
         let exc = EXCURSION * k * modulation.clamp(0.0, PLATE_MOD_MAX);
         let mut out = [0.0f32; 2];
+        let keep = (1.0 - share * share).max(0.0).sqrt();
         for h in 0..2 {
-            let v = u + self.cross[1 - h];
+            let c = self.cross[1 - h];
+            // Shimmer: part of what crosses comes over shifted (two voices, this half a few cents
+            // up or down), bounded by the range; equal power with what crosses as it is.
+            let c = if share > 0.0 {
+                let spread = if h == 0 { self.spread } else { 1.0 / self.spread };
+                let mut y = 0.0;
+                for v in 0..2 {
+                    if self.weight[v] > 0.0 {
+                        y += self.weight[v] * self.shift[h][v].process(c, self.ratio[v] * spread);
+                    }
+                }
+                let r = &mut self.range[h];
+                r[0] += (y - r[0]) * self.range_k.0;
+                let y = y - r[0];
+                // The high cut twice (12 dB/oct): once, at AMOUNT 100 % a third of a late tail sat
+                // over 6 kHz.
+                r[1] += (y - r[1]) * self.range_k.1;
+                r[2] += (r[1] - r[2]) * self.range_k.1;
+                keep * c + share * r[2]
+            } else {
+                c
+            };
+            let v = u + c;
             let v = self.ap1[h].process(v, -PLATE_DD1, exc * if h == 0 { lfo } else { -lfo });
             self.d1[h].write(v);
             let t = self.filt[h].process(self.d1[h].at((PTANK[h][1] * k) as usize));
@@ -1915,8 +1968,8 @@ mod shimmer_tests {
     fn shimmer_puts_the_interval_in_the_tail() {
         let x = tone(440.0, 4 * 48_000, 24_000);
         for (pitch, f) in [(12.0, 880.0), (7.0, 659.26), (-12.0, 220.0)] {
-            let dry = render(&ReverbSettings { decay_s: 6.0, ..ReverbSettings::default() }, &x);
-            let shim = render(&ReverbSettings { decay_s: 6.0, shimmer: 0.6, shimmer_pitch: pitch, ..ReverbSettings::default() }, &x);
+            let dry = render(&ReverbSettings { kind: ReverbKind::Plate, decay_s: 6.0, ..ReverbSettings::default() }, &x);
+            let shim = render(&ReverbSettings { kind: ReverbKind::Shimmer, decay_s: 6.0, shimmer: 0.6, shimmer_pitch: pitch, ..ReverbSettings::default() }, &x);
             let tail = 48_000..96_000;
             let gain = 20.0 * (level(&shim[tail.clone()], f) / level(&dry[tail], f)).log10();
             assert!(gain > 15.0, "{pitch}: {gain:.1} dB");
@@ -1927,7 +1980,7 @@ mod shimmer_tests {
     fn shimmer_never_runs_away_even_frozen_on_a_held_tone() {
         for pitch in [0.0, 0.3, 7.0, 12.0, -12.0, 24.0] {
             let x = tone(220.0, 20 * 48_000, 20 * 48_000);
-            let s = ReverbSettings { decay_s: 30.0, shimmer: 1.0, shimmer_pitch: pitch, ..ReverbSettings::default() };
+            let s = ReverbSettings { kind: ReverbKind::Shimmer, decay_s: 30.0, shimmer: 1.0, shimmer_pitch: pitch, shimmer_pitch2: pitch + 7.0, shimmer_blend: 0.5, ..ReverbSettings::default() };
             let y = render(&s, &x);
             let early = peak(&y[48_000..3 * 48_000]);
             let late = peak(&y[17 * 48_000..]);
@@ -1952,10 +2005,10 @@ mod shimmer_tests {
     }
 
     #[test]
-    fn no_shimmer_is_the_reverb_as_it_was() {
+    fn the_other_types_ignore_the_shimmer_dials() {
         let x = tone(330.0, 48_000, 4800);
-        let a = render(&ReverbSettings::default(), &x);
-        let b = render(&ReverbSettings { shimmer: 0.0, shimmer_pitch: -7.0, ..ReverbSettings::default() }, &x);
+        let a = render(&ReverbSettings { shimmer: 0.0, ..ReverbSettings::default() }, &x);
+        let b = render(&ReverbSettings { shimmer: 1.0, shimmer_pitch: -7.0, shimmer_blend: 0.7, ..ReverbSettings::default() }, &x);
         assert_eq!(a, b);
     }
 }

@@ -214,8 +214,8 @@ fn the_dials_sit_in_their_groups() {
     let (view, _host) = setup();
     let groups = view.dial_groups();
     let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
-    assert_eq!(names, ["SPACE", "DUCK", "EARLY", "SHIMMER", "MOD"]);
-    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("SHIMMER", &["shimmer", "shimmer_pitch", "shimmer_low", "shimmer_high"]), ("DUCK", &["duck", "duck_thresh", "duck_release"])];
+    assert_eq!(names, ["SPACE", "DUCK", "EARLY", "MOD"]);
+    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("DUCK", &["duck", "duck_thresh", "duck_release"])];
     for (name, members) in member {
         let rect = groups.iter().find(|g| g.0 == name).expect("group").1;
         for id in members {
@@ -242,4 +242,26 @@ fn freeze_toggles_from_the_footer() {
         draw(&mut view, &host);
         assert_eq!(plain(&host, FREEZE.id), want);
     }
+}
+
+#[test]
+fn the_shimmer_type_brings_its_panel_and_takes_it_away() {
+    let (mut view, host) = setup();
+    host.set_plain("reverb_type", 5.0);
+    view.tick(&host);
+    let groups = view.dial_groups();
+    let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
+    assert_eq!(names, ["SPACE", "DUCK", "EARLY", "SHIMMER", "MOD"]);
+    let rect = groups.iter().find(|g| g.0 == "SHIMMER").expect("panel").1;
+    for id in ["shimmer", "shimmer_pitch", "shimmer_pitch2", "shimmer_blend", "shimmer_detune", "shimmer_low", "shimmer_high"] {
+        assert!(rect.contains(view.dial(id).expect("dial")), "{id} outside SHIMMER");
+    }
+    for (i, a) in groups.iter().enumerate() {
+        for b in &groups[i + 1..] {
+            assert!(a.1.intersect(b.1).area() == 0.0, "{} overlaps {}", a.0, b.0);
+        }
+    }
+    host.set_plain("reverb_type", 2.0);
+    view.tick(&host);
+    assert!(view.dial("shimmer").is_none());
 }

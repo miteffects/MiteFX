@@ -55,6 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain("d3_mult", 1.6);
         host.set_plain("d3_q", 2.0);
     }
+    if v("shimmer") {
+        host.set_plain(mite_verb::params::REVERB_TYPE.id, 5.0);
+    }
     if v("duck") {
         host.set_plain(DUCK.id, 12.0);
         host.set_plain(DUCK_THRESH.id, -28.0);

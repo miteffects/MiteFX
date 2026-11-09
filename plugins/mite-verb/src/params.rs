@@ -27,7 +27,11 @@ use crate::dsp::Output;
 ///   state gets 150 Hz–6.5 kHz, what version 4 had built in.
 /// - 6 (2026-11-09): the reverb's type (`reverb_type`: Room, Hall, Plate, Chamber, Spring)
 ///   appended; a version 5 state gets Room, what it was.
-pub const STATE_VERSION: u32 = 6;
+/// - 7 (2026-11-09): shimmer is a type (user: "move shimmer as a type so that we can give it
+///   more options"): `reverb_type` gains Shimmer, `shimmer` is its amount (50 % by default), and
+///   `shimmer_pitch2`, `shimmer_blend`, `shimmer_detune` are appended. A version 6 state with
+///   shimmer on becomes the Shimmer type ([`crate::migrate::v6_to_v7`]).
+pub const STATE_VERSION: u32 = 7;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -53,11 +57,16 @@ pub const REVERB_TYPE: ChoiceSpec = ChoiceSpec { id: "reverb_type", name: "Type"
 
 // ---- Shimmer -----------------------------------------------------------------------------------
 
-/// How fast the tail climbs (or falls) by the interval: 0 off, 100 % most of it each second.
-pub const SHIMMER: ParamSpec = spec("shimmer", "Shimmer Feedback", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+/// The Shimmer type: how much of each pass round the tank climbs by the interval.
+pub const SHIMMER: ParamSpec = spec("shimmer", "Shimmer Amount", "%", 0.0, 100.0, 50.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
 /// The interval, semitones.
 pub const SHIMMER_PITCH: ParamSpec = spec("shimmer_pitch", "Shimmer Pitch", "st", -24.0, 24.0, 12.0, ParamScale::Linear, 1, (1.0, 0.1), ParamDisplay::Number);
-/// The shimmer's range as heard: its low cut and high cut.
+/// The second interval, and the blend between the two (0: the first alone).
+pub const SHIMMER_PITCH2: ParamSpec = spec("shimmer_pitch2", "Shimmer Pitch 2", "st", -24.0, 24.0, 19.0, ParamScale::Linear, 1, (1.0, 0.1), ParamDisplay::Number);
+pub const SHIMMER_BLEND: ParamSpec = spec("shimmer_blend", "Shimmer Blend", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+/// The sides' spread, cents either way: two voices beating slowly, wide.
+pub const SHIMMER_DETUNE: ParamSpec = spec("shimmer_detune", "Shimmer Detune", "ct", 0.0, 50.0, 6.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+/// The range of what climbs: its low cut and high cut.
 pub const SHIMMER_LOW: ParamSpec = spec("shimmer_low", "Shimmer Low Cut", "Hz", 20.0, 2000.0, 150.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 pub const SHIMMER_HIGH: ParamSpec = spec("shimmer_high", "Shimmer High Cut", "Hz", 1000.0, 20_000.0, 6500.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 
@@ -124,6 +133,7 @@ pub fn manifest() -> String {
     }
     lines.extend([SHIMMER.manifest_line(), SHIMMER_PITCH.manifest_line(), SHIMMER_LOW.manifest_line(), SHIMMER_HIGH.manifest_line()]);
     lines.push(REVERB_TYPE.manifest_line());
+    lines.extend([SHIMMER_PITCH2.manifest_line(), SHIMMER_BLEND.manifest_line(), SHIMMER_DETUNE.manifest_line()]);
     lines.join("\n") + "\n"
 }
 
@@ -156,7 +166,7 @@ fn split_band_id(id: &str) -> Option<(char, usize, &str)> {
 
 /// Every continuous spec by its id, for stand-in hosts.
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
-    if let Some(s) = CONTINUOUS[..15].iter().chain(&[SHIMMER, SHIMMER_PITCH, SHIMMER_LOW, SHIMMER_HIGH]).find(|s| s.id == id) {
+    if let Some(s) = CONTINUOUS[..15].iter().chain(&[SHIMMER, SHIMMER_PITCH, SHIMMER_LOW, SHIMMER_HIGH, SHIMMER_PITCH2, SHIMMER_BLEND, SHIMMER_DETUNE]).find(|s| s.id == id) {
         return Some(*s);
     }
     match split_band_id(id)? {
@@ -244,6 +254,9 @@ pub struct VerbParams {
     pub shimmer_low: FloatParam,
     pub shimmer_high: FloatParam,
     pub reverb_type: IntParam,
+    pub shimmer_pitch2: FloatParam,
+    pub shimmer_blend: FloatParam,
+    pub shimmer_detune: FloatParam,
     pub bands: [DecayBandParams; DECAY_BANDS],
     pub tone: [ToneBandParams; TONE_BANDS],
     pub snapshots: std::sync::Arc<Snapshots>,
@@ -278,6 +291,9 @@ impl Default for VerbParams {
             shimmer_low: float_param(&SHIMMER_LOW),
             shimmer_high: float_param(&SHIMMER_HIGH),
             reverb_type: choice_param(&REVERB_TYPE, REVERB_TYPE.name.to_owned()),
+            shimmer_pitch2: float_param(&SHIMMER_PITCH2),
+            shimmer_blend: float_param(&SHIMMER_BLEND),
+            shimmer_detune: float_param(&SHIMMER_DETUNE),
             bands: std::array::from_fn(DecayBandParams::new),
             tone: std::array::from_fn(ToneBandParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
@@ -308,6 +324,9 @@ pub fn reverb_settings(p: impl Fn(&str) -> f32) -> ReverbSettings {
         early_send: p(EARLY_SEND.id) / 100.0,
         shimmer: p(SHIMMER.id) / 100.0,
         shimmer_pitch: p(SHIMMER_PITCH.id),
+        shimmer_pitch2: p(SHIMMER_PITCH2.id),
+        shimmer_blend: p(SHIMMER_BLEND.id) / 100.0,
+        shimmer_detune: p(SHIMMER_DETUNE.id),
         shimmer_low_hz: p(SHIMMER_LOW.id),
         shimmer_high_hz: p(SHIMMER_HIGH.id),
         bands: std::array::from_fn(|b| {
@@ -354,6 +373,9 @@ impl VerbParams {
             "shimmer_low" => f(&self.shimmer_low),
             "shimmer_high" => f(&self.shimmer_high),
             "reverb_type" => int(&self.reverb_type),
+            "shimmer_pitch2" => f(&self.shimmer_pitch2),
+            "shimmer_blend" => f(&self.shimmer_blend),
+            "shimmer_detune" => f(&self.shimmer_detune),
             _ => match split_band_id(id) {
                 Some(('d', b, short)) => {
                     let band = &self.bands[b];
@@ -440,6 +462,9 @@ unsafe impl Params for VerbParams {
         map.push(p(SHIMMER_LOW.id, self.shimmer_low.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_HIGH.id, self.shimmer_high.as_ptr(), "Shimmer"));
         map.push(p(REVERB_TYPE.id, self.reverb_type.as_ptr(), ""));
+        map.push(p(SHIMMER_PITCH2.id, self.shimmer_pitch2.as_ptr(), "Shimmer"));
+        map.push(p(SHIMMER_BLEND.id, self.shimmer_blend.as_ptr(), "Shimmer"));
+        map.push(p(SHIMMER_DETUNE.id, self.shimmer_detune.as_ptr(), "Shimmer"));
         map
     }
 }
