@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite DeNoise",
+  "version": 1,
+  "name": "Gentle Hiss",
+  "params": {
+    "threshold": 4.0,
+    "reduction": 8.0,
+    "smoothing": 50.0,
+    "emphasis": 4.0
+  }
+}

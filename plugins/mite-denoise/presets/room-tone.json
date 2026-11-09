@@ -1,0 +1,12 @@
+{
+  "plugin": "Mite DeNoise",
+  "version": 1,
+  "name": "Room Tone",
+  "params": {
+    "threshold": 5.0,
+    "reduction": 10.0,
+    "attack": 20.0,
+    "release": 400.0,
+    "smoothing": 60.0
+  }
+}

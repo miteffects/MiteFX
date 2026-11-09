@@ -1,0 +1,10 @@
+threshold | dB | -10 | 30 | 6 | Linear
+reduction | dB | 0 | 60 | 12 | Linear
+attack | ms | 1 | 200 | 10 | Log
+release | ms | 10 | 2000 | 150 | Log
+smoothing | % | 0 | 100 | 40 | Linear
+emphasis | dB | -12 | 12 | 0 | Linear
+adaptive | bool | true
+listen | bool | false
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false

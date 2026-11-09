@@ -43,3 +43,6 @@ name = "Mite Mod"
 
 [mite_pitch]
 name = "Mite Pitch"
+
+[mite_denoise]
+name = "Mite DeNoise"

@@ -1,0 +1,12 @@
+{
+  "plugin": "Mite DeNoise",
+  "version": 1,
+  "name": "Voice Cleanup",
+  "params": {
+    "threshold": 6.0,
+    "reduction": 15.0,
+    "attack": 5.0,
+    "release": 120.0,
+    "smoothing": 40.0
+  }
+}

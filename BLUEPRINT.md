@@ -117,6 +117,7 @@ MiteFX/
 | Doubling: per-note timing, detune, level and tone from an onset detector, switched before each note arrives; chorus; placement | `mite_dsp::doubler` (`Doubler`; Double, 2026-11-04) |
 | Modulation matrix: two LFOs (seven shapes, sync locked to the song, phase), an envelope follower, eight slots each moving a target by a share of its knob's travel, in 32-sample control steps counted from the start (block-size invariant), sources smoothed 2 ms | `mite_dsp::modmatrix` (`Matrix::steps`, `lfo_at`); parameters `mite_core::modmatrix` (`manifest_lines`, `modulate`, `MatrixTap`); host glue and per-block plumbing `mite_plugin::matrix` (`MatrixParams`, `MatrixRunner`); the panel `mite_ui::widgets::matrix` (`MatrixPanel`, `knob_modulation`, `Knob::draw_modulation`). Delay, Sat, Mod; 2026-11-05 |
 | Modulation: one smooth LFO (six shapes, sync locked to the song), chorus, ensemble, flanger (through zero), phaser (2–24 stages), vibrato, rotary speaker (horn and drum with their own inertia), micro pitch shift (correlation-matched splices), their responses for drawing; the doubler's sinc reads | `mite_dsp::modulation` (`Mod`, `shape_at`, `flanger_response`, `phaser_response`, `rotor_time_s`; Mod, 2026-11-05) |
+| Spectral noise reduction: learned or tracked noise floor (minimum statistics), a gate per bin with knee, smoothing across frequency, attack/release, the profile as a density per Hz at log points (portable across rates) | `mite_dsp::denoise` (`Denoiser`; DeNoise, 2026-11-09; Gate's spectral mode can build on it) |
 | De-essing: relative (band against the whole) or absolute detection, dynamic shelf / three-bell band / wide reduction exactly the identity at rest, lookahead, smart release | `mite_dsp::deess` (`DeEsser`, `response_db`; DeEss, 2026-11-05) |
 | Band split: LR4 crossover cascade with allpass compensation (bands sum to an allpass), the slot scheme (crossover slot k owns band k + 1), carrying states across a band made or an L/R ↔ M/S switch | `mite_dsp::crossover` (`Layout<B>`, `Split<B>`, `Cross`; Shape splits into 5, Sat into 6; 2026-10-26) |
 | Oversampling 1/2/4/8× (half-band FIR cascade, linear phase, whole-sample latency 0/69/76/78) | `mite_dsp::oversample` |
@@ -538,6 +539,23 @@ positions, not labels. `mite_ui` now looks the letter and digit keys up in the X
 layout and group while Ctrl is down (`keymap::layout_char`, the UI thread's own x11rb connection,
 XKB for the group). The editor's undo and redo, per take, move into `Session::history` when the
 editor closes and come back when it opens (tested).
+
+### 16. Mite DeNoise. Rival: Acon Digital DeNoise
+
+Spectral noise reduction (user, 2026-11-09: "the functionality of Acon Digital's DeNoise but
+apply our design"; built without prompts, questions after). `docs/design/denoise-brief.md`.
+Accent linen.
+
+- A gate per frequency on an STFT (`mite_dsp::denoise`).
+- The floor is learned (LEARN; saved with the session) or tracked (ADAPTIVE: minimum
+  statistics with a per-bin lift, so it lands on a steady hum as on random noise).
+- Threshold over the floor, tilted by emphasis; reduction over a 6 dB knee; attack, release and
+  smoothing across frequencies; noise only; bypass at the same latency.
+- The plot draws the denoiser's own spectra, floor, threshold (grips for threshold and tilt)
+  and the reduction per frequency.
+
+**Status (2026-11-09):** first version built. All tests pass, installed, 0.8 % CPU at 48 kHz,
+120 fps. Not yet heard by the user; open questions in the brief §4.
 
 ### 15. Mite Amp (later)
 

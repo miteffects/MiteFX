@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite DeNoise",
+  "version": 1,
+  "name": "Strong",
+  "params": {
+    "threshold": 10.0,
+    "reduction": 30.0,
+    "release": 250.0,
+    "smoothing": 70.0
+  }
+}

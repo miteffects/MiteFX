@@ -1,0 +1,12 @@
+{
+  "plugin": "Mite DeNoise",
+  "version": 1,
+  "name": "Hum and Rumble",
+  "params": {
+    "threshold": 8.0,
+    "reduction": 24.0,
+    "smoothing": 10.0,
+    "emphasis": -8.0,
+    "adaptive": 0.0
+  }
+}
