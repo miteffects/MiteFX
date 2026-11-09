@@ -45,11 +45,13 @@ const DISPLAY_TOP: f64 = HEADER;
 const HELP_TOP: f64 = DISPLAY_TOP + 620.0;
 const FOOTER_TOP: f64 = HELP_TOP + 28.0;
 const LANE_H: f64 = 64.0;
-const KEYS: Rect = Rect::new(0.0, DISPLAY_TOP, 64.0, HELP_TOP - 26.0 - LANE_H);
-const ROLL: Rect = Rect::new(64.0, DISPLAY_TOP, VIEW_W, HELP_TOP - 26.0 - LANE_H);
+/// The time ruler, over the notes.
+const RULER_H: f64 = 26.0;
+const RULER: Rect = Rect::new(64.0, DISPLAY_TOP, VIEW_W, DISPLAY_TOP + RULER_H);
+const KEYS: Rect = Rect::new(0.0, DISPLAY_TOP + RULER_H, 64.0, HELP_TOP - LANE_H);
+const ROLL: Rect = Rect::new(64.0, DISPLAY_TOP + RULER_H, VIEW_W, HELP_TOP - LANE_H);
 /// The waveform lane: what plays, under the notes.
-const LANE: Rect = Rect::new(64.0, HELP_TOP - 26.0 - LANE_H, VIEW_W, HELP_TOP - 26.0);
-const RULER: Rect = Rect::new(64.0, HELP_TOP - 26.0, VIEW_W, HELP_TOP);
+const LANE: Rect = Rect::new(64.0, HELP_TOP - LANE_H, VIEW_W, HELP_TOP);
 const TRANSFER: Rect = Rect::new(16.0, FOOTER_TOP + 14.0, 156.0, FOOTER_TOP + 42.0);
 /// The snap's three buttons, from here, each this wide.
 const SNAP_X: f64 = 176.0;
@@ -454,6 +456,14 @@ impl PitchView {
             .map(|o| o.region)
     }
 
+    /// Whether `p` is on a note of another clip.
+    fn on_other_note(&self, p: Point) -> bool {
+        self.shared.session.others().iter().any(|o| {
+            let sh = self.shift_of(o);
+            o.analysis.notes.iter().enumerate().filter(|(_, n)| n.end > o.from && n.start < o.to).any(|(i, n)| self.rect_at(n, &o.edits.get(i).copied().unwrap_or_default(), o.analysis.fs, sh).inflate(2.0, 3.0).contains(p))
+        })
+    }
+
     fn hot_at(&self, p: Point) -> Option<Hot> {
         if TRANSFER.contains(p) {
             return Some(Hot::Transfer);
@@ -719,7 +729,8 @@ impl PitchView {
         }
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((ROLL.x0 - 0.5, ROLL.y0), (ROLL.x0 - 0.5, ROLL.y1)));
         // The ruler: seconds from the take's start (a step that keeps labels apart).
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &RULER);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &Rect::new(0.0, RULER.y0, RULER.x1, RULER.y1));
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, RULER.y1 - 0.5), (RULER.x1, RULER.y1 - 0.5)));
         let step = [0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0].into_iter().find(|s| s / self.span * ROLL.width() >= 70.0).unwrap_or(120.0);
         // Lines on round song times; with the song's bars and beats, on those.
         let origin = self.take_song_s();
@@ -771,7 +782,7 @@ impl PitchView {
             };
             if b > a {
                 let on = s.loop_on.load(Ordering::Acquire) || self.ruler_from.is_some();
-                let band = Rect::new(self.x_of(a).max(RULER.x0), RULER.y0 + 2.0, self.x_of(b).min(RULER.x1), RULER.y0 + 6.0);
+                let band = Rect::new(self.x_of(a).max(RULER.x0), RULER.y1 - 6.0, self.x_of(b).min(RULER.x1), RULER.y1 - 2.0);
                 if band.width() > 0.0 {
                     cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(if on { 0.8 } else { 0.25 }), None, &RoundedRect::from_rect(band, 2.0));
                 }
@@ -779,9 +790,10 @@ impl PitchView {
             let x = self.x_of(self.cue_s());
             if (RULER.x0..=RULER.x1).contains(&x) {
                 let mut tri = BezPath::new();
-                tri.move_to((x - 5.0, RULER.y1 - 1.0));
-                tri.line_to((x + 5.0, RULER.y1 - 1.0));
-                tri.line_to((x, RULER.y1 - 8.0));
+                // Pointing down at the notes.
+                tri.move_to((x - 5.0, RULER.y1 - 9.0));
+                tri.line_to((x + 5.0, RULER.y1 - 9.0));
+                tri.line_to((x, RULER.y1 - 2.0));
                 tri.close_path();
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_hi, None, &tri);
             }
@@ -1157,7 +1169,7 @@ impl PitchView {
         match self.hot {
                         Some(Hot::Seam(_)) => Help::default().text("Click to join these two notes"),
             Some(Hot::Ruler) => Help::default().text("Click: the play cursor here; drag: a loop range"),
-            Some(Hot::Clip(_)) => Help::default().text("Another clip on this track — click to edit its notes"),
+            Some(Hot::Clip(_)) => Help::default().text("Another clip on this track — click to edit its notes (off a note: the play cursor goes there too)"),
                         Some(Hot::Play) if self.shared.session.ara().is_some() => Help::default().text("Play from the cursor, or stop (Space) — the host's transport"),
             Some(Hot::Play) => Help::default().text("Play from the cursor, or stop (Space) — the plugin plays the take itself while the host is stopped"),
             Some(Hot::Loop) => Help::default().text("Loop the range on the ruler (L); drag along the ruler to set it"),
@@ -1398,6 +1410,11 @@ impl PitchView {
                     true
                 }
                 Some(Hot::Clip(region)) => {
+                    // Off its notes, the click also moves the play cursor there (first: the
+                    // switch keeps the cursor's place on the song).
+                    if !self.on_other_note(pos) {
+                        self.set_cue(self.t_of(pos.x));
+                    }
                     session.pick_clip(region);
                     true
                 }
@@ -1461,7 +1478,12 @@ impl PitchView {
                     if !mods.shift && !mods.ctrl {
                         self.selected.clear();
                     }
+                    // A drag selects a box; a click moves the play cursor (on release).
                     self.box_from = Some(pos);
+                    true
+                }
+                None if LANE.contains(pos) => {
+                    self.set_cue(self.t_of(pos.x));
                     true
                 }
                 None => false,
@@ -1493,6 +1515,12 @@ impl PitchView {
                     return true;
                 }
                 if let Some(from) = self.box_from.take() {
+                    // Not dragged: a click off the notes, the play cursor goes there.
+                    if (pos - from).hypot() < 4.0 {
+                        self.set_cue(self.t_of(pos.x));
+                        self.hot = self.hot_at(pos);
+                        return true;
+                    }
                     let r = Rect::from_points(from, pos);
                     if let Some(a) = session.analysis() {
                         let edits = session.edits();

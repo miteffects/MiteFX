@@ -525,6 +525,11 @@ when the rates differ; the editor's playhead converts too. Found by rendering in
 with the stem: −0.006 in time before, 0.9997 after. `MITE_PITCH_DIAG=1` logs each instance's
 in/out peaks to the ARA log.
 
+**2026-11-09 (user: ruler at the bottom "a bit weird"; "make the timeline teleport if I click
+wherever when not on a note"):** the ruler sits over the notes; a click off the notes (in the roll,
+the lane, or another clip's empty stretch) puts the play cursor there (playing: the host jumps);
+a drag still selects a box.
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).

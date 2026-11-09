@@ -502,3 +502,21 @@ fn timing_snaps_onto_the_songs_beats() {
     let at = start + (a.notes[2].start as f64 + e.offset) / FS;
     assert!(((at / 0.0625) - (at / 0.0625).round()).abs() > 1e-3, "free: {at}");
 }
+
+#[test]
+fn a_click_off_the_notes_moves_the_play_cursor_and_a_drag_selects() {
+    let (mut view, host, shared) = ready("ed-cue");
+    let s = &shared.session;
+    // Below every note, at 1.3 s of the take.
+    let at = Point::new(view.x_of(1.3), view.y_of(3000.0).min(600.0));
+    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+    view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+    assert!((view.cue_s() - 1.3).abs() < 0.01, "{}", view.cue_s());
+    // A drag over notes selects them and leaves the cursor.
+    let r = view.note_rect(1).expect("in view");
+    drag(&mut view, &host, Point::new(r.x0 - 10.0, r.y0 - 10.0), Point::new(r.x1 + 2.0, r.y1 + 10.0), MODS);
+    assert!(view.selected().contains(&1));
+    assert!((view.cue_s() - 1.3).abs() < 0.01);
+    let _ = s;
+}
