@@ -12,6 +12,9 @@ use nih_plug::wrapper::state::PluginState;
 const OLD_LAST: f64 = 3.0;
 const NEW_LAST: f64 = 5.0;
 
+/// **2 → 3 (2026-11-10):** each band's L/R and M/S balance appended, centred (as it was).
+pub fn v2_to_v3(_state: &mut PluginState) {}
+
 pub fn v1_to_v2(state: &mut PluginState) {
     if let Some(json) = state.fields.get_mut(SNAPSHOTS_KEY) {
         if let Some(lifted) = rescale_stereo(json) {

@@ -113,7 +113,7 @@ fn offered() -> Vec<Model> {
 
 /// The wide card's dials: drive large, then bias, tone, mix and output; under them the
 /// dynamics row (the threshold is automatic: no dial).
-const DIALS: [(ParamSpec, &str, KnobKind); 8] = [
+const DIALS: [(ParamSpec, &str, KnobKind); 10] = [
     (B_DRIVE, "DRIVE", KnobKind::Unipolar),
     (B_BIAS, "BIAS", KnobKind::Bipolar),
     (B_TONE, "TONE", KnobKind::Bipolar),
@@ -122,6 +122,9 @@ const DIALS: [(ParamSpec, &str, KnobKind); 8] = [
     (B_DYN, "DYNAMICS", KnobKind::Bipolar),
     (B_DYN_ATT, "ATTACK", KnobKind::Unipolar),
     (B_DYN_REL, "RELEASE", KnobKind::Unipolar),
+    // Where the saturation lands (user, 2026-11-10: "where are l/r and mid/side knobs").
+    (B_LR, "L/R", KnobKind::Bipolar),
+    (B_MS, "M/S", KnobKind::Bipolar),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,7 +152,7 @@ struct Card {
     solo: Option<Rect>,
     mute: Option<Rect>,
     remove: Option<Rect>,
-    /// Dial centres and diameters: the eight of `DIALS`, or DRIVE and MIX on a narrow card.
+    /// Dial centres and diameters: the ten of `DIALS`, or DRIVE and MIX on a narrow card.
     dials: Vec<(Point, f64)>,
 }
 
@@ -217,7 +220,7 @@ pub fn memory_host() -> mite_ui::MemoryParamHost {
                 } else if id.starts_with("lfo") {
                     &[LFO_RATE, LFO_PHASE]
                 } else if id.starts_with('b') {
-                    &BAND_SPECS
+                    &BAND_ALL_SPECS
                 } else {
                     &[M_AMT]
                 };
@@ -252,6 +255,8 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::sat::SatSettings {
             bypass: on(&band_id(b, B_BYPASS.id)),
             mute: on(&band_id(b, B_MUTE.id)),
             solo: on(&band_id(b, B_SOLO.id)),
+            lr: p(&band_id(b, B_LR.id)) / 100.0,
+            ms: p(&band_id(b, B_MS.id)) / 100.0,
         }),
         auto_gain: on(AUTO_GAIN.id),
     }
@@ -616,6 +621,8 @@ impl SatView {
             let (row1, row2) = (square.y0 + 70.0, square.y0 + 200.0);
             let mut dials: Vec<(Point, f64)> = (0..5).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row1), if k == 0 { 84.0 } else { 60.0 })).collect();
             dials.extend((0..3).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row2), if k == 0 { 60.0 } else { 52.0 })));
+            // L/R and M/S, beside the dynamics.
+            dials.extend((3..5).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row2), 52.0)));
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
             return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 132.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
         }
@@ -645,9 +652,11 @@ impl SatView {
                     for k in 0..4 {
                         dials.push((Point::new(ax0 + col * (1.5 + (k % 2) as f64), top + step * (k / 2) as f64), 44.0));
                     }
+                    // The dynamics' three, then L/R and M/S, in one row of five.
                     let row = (top + 2.0 * step + 4.0).min(rect.y1 - 47.0);
-                    for k in 0..3 {
-                        dials.push((Point::new(ax0 + col * (k as f64 + 0.5), row), 40.0));
+                    let col5 = (ax1 - ax0) / 5.0;
+                    for k in 0..5 {
+                        dials.push((Point::new(ax0 + col5 * (k as f64 + 0.5), row), 40.0));
                     }
                     Card {
                         band,

@@ -413,6 +413,9 @@ pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, bias: f32, a:
 
 // ---- Settings ------------------------------------------------------------------------------
 
+/// The L/R and M/S balance glide, s.
+const BALANCE_GLIDE_S: f64 = 0.02;
+
 /// What part of the stereo image a band saturates (frozen order, as the `stereo` parameter).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StereoMode {
@@ -485,6 +488,11 @@ pub struct BandSat {
     pub bypass: bool,
     pub mute: bool,
     pub solo: bool,
+    /// Where the saturation lands, −1…1 (0: everywhere): toward the left (−) or the right (+),
+    /// and toward the mid (−) or the side (+). They weigh what the band changes, so at the far
+    /// end the other part passes as it came.
+    pub lr: f32,
+    pub ms: f32,
 }
 
 impl Default for BandSat {
@@ -493,6 +501,8 @@ impl Default for BandSat {
             model: Model::DEFAULT,
             drive_db: 0.0,
             bias: 0.0,
+            lr: 0.0,
+            ms: 0.0,
             stereo: StereoMode::Stereo,
             tone_db: 0.0,
             mix: 1.0,
@@ -1061,6 +1071,8 @@ struct BandCore {
     dyn_ref: Option<f32>,
     /// Nothing runs: the oversampler and filters are clear.
     idle: bool,
+    /// The L/R and M/S balance as it glides (`BandSat::lr`, `ms`).
+    balance: [f32; 2],
 }
 
 impl BandCore {
@@ -1082,6 +1094,7 @@ impl BandCore {
             dyn_db: 0.0,
             dyn_ref: None,
             idle: true,
+            balance: [0.0; 2],
         }
     }
 
@@ -2066,10 +2079,13 @@ impl Saturator {
                 }
                 // The sum. Left and right start from what they were and only take on the
                 // differences, so a neutral band stays the input bit for bit in every mode.
+                let bal_to = [s.bands[b].lr.clamp(-1.0, 1.0), s.bands[b].ms.clamp(-1.0, 1.0)];
+                let bal_k = (1.0 - (-1.0 / (BALANCE_GLIDE_S * self.fs)).exp()) as f32;
                 for i in 0..n {
                     let post = self.lanes.post[b][i] * dyn_gain[i];
+                    let fader = self.lanes.fader[b][i];
+                    let mut ys = [0.0f32; 2];
                     if ms {
-                        let fader = self.lanes.fader[b][i];
                         let part = |c: usize| {
                             if driven[c] {
                                 xde[c][i] * (post - fader) + post * diff[c][i]
@@ -2078,18 +2094,35 @@ impl Saturator {
                             }
                         };
                         let (pm, ps) = (part(0), part(1));
-                        let (l, r) = (xds[0][i] * fader + (pm + ps), xds[1][i] * fader + (pm - ps));
-                        out[ci][0][i] += l;
-                        out[ci][1][i] += r;
-                        peak_out = peak_out.max(l.abs()).max(r.abs());
+                        ys = [xds[0][i] * fader + (pm + ps), xds[1][i] * fader + (pm - ps)];
                     } else {
                         for c in 0..n_ch {
                             // A channel left out (Left, Right) passes as the band's dry part
                             // would, untouched by the curve's gains.
-                            let y = if driven[c] { (xds[c][i] + diff[c][i]) * post } else { xds[c][i] * self.lanes.fader[b][i] };
-                            out[ci][c][i] += y;
-                            peak_out = peak_out.max(y.abs());
+                            ys[c] = if driven[c] { (xds[c][i] + diff[c][i]) * post } else { xds[c][i] * fader };
                         }
+                    }
+                    // The balance: what the band changes, weighed toward one side (L/R), then
+                    // toward the mid or the side (M/S). Centred, it is left alone (bit for bit).
+                    let bal = &mut band.balance;
+                    for (v, &to) in bal.iter_mut().zip(&bal_to) {
+                        *v += (to - *v) * bal_k;
+                        // Landed: exactly there (centred is then bit for bit, a far end clean).
+                        if (to - *v).abs() < 1e-4 {
+                            *v = to;
+                        }
+                    }
+                    if n_ch == 2 && (bal[0] != 0.0 || bal[1] != 0.0) {
+                        let (wl, wr) = ((1.0 - bal[0]).min(1.0), (1.0 + bal[0]).min(1.0));
+                        let (wm, ws) = ((1.0 - bal[1]).min(1.0), (1.0 + bal[1]).min(1.0));
+                        let (dl, dr) = (xds[0][i] * fader, xds[1][i] * fader);
+                        let (el, er) = ((ys[0] - dl) * wl, (ys[1] - dr) * wr);
+                        let (em, es) = (0.5 * (el + er) * wm, 0.5 * (el - er) * ws);
+                        ys = [dl + em + es, dr + em - es];
+                    }
+                    for c in 0..n_ch {
+                        out[ci][c][i] += ys[c];
+                        peak_out = peak_out.max(ys[c].abs());
                     }
                     for c in 0..n_ch {
                         dry_out[ci][c][i] += xds[c][i];
@@ -2442,6 +2475,38 @@ mod tests {
                 let (a, b, da, db) = run_stereo(&s, &l, &r);
                 assert_eq!(a, da, "{mode:?}");
                 assert_eq!(b, db, "{mode:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_balance_knobs_move_the_saturation_and_centred_change_nothing() {
+        let (l, r) = stereo_input();
+        let mut s = band(Model::Tube, 18.0);
+        let (a0, b0, _, _) = run_stereo(&s, &l, &r);
+        // Centred: exactly as without them.
+        s.bands[0].lr = 0.0;
+        s.bands[0].ms = 0.0;
+        let (a, b, _, _) = run_stereo(&s, &l, &r);
+        assert_eq!((a, b), (a0.clone(), b0.clone()));
+        // All the way left: the right as it came; all the way to the mid: the side as it came.
+        let worst = |x: &[f32], y: &[f32]| x.iter().zip(y).fold(0.0f32, |m, (p, q)| m.max((p - q).abs()));
+        let side = |x: &[f32], y: &[f32]| -> Vec<f32> { x.iter().zip(y).map(|(p, q)| 0.5 * (p - q)).collect() };
+        for (lr, ms) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+            let mut s = band(Model::Tube, 18.0);
+            s.bands[0].lr = lr;
+            s.bands[0].ms = ms;
+            let (a, b, da, db) = run_stereo(&s, &l, &r);
+            // Past the glide (a 20 ms time constant lands within 1e-4 after ~9 of them), compare.
+            let k = 12_000;
+            match (lr as i32, ms as i32) {
+                (-1, 0) => assert!(worst(&b[k..], &db[k..]) < 1e-5 && worst(&a[k..], &da[k..]) > 0.01, "left only: right off by {}, left moved {}, len {}", worst(&b[k..], &db[k..]), worst(&a[k..], &da[k..]), a.len()),
+                (1, 0) => assert!(worst(&a[k..], &da[k..]) < 1e-5 && worst(&b[k..], &db[k..]) > 0.01, "right only"),
+                (0, -1) => assert!(worst(&side(&a, &b)[k..], &side(&da, &db)[k..]) < 1e-5, "mid only: the side clean"),
+                _ => {
+                    let mid = |x: &[f32], y: &[f32]| -> Vec<f32> { x.iter().zip(y).map(|(p, q)| 0.5 * (p + q)).collect() };
+                    assert!(worst(&mid(&a, &b)[k..], &mid(&da, &db)[k..]) < 1e-5, "side only: the mid clean");
+                }
             }
         }
     }

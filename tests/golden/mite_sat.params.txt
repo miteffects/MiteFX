@@ -137,3 +137,15 @@ m7_amt | % | -100 | 100 | 0 | Linear
 m8_src | choice | Off, LFO 1, LFO 2, Envelope | 0
 m8_dst | choice | None, Band 1 Drive, Band 1 Bias, Band 1 Tone, Band 1 Mix, Band 1 Output, Band 1 Dynamics, Band 2 Drive, Band 2 Bias, Band 2 Tone, Band 2 Mix, Band 2 Output, Band 2 Dynamics, Band 3 Drive, Band 3 Bias, Band 3 Tone, Band 3 Mix, Band 3 Output, Band 3 Dynamics, Band 4 Drive, Band 4 Bias, Band 4 Tone, Band 4 Mix, Band 4 Output, Band 4 Dynamics, Band 5 Drive, Band 5 Bias, Band 5 Tone, Band 5 Mix, Band 5 Output, Band 5 Dynamics, Band 6 Drive, Band 6 Bias, Band 6 Tone, Band 6 Mix, Band 6 Output, Band 6 Dynamics, Crossover 1, Crossover 2, Crossover 3, Crossover 4, Crossover 5, Mix, Output | 0
 m8_amt | % | -100 | 100 | 0 | Linear
+b1_lr | % | -100 | 100 | 0 | Linear
+b1_ms | % | -100 | 100 | 0 | Linear
+b2_lr | % | -100 | 100 | 0 | Linear
+b2_ms | % | -100 | 100 | 0 | Linear
+b3_lr | % | -100 | 100 | 0 | Linear
+b3_ms | % | -100 | 100 | 0 | Linear
+b4_lr | % | -100 | 100 | 0 | Linear
+b4_ms | % | -100 | 100 | 0 | Linear
+b5_lr | % | -100 | 100 | 0 | Linear
+b5_ms | % | -100 | 100 | 0 | Linear
+b6_lr | % | -100 | 100 | 0 | Linear
+b6_ms | % | -100 | 100 | 0 | Linear
