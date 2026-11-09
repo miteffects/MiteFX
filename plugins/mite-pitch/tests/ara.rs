@@ -249,3 +249,35 @@ fn the_songs_bars_and_beats_come_from_the_musical_context() {
     assert_eq!(g.bar_beat(4.0), (3, 1.0));
     assert!((g.seconds_at(3.0) - 2.0).abs() < 1e-9);
 }
+
+#[test]
+fn a_clip_of_another_rate_plays_in_time_at_the_hosts_rate() {
+    // The clip's file is 44.1 kHz, the host runs at 48 kHz (REAPER: the vocal played 8.8 % fast,
+    // read sample for sample, and drifted ahead of the song, 2026-11-09).
+    let src_fs = 44_100.0;
+    let hz = 441.0;
+    let x: Vec<f32> = (0..(2.0 * src_fs) as usize).map(|k| (0.5 * (std::f64::consts::TAU * hz * k as f64 / src_fs).sin()) as f32).collect();
+    let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+    // At song time 1 s, from 0.25 s into the clip, for 1.5 s.
+    let (_src, _md, rg) = host.add_clip(Audio { fs: src_fs, l: x.clone(), r: x.clone() }, c"src-44", c"mod-44", 1.0, 0.25, 1.5);
+    let s = session("ara-44k");
+    let inst = unsafe { mite_ara::bind(host.dc, 7, 7) };
+    host.give(inst.extension(), rg);
+    assert!(inst.document.wait_reads(Duration::from_secs(10)));
+    s.bind_ara(inst);
+    assert!(s.wait_idle(Duration::from_secs(30)));
+    let mut e = PitchEngine::new(FS as f32);
+    song(&mut e, &s, 0, 480);
+    let out = song(&mut e, &s, 0, (3.0 * FS) as usize);
+    // Silence before the region, the clip's tone after its start, in time with the song.
+    assert!(out[..(FS * 0.99) as usize].iter().all(|v| *v == 0.0));
+    let err = ((1.1 * FS) as usize..(2.4 * FS) as usize)
+        .map(|k| {
+            let t_clip = (k as f64 / FS - 1.0) + 0.25;
+            (out[k] - (0.5 * (std::f64::consts::TAU * hz * t_clip).sin()) as f32).abs()
+        })
+        .fold(0.0f32, f32::max);
+    assert!(err < 2e-3, "{err}");
+    // It ends where the region ends (1.5 s of song).
+    assert!(out[(2.51 * FS) as usize..].iter().all(|v| v.abs() < 1e-3));
+}

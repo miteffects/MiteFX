@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use mite_core::Handover;
 use crate::grid::Grid;
+use mite_dsp::resample::SincTable;
 use mite_dsp::melody::{affected, analyse, detect_key, render, render_range, Analysis, NoteEdit};
 
 /// The waveform lane's resolution: one low and high per this many samples.
@@ -105,12 +106,15 @@ pub struct Rendered {
 }
 
 /// A stretch of rendered audio on the host's timeline: from timeline sample `start`, `len`
-/// samples of `audio` from `offset`.
+/// timeline samples, reading `audio` from its sample `offset`, `rate` of its samples per timeline
+/// sample (a clip of another sample rate than the host's, ARA), through `sinc` when that is not 1.
 pub struct Segment {
     pub start: i64,
     pub offset: usize,
     pub len: usize,
     pub audio: Arc<Vec<f32>>,
+    pub rate: f64,
+    pub sinc: Option<Arc<SincTable>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +276,11 @@ pub struct Session {
     song_sig: AtomicU32,
     song_q0: AtomicU64,
     song_bar_q: AtomicU64,
+    /// Diagnostics (MITE_PITCH_DIAG set): the loudest input and output sample since the worker
+    /// last logged them (f32 bits), and the blocks seen.
+    pub diag_in: AtomicU32,
+    pub diag_out: AtomicU32,
+    pub diag_blocks: AtomicU64,
     /// Renders this instance's worker has made, whole or in part (tests: a player instance takes
     /// the editor's render and makes none).
     pub renders_made: AtomicUsize,
@@ -315,6 +324,9 @@ impl Session {
             busy: AtomicUsize::new(0),
             version: AtomicU64::new(0),
             renders_made: AtomicUsize::new(0),
+            diag_in: AtomicU32::new(0),
+            diag_out: AtomicU32::new(0),
+            diag_blocks: AtomicU64::new(0),
             song_bpm: AtomicU64::new(0),
             song_sig: AtomicU32::new(0),
             song_q0: AtomicU64::new(0),
@@ -420,7 +432,16 @@ impl Session {
     }
 
     pub fn set_sample_rate(&self, fs: f32) {
-        *self.sample_rate.lock().unwrap_or_else(|e| e.into_inner()) = fs;
+        let old = std::mem::replace(&mut *self.sample_rate.lock().unwrap_or_else(|e| e.into_inner()), fs);
+        // Bound to ARA, the clips are placed in the host's samples: place them again.
+        if old != fs && self.ara().is_some() {
+            self.send(Job::Sync);
+        }
+    }
+
+    /// The host's sample rate (the timeline's samples).
+    pub fn host_rate(&self) -> f64 {
+        f64::from(*self.sample_rate.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     pub fn status(&self) -> Status {
@@ -838,8 +859,13 @@ struct AraState {
     others_key: Vec<(u64, String, usize, usize, u64)>,
     /// The waveform of each modification's render (by the render it came from).
     peaks: std::collections::HashMap<u64, (Arc<Vec<f32>>, Peaks)>,
-    /// The regions this instance plays: (modification, timeline start, offset, length), samples.
-    regions: Vec<(u64, i64, usize, usize)>,
+    /// The regions this instance plays: (modification, timeline start and length in the host's
+    /// samples, offset in the clip's, the clip's samples per host sample).
+    regions: Vec<(u64, i64, usize, usize, f64)>,
+    /// Sinc tables by (clip rate, host rate).
+    sincs: Vec<((u64, u64), Arc<SincTable>)>,
+    /// The host's rate the regions were placed at.
+    host: f64,
 }
 
 impl AraState {
@@ -926,15 +952,25 @@ impl AraState {
         self.mods.retain(|m, _| model.modifications.contains_key(m));
         self.sources.retain(|id, _| model.sources.contains_key(id));
         // Where each played region sits.
-        let regions: Vec<(u64, i64, usize, usize)> = st
+        // The timeline counts the host's samples; the clip, its own (they differ when the clip's
+        // file has another rate than the project).
+        let host = s.host_rate();
+        self.host = host;
+        let regions: Vec<(u64, i64, usize, usize, f64)> = st
             .playback
             .iter()
             .filter_map(|id| {
                 let r = model.regions.get(id)?;
                 let fs = model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate)?;
-                Some((r.modification, (r.start_in_playback * fs).round() as i64, (r.start_in_modification * fs).round().max(0.0) as usize, (r.duration_in_playback * fs).round().max(0.0) as usize))
+                Some((r.modification, (r.start_in_playback * host).round() as i64, (r.start_in_modification * fs).round().max(0.0) as usize, (r.duration_in_playback * host).round().max(0.0) as usize, fs / host))
             })
             .collect();
+        for &(_, _, _, _, rate) in &regions {
+            let key = ((rate * host).to_bits(), host.to_bits());
+            if (rate - 1.0).abs() > 1e-9 && !self.sincs.iter().any(|(k, _)| *k == key) {
+                self.sincs.push((key, Arc::new(SincTable::for_rates(rate * host, host))));
+            }
+        }
         if regions != self.regions {
             self.regions = regions;
             changed = true;
@@ -1057,10 +1093,15 @@ impl AraState {
     fn segments(&self) -> Vec<Segment> {
         self.regions
             .iter()
-            .filter_map(|&(m, start, offset, len)| {
+            .filter_map(|&(m, start, offset, len, rate)| {
                 let c = self.mods.get(&m)?;
-                let len = len.min(c.render.len().saturating_sub(offset));
-                Some(Segment { start, offset, len, audio: c.render.clone() })
+                let len = len.min((c.render.len().saturating_sub(offset) as f64 / rate) as usize);
+                let same = (rate - 1.0).abs() <= 1e-9;
+                let sinc = if same { None } else { self.sincs.iter().find(|(k, _)| *k == ((rate * self.host).to_bits(), self.host.to_bits())).map(|(_, t)| t.clone()) };
+                if !same && sinc.is_none() {
+                    return None;
+                }
+                Some(Segment { start, offset, len, audio: c.render.clone(), rate: if same { 1.0 } else { rate }, sinc })
             })
             .collect()
     }
@@ -1092,6 +1133,8 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
     // The current take's render, kept here so an edit re-renders only its stretch.
     let mut current: Option<(i64, Vec<f32>)> = None;
     let mut ara = AraState::default();
+    let diag = std::env::var_os("MITE_PITCH_DIAG").is_some();
+    let mut diag_at = std::time::Instant::now();
     loop {
         let first = match rx.recv_timeout(std::time::Duration::from_millis(40)) {
             Ok(j) => Some(j),
@@ -1099,6 +1142,14 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         };
         let Some(s) = session.upgrade() else { return };
+        if diag && diag_at.elapsed() > std::time::Duration::from_millis(500) {
+            diag_at = std::time::Instant::now();
+            if let Some(inst) = s.ara() {
+                let db = |a: &AtomicU32| 20.0 * f32::from_bits(a.swap(0, Ordering::AcqRel)).max(1e-9).log10();
+                let segs: Vec<(i64, usize)> = ara.segments().iter().map(|g| (g.start, g.len)).collect();
+                crate::ara::log(&format!("audio {:p} doc {:p}: roles {}, playing {}, pos {}, in {:.1} dB, out {:.1} dB, blocks {}, segments {segs:?}", Arc::as_ptr(&s), Arc::as_ptr(&inst.document), inst.roles, s.playing.load(Ordering::Relaxed), s.playhead.load(Ordering::Relaxed), db(&s.diag_in), db(&s.diag_out), s.diag_blocks.swap(0, Ordering::AcqRel)));
+            }
+        }
         let mut jobs: Vec<Job> = first.into_iter().collect();
         while let Ok(more) = rx.try_recv() {
             jobs.push(more);
@@ -1193,7 +1244,7 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                         }
                         Rendered { segments: ara.segments(), ara: AraState::renders(&inst), take: None }
                     }
-                    None => Rendered { segments: vec![Segment { start: *start, offset: 0, len: r.len(), audio: shared.clone() }], ara: false, take: Some(shared) },
+                    None => Rendered { segments: vec![Segment { start: *start, offset: 0, len: r.len(), audio: shared.clone(), rate: 1.0, sinc: None }], ara: false, take: Some(shared) },
                 };
                 s.renders.send(Box::new(rendered));
                 let peaks = peaks_of(r);

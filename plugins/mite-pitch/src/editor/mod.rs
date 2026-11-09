@@ -567,7 +567,9 @@ impl PitchView {
         let s = &self.shared.session;
         let t = s.take()?;
         if s.playing.load(Ordering::Relaxed) {
-            return Some((s.playhead.load(Ordering::Relaxed) - t.start) as f64 / t.sample_rate);
+            // The playhead counts the host's samples, the take its own (ARA: the clip's file may
+            // have another rate).
+            return Some(s.playhead.load(Ordering::Relaxed) as f64 / s.host_rate() - t.start as f64 / t.sample_rate);
         }
         s.local_active.load(Ordering::Acquire).then(|| s.local_pos.load(Ordering::Acquire) as f64 / t.sample_rate)
     }

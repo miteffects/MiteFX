@@ -516,6 +516,15 @@ from the ARA musical context (host content access, model thread) or, without ARA
 line (Alt or snap off: free). (4) The CLAP crash written up for Cockos:
 `docs/design/reaper-clap-ara-report.md` (not posted: the user posts it).
 
+**Fix 2026-11-09 (user: "I hear double vocals, one after the other"):** over ARA the player read
+the clip's samples at the host's timeline positions: a 44.1 kHz vocal in a 48 kHz project played
+8.8 % fast and sharp, running ahead of the untouched copy the user sends elsewhere. Regions are now
+placed in the host's samples and read through a windowed sinc (`mite_dsp::resample::SincTable`)
+when the rates differ; the editor's playhead converts too. Found by rendering in a private REAPER
+(HOME and config in the scratchpad, `-new`, `__startup.lua`, render stem 41716) and correlating
+with the stem: −0.006 in time before, 0.9997 after. `MITE_PITCH_DIAG=1` logs each instance's
+in/out peaks to the ARA log.
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).

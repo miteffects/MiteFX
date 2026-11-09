@@ -30,6 +30,8 @@ pub struct MitePitch {
     params: Arc<PitchParams>,
     engine: PitchEngine,
     shared: Arc<PitchShared>,
+    /// MITE_PITCH_DIAG set: each block's input and output peaks go to the ARA log.
+    diag: bool,
 }
 
 impl Default for MitePitch {
@@ -43,6 +45,7 @@ impl Default for MitePitch {
             params,
             engine: PitchEngine::new(48_000.0),
             shared,
+            diag: std::env::var_os("MITE_PITCH_DIAG").is_some(),
         }
     }
 }
@@ -123,12 +126,24 @@ impl Plugin for MitePitch {
             playing: t.playing,
             pos: t.pos_samples(),
         };
-        self.engine.process(
-            buffer.as_slice(),
-            transport,
-            self.params.bypass.value(),
-            &self.shared.session,
-        );
+        let s = &self.shared.session;
+        if !self.diag {
+            self.engine.process(buffer.as_slice(), transport, self.params.bypass.value(), s);
+            return ProcessStatus::Normal;
+        }
+        let peak = |b: &mut Buffer| b.as_slice().iter().flat_map(|c| c.iter()).fold(0.0f32, |m, v| m.max(v.abs()));
+        let pin = peak(buffer);
+        self.engine.process(buffer.as_slice(), transport, self.params.bypass.value(), s);
+        let pout = peak(buffer);
+        // Diagnostics: atomics only.
+        use std::sync::atomic::Ordering::Relaxed;
+        if pin > f32::from_bits(s.diag_in.load(Relaxed)) {
+            s.diag_in.store(pin.to_bits(), Relaxed);
+        }
+        if pout > f32::from_bits(s.diag_out.load(Relaxed)) {
+            s.diag_out.store(pout.to_bits(), Relaxed);
+        }
+        s.diag_blocks.fetch_add(1, Relaxed);
         ProcessStatus::Normal
     }
 }

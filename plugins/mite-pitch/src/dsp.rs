@@ -171,7 +171,11 @@ impl PitchEngine {
             let at = pos + i as i64;
             let seg = r.segments.iter().find(|g| at >= g.start && at < g.start + g.len as i64);
             self.blend = if seg.is_some() { (self.blend + self.blend_step).min(1.0) } else { (self.blend - self.blend_step).max(0.0) };
-            let v = seg.map_or(0.0, |g| g.audio.get(g.offset + (at - g.start) as usize).copied().unwrap_or(0.0));
+            let v = seg.map_or(0.0, |g| match &g.sinc {
+                // A clip of another rate than the host's: read between its samples.
+                Some(t) => t.read(&g.audio, g.offset as f64 + (at - g.start) as f64 * g.rate),
+                None => g.audio.get(g.offset + (at - g.start) as usize).copied().unwrap_or(0.0),
+            });
             for ch in channels.iter_mut().take(n_ch) {
                 let dry = if ara { 0.0 } else { ch[i] };
                 ch[i] = dry * (1.0 - self.blend) + v * self.blend;

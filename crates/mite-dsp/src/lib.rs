@@ -29,6 +29,7 @@ pub mod natural_phase;
 pub mod output;
 pub mod oversample;
 pub mod pitch;
+pub mod resample;
 pub mod reverb;
 pub mod reverb_quality;
 pub mod sat;
