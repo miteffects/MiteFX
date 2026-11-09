@@ -617,7 +617,7 @@ impl SatView {
             let mut dials: Vec<(Point, f64)> = (0..5).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row1), if k == 0 { 84.0 } else { 60.0 })).collect();
             dials.extend((0..3).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row2), if k == 0 { 60.0 } else { 52.0 })));
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
-            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 44.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
+            return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 132.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
         }
         let current = self.rail.current(layout);
         let narrow = (PLOT_W - CARD_WIDE - CARD_GAP * (n - 1) as f64) / (n - 1) as f64;
@@ -657,7 +657,8 @@ impl SatView {
                         bars: Some(bars),
                         models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 36.0, 32.0, 40.0),
                         power: Some(button(1.0)),
-                        stereo: Some(Rect::new(rect.x0 + 372.0, rect.y0 + 10.0, rect.x0 + 404.0, rect.y0 + 42.0)),
+                        // The stereo pill fills what the model icons and the buttons leave.
+                        stereo: Some(Rect::new(rect.x0 + 366.0, rect.y0 + 10.0, button(3.0).x0 - 8.0, rect.y0 + 42.0)),
                         solo: Some(button(3.0)),
                         mute: Some(button(2.0)),
                         remove: Some(button(0.0)),
@@ -670,7 +671,9 @@ impl SatView {
                     // Two small dials, side by side when there is room.
                     let top = square.y1 + 30.0;
                     let dials = if w >= 216.0 { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0 + 104.0, top), 34.0)] } else { vec![(Point::new(rect.x0 + 27.0, top), 34.0), (Point::new(rect.x0 + 27.0, top + 44.0), 34.0)] };
-                    Card { band, kind: CardKind::Narrow, rect, square, bars: None, models: Vec::new(), power: None, stereo: None, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
+                    // The stereo badge in the square's corner: shows the mode, a click picks one.
+                    let stereo = Some(Rect::from_center_size((square.x0 + 13.0, square.y0 + 11.0), (24.0, 20.0)));
+                    Card { band, kind: CardKind::Narrow, rect, square, bars: None, models: Vec::new(), power: None, stereo, solo: Some(button(1.0)), mute: Some(button(0.0)), remove: None, dials }
                 }
             })
             .collect()
@@ -767,9 +770,21 @@ impl SatView {
                 glyphs::draw(cx.scene, glyphs::POWER, r.center(), r.height() * 0.5, ink, 1.8);
             }
             let mode = Self::plain(cx.host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
-            if let Some(r) = card.stereo {
-                let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), mode != 0, theme.accent);
-                glyphs::draw_stereo(cx.scene, mode, r.center(), r.height() * 0.68, ink);
+            if let Some(r) = card.stereo.filter(|_| card.kind != CardKind::Narrow) {
+                // A pill with the glyph and the mode's name: where the band's stereo is picked.
+                let open = matches!(self.stereo_menu, Some((sb, _)) if sb == b);
+                let lit = mode != 0;
+                let border = if open || hot(r) || lit { theme.accent } else { theme.panel_control_border };
+                mite_ui::paint::raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, border, theme.shadows);
+                let ink = if lit { theme.accent } else { theme.text_hi };
+                const NAMES: [&str; 6] = ["STEREO", "MID", "SIDE", "M/S", "LEFT", "RIGHT"];
+                if r.width() >= 100.0 {
+                    glyphs::draw_stereo(cx.scene, mode, Point::new(r.x0 + 16.0, r.center().y), 20.0, ink);
+                    cx.text.draw(cx.scene, NAMES[mode.min(5)], r.x0 + 30.0, r.center().y - 7.0, TextStyle::LABEL.sized(11.0), ink, Align::Left);
+                } else {
+                    // A tight header (the wide card): the name alone, centred.
+                    cx.text.draw(cx.scene, NAMES[mode.min(5)], r.center().x, r.center().y - 7.0, TextStyle::LABEL.sized(10.5), ink, Align::Center);
+                }
             }
             if let Some(r) = card.solo {
                 let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), solo, theme.needle);
@@ -798,8 +813,11 @@ impl SatView {
                 };
                 self.probe.draw(cx, r, focus, lit);
             }
-            if card.kind == CardKind::Narrow && mode != 0 {
-                glyphs::draw_stereo(cx.scene, mode, Point::new(card.square.x0 + 13.0, card.square.y0 + 11.0), 16.0, theme.accent.multiply_alpha(alpha));
+            if card.kind == CardKind::Narrow {
+                // Lit when the band is not plain stereo; dim (but there to click) when it is.
+                let r = card.stereo.unwrap_or_default();
+                let ink = if mode != 0 { theme.accent.multiply_alpha(alpha) } else if hot(r) { theme.text_hi } else { theme.text_lo.multiply_alpha(0.6 * alpha) };
+                glyphs::draw_stereo(cx.scene, mode, r.center(), 16.0, ink);
             }
         }
         for k in &self.knobs {
@@ -932,7 +950,7 @@ impl SatView {
             Some(Hot::Harmonic(_, i)) => return self.probe.help(i),
             Some(Hot::Stereo(b)) => {
                 let i = Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
-                return Help::default().text(format!("{} — {}", B_STEREO.choices[i.min(3)], stereo_words(i)));
+                return Help::default().text(format!("{} — {}", B_STEREO.choices[i.min(5)], stereo_words(i)));
             }
             Some(Hot::Model(_, m)) => return Help::default().text(format!("{} — {}", m.name(), model_words(m))),
             Some(Hot::Power(b)) => return Help::default().text(if Self::on(host, &band_id(b, B_BYPASS.id)) { "The band passes clean — click to saturate it again." } else { "Band on — click to let it pass clean (still heard)." }),
@@ -1030,6 +1048,10 @@ impl SatView {
             if !card.rect.contains(p) {
                 continue;
             }
+            // The buttons first: a narrow card's stereo badge sits in its square's corner.
+            if let Some((_, h)) = card.buttons().into_iter().find(|(r, _)| r.is_some_and(|r| r.contains(p))) {
+                return Some(h);
+            }
             if card.square.contains(p) {
                 return Some(Hot::Square(card.band));
             }
@@ -1038,9 +1060,6 @@ impl SatView {
             }
             if let Some(&(m, _)) = card.models.iter().find(|(_, r)| r.contains(p)) {
                 return Some(Hot::Model(card.band, m));
-            }
-            if let Some((_, h)) = card.buttons().into_iter().find(|(r, _)| r.is_some_and(|r| r.contains(p))) {
-                return Some(h);
             }
             return Some(Hot::Card(card.band));
         }
@@ -1362,6 +1381,8 @@ fn stereo_words(mode: usize) -> &'static str {
         1 => "only the middle of the image saturates, the sides stay clean. Click to choose",
         2 => "only the sides saturate, the middle stays clean. Click to choose",
         3 => "the middle and the sides saturate each on their own. Click to choose",
+        4 => "only the left channel saturates, the right stays clean. Click to choose",
+        5 => "only the right channel saturates, the left stays clean. Click to choose",
         _ => "left and right saturate each on their own. Click to choose",
     }
 }

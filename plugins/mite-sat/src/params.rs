@@ -17,7 +17,9 @@ use nih_plug::prelude::*;
 /// The state format version (`mite_plugin::state`). Bump it, with a migration step in
 /// `MiteSat::filter_state` and a new golden state file, when a release changes what a state
 /// means.
-pub const STATE_VERSION: u32 = 1;
+/// - 2 (2026-11-10): Left and Right appended to each band's stereo choices; snapshots rescaled
+///   ([`crate::migrate::v1_to_v2`]).
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -64,7 +66,7 @@ pub const B_DYN_THR: ParamSpec = spec("dyn_thr", "Dynamics Threshold", "dBFS", -
 pub const B_DYN_ATT: ParamSpec = spec("dyn_att", "Dynamics Attack", "ms", 0.1, 100.0, 10.0, ParamScale::Log, 1, (0.25, 1.0 / 16.0), ParamDisplay::Time);
 pub const B_DYN_REL: ParamSpec = spec("dyn_rel", "Dynamics Release", "ms", 10.0, 1000.0, 150.0, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::Time);
 /// What part of the stereo image the band saturates (slice 5).
-pub const B_STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &["Stereo", "Mid", "Side", "M/S"], default: 0 };
+pub const B_STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &["Stereo", "Mid", "Side", "M/S", "Left", "Right"], default: 0 };
 /// Clean, but still heard.
 pub const B_BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 /// A muted band drops out of the sum (sound: kept in presets).

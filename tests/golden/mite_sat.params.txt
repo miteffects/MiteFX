@@ -25,7 +25,7 @@ b1_dyn | % | -100 | 100 | 0 | Linear
 b1_dyn_thr | dBFS | -60 | 0 | -24 | Linear
 b1_dyn_att | ms | 0.1 | 100 | 10 | Log
 b1_dyn_rel | ms | 10 | 1000 | 150 | Log
-b1_stereo | choice | Stereo, Mid, Side, M/S | 0
+b1_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b1_bypass | bool | false
 b1_mute | bool | false
 b1_solo | bool | false
@@ -39,7 +39,7 @@ b2_dyn | % | -100 | 100 | 0 | Linear
 b2_dyn_thr | dBFS | -60 | 0 | -24 | Linear
 b2_dyn_att | ms | 0.1 | 100 | 10 | Log
 b2_dyn_rel | ms | 10 | 1000 | 150 | Log
-b2_stereo | choice | Stereo, Mid, Side, M/S | 0
+b2_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b2_bypass | bool | false
 b2_mute | bool | false
 b2_solo | bool | false
@@ -53,7 +53,7 @@ b3_dyn | % | -100 | 100 | 0 | Linear
 b3_dyn_thr | dBFS | -60 | 0 | -24 | Linear
 b3_dyn_att | ms | 0.1 | 100 | 10 | Log
 b3_dyn_rel | ms | 10 | 1000 | 150 | Log
-b3_stereo | choice | Stereo, Mid, Side, M/S | 0
+b3_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b3_bypass | bool | false
 b3_mute | bool | false
 b3_solo | bool | false
@@ -67,7 +67,7 @@ b4_dyn | % | -100 | 100 | 0 | Linear
 b4_dyn_thr | dBFS | -60 | 0 | -24 | Linear
 b4_dyn_att | ms | 0.1 | 100 | 10 | Log
 b4_dyn_rel | ms | 10 | 1000 | 150 | Log
-b4_stereo | choice | Stereo, Mid, Side, M/S | 0
+b4_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b4_bypass | bool | false
 b4_mute | bool | false
 b4_solo | bool | false
@@ -81,7 +81,7 @@ b5_dyn | % | -100 | 100 | 0 | Linear
 b5_dyn_thr | dBFS | -60 | 0 | -24 | Linear
 b5_dyn_att | ms | 0.1 | 100 | 10 | Log
 b5_dyn_rel | ms | 10 | 1000 | 150 | Log
-b5_stereo | choice | Stereo, Mid, Side, M/S | 0
+b5_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b5_bypass | bool | false
 b5_mute | bool | false
 b5_solo | bool | false
@@ -95,7 +95,7 @@ b6_dyn | % | -100 | 100 | 0 | Linear
 b6_dyn_thr | dBFS | -60 | 0 | -24 | Linear
 b6_dyn_att | ms | 0.1 | 100 | 10 | Log
 b6_dyn_rel | ms | 10 | 1000 | 150 | Log
-b6_stereo | choice | Stereo, Mid, Side, M/S | 0
+b6_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b6_bypass | bool | false
 b6_mute | bool | false
 b6_solo | bool | false

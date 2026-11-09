@@ -53,6 +53,13 @@ pub fn draw_stereo(scene: &mut Scene, mode: usize, c: Point, size: f64, color: C
         dot(scene, c.x - dx - r * 0.52);
         dot(scene, c.x + dx + r * 0.52);
     }
+    // Left or right alone: a dot in that circle.
+    if mode == 4 {
+        dot(scene, c.x - dx - r * 0.3);
+    }
+    if mode == 5 {
+        dot(scene, c.x + dx + r * 0.3);
+    }
 }
 
 /// A model's icon: its own transfer curve (from the DSP) over −1…1, `size` across, centred on

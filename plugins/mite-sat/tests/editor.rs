@@ -322,12 +322,12 @@ fn the_bars_read_and_never_write() {
 }
 
 #[test]
-fn the_stereo_list_sets_the_band_and_a_narrow_card_has_none() {
+fn the_stereo_list_sets_the_band_and_a_narrow_card_has_its_badge() {
     let (mut view, host) = shared_at(48_000.0);
     let button = view.band_stereo(&host, 0).expect("the card has one");
     click(&mut view, &host, button.center());
     let rows = view.stereo_rows();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 6, "Stereo, Mid, Side, M/S, Left, Right");
     click(&mut view, &host, rows[2].center());
     assert_eq!(plain(&host, &band_id(0, B_STEREO.id)), 2.0);
     assert!(view.stereo_rows().is_empty());
@@ -335,7 +335,13 @@ fn the_stereo_list_sets_the_band_and_a_narrow_card_has_none() {
     host.set_plain(&cross_id(0, X_ON.id), 1.0);
     view.select(0);
     draw(&mut view, &host);
-    assert!(view.band_stereo(&host, 1).is_none(), "a narrow card only shows it");
+    // A narrow card picks it too (user, 2026-11-10: it was missed): its badge opens the list.
+    let badge = view.band_stereo(&host, 1).expect("a narrow card has its badge");
+    click(&mut view, &host, badge.center());
+    let rows = view.stereo_rows();
+    assert_eq!(rows.len(), 6);
+    click(&mut view, &host, rows[4].center());
+    assert_eq!(mite_sat::editor::settings(&host).bands[1].stereo, mite_dsp::sat::StereoMode::Left);
 }
 
 #[test]

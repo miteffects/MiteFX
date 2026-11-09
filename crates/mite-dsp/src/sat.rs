@@ -424,26 +424,37 @@ pub enum StereoMode {
     Side,
     /// Mid and side each through the curve of their own.
     MidSide,
+    /// The left goes through the curve, the right stays clean.
+    Left,
+    /// The right goes through the curve, the left stays clean.
+    Right,
 }
 
 impl StereoMode {
-    pub const ALL: [StereoMode; 4] = [
+    pub const ALL: [StereoMode; 6] = [
         StereoMode::Stereo,
         StereoMode::Mid,
         StereoMode::Side,
         StereoMode::MidSide,
+        StereoMode::Left,
+        StereoMode::Right,
     ];
 
     pub fn from_index(i: usize) -> Self {
-        Self::ALL[i.min(3)]
+        Self::ALL[i.min(Self::ALL.len() - 1)]
+    }
+
+    /// Whether the curves see mid and side (else left and right).
+    pub fn mid_side(self) -> bool {
+        matches!(self, StereoMode::Mid | StereoMode::Side | StereoMode::MidSide)
     }
 
     /// Which of the two signals (L/R, or mid/side) go through the curve.
     fn driven(self) -> [bool; 2] {
         match self {
             StereoMode::Stereo | StereoMode::MidSide => [true, true],
-            StereoMode::Mid => [true, false],
-            StereoMode::Side => [false, true],
+            StereoMode::Mid | StereoMode::Left => [true, false],
+            StereoMode::Side | StereoMode::Right => [false, true],
         }
     }
 }
@@ -1848,7 +1859,7 @@ impl Saturator {
                 let mut peak_out = 0.0f32;
                 // The two signals the curves see: left and right, or mid and side.
                 let mode = core.modes[b];
-                let ms = mode != StereoMode::Stereo;
+                let ms = mode.mid_side();
                 let driven = mode.driven();
                 let driven = [driven[0], driven[1] && n_ch == 2];
                 // Mean square across what goes through the curves, going in and coming out (before
@@ -2073,7 +2084,9 @@ impl Saturator {
                         peak_out = peak_out.max(l.abs()).max(r.abs());
                     } else {
                         for c in 0..n_ch {
-                            let y = (xds[c][i] + diff[c][i]) * post;
+                            // A channel left out (Left, Right) passes as the band's dry part
+                            // would, untouched by the curve's gains.
+                            let y = if driven[c] { (xds[c][i] + diff[c][i]) * post } else { xds[c][i] * self.lanes.fader[b][i] };
                             out[ci][c][i] += y;
                             peak_out = peak_out.max(y.abs());
                         }
@@ -2429,6 +2442,24 @@ mod tests {
                 let (a, b, da, db) = run_stereo(&s, &l, &r);
                 assert_eq!(a, da, "{mode:?}");
                 assert_eq!(b, db, "{mode:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn left_leaves_the_right_alone_and_right_the_left() {
+        for auto_gain in [false, true] {
+            let (l, r) = stereo_input();
+            for (mode, clean_left) in [(StereoMode::Left, false), (StereoMode::Right, true)] {
+                let mut s = band(Model::Tube, 18.0);
+                s.auto_gain = auto_gain;
+                s.bands[0].stereo = mode;
+                let (a, b, da, db) = run_stereo(&s, &l, &r);
+                let (clean, clean_dry, driven, driven_dry) = if clean_left { (&a, &da, &b, &db) } else { (&b, &db, &a, &da) };
+                let worst = clean.iter().zip(clean_dry.iter()).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                assert!(worst < 2e-6, "{mode:?}: the clean side moved by {worst}");
+                let moved = driven.iter().zip(driven_dry.iter()).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                assert!(moved > 0.01, "{mode:?}: the driven side did not change: {moved}");
             }
         }
     }
