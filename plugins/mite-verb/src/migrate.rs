@@ -21,6 +21,9 @@ use crate::params::{band_id, tone_id, D_FREQ, D_MULT, D_ON, D_Q, D_TYPE, E_FREQ,
 
 pub fn v1_to_v2(_state: &mut PluginState) {}
 
+/// **3 → 4 (2026-11-09):** shimmer appended; a version 3 state gets its defaults (off).
+pub fn v3_to_v4(_state: &mut PluginState) {}
+
 const fn old(id: &'static str, min: f32, max: f32, default: f32) -> ParamSpec {
     ParamSpec { id, name: id, unit: "", min, max, default, scale: ParamScale::Log, smoothing_ms: 20.0, decimals: 0, wheel_step: 0.0, wheel_step_fine: 0.0, display: ParamDisplay::Number }
 }

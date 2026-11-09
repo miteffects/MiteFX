@@ -54,6 +54,25 @@ const SIZE_GLIDE_MS: f32 = 200.0;
 const PREDELAY_FADE_MS: f32 = 30.0;
 const FREEZE_MS: f32 = 50.0;
 const DUCK_ATTACK_MS: f32 = 2.0;
+/// The shimmer's grain window, s: long enough that a low note keeps a few periods in it, short
+/// enough not to smear.
+const SHIM_WINDOW_S: f32 = 0.06;
+/// The lines' shifters run in this many groups, their grains a 1/(2·groups) window apart, so the
+/// crossfades never dip together.
+const SHIM_GROUPS: usize = 4;
+/// The shifted part loses its lows below this, Hz (an octave down, pass after pass, would pile
+/// up mud).
+const SHIM_LOW_CUT: f32 = 120.0;
+/// And its highs above this, Hz (lower when shifting up, see `Reverb::shim_lp`).
+const SHIM_TOP_HZ: f32 = 12_000.0;
+/// The power match's smoothing per sample (about 50 ms at 48 kHz), and its most.
+const SHIM_MATCH_K: f32 = 4e-4;
+const SHIM_MATCH_MAX: f32 = 2.0;
+/// At SHIMMER 100 %, this much of the tail per second moves up (or down) the interval: 1 − e^−rate
+/// a second (about 95 %).
+const SHIM_RATE: f32 = 3.0;
+/// The interval glides with this time constant, ms.
+const SHIM_GLIDE_MS: f32 = 15.0;
 
 /// The network's fixed random draws (deterministic): each line's main delay at the largest size
 /// and its allpasses (ms), the input's signs (the left input feeds the even lines, the right the
@@ -272,6 +291,10 @@ pub struct ReverbSettings {
     pub duck_db: f32,
     pub duck_thresh_db: f32,
     pub duck_release_ms: f32,
+    /// Shimmer, 0…1 (0: off): how much of each pass round the tank is shifted by
+    /// `shimmer_pitch` semitones (equal power: the tail never grows from it).
+    pub shimmer: f32,
+    pub shimmer_pitch: f32,
 }
 
 impl Default for ReverbSettings {
@@ -293,6 +316,8 @@ impl Default for ReverbSettings {
             duck_db: 0.0,
             duck_thresh_db: -30.0,
             duck_release_ms: 300.0,
+            shimmer: 0.0,
+            shimmer_pitch: 12.0,
         }
     }
 }
@@ -892,6 +917,9 @@ fn unpack(
         early_size_ms: v[10],
         early_send: v[11],
         bands,
+        // Read from the settings themselves (they never redesign the lines).
+        shimmer: 0.0,
+        shimmer_pitch: 0.0,
         ..*s
     }
 }
@@ -953,6 +981,27 @@ pub struct Reverb {
     duck_k: f32,
     phase: usize,
     designed: Option<(ReverbSettings, f32)>,
+    /// Shimmer: each line's recent feedback (`LINES` rows of `shim_len`), the write position, the
+    /// grains' phase (0…1), each line's low-cut state, the amount (as `er`), the interval's
+    /// ratio, and the coefficients (low cut, glide).
+    shim_buf: Vec<f32>,
+    shim_len: usize,
+    shim_pos: usize,
+    shim_phase: f32,
+    shim_lc: [f32; LINES],
+    /// Each line's two-pole lowpass ahead of the shift (read faster, what is over half the
+    /// Nyquist frequency at an octave up would fold back down), and its coefficient.
+    shim_lp: [[f32; 2]; LINES],
+    shim_lp_k: f32,
+    shim: [f32; 2],
+    shim_ratio: f32,
+    shim_k: (f32, f32),
+    /// The lines' power before and after the shift (smoothed), and the gain matching them.
+    shim_pow: [f32; 3],
+    shim_match: f32,
+    /// At most one: the mix's power held to what came in (a shift near unison, read in phase,
+    /// adds like an echo).
+    shim_cap: f32,
 }
 
 impl Reverb {
@@ -997,6 +1046,22 @@ impl Reverb {
             duck_k: 1.0 - (-1.0 / (0.003 * fs)).exp(),
             phase: 0,
             designed: None,
+            shim_buf: vec![0.0; LINES * ((SHIM_WINDOW_S * fs) as usize + 8)],
+            shim_len: (SHIM_WINDOW_S * fs) as usize + 8,
+            shim_pos: 0,
+            shim_phase: 0.0,
+            shim_lc: [0.0; LINES],
+            shim_lp: [[0.0; 2]; LINES],
+            shim_lp_k: 1.0,
+            shim: [0.0; 2],
+            shim_ratio: 2.0,
+            shim_pow: [0.0; 3],
+            shim_match: 1.0,
+            shim_cap: 1.0,
+            shim_k: (
+                1.0 - (-std::f32::consts::TAU * SHIM_LOW_CUT / fs).exp(),
+                1.0 - (-(CONTROL as f32) / (SHIM_GLIDE_MS * 0.001 * fs)).exp(),
+            ),
         };
         let control_rate = fs / CONTROL as f32;
         for (k, sm) in r.smooth.iter_mut().enumerate() {
@@ -1043,6 +1108,14 @@ impl Reverb {
         self.phase = 0;
         self.duck_g = 1.0;
         self.designed = None;
+        self.shim_buf.fill(0.0);
+        self.shim_pos = 0;
+        self.shim_phase = 0.0;
+        self.shim_lc = [0.0; LINES];
+        self.shim_lp = [[0.0; 2]; LINES];
+        self.shim_pow = [0.0; 3];
+        self.shim_match = 1.0;
+        self.shim_cap = 1.0;
         self.control(s, true);
         self.control(s, true);
     }
@@ -1109,6 +1182,10 @@ impl Reverb {
             }
             self.designed = Some((g, freeze));
         }
+        let to = (s.shimmer_pitch.clamp(-24.0, 24.0) / 12.0).exp2();
+        self.shim_ratio = if jump { to } else { self.shim_ratio + (to - self.shim_ratio) * self.shim_k.1 };
+        let top = (SHIM_TOP_HZ.min(0.42 * fs / self.shim_ratio.max(1.0))).min(0.45 * fs);
+        self.shim_lp_k = 1.0 - (-std::f32::consts::TAU * top / fs).exp();
         let d = g.diffusion.clamp(0.0, 1.0);
         let next = [
             g.mod_depth * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
@@ -1117,6 +1194,13 @@ impl Reverb {
             g.early,
             g.early_send.clamp(0.0, 1.0),
             g.width,
+            {
+                // The share of each pass shifted, from a rate per second (whatever the size,
+                // the cascade climbs at the same pace): sin θ of it.
+                let pass_s = self.len[1].iter().sum::<f32>() / (LINES as f32 * fs);
+                let share = 1.0 - (-SHIM_RATE * s.shimmer.clamp(0.0, 1.0) * pass_s).exp();
+                share.sqrt()
+            },
         ];
         for (v, n) in [
             &mut self.depth,
@@ -1125,6 +1209,7 @@ impl Reverb {
             &mut self.early,
             &mut self.send,
             &mut self.width,
+            &mut self.shim,
         ]
         .into_iter()
         .zip(next)
@@ -1139,6 +1224,63 @@ impl Reverb {
         if jump {
             self.duck[0] = self.duck[1];
         }
+    }
+
+    /// Shimmer on one sample of the lines' feedback: each line keeps its last window, two
+    /// grains read it back shifted by the interval, and the line takes cos θ·itself + sin θ·shifted
+    /// (`share` = sin θ). The grains' sin²/cos² weights sum to one and the shifted part has at
+    /// most the line's power, so the loop never gains.
+    fn shimmer(&mut self, y: &mut [f32; LINES], share: f32) {
+        let n = self.shim_len;
+        let window = (n - 8) as f32;
+        let pos = self.shim_pos;
+        self.shim_pos = (pos + 1) % n;
+        self.shim_phase -= (self.shim_ratio - 1.0) / window;
+        self.shim_phase -= self.shim_phase.floor();
+        // Per group: two heads' read offsets (whole, fraction) and weights.
+        let mut taps = [[(0usize, 0.0f32, 0.0f32); 2]; SHIM_GROUPS];
+        for (g, t) in taps.iter_mut().enumerate() {
+            let p = (self.shim_phase + g as f32 / (2 * SHIM_GROUPS) as f32).fract();
+            for (h, tap) in t.iter_mut().enumerate() {
+                let ph = (p + 0.5 * h as f32).fract();
+                let w = (std::f32::consts::PI * ph).sin();
+                let d = ph * window;
+                *tap = (d as usize, d.fract(), w * w);
+            }
+        }
+        let (c, sn) = ((1.0 - share * share).max(0.0).sqrt(), share);
+        let lc = self.shim_k.0;
+        let (g, cap) = (self.shim_match, self.shim_cap);
+        let (mut p_in, mut p_out, mut p_mix) = (0.0f32, 0.0f32, 0.0f32);
+        for i in 0..LINES {
+            let row = &mut self.shim_buf[i * n..(i + 1) * n];
+            // The low cut on what is kept for shifting.
+            self.shim_lc[i] += (y[i] - self.shim_lc[i]) * lc;
+            let lp = &mut self.shim_lp[i];
+            lp[0] += (y[i] - self.shim_lc[i] - lp[0]) * self.shim_lp_k;
+            lp[1] += (lp[0] - lp[1]) * self.shim_lp_k;
+            row[pos] = lp[1];
+            let mut acc = 0.0;
+            for &(whole, frac, w) in &taps[i % SHIM_GROUPS] {
+                let a = (pos + n - whole) % n;
+                let b = (a + n - 1) % n;
+                acc += w * (row[a] + (row[b] - row[a]) * frac);
+            }
+            p_in += y[i] * y[i];
+            p_out += acc * acc;
+            let m = c * y[i] + sn * g * acc;
+            p_mix += m * m;
+            y[i] = m * cap;
+        }
+        // The shifted part matched to the power it replaces: the grains' crossfades and the low
+        // cut lose some (a quarter, on a dense tail), a held tone read twice in phase gains some.
+        // Matched, the loop keeps its own decay at any amount and never runs away.
+        let k = SHIM_MATCH_K;
+        self.shim_pow[0] += (p_in - self.shim_pow[0]) * k;
+        self.shim_pow[1] += (p_out - self.shim_pow[1]) * k;
+        self.shim_pow[2] += (p_mix - self.shim_pow[2]) * k;
+        self.shim_match = if self.shim_pow[1] > 1e-12 { (self.shim_pow[0] / self.shim_pow[1]).sqrt().min(SHIM_MATCH_MAX) } else { 1.0 };
+        self.shim_cap = if self.shim_pow[2] > self.shim_pow[0] && self.shim_pow[2] > 1e-12 { (self.shim_pow[0] / self.shim_pow[2]).sqrt() } else { 1.0 };
     }
 
     /// Writes the reverb of `input` (one or two channels) into `wet` (as many). Never allocates.
@@ -1264,10 +1406,16 @@ impl Reverb {
                 h[i] = v[i] * self.topo.mix_sign[i];
             }
             hadamard(&mut h);
+            let mut y = [0.0f32; LINES];
             for i in 0..LINES {
-                let y = self.filters[i].process(h[self.topo.mix_perm[i]]);
+                y[i] = self.filters[i].process(h[self.topo.mix_perm[i]]);
+            }
+            if self.shim[0] > 0.0 || self.shim[1] > 0.0 {
+                self.shimmer(&mut y, lerp(self.shim));
+            }
+            for i in 0..LINES {
                 let x = self.topo.in_sign[i] * into[i & 1];
-                self.lines[i].write(y + x);
+                self.lines[i].write(y[i] + x);
             }
             let mut l = ol * OUT_GAIN + early[0];
             let mut r = or * OUT_GAIN + early[1];
@@ -1406,5 +1554,90 @@ mod tests {
             assert!((v - last).abs() < 0.002);
             last = v;
         }
+    }
+}
+
+
+#[cfg(test)]
+mod shimmer_tests {
+    use super::*;
+
+    const FS: f32 = 48_000.0;
+
+    /// The left wet output of `x` (mono in, stereo out) at `s`.
+    fn render(s: &ReverbSettings, x: &[f32]) -> Vec<f32> {
+        let mut r = Reverb::new(FS, s);
+        let (mut l, mut rr) = (vec![0.0; x.len()], vec![0.0; x.len()]);
+        for (i, ch) in x.chunks(256).enumerate() {
+            let (a, b) = (i * 256, i * 256 + ch.len());
+            r.process([ch, ch], [&mut l[a..b], &mut rr[a..b]], true, s);
+        }
+        l
+    }
+
+    fn tone(f: f32, len: usize, on: usize) -> Vec<f32> {
+        (0..len).map(|i| if i < on { 0.3 * (std::f32::consts::TAU * f * i as f32 / FS).sin() } else { 0.0 }).collect()
+    }
+
+    fn level(v: &[f32], f: f32) -> f32 {
+        let (mut c, mut s) = (0.0f64, 0.0f64);
+        for (i, &x) in v.iter().enumerate() {
+            let w = std::f64::consts::TAU * f64::from(f) * i as f64 / f64::from(FS);
+            c += f64::from(x) * w.cos();
+            s += f64::from(x) * w.sin();
+        }
+        (2.0 * (c * c + s * s).sqrt() / v.len() as f64) as f32
+    }
+
+    fn peak(v: &[f32]) -> f32 {
+        v.iter().fold(0.0, |m, x| m.max(x.abs()))
+    }
+
+    #[test]
+    fn shimmer_puts_the_interval_in_the_tail() {
+        let x = tone(440.0, 4 * 48_000, 24_000);
+        for (pitch, f) in [(12.0, 880.0), (7.0, 659.26), (-12.0, 220.0)] {
+            let dry = render(&ReverbSettings { decay_s: 6.0, ..ReverbSettings::default() }, &x);
+            let shim = render(&ReverbSettings { decay_s: 6.0, shimmer: 0.6, shimmer_pitch: pitch, ..ReverbSettings::default() }, &x);
+            let tail = 48_000..96_000;
+            let gain = 20.0 * (level(&shim[tail.clone()], f) / level(&dry[tail], f)).log10();
+            assert!(gain > 15.0, "{pitch}: {gain:.1} dB");
+        }
+    }
+
+    #[test]
+    fn shimmer_never_runs_away_even_frozen_on_a_held_tone() {
+        for pitch in [0.0, 0.3, 7.0, 12.0, -12.0, 24.0] {
+            let x = tone(220.0, 20 * 48_000, 20 * 48_000);
+            let s = ReverbSettings { decay_s: 30.0, shimmer: 1.0, shimmer_pitch: pitch, ..ReverbSettings::default() };
+            let y = render(&s, &x);
+            let early = peak(&y[48_000..3 * 48_000]);
+            let late = peak(&y[17 * 48_000..]);
+            assert!(late < 4.0 * early && late < 4.0, "{pitch}: {early} → {late}");
+            // Frozen with the tone gone.
+            let mut r = Reverb::new(FS, &s);
+            let (mut l, mut rr) = (vec![0.0; 256], vec![0.0; 256]);
+            let mut held = 0.0f32;
+            for b in 0..(16 * 48_000 / 256) {
+                let frozen = b >= 2 * 48_000 / 256;
+                let s = ReverbSettings { freeze: frozen, ..s };
+                let input = if frozen { vec![0.0; 256] } else { tone(220.0, 256, 256) };
+                r.process([&input, &input], [&mut l, &mut rr], true, &s);
+                if b == 3 * 48_000 / 256 {
+                    held = peak(&l);
+                }
+                if b > 14 * 48_000 / 256 {
+                    assert!(peak(&l) < 4.0 * held.max(1e-3), "{pitch} frozen: {held} → {}", peak(&l));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_shimmer_is_the_reverb_as_it_was() {
+        let x = tone(330.0, 48_000, 4800);
+        let a = render(&ReverbSettings::default(), &x);
+        let b = render(&ReverbSettings { shimmer: 0.0, shimmer_pitch: -7.0, ..ReverbSettings::default() }, &x);
+        assert_eq!(a, b);
     }
 }

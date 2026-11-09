@@ -214,8 +214,8 @@ fn the_dials_sit_in_their_groups() {
     let (view, _host) = setup();
     let groups = view.dial_groups();
     let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
-    assert_eq!(names, ["SPACE", "MOD", "EARLY", "DUCK"]);
-    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("DUCK", &["duck", "duck_release"])];
+    assert_eq!(names, ["SPACE", "MOD", "EARLY", "SHIMMER", "DUCK"]);
+    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("SHIMMER", &["shimmer", "shimmer_pitch"]), ("DUCK", &["duck", "duck_release"])];
     for (name, members) in member {
         let rect = groups.iter().find(|g| g.0 == name).expect("group").1;
         for id in members {

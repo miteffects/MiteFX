@@ -1,0 +1,23 @@
+{
+  "plugin": "Mite Verb",
+  "version": 1,
+  "name": "Shimmer Hall",
+  "params": {
+    "predelay": 20.0,
+    "size": 90.0,
+    "decay": 8.0,
+    "d1_on": 1.0,
+    "d1_type": 1.0,
+    "d1_freq": 300.0,
+    "d1_mult": 0.7,
+    "d1_q": 0.71,
+    "diffusion": 90.0,
+    "early": 20.0,
+    "mod_depth": 50.0,
+    "mod_rate": 0.4,
+    "width": 120.0,
+    "shimmer": 40.0,
+    "shimmer_pitch": 12.0,
+    "mix": 40.0
+  }
+}

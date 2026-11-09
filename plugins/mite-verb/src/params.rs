@@ -21,7 +21,9 @@ use crate::dsp::Output;
 ///   a tilt), the tone EQ eight of Mite EQ's bands `e1…e8_{on,type,freq,gain,q,slope}`. The fixed
 ///   low and high decay shelves (`lo_mult`, `lo_freq`, `hi_mult`, `hi_freq`) and the cuts
 ///   (`lo_cut`, `hi_cut`) are gone: [`crate::migrate::v2_to_v3`] turns them into bands.
-pub const STATE_VERSION: u32 = 3;
+/// - 4 (2026-11-09): shimmer (`shimmer`, `shimmer_pitch`) appended; a version 3 state gets
+///   their defaults (off).
+pub const STATE_VERSION: u32 = 4;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -40,6 +42,13 @@ pub const MOD_RATE: ParamSpec = spec("mod_rate", "Modulation Rate", "Hz", 0.05, 
 pub const WIDTH: ParamSpec = spec("width", "Width", "%", 0.0, 150.0, 100.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
 pub const EARLY_SIZE: ParamSpec = spec("early_size", "Early Size", "ms", 2.0, 200.0, 35.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Time);
 pub const EARLY_SEND: ParamSpec = spec("early_send", "Early Send", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+
+// ---- Shimmer -----------------------------------------------------------------------------------
+
+/// How fast the tail climbs (or falls) by the interval: 0 off, 100 % most of it each second.
+pub const SHIMMER: ParamSpec = spec("shimmer", "Shimmer", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+/// The interval, semitones.
+pub const SHIMMER_PITCH: ParamSpec = spec("shimmer_pitch", "Shimmer Pitch", "st", -24.0, 24.0, 12.0, ParamScale::Linear, 1, (1.0, 0.1), ParamDisplay::Number);
 
 // ---- Freeze and ducking --------------------------------------------------------------------------
 
@@ -102,6 +111,7 @@ pub fn manifest() -> String {
         let prefix = |line: String| format!("e{}_{line}", b + 1);
         lines.extend([E_ON.manifest_line(), E_TYPE.manifest_line(), E_FREQ.manifest_line(), E_GAIN.manifest_line(), E_Q.manifest_line(), E_SLOPE.manifest_line()].map(prefix));
     }
+    lines.extend([SHIMMER.manifest_line(), SHIMMER_PITCH.manifest_line()]);
     lines.join("\n") + "\n"
 }
 
@@ -134,7 +144,7 @@ fn split_band_id(id: &str) -> Option<(char, usize, &str)> {
 
 /// Every continuous spec by its id, for stand-in hosts.
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
-    if let Some(s) = CONTINUOUS[..15].iter().find(|s| s.id == id) {
+    if let Some(s) = CONTINUOUS[..15].iter().chain(&[SHIMMER, SHIMMER_PITCH]).find(|s| s.id == id) {
         return Some(*s);
     }
     match split_band_id(id)? {
@@ -214,6 +224,8 @@ pub struct VerbParams {
     pub bypass: BoolParam,
     pub early_size: FloatParam,
     pub early_send: FloatParam,
+    pub shimmer: FloatParam,
+    pub shimmer_pitch: FloatParam,
     pub bands: [DecayBandParams; DECAY_BANDS],
     pub tone: [ToneBandParams; TONE_BANDS],
     pub snapshots: std::sync::Arc<Snapshots>,
@@ -243,6 +255,8 @@ impl Default for VerbParams {
             bypass: flag(&BYPASS),
             early_size: float_param(&EARLY_SIZE),
             early_send: float_param(&EARLY_SEND),
+            shimmer: float_param(&SHIMMER),
+            shimmer_pitch: float_param(&SHIMMER_PITCH),
             bands: std::array::from_fn(DecayBandParams::new),
             tone: std::array::from_fn(ToneBandParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
@@ -270,6 +284,8 @@ pub fn reverb_settings(p: impl Fn(&str) -> f32) -> ReverbSettings {
         duck_release_ms: p(DUCK_RELEASE.id),
         early_size_ms: p(EARLY_SIZE.id),
         early_send: p(EARLY_SEND.id) / 100.0,
+        shimmer: p(SHIMMER.id) / 100.0,
+        shimmer_pitch: p(SHIMMER_PITCH.id),
         bands: std::array::from_fn(|b| {
             let v = |id: &str| p(&band_id(b, id));
             DecayBand { on: v(D_ON.id) >= 0.5, shape: DecayShape::from_index(index(v(D_TYPE.id))), freq: v(D_FREQ.id), mult: v(D_MULT.id), q: v(D_Q.id) }
@@ -309,6 +325,8 @@ impl VerbParams {
             "duck_release" => f(&self.duck_release),
             "early_size" => f(&self.early_size),
             "early_send" => f(&self.early_send),
+            "shimmer" => f(&self.shimmer),
+            "shimmer_pitch" => f(&self.shimmer_pitch),
             _ => match split_band_id(id) {
                 Some(('d', b, short)) => {
                     let band = &self.bands[b];
@@ -390,6 +408,8 @@ unsafe impl Params for VerbParams {
                 map.push((tone_id(b, id), ptr, "Tone EQ".to_owned()));
             }
         }
+        map.push(p(SHIMMER.id, self.shimmer.as_ptr(), "Shimmer"));
+        map.push(p(SHIMMER_PITCH.id, self.shimmer_pitch.as_ptr(), "Shimmer"));
         map
     }
 }

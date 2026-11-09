@@ -294,20 +294,26 @@ impl VerbView {
             ],
         );
         type Dial = (ParamSpec, &'static str, Option<mite_core::DialCurve>);
-        let layout: [(&'static str, &'static str, usize, usize, Vec<Dial>); 4] = [
+        // Columns: SPACE spans the wide one; below it EARLY and SHIMMER share it.
+        let wide = GROUP_COLS[0];
+        let split = wide.1 - (GROUP_COLS[1].1 - GROUP_COLS[1].0);
+        let cols = [wide, GROUP_COLS[1], (wide.0, split - 8.0), (split, wide.1)];
+        let layout: [(&'static str, &'static str, usize, usize, Vec<Dial>); 5] = [
             ("SPACE", "the room itself", 0, 0, vec![(SIZE, "SIZE", None), (DECAY, "DECAY", None), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL))]),
             ("MOD", "the room's slow drift", 0, 1, vec![(MOD_DEPTH, "DEPTH", None), (MOD_RATE, "RATE", None)]),
-            ("EARLY", "the first reflections", 1, 0, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
+            ("EARLY", "the first reflections", 1, 2, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
+            ("SHIMMER", "the tail climbing by an interval, pass after pass", 1, 3, vec![(SHIMMER, "AMOUNT", None), (SHIMMER_PITCH, "PITCH", None)]),
             ("DUCK", "the reverb stepping back while the input plays", 1, 1, vec![(DUCK, "DEPTH", None), (DUCK_RELEASE, "RELEASE", None)]),
         ];
         let mut knobs = Vec::new();
         let mut groups = Vec::new();
         for (name, words, row, col, dials) in layout {
-            let rect = Rect::new(GROUP_COLS[col].0, GROUP_ROWS[row].0, GROUP_COLS[col].1, GROUP_ROWS[row].1);
+            let rect = Rect::new(cols[col].0, GROUP_ROWS[row].0, cols[col].1, GROUP_ROWS[row].1);
             let n = dials.len() as f64;
             for (i, (spec, label, curve)) in dials.into_iter().enumerate() {
                 let at = Point::new(rect.x0 + rect.width() * (i as f64 + 0.5) / n, rect.y0 + DIAL_DY);
-                let k = Knob::new(spec, label, KnobKind::Unipolar, at, DIAL_D);
+                let kind = if spec.min < 0.0 { KnobKind::Bipolar } else { KnobKind::Unipolar };
+                let k = Knob::new(spec, label, kind, at, DIAL_D);
                 knobs.push(match curve {
                     Some(c) => k.with_curve(c),
                     None => k,

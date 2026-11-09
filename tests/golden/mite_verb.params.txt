@@ -103,3 +103,5 @@ e8_freq | Hz | 20 | 20000 | 1000 | Log
 e8_gain | dB | -24 | 24 | 0 | Linear
 e8_q |  | 0.1 | 10 | 0.70710677 | Log
 e8_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+shimmer | % | 0 | 100 | 0 | Linear
+shimmer_pitch | st | -24 | 24 | 12 | Linear
