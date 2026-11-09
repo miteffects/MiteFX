@@ -35,6 +35,7 @@ pub mod resample;
 pub mod reverb;
 pub mod reverb_quality;
 pub mod sat;
+pub mod shimmer;
 pub mod shape;
 pub mod smooth;
 pub mod spectral;

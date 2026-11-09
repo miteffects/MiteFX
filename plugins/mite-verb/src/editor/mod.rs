@@ -69,18 +69,18 @@ const PILL_Y: f64 = PLOT.y0 + 8.0;
 /// The history under the plot.
 const HIST_TOP: f64 = PLOT.y1 + 8.0;
 const HIST_BOTTOM: f64 = HELP_TOP - 4.0;
-const HIST_W: f64 = 740.0;
+const HIST_W: f64 = 620.0;
 const HIST_SECONDS: f64 = 6.0;
 const HIST_RANGE: f64 = 60.0;
 const DUCK_GRIP_X: f64 = HIST_W - 38.0;
 const DUCK_GRIP: (f64, f64) = (34.0, 20.0);
 
 /// The dials beside the history, grouped: two rows, a wide and a narrow panel in each.
-const DIAL_D: f64 = 44.0;
-const GROUP_COLS: [(f64, f64); 2] = [(752.0, 1062.0), (1070.0, 1172.0)];
+const DIAL_D: f64 = 56.0;
+const GROUP_COLS: [(f64, f64); 2] = [(632.0, 1024.0), (1032.0, 1172.0)];
 const GROUP_ROWS: [(f64, f64); 2] = [(HIST_TOP, HIST_TOP + 104.0), (HIST_BOTTOM - 104.0, HIST_BOTTOM)];
 /// A dial's centre below its panel's top.
-const DIAL_DY: f64 = 54.0;
+const DIAL_DY: f64 = 52.0;
 
 const WELLS: [f64; 2] = [1206.0, 1238.0];
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
