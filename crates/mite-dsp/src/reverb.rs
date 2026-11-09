@@ -58,7 +58,7 @@ const DUCK_ATTACK_MS: f32 = 2.0;
 /// What is fed back loses its lows below and its highs above these, Hz (the top after the
 /// shift, 24 dB/oct: the octave over it is 24 dB down, so a pass up darkens and the cascade
 /// fades instead of piling up; what folds over Nyquist is far above it).
-const SHIM_BAND: (f32, f32) = (220.0, 5000.0);
+const SHIM_BAND: (f32, f32) = (150.0, 6500.0);
 /// The fed-back tail's ceiling (soft), full scale.
 const SHIM_CEILING: f32 = 0.3;
 /// The interval glides with this time constant, ms.
