@@ -497,6 +497,12 @@ edits archived by the host, transport through the host). REAPER crashes in its o
 CLAP (ARA over CLAP is now off by default); over VST3 (fork 965eb1b) it binds an editor
 instance and a hidden playback instance and works (brief §1c, §1d).
 
+**2026-11-06: consonants belong to notes.** A note carries the unpitched sound around it (a
+leading consonant up to 350 ms, a final one up to 250 ms): the time map moves it with the note,
+unstretched, and level edits reach it. On the user's vocal the energy outside any note fell from
+6.7 % to 0.9 % (room tone, long breaths); the editor draws them as a faint lead-in and tail
+(`examples/melody_gaps`). User confirmed ARA over VST3 works in REAPER (c61d2e1).
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).
