@@ -1,151 +1,254 @@
-//! A pitch shifter for a reverb's shimmer: a phase vocoder with peak-locked shifting (Laroche &
-//! Dolson). Each frame (75 % overlap) every spectral peak's true frequency is measured from its
-//! phase advance, and the peak with its neighbourhood moves to `ratio` times it, resynthesised
-//! with its phase advancing at the new frequency. No grains, no splices: the
-//! output is continuous (soft and a little smeared in time, which a reverb tail hides), where a
-//! two-grain time-domain shifter crossfades twenty times a second and is heard as grain
-//! (user, 2026-11-09: "still sounds grainy").
+//! A pitch shifter for a reverb's shimmer: a phase-vocoder time stretch (identity phase locking,
+//! Laroche & Dolson) followed by resampling. Each frame is analysed every `HOP` samples and laid
+//! down again every `ratio × HOP`, its peaks' phases advancing at their own frequencies over the
+//! longer hop (the sound stretched, its pitch kept); the stretched stream is then read `ratio`
+//! times as fast (Hermite), which puts the pitch up by `ratio` at the input's length.
+//!
+//! History (2026-11-09): a two-grain time-domain shifter was "grainy" (user); then shifting the
+//! bins up in place (k → ratio·k) inside each frame was heard as "metallic": doubling every
+//! frequency of a frame squeezes its sound into half the frame, twice over — an echo at half a
+//! frame (21 ms, correlation 0.11 on noise against 0.01), a comb. Stretch-and-resample never
+//! repeats a frame's sound (tested).
 //!
 //! Sized in [`SpectralShifter::new`]; `process` never allocates.
 
+use std::sync::Arc;
+
 use realfft::num_complex::Complex;
+use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
-use crate::stft::Stft;
-
-/// Frames overlap eightfold: a partial's phase moves less between frames, so a chord comes out
-/// cleaner with the shorter frame.
+/// Analysis frames overlap eightfold.
 const OVERLAP: usize = 8;
+/// The interval's range, as a speed ratio (±24 semitones).
+const RATIO: (f64, f64) = (0.25, 4.0);
 
-/// The frame, about 43 ms at any rate (2048 at 44.1/48 kHz): crisp in time (85 ms smeared the
-/// tail: "still sounds a bit washy", user 2026-11-09), fine enough in frequency for low notes'
-/// harmonics to land in their own bins.
+/// The frame, about 64 ms (3072 at 48 kHz; a multiple of the overlap): long enough that a chord's
+/// partials sit in bins of their own (43 ms let them share and left junk 21 dB down), short
+/// enough to stay crisp.
 pub fn frame_size(fs: f32) -> usize {
-    let target = 0.043 * fs;
-    let mut n = 1024;
-    while (n as f32) < target * 0.75 {
-        n *= 2;
-    }
-    n
+    let n = (0.064 * fs / OVERLAP as f32).round() as usize * OVERLAP;
+    n.max(64 * OVERLAP)
+}
+
+/// One side's stretcher and resampler.
+struct Side {
+    /// The last `n` input samples (oldest first) and how many came since the last frame.
+    input: Vec<f64>,
+    since: usize,
+    /// Each bin's last analysis phase and last synthesis phase.
+    last: Vec<f64>,
+    synth: Vec<f64>,
+    /// The overlap-add of the stretched frames and of their windows (to divide by).
+    acc: Vec<f64>,
+    wsum: Vec<f64>,
+    /// The stretched stream (a ring), where it has been written to, where it is read, and the
+    /// speed it is read at (the last frame's synthesis hop over the analysis hop).
+    fifo: Vec<f64>,
+    written: f64,
+    read: f64,
+    speed: f64,
+    /// The synthesis hop's fraction carried to the next frame (the hops average the exact ratio).
+    carry: f64,
 }
 
 pub struct SpectralShifter {
-    stft: Stft,
-    /// Per side: each bin's last analysis phase; the last frame's moved peaks (their synthesis
-    /// phase and frequency in bins, by target bin; NaN: none there) and this frame's.
-    last: [Vec<f64>; 2],
-    synth: [Vec<[f64; 2]>; 2],
-    fresh: Vec<[f64; 2]>,
-    /// Scratch per frame: the magnitudes and phases.
+    n: usize,
+    hop: usize,
+    r2c: Arc<dyn RealToComplex<f64>>,
+    c2r: Arc<dyn ComplexToReal<f64>>,
+    fwd_scratch: Vec<Complex<f64>>,
+    inv_scratch: Vec<Complex<f64>>,
+    /// Square-root Hann (analysis and synthesis).
+    window: Vec<f64>,
+    frame: Vec<f64>,
+    spec: Vec<Complex<f64>>,
     mag: Vec<f64>,
     phase: Vec<f64>,
+    sides: [Side; 2],
 }
 
 impl SpectralShifter {
     /// Allocates.
     pub fn new(fs: f32) -> Self {
-        let stft = Stft::with_overlap(frame_size(fs), OVERLAP);
-        let bins = stft.bins();
-        let zeros = || vec![0.0; bins];
-        let none = || vec![[f64::NAN; 2]; bins];
-        Self { stft, last: [zeros(), zeros()], synth: [none(), none()], fresh: none(), mag: zeros(), phase: zeros() }
+        let n = frame_size(fs);
+        let hop = n / OVERLAP;
+        let mut planner = RealFftPlanner::<f64>::new();
+        let r2c = planner.plan_fft_forward(n);
+        let c2r = planner.plan_fft_inverse(n);
+        let bins = n / 2 + 1;
+        let window = (0..n).map(|i| (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos()).sqrt()).collect();
+        // The longest synthesis hop is RATIO.1 × hop; the ring holds several frames of it.
+        let acc_len = n + (RATIO.1 as usize + 1) * hop;
+        let side = || Side {
+            input: vec![0.0; n],
+            since: 0,
+            last: vec![0.0; bins],
+            synth: vec![0.0; bins],
+            acc: vec![0.0; acc_len],
+            wsum: vec![0.0; acc_len],
+            fifo: vec![0.0; 8 * n],
+            written: 0.0,
+            read: 0.0,
+            speed: 1.0,
+            carry: 0.0,
+        };
+        let mut s = Self {
+            n,
+            hop,
+            fwd_scratch: r2c.make_scratch_vec(),
+            inv_scratch: c2r.make_scratch_vec(),
+            spec: r2c.make_output_vec(),
+            r2c,
+            c2r,
+            window,
+            frame: vec![0.0; n],
+            mag: vec![0.0; bins],
+            phase: vec![0.0; bins],
+            sides: [side(), side()],
+        };
+        s.reset();
+        s
     }
 
-    /// The delay through it, samples.
+    /// The delay through it, samples (about: the frame, plus the reader's lag).
     pub fn latency(&self) -> usize {
-        self.stft.latency()
+        self.n + self.n / 2
     }
 
     pub fn reset(&mut self) {
-        self.stft.reset();
-        for v in &mut self.last {
-            v.fill(0.0);
-        }
-        for v in &mut self.synth {
-            v.fill([f64::NAN; 2]);
+        for side in &mut self.sides {
+            side.input.fill(0.0);
+            side.since = 0;
+            side.last.fill(0.0);
+            side.synth.fill(0.0);
+            side.acc.fill(0.0);
+            side.wsum.fill(0.0);
+            side.fifo.fill(0.0);
+            side.written = 0.0;
+            // The reader starts half a frame behind what the first frames write.
+            side.read = -(self.n as f64) / 2.0;
+            side.speed = 1.0;
+            side.carry = 0.0;
         }
     }
 
-    /// Shifts `left` and `right` in place by `ratio` (2: an octave up; one per side, so the sides
-    /// can be detuned against each other), delayed by [`Self::latency`].
+    /// Shifts `left` and `right` in place by `ratio` (2: an octave up; one per side), delayed by
+    /// about [`Self::latency`].
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32], ratio: [f32; 2]) {
-        let ratio = ratio.map(|r| f64::from(r.clamp(0.125, 8.0)));
-        let (n, hop) = (self.stft.size() as f64, self.stft.hop() as f64);
-        let (last, synth, fresh, mag, phase) = (&mut self.last, &mut self.synth, &mut self.fresh, &mut self.mag, &mut self.phase);
-        self.stft.process(left, right, &mut |l: &mut [Complex<f64>], r: &mut [Complex<f64>]| {
-            for (c, spec) in [l, r].into_iter().enumerate() {
-                shift_frame(spec, &mut last[c], &mut synth[c], fresh, mag, phase, ratio[c], n, hop);
+        for (c, buf) in [left, right].into_iter().enumerate() {
+            let r = f64::from(ratio[c]).clamp(RATIO.0, RATIO.1);
+            for x in buf.iter_mut() {
+                let side = &mut self.sides[c];
+                side.input.copy_within(1.., 0);
+                let last = self.n - 1;
+                side.input[last] = if x.is_finite() { f64::from(*x) } else { 0.0 };
+                side.since += 1;
+                if side.since == self.hop {
+                    side.since = 0;
+                    self.frame(c, r);
+                }
+                *x = self.sides[c].next() as f32;
             }
-        });
+        }
+    }
+
+    /// One analysis frame of side `c`, laid down stretched by `ratio`.
+    fn frame(&mut self, c: usize, ratio: f64) {
+        use std::f64::consts::TAU;
+        let n = self.n;
+        let side = &mut self.sides[c];
+        // The synthesis hop, whole samples, its fraction carried on: on average exactly `ratio`
+        // times the analysis hop, as fast as the reader reads, so the stream neither starves nor
+        // floods and the pitch is exact.
+        let want = ratio * self.hop as f64 + side.carry;
+        let out_hop = (want.floor() as usize).clamp(1, side.acc.len() - n);
+        side.carry = want - out_hop as f64;
+        side.speed = ratio;
+        for ((f, x), w) in self.frame.iter_mut().zip(&side.input).zip(&self.window) {
+            *f = x * w;
+        }
+        let _ = self.r2c.process_with_scratch(&mut self.frame, &mut self.spec, &mut self.fwd_scratch);
+        let bins = self.spec.len();
+        for k in 0..bins {
+            let (m, ph) = self.spec[k].to_polar();
+            self.mag[k] = m;
+            self.phase[k] = ph;
+        }
+        // Each peak: its true frequency from its phase advance over the analysis hop, its
+        // synthesis phase advanced at that frequency over the synthesis hop from where it was;
+        // the bins around it (to the valleys) keep their phases relative to it.
+        let ana = TAU * self.hop as f64 / n as f64;
+        let mut start = 0;
+        let mut k = 1;
+        while start < bins {
+            while k < bins && !(self.mag[k] > self.mag[k - 1] && (k + 1 >= bins || self.mag[k] >= self.mag[k + 1])) {
+                k += 1;
+            }
+            let peak = k.min(bins - 1);
+            let mut end = peak + 1;
+            while end < bins && self.mag[end] < self.mag[end - 1] {
+                end += 1;
+            }
+            let mut d = self.phase[peak] - side.last[peak] - peak as f64 * ana;
+            d -= TAU * (d / TAU).round();
+            let omega = (peak as f64 * ana + d) / self.hop as f64; // rad per sample
+            let syn = side.synth[peak] + omega * out_hop as f64;
+            for b in start..end.min(bins) {
+                let ph = syn + self.phase[b] - self.phase[peak];
+                side.synth[b] = ph % TAU;
+                self.spec[b] = Complex::from_polar(self.mag[b], ph);
+            }
+            start = end;
+            k = end.max(k + 1);
+        }
+        side.last.copy_from_slice(&self.phase);
+        let last = bins - 1;
+        self.spec[0].im = 0.0;
+        self.spec[last].im = 0.0;
+        let _ = self.c2r.process_with_scratch(&mut self.spec, &mut self.frame, &mut self.inv_scratch);
+        let scale = 1.0 / n as f64;
+        for i in 0..n {
+            let w = self.window[i];
+            side.acc[i] += self.frame[i] * w * scale;
+            side.wsum[i] += w * w;
+        }
+        // The first `out_hop` samples are complete: into the stream, divided by the windows' sum.
+        let len = side.fifo.len();
+        for i in 0..out_hop {
+            let y = side.acc[i] / side.wsum[i].max(0.5);
+            let at = side.written as usize % len;
+            side.fifo[at] = y;
+            side.written += 1.0;
+        }
+        side.acc.copy_within(out_hop.., 0);
+        side.wsum.copy_within(out_hop.., 0);
+        let tail = side.acc.len() - out_hop;
+        side.acc[tail..].fill(0.0);
+        side.wsum[tail..].fill(0.0);
     }
 }
 
-/// One frame of one side, in place: each spectral peak moves with the bins around it (to the
-/// valleys either side) as one piece, so a partial keeps its shape and level, and those bins
-/// keep their phases relative to the peak (identity phase locking: no phasiness).
-#[allow(clippy::too_many_arguments)]
-fn shift_frame(spec: &mut [Complex<f64>], last: &mut [f64], synth: &mut [[f64; 2]], fresh: &mut [[f64; 2]], mag: &mut [f64], phase: &mut [f64], ratio: f64, n: f64, hop: f64) {
-    use std::f64::consts::TAU;
-    let bins = spec.len();
-    // The phase a bin's centre frequency advances over a hop, per bin.
-    let expect = TAU * hop / n;
-    // Phases as seen from the frame's centre (bin k turned by k·π, as a half-frame rotation
-    // would): a partial's bins then share one phase instead of alternating, and its phase does
-    // not flip by π when its frequency crosses a bin edge (it did: a drifting tone dipped 12 dB
-    // at every crossing).
-    for k in 0..bins {
-        let (m, ph) = spec[k].to_polar();
-        mag[k] = m;
-        phase[k] = ph + std::f64::consts::PI * (k % 2) as f64;
-        spec[k] = Complex::new(0.0, 0.0);
+impl Side {
+    /// The next output sample: the stream read at `speed`, Hermite between samples.
+    fn next(&mut self) -> f64 {
+        let len = self.fifo.len() as f64;
+        // Never read what is not written yet (or what has been overwritten).
+        self.read = self.read.clamp(self.written - len + 4.0, self.written - 3.0);
+        let y = if self.read < 1.0 {
+            0.0
+        } else {
+            let i = self.read.floor();
+            let t = self.read - i;
+            let at = |k: f64| self.fifo[((i + k).rem_euclid(len)) as usize];
+            let (xm1, x0, x1, x2) = (at(-1.0), at(0.0), at(1.0), at(2.0));
+            let c1 = 0.5 * (x1 - xm1);
+            let c2 = xm1 - 2.5 * x0 + 2.0 * x1 - 0.5 * x2;
+            let c3 = 0.5 * (x2 - xm1) + 1.5 * (x0 - x1);
+            ((c3 * t + c2) * t + c1) * t + x0
+        };
+        self.read += self.speed;
+        y
     }
-    fresh.fill([f64::NAN; 2]);
-    let mut k = 1;
-    let mut start = 0;
-    while k < bins {
-        // The next peak, and the valley after it.
-        let is_peak = mag[k] > mag[k - 1] && (k + 1 >= bins || mag[k] >= mag[k + 1]);
-        if !is_peak {
-            k += 1;
-            continue;
-        }
-        let peak = k;
-        let mut end = peak + 1;
-        while end < bins && mag[end] < mag[end - 1] {
-            end += 1;
-        }
-        let mut d = phase[peak] - last[peak] - peak as f64 * expect;
-        d -= TAU * (d / TAU).round();
-        let true_bin = peak as f64 + d / expect;
-        let target = peak as isize + (true_bin * ratio - true_bin).round() as isize;
-        if target > 0 && (target as usize) < bins {
-            let t = target as usize;
-            let f = true_bin * ratio;
-            // The phase carries on from the same partial last frame (the moved peak nearest,
-            // within two bins: a drifting partial crosses bins without its phase restarting),
-            // advancing over the hop at the mean of its old and new frequency.
-            let prev = [0isize, -1, 1, -2, 2].iter().map(|d| t as isize + d).filter(|&b| b >= 0 && (b as usize) < bins).map(|b| synth[b as usize]).find(|p| !p[0].is_nan());
-            let ph = match prev {
-                Some([p, pf]) => (p + 0.5 * (pf + f) * expect) % TAU,
-                None => phase[peak],
-            };
-            fresh[t] = [ph, f];
-            // The neighbourhood moves by the shift rounded to whole bins (rounding the shift,
-            // not the target, keeps the shape within half a bin of its frequency).
-            let offset = (f - true_bin).round() as isize;
-            let rot = ph - phase[peak];
-            for b in start..end {
-                let j = b as isize + offset;
-                if j >= 0 && (j as usize) < bins {
-                    let back = std::f64::consts::PI * (j % 2) as f64;
-                    spec[j as usize] += Complex::from_polar(mag[b], phase[b] + rot - back);
-                }
-            }
-        }
-        start = end;
-        k = end;
-    }
-    last.copy_from_slice(&phase[..bins]);
-    synth.copy_from_slice(fresh);
 }
 
 #[cfg(test)]
@@ -235,8 +338,31 @@ mod purity {
             let env: Vec<f32> = tail.chunks(480).map(|c| (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).sqrt()).collect();
             let (lo, hi) = env.iter().fold((f32::MAX, 0.0f32), |(a, b), &e| (a.min(e), b.max(e)));
             let (junk, swing) = (10.0 * (1.0 - p).max(1e-12).log10(), 10.0 * (hi / lo).log10());
-            // Measured 2026-11-09 (43 ms, 8× overlap): junk −64/−34/−46 dB, swing ±0.07/±1.06/±0.74 dB.
-            assert!(junk < -30.0 && swing < 1.5, "{name}: junk {junk:.1} dB, envelope ±{swing:.2} dB");
+            // Measured 2026-11-09 (stretch and resample, 64 ms): junk −85/−31/−84 dB, swing
+            // ±0.07/±1.04/±0.07 dB.
+            assert!(junk < -28.0 && swing < 1.5, "{name}: junk {junk:.1} dB, envelope ±{swing:.2} dB");
         }
+    }
+}
+
+#[cfg(test)]
+mod comb {
+    use super::*;
+
+    /// Noise shifted an octave up stays noise: no echo of itself at any lag up to 60 ms (shifting
+    /// bins in place left one at half a frame, correlation 0.11, heard as metallic).
+    #[test]
+    fn noise_comes_out_without_an_echo_of_itself() {
+        let fs = 48_000.0f32;
+        let mut seed = 3u32;
+        let mut l: Vec<f32> = (0..4 * 48_000).map(|_| { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed as f32 / u32::MAX as f32 - 0.5) * 0.5 }).collect();
+        let mut r = l.clone();
+        let mut sh = SpectralShifter::new(fs);
+        for (a, b) in l.chunks_mut(64).zip(r.chunks_mut(64)) {
+            sh.process(a, b, [2.0; 2]);
+        }
+        let lags = crate::reverb_quality::periodic_lags(&l[48_000..], f64::from(fs), 0.0, 2.5, 1);
+        // Measured 2026-11-09: 0.037 at 32 ms (noise itself: 0.01).
+        assert!(lags[0].1.abs() < 0.06, "{lags:?}");
     }
 }

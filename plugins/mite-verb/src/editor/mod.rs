@@ -7,9 +7,10 @@
 //! dont make default bands"). The two glyph pills top left pick which one the pointer edits; the
 //! other stays drawn, dim, and grabbing one of its bands picks it. The decay curve is drawn and
 //! dragged against `DecayModel` (one mean line, designed once per change: a drag costs well under
-//! a millisecond; the exact 32-line mean froze the UI). Under the plot the history
-//! (the input dim, the reverb lit; the ducking threshold to drag), then the dials grouped by what
-//! they do (SPACE, DUCK; EARLY, SHIMMER, MOD); the meters on the right.
+//! a millisecond; the exact 32-line mean froze the UI). Under the plot the dials, large, grouped by
+//! what they do (SPACE, DUCK; EARLY, SHIMMER, MOD); the meters on the right. No level history
+//! (user, 2026-11-09: "it works without that graph"): the ducking threshold is a dial with the
+//! input on its ring.
 
 mod spectrum;
 
@@ -20,17 +21,17 @@ use std::time::Instant;
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq::{analog_response_db, BandSettings, BandType, SLOPES_DB};
 use mite_dsp::reverb::{DecayModel, DecayShape, ReverbSettings, DECAY_BANDS, TONE_BANDS};
+use mite_ui::widgets::history;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_stroke, panel};
 use mite_ui::peniko::{Color, Fill};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::eq_icons::draw_type_icon;
-use mite_ui::widgets::history::{self, HistoryLane};
 use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
-use crate::dsp::{record, HISTORY_RECORDS, HISTORY_SLICE_MS};
+use crate::dsp::{record, HISTORY_RECORDS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::VerbShared;
@@ -66,21 +67,19 @@ const PILL: (f64, f64) = (38.0, 24.0);
 const PILL_X: [f64; 2] = [44.0, 88.0];
 const PILL_Y: f64 = PLOT.y0 + 8.0;
 
-/// The history under the plot.
-const HIST_TOP: f64 = PLOT.y1 + 8.0;
-const HIST_BOTTOM: f64 = HELP_TOP - 4.0;
-const HIST_W: f64 = 420.0;
-const HIST_SECONDS: f64 = 6.0;
-const HIST_RANGE: f64 = 60.0;
+/// The dials' area under the plot, and the meters' range (dB).
+const DIALS_TOP: f64 = PLOT.y1 + 8.0;
+const DIALS_BOTTOM: f64 = HELP_TOP - 4.0;
+const METER_RANGE: f64 = 60.0;
 
-/// The dials beside the history, grouped: two rows, a wide and a narrow panel in each.
-const DIAL_D: f64 = 56.0;
+/// The dials, grouped: two rows of panels, each as wide as its dials need.
+const DIAL_D: f64 = 64.0;
 /// The dials' span (x) and the gap between panels.
-const GROUPS_X: (f64, f64) = (HIST_W + 12.0, 1172.0);
+const GROUPS_X: (f64, f64) = (8.0, 1172.0);
 const GROUP_GAP: f64 = 8.0;
-const GROUP_ROWS: [(f64, f64); 2] = [(HIST_TOP, HIST_TOP + 104.0), (HIST_BOTTOM - 104.0, HIST_BOTTOM)];
+const GROUP_ROWS: [(f64, f64); 2] = [(DIALS_TOP, DIALS_TOP + 104.0), (DIALS_BOTTOM - 104.0, DIALS_BOTTOM)];
 /// A dial's centre below its panel's top.
-const DIAL_DY: f64 = 52.0;
+const DIAL_DY: f64 = 55.0;
 
 const WELLS: [f64; 2] = [1206.0, 1238.0];
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
@@ -119,18 +118,8 @@ fn y_tone(y: f64) -> f64 {
     (mid - y) / (0.5 * (DECAY_BOTTOM - DECAY_TOP)) * TONE_DB
 }
 
-/// A level's y on the history (0…−60 dB).
-fn lv_y(db: f32) -> f64 {
-    HIST_TOP + 6.0 + (-f64::from(db)).clamp(0.0, HIST_RANGE) / HIST_RANGE * (HIST_BOTTOM - HIST_TOP - 12.0)
-}
 
-fn px_per_db() -> f64 {
-    (HIST_BOTTOM - HIST_TOP - 12.0) / HIST_RANGE
-}
 
-fn history_lane() -> HistoryLane {
-    HistoryLane { x0: 0.0, width: HIST_W, top: HIST_TOP, bottom: HIST_BOTTOM, seconds: HIST_SECONDS, slice_ms: HISTORY_SLICE_MS }
-}
 
 fn fmt_s(t: f64) -> String {
     if t >= 10.0 {
@@ -444,9 +433,6 @@ impl VerbView {
         tone_y(db)
     }
 
-    pub fn level_y(&self, db: f32) -> f64 {
-        lv_y(db)
-    }
 
     pub fn dial(&self, id: &str) -> Option<Point> {
         self.knobs.iter().find(|k| k.id == id).map(|k| k.center)
@@ -491,10 +477,6 @@ impl VerbView {
             }
         }
         (0.5 * (lo + hi)).exp() as f32
-    }
-
-    fn since_fresh(&self) -> f64 {
-        (self.last_fresh.elapsed().as_secs_f64() * 1000.0 / f64::from(HISTORY_SLICE_MS)).min(4.0)
     }
 
     fn frozen(&self, host: &dyn ParamHost) -> bool {
@@ -658,43 +640,6 @@ impl VerbView {
         }
     }
 
-    fn draw_history(&self, cx: &mut DrawCx<'_>) {
-        let theme = cx.theme;
-        let lane = history_lane();
-        let rect = lane.rect();
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &rect);
-        for db in [-12.0, -24.0, -36.0, -48.0] {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((0.0, lv_y(db)), (HIST_W, lv_y(db))));
-        }
-        cx.begin_clip(&rect);
-        let cols = lane.columns(&self.history, self.seen, self.since_fresh());
-        if cols.len() >= 2 {
-            type Col = history::Column<{ record::WIDTH }>;
-            let level = |c: &Col, k: usize| c.high[k].max(c.high[k + 1]);
-            let line = |f: &dyn Fn(&Col) -> f64| history::column_line(&cols, f);
-            let input = line(&|c| lv_y(level(c, record::IN)));
-            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.12), None, &history::close_to(input.clone(), &cols, HIST_BOTTOM));
-            // The reverb alone, lit: its tail falls after each phrase.
-            let wet = line(&|c| lv_y(level(c, record::WET)));
-            let accent = theme.accent;
-            let look = history::LevelLook { fill: [accent.multiply_alpha(0.16), accent.multiply_alpha(0.01)], span: (HIST_TOP, HIST_BOTTOM), edge: accent, width: 1.8, glow: 2.4 };
-            history::draw_level(cx, &cols, &wet, HIST_BOTTOM, look);
-            if cols.iter().any(|c| c.low[record::DUCK] < -0.05) {
-                let edge = line(&|c| HIST_TOP + (f64::from(-c.low[record::DUCK]) * px_per_db()).clamp(0.0, HIST_BOTTOM - HIST_TOP));
-                history::draw_reduction(cx, &cols, &edge, HIST_TOP, 0.5 * (HIST_BOTTOM - HIST_TOP));
-            }
-            cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85), None, &input);
-        }
-        cx.end_clip();
-        // The ducking threshold: where the input crosses it, the reverb is turned down. Dim while
-        // ducking is off.
-        let host = cx.host;
-        let on = Self::plain(host, DUCK.id) > 0.0;
-        let y = lv_y(Self::plain(host, DUCK_THRESH.id));
-        let ink = if on { theme.accent } else { theme.text_lo };
-        let stroke = Stroke::new(1.3).with_dashes(0.0, [5.0, 4.0]);
-        cx.scene.stroke(&stroke, Affine::IDENTITY, ink.multiply_alpha(if on { 0.9 } else { 0.5 }), None, &Line::new((0.0, y), (HIST_W, y)));
-    }
 
     /// The dial groups' panels, each named at its top left.
     fn draw_groups(&self, cx: &mut DrawCx<'_>) {
@@ -714,7 +659,7 @@ impl VerbView {
         let seg = Stroke::new(8.0).with_dashes(0.0, [2.0, 2.0]);
         let (top, bottom) = (METER_TOP + 4.0, METER_BOTTOM - 4.0);
         let span = bottom - top;
-        let level_y = |db: f32| bottom - ((f64::from(db) + HIST_RANGE).clamp(0.0, HIST_RANGE) / HIST_RANGE * span / 4.0).round() * 4.0;
+        let level_y = |db: f32| bottom - ((f64::from(db) + METER_RANGE).clamp(0.0, METER_RANGE) / METER_RANGE * span / 4.0).round() * 4.0;
         for (i, x) in WELLS.iter().flat_map(|&w| [w + 5.0, w + 15.0]).enumerate() {
             cx.scene.stroke(&seg, Affine::IDENTITY, theme.meter_off, None, &Line::new((x, top), (x, bottom)));
             let line = Line::new((x, bottom), (x, level_y(self.meters[i])));
@@ -1143,7 +1088,6 @@ impl View for VerbView {
             cx.begin_glow_hole(h);
         }
         self.draw_plot(cx);
-        self.draw_history(cx);
         self.draw_groups(cx);
         for k in &self.knobs {
             k.draw(cx);

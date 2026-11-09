@@ -61,6 +61,10 @@ const SHIM_SUB_HZ: f32 = 40.0;
 /// fade: the octave over it is 24 dB down each pass. Wider than 150 Hz–6.5 kHz brightens it (8 kHz
 /// put 37 % of a late tail over 6 kHz).
 pub const SHIM_RANGE_HZ: (f32, f32) = (20.0, 20_000.0);
+/// The shifted tail's diffusers per side, ms, and their coefficient: the vocoder's output is a
+/// sum of steady partials; smeared before it goes back in, it joins the tail as a wash.
+const SHIM_DIFF_MS: [[f32; 4]; 2] = [[4.71, 7.33, 11.13, 17.93], [5.27, 8.09, 12.41, 16.87]];
+const SHIM_DIFF_G: f32 = 0.6;
 /// The shimmer's two voices (left, right) sit this far either side of the interval, cents.
 const SHIM_DETUNE_CENTS: f32 = 6.0;
 /// The fed-back tail's ceiling (soft), full scale.
@@ -945,7 +949,7 @@ fn butterworth(fc: f32, fs: f32, high: bool) -> [f32; 5] {
 /// The shimmer's feedback at 100 % for a 1 s tail (÷ √T60: a longer tail holds more energy). At
 /// 8 s, 100 % blooms about 5–10 dB over the reverb alone and still decays; twice it runs into
 /// the ceiling (measured with `examples/shimmer_probe.rs`, 2026-11-09).
-const SHIM_K: f32 = 1.8;
+const SHIM_K: f32 = 1.4;
 
 /// The shimmer's feedback gain for `amount` (0…1) at a decay of `decay_s`, shifting by
 /// `semitones`. Under two semitones it fades out: unshifted, the feedback lands on the tail's
@@ -1019,6 +1023,8 @@ pub struct Reverb {
     /// (low cut, two lowpass poles), the feedback gain (as `er`), the ratio, its lowpass
     /// coefficient, and the fixed coefficients (low cut, glide).
     shift: SpectralShifter,
+    /// The shifted tail's own diffusers per side, before it goes back in.
+    shim_diff: [[Allpass; 4]; 2],
     shim_fb: [f32; 2],
     shim_f: [[f32; 7]; 2],
     shim: [f32; 2],
@@ -1071,6 +1077,7 @@ impl Reverb {
             phase: 0,
             designed: None,
             shift: SpectralShifter::new(fs),
+            shim_diff: std::array::from_fn(|c| std::array::from_fn(|k| Allpass::new(ms(SHIM_DIFF_MS[c][k])))),
             shim_fb: [0.0; 2],
             shim_f: [[0.0; 7]; 2],
             shim: [0.0; 2],
@@ -1128,6 +1135,9 @@ impl Reverb {
         self.duck_g = 1.0;
         self.designed = None;
         self.shift.reset();
+        for a in self.shim_diff.iter_mut().flatten() {
+            a.line.reset();
+        }
         self.shim_fb = [0.0; 2];
         self.shim_f = [[0.0; 7]; 2];
         self.control(s, true);
@@ -1394,6 +1404,9 @@ impl Reverb {
                         f[z] = b1 * v - a1 * y + f[z + 1];
                         f[z + 1] = b2 * v - a2 * y;
                         v = y;
+                    }
+                    for a in &mut self.shim_diff[c] {
+                        v = a.process(v, SHIM_DIFF_G);
                     }
                     let y = g * v;
                     // A soft ceiling: clean at a tail's levels, a firm brake on a build-up.

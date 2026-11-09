@@ -5,7 +5,7 @@
 //!     cargo run --release -p mite-dsp --example shimmer_probe
 
 use mite_dsp::reverb::{DecayBand, ReverbSettings, Reverb};
-use mite_dsp::reverb_quality::peakiness;
+use mite_dsp::reverb_quality::{peakiness, periodicity};
 use realfft::RealFftPlanner;
 
 const FS: f32 = 48_000.0;
@@ -42,6 +42,11 @@ fn main() {
             env * [261.6f32, 329.6, 392.0].iter().map(|f| 0.1 * (std::f32::consts::TAU * f * t).sin()).sum::<f32>()
         })
         .collect();
+    // SHIM_IN=noise: a 50 ms noise burst instead (any steady peak in its tail is ringing).
+    let x: Vec<f32> = if std::env::var("SHIM_IN").as_deref() == Ok("noise") {
+        let mut seed = 7u32;
+        (0..n).map(|i| if i < 2400 { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; (seed as f32 / u32::MAX as f32 - 0.5) * 0.5 } else { 0.0 }).collect()
+    } else { x };
     let base = ReverbSettings {
         predelay_ms: 20.0, size: 0.9, decay_s: 8.0, diffusion: 0.9, early: 0.2, mod_depth: 0.5, mod_rate: 0.4, width: 1.2,
         bands: { let mut b = [DecayBand::default(); 8]; b[0] = DecayBand::low_shelf(300.0, 0.7); b },
@@ -52,7 +57,7 @@ fn main() {
     for amt in amounts {
         let s = ReverbSettings { shimmer: amt, shimmer_pitch: 12.0, ..base };
         let y = render(&s, &x);
-        println!("shimmer {amt}: peaky tail {:.3} %", peakiness(&y, f64::from(FS), 1.0, 3.0) * 100.0);
+        println!("shimmer {amt}: peaky tail {:.3} % (late {:.3} %)  periodicity {:.3}", peakiness(&y, f64::from(FS), 1.0, 3.0) * 100.0, peakiness(&y, f64::from(FS), 3.0, 6.0) * 100.0, periodicity(&y, f64::from(FS), 1.0, 3.0));
         for t in [1usize, 2, 3, 5, 8] {
             let seg = &y[t * 48_000..(t + 1) * 48_000];
             let sp = spectrum(seg);
