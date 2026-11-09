@@ -3,7 +3,6 @@
 use mite_core::HistoryTap;
 use mite_verb::dsp::{record, VerbEngine};
 use mite_verb::editor::{memory_host, output, settings};
-use mite_ui::ParamHost;
 
 /// The energy within ±25 Hz of `f` (a few frequencies summed: the detuned voices sit a few Hz off).
 fn level(v: &[f32], f: f32) -> f32 {
