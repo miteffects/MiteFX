@@ -73,6 +73,11 @@ const SPAN_RANGE_S: (f64, f64) = (0.5, 600.0);
 /// The pitch shown around the notes, cents.
 const PITCH_PAD: f64 = 400.0;
 const MIN_PITCH_SPAN: f64 = 1200.0;
+/// The beat grid's lines no closer than this, px, and its labels.
+const GRID_LINE_PX: f64 = 12.0;
+const GRID_LABEL_PX: f64 = 48.0;
+/// Timing snaps to grid lines no closer than this, px.
+const GRID_SNAP_PX: f64 = 16.0;
 /// Undo steps kept.
 const UNDO_DEPTH: usize = 200;
 /// A note's edges are grips this wide, px.
@@ -123,7 +128,7 @@ impl Tool {
 
     fn words(self) -> &'static str {
         match self {
-            Tool::Main => "Main (1) — drag a note: up and down its pitch, sideways its timing, its edges its length; double-click: onto the snap",
+            Tool::Main => "Main (1) — drag a note: up and down its pitch, sideways its timing (onto the beats), its edges its length; double-click: onto the snap",
             Tool::Vibrato => "Vibrato (2) — drag a note up for more of its vibrato, down for less; double-click: as sung",
             Tool::Drift => "Drift (3) — drag a note up for more of its slow slides and sags, down for less; double-click: as sung",
             Tool::Formant => "Formant (4) — drag a note up or down to move its formants (the voice's size); double-click: as sung",
@@ -390,13 +395,9 @@ impl PitchView {
         Rect::new(self.x_of(s), yc - h / 2.0, self.x_of(t).max(self.x_of(s) + 3.0), yc + h / 2.0)
     }
 
-    /// Where the shown take starts on the song, s (0 without ARA: the take's own time).
+    /// Where the shown take starts on the song (the host's timeline), s.
     fn take_song_s(&self) -> f64 {
-        let s = &self.shared.session;
-        match (s.ara(), s.take()) {
-            (Some(_), Some(t)) => t.start as f64 / t.sample_rate,
-            _ => 0.0,
-        }
+        self.shared.session.take().map_or(0.0, |t| t.start as f64 / t.sample_rate)
     }
 
     /// Whether note `n` lies in the current clip (ARA: the region's part of the take; the rest of
@@ -718,10 +719,33 @@ impl PitchView {
         // The ruler: seconds from the take's start (a step that keeps labels apart).
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &RULER);
         let step = [0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0].into_iter().find(|s| s / self.span * ROLL.width() >= 70.0).unwrap_or(120.0);
-        // Lines on round song times.
+        // Lines on round song times; with the song's bars and beats, on those.
         let origin = self.take_song_s();
+        let grid = self.shared.session.grid();
+        if let Some(g) = &grid {
+            let px = self.span / ROLL.width();
+            let (s0, s1) = (self.t0 + origin, self.t0 + self.span + origin);
+            for t in g.ticks(s0, s1, GRID_LINE_PX * px) {
+                let x = self.x_of(t.s - origin);
+                let ink = match t.beat {
+                    1 => theme.grid_major,
+                    0 => theme.grid_minor.multiply_alpha(0.45),
+                    _ => theme.grid_minor,
+                };
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, ink, None, &Line::new((x, ROLL.y0), (x, ROLL.y1)));
+            }
+            for t in g.ticks(s0, s1, GRID_LABEL_PX * px).into_iter().filter(|t| t.beat > 0) {
+                let x = self.x_of(t.s - origin);
+                if x + 30.0 > ROLL.x1 {
+                    break;
+                }
+                let label = if t.beat == 1 { format!("{}", t.bar) } else { format!("{}.{}", t.bar, t.beat) };
+                let ink = if t.beat == 1 { theme.text_mid } else { theme.text_lo };
+                cx.text.draw(cx.scene, &label, x + 4.0, RULER.y0 + 6.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0) }, ink, Align::Left);
+            }
+        }
         let mut k = ((self.t0 + origin) / step).ceil() as i64;
-        let mut guard = 0;
+        let mut guard = if grid.is_some() { 200 } else { 0 };
         while (k as f64) * step - origin <= self.t0 + self.span && guard < 200 {
             let t = k as f64 * step - origin;
             let x = self.x_of(t);
@@ -1180,6 +1204,20 @@ impl PitchView {
                 let start_s = (n.start as f64 + e0.offset) / a.fs;
                 ((self.t_of(pos.x) - start_s) / e0.stretch * 1000.0).clamp(0.0, TRANSITION_MAX_MS)
             })
+        };
+        // Timing onto the song's beats (when the snap is on, Alt the other way; Shift: free): the
+        // grabbed note's start lands on a line, the others move with it.
+        let dt = match (d.grip, s.grid(), snap != Snap::Off && !mods.fine()) {
+            (Grip::Body(Some(true)), Some(g), true) => {
+                let e0 = d.notes.iter().find(|n| n.0 == d.grab).map_or(NoteEdit::default(), |n| n.1);
+                a.notes.get(d.grab).map_or(dt, |n| {
+                    let origin = self.take_song_s();
+                    let at = origin + (n.start as f64 + e0.offset + dt) / a.fs;
+                    let to = g.snap(at, GRID_SNAP_PX * self.span / ROLL.width());
+                    (to - origin) * a.fs - n.start as f64 - e0.offset
+                })
+            }
+            _ => dt,
         };
         let changes: Vec<(usize, NoteEdit)> = d
             .notes

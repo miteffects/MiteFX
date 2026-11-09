@@ -11,6 +11,7 @@ use nih_plug::prelude::*;
 pub mod ara;
 pub mod dsp;
 pub mod editor;
+pub mod grid;
 pub mod params;
 pub mod presets;
 pub mod session;
@@ -113,6 +114,11 @@ impl Plugin for MitePitch {
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         let t = context.transport();
+        // The song's time, for the editor's bars and beats.
+        if let (Some(bpm), Some(pos), Some(beats)) = (t.tempo, t.pos_samples(), t.pos_beats()) {
+            let sig = (t.time_sig_numerator.unwrap_or(4), t.time_sig_denominator.unwrap_or(4));
+            self.shared.session.set_song_time(bpm, sig, f64::from(t.sample_rate), pos, beats, t.bar_start_pos_beats());
+        }
         let transport = Transport {
             playing: t.playing,
             pos: t.pos_samples(),

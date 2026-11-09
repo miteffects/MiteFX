@@ -234,3 +234,18 @@ fn without_the_editors_render_the_player_renders_only_the_changed_note() {
     let err = out.iter().zip(&want).skip(480).map(|(o, w)| (o - w).abs()).fold(0.0f32, f32::max);
     assert!(err < 1e-5, "{err}");
 }
+
+#[test]
+fn the_songs_bars_and_beats_come_from_the_musical_context() {
+    let x = take();
+    let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+    let (s, _e, _md) = bound(&mut host, &x, c"mod-g");
+    assert!(s.grid().is_none(), "no tempo given yet");
+    // 90 bpm in 3/4: a bar is 2 s.
+    host.set_time(&[(0.0, 0.0), (2.0 / 3.0, 1.0)], &[(3, 4, 0.0)]);
+    s.sync_ara();
+    assert!(s.wait_idle(Duration::from_secs(30)));
+    let g = s.grid().expect("the host's tempo map");
+    assert_eq!(g.bar_beat(4.0), (3, 1.0));
+    assert!((g.seconds_at(3.0) - 2.0).abs() < 1e-9);
+}

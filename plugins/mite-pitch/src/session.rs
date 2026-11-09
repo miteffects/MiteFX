@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
 
 use mite_core::Handover;
+use crate::grid::Grid;
 use mite_dsp::melody::{affected, analyse, detect_key, render, render_range, Analysis, NoteEdit};
 
 /// The waveform lane's resolution: one low and high per this many samples.
@@ -217,6 +218,8 @@ pub struct State {
     pub clip: Option<(usize, usize)>,
     pub others: Arc<Vec<OtherClip>>,
     pub pick: Option<u64>,
+    /// The song's bars and beats from the host's ARA musical context.
+    pub ara_grid: Option<Arc<Grid>>,
 }
 
 enum Job {
@@ -261,6 +264,14 @@ pub struct Session {
     busy: AtomicUsize,
     /// Bumped whenever the notes or edits change (the editor redraws).
     pub version: AtomicU64,
+    /// The song's time as the host's transport last gave it (the audio thread writes it): the
+    /// tempo (bpm; f64 bits, 0: none), the signature (numerator << 16 | denominator), the quarter
+    /// at timeline sample 0 and where in a bar quarter 0 falls (f64 bits; both constant while a
+    /// tempo holds, so a read between two writes is off by nothing).
+    song_bpm: AtomicU64,
+    song_sig: AtomicU32,
+    song_q0: AtomicU64,
+    song_bar_q: AtomicU64,
     /// Renders this instance's worker has made, whole or in part (tests: a player instance takes
     /// the editor's render and makes none).
     pub renders_made: AtomicUsize,
@@ -283,6 +294,7 @@ impl Session {
                 clip: None,
                 others: Arc::new(Vec::new()),
                 pick: None,
+                ara_grid: None,
             }),
             renders: Handover::new(),
             records: Handover::new(),
@@ -303,6 +315,10 @@ impl Session {
             busy: AtomicUsize::new(0),
             version: AtomicU64::new(0),
             renders_made: AtomicUsize::new(0),
+            song_bpm: AtomicU64::new(0),
+            song_sig: AtomicU32::new(0),
+            song_q0: AtomicU64::new(0),
+            song_bar_q: AtomicU64::new(0),
             sample_rate: Mutex::new(48_000.0),
                         dir: Mutex::new(data_dir()),
             ara: Mutex::new(None),
@@ -340,6 +356,37 @@ impl Session {
 
     pub fn ara(&self) -> Option<Arc<mite_ara::Instance>> {
         self.ara.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The host's transport, each block (audio thread: atomics only): tempo `bpm`, signature
+    /// `sig`, and at timeline sample `pos` (rate `fs`) quarter `beats`, the bar having started at
+    /// quarter `bar_start`.
+    pub fn set_song_time(&self, bpm: f64, sig: (i32, i32), fs: f64, pos: i64, beats: f64, bar_start: Option<f64>) {
+        if !(bpm > 1.0 && bpm.is_finite() && fs > 0.0 && beats.is_finite()) {
+            return;
+        }
+        let q0 = beats - pos as f64 / fs * bpm / 60.0;
+        let (num, den) = (sig.0.clamp(1, 64), sig.1.clamp(1, 64));
+        let bar_len = f64::from(num) * 4.0 / f64::from(den);
+        let bar_q = bar_start.filter(|b| b.is_finite()).map_or(0.0, |b| b.rem_euclid(bar_len));
+        self.song_bpm.store(bpm.to_bits(), Ordering::Relaxed);
+        self.song_sig.store(((num as u32) << 16) | den as u32, Ordering::Relaxed);
+        self.song_q0.store(q0.to_bits(), Ordering::Relaxed);
+        self.song_bar_q.store(bar_q.to_bits(), Ordering::Relaxed);
+    }
+
+    /// The song's bars and beats: the ARA musical context's, else the host transport's (one
+    /// tempo and signature), else none.
+    pub fn grid(&self) -> Option<Arc<Grid>> {
+        if let Some(g) = self.lock().ara_grid.clone() {
+            return Some(g);
+        }
+        let bpm = f64::from_bits(self.song_bpm.load(Ordering::Relaxed));
+        let sig = self.song_sig.load(Ordering::Relaxed);
+        let (num, den) = ((sig >> 16) as i32, (sig & 0xffff) as i32);
+        let q0 = f64::from_bits(self.song_q0.load(Ordering::Relaxed));
+        let bar_q = f64::from_bits(self.song_bar_q.load(Ordering::Relaxed));
+        Grid::constant(bpm, (num.max(1), den.max(1)), 0.0, q0, bar_q).map(Arc::new)
     }
 
     /// The other clips on the editor's track (ARA).
@@ -897,6 +944,18 @@ impl AraState {
             let fs = model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate)?;
             Some((r.id, r.modification, ((r.start_in_playback - r.start_in_modification) * fs).round() as i64))
         });
+        // The song's bars and beats, from the current clip's musical context (or any shown).
+        let grid = current_region.iter().chain(shown.iter().filter_map(|id| model.regions.get(id))).find_map(|r| {
+            let c = model.context_of(r)?;
+            Grid::new(c.tempo.clone(), c.bars.clone())
+        });
+        {
+            let mut stl = s.lock();
+            if stl.ara_grid.as_deref() != grid.as_ref() {
+                stl.ara_grid = grid.map(Arc::new);
+                changed = true;
+            }
+        }
         // The other clips on the track, where they sit.
         let fs_of = |r: &mite_ara::PlaybackRegion| model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate);
         let others: Vec<(&mite_ara::PlaybackRegion, f64)> = shown.iter().filter(|id| current.is_none_or(|c| c.0 != **id)).filter_map(|id| model.regions.get(id)).filter_map(|r| Some((r, fs_of(r)?))).filter(|(r, _)| self.mods.contains_key(&r.modification)).collect();

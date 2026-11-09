@@ -80,6 +80,88 @@ unsafe extern "C" fn archive_id(_c: ARAArchivingControllerHostRef, _r: ARAArchiv
 
 static ARCHIVING: ARAArchivingControllerInterface = ARAArchivingControllerInterface { structSize: std::mem::size_of::<ARAArchivingControllerInterface>(), getArchiveSize: Some(archive_size), readBytesFromArchive: Some(archive_read), writeBytesToArchive: Some(archive_write), notifyDocumentArchivingProgress: Some(archive_progress), notifyDocumentUnarchivingProgress: Some(archive_progress), getDocumentArchiveID: Some(archive_id) };
 
+/// The song's time as the test host gives it (the musical context's host ref points at it).
+#[derive(Default)]
+struct SongTime {
+    tempo: Vec<ARAContentTempoEntry>,
+    bars: Vec<ARAContentBarSignature>,
+}
+
+/// A content reader: a copy of the events of one type, each as raw bytes.
+struct Events {
+    size: usize,
+    bytes: Vec<u8>,
+}
+
+fn song_time(ctx: ARAMusicalContextHostRef) -> &'static Mutex<SongTime> {
+    unsafe { &*(ctx as *const Mutex<SongTime>) }
+}
+
+unsafe extern "C" fn ca_available(c: ARAContentAccessControllerHostRef, ctx: ARAMusicalContextHostRef, kind: ARAContentType) -> ARABool {
+    on_model_thread(c.cast(), "isMusicalContextContentAvailable");
+    let t = song_time(ctx).lock().unwrap();
+    let kind = kind as u32;
+    ARABool::from(if kind == kARAContentTypeTempoEntries {
+        t.tempo.len() >= 2
+    } else if kind == kARAContentTypeBarSignatures {
+        !t.bars.is_empty()
+    } else {
+        false
+    })
+}
+unsafe extern "C" fn ca_grade(_c: ARAContentAccessControllerHostRef, _ctx: ARAMusicalContextHostRef, _k: ARAContentType) -> ARAContentGrade {
+    kARAContentGradeAdjusted as ARAContentGrade
+}
+unsafe extern "C" fn ca_create(c: ARAContentAccessControllerHostRef, ctx: ARAMusicalContextHostRef, kind: ARAContentType, _r: *const ARAContentTimeRange) -> ARAContentReaderHostRef {
+    on_model_thread(c.cast(), "createMusicalContextContentReader");
+    let t = song_time(ctx).lock().unwrap();
+    fn raw<T>(v: &[T]) -> Vec<u8> {
+        unsafe { std::slice::from_raw_parts(v.as_ptr().cast::<u8>(), std::mem::size_of_val(v)) }.to_vec()
+    }
+    let kind = kind as u32;
+    let ev = if kind == kARAContentTypeTempoEntries {
+        Events { size: std::mem::size_of::<ARAContentTempoEntry>(), bytes: raw(&t.tempo) }
+    } else if kind == kARAContentTypeBarSignatures {
+        Events { size: std::mem::size_of::<ARAContentBarSignature>(), bytes: raw(&t.bars) }
+    } else {
+        return std::ptr::null_mut();
+    };
+    Box::into_raw(Box::new(ev)).cast()
+}
+unsafe extern "C" fn ca_source_available(_c: ARAContentAccessControllerHostRef, _s: ARAAudioSourceHostRef, _k: ARAContentType) -> ARABool {
+    0
+}
+unsafe extern "C" fn ca_source_grade(_c: ARAContentAccessControllerHostRef, _s: ARAAudioSourceHostRef, _k: ARAContentType) -> ARAContentGrade {
+    kARAContentGradeInitial as ARAContentGrade
+}
+unsafe extern "C" fn ca_source_create(_c: ARAContentAccessControllerHostRef, _s: ARAAudioSourceHostRef, _k: ARAContentType, _r: *const ARAContentTimeRange) -> ARAContentReaderHostRef {
+    std::ptr::null_mut()
+}
+unsafe extern "C" fn ca_count(_c: ARAContentAccessControllerHostRef, r: ARAContentReaderHostRef) -> ARAInt32 {
+    let ev = unsafe { &*(r as *const Events) };
+    (ev.bytes.len() / ev.size) as ARAInt32
+}
+unsafe extern "C" fn ca_data(_c: ARAContentAccessControllerHostRef, r: ARAContentReaderHostRef, i: ARAInt32) -> *const c_void {
+    let ev = unsafe { &*(r as *const Events) };
+    ev.bytes[i as usize * ev.size..].as_ptr().cast()
+}
+unsafe extern "C" fn ca_destroy(c: ARAContentAccessControllerHostRef, r: ARAContentReaderHostRef) {
+    on_model_thread(c.cast(), "destroyContentReader");
+    drop(unsafe { Box::from_raw(r as *mut Events) });
+}
+static CONTENT_ACCESS: ARAContentAccessControllerInterface = ARAContentAccessControllerInterface {
+    structSize: std::mem::size_of::<ARAContentAccessControllerInterface>(),
+    isMusicalContextContentAvailable: Some(ca_available),
+    getMusicalContextContentGrade: Some(ca_grade),
+    createMusicalContextContentReader: Some(ca_create),
+    isAudioSourceContentAvailable: Some(ca_source_available),
+    getAudioSourceContentGrade: Some(ca_source_grade),
+    createAudioSourceContentReader: Some(ca_source_create),
+    getContentReaderEventCount: Some(ca_count),
+    getContentReaderDataForEvent: Some(ca_data),
+    destroyContentReader: Some(ca_destroy),
+};
+
 static CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 fn call(s: String) {
     CALLS.lock().unwrap().push(s);
@@ -121,7 +203,7 @@ fn host() -> ARADocumentControllerHostInstance {
         archivingControllerHostRef: std::ptr::null_mut(),
         archivingControllerInterface: &ARCHIVING,
         contentAccessControllerHostRef: std::ptr::null_mut(),
-        contentAccessControllerInterface: std::ptr::null(),
+        contentAccessControllerInterface: &CONTENT_ACCESS,
         modelUpdateControllerHostRef: std::ptr::null_mut(),
         modelUpdateControllerInterface: &MODEL_UPDATE,
         playbackControllerHostRef: std::ptr::null_mut(),
@@ -141,6 +223,7 @@ pub struct TestHost {
     pub i: ARADocumentControllerInterface,
     ctx: ARAMusicalContextRef,
     seq: ARARegionSequenceRef,
+    time: &'static Mutex<SongTime>,
     // Boxed: the host refs point at them.
     #[allow(clippy::vec_box)]
     audio: Vec<Box<Audio>>,
@@ -160,12 +243,14 @@ impl TestHost {
         unsafe { f.initializeARAWithConfiguration.expect("init")(&config) };
         let mut h = host();
         h.audioAccessControllerHostRef = (ctx as *mut HostCtx).cast();
+        h.contentAccessControllerHostRef = (ctx as *mut HostCtx).cast();
+        let time: &'static Mutex<SongTime> = Box::leak(Box::new(Mutex::new(SongTime::default())));
         let props = ARADocumentProperties { structSize: std::mem::size_of::<ARADocumentProperties>(), name: c"Song".as_ptr() };
         let inst = unsafe { std::ptr::read_unaligned(f.createDocumentControllerWithDocument.expect("create")(&h, &props)) };
-        let mut me = Self { dc: inst.documentControllerRef, i: unsafe { std::ptr::read_unaligned(inst.documentControllerInterface) }, ctx: std::ptr::null_mut(), seq: std::ptr::null_mut(), audio: Vec::new() };
+        let mut me = Self { dc: inst.documentControllerRef, i: unsafe { std::ptr::read_unaligned(inst.documentControllerInterface) }, ctx: std::ptr::null_mut(), seq: std::ptr::null_mut(), time, audio: Vec::new() };
         call!(me.beginEditing());
         let ctx_props = ARAMusicalContextProperties { structSize: std::mem::size_of::<ARAMusicalContextProperties>(), name: c"ctx".as_ptr(), orderIndex: 0, color: std::ptr::null() };
-        me.ctx = call!(me.createMusicalContext(std::ptr::null_mut(), &ctx_props));
+        me.ctx = call!(me.createMusicalContext((time as *const Mutex<SongTime>).cast_mut().cast(), &ctx_props));
         let seq_props = ARARegionSequenceProperties { structSize: std::mem::size_of::<ARARegionSequenceProperties>(), name: c"Vocal".as_ptr(), orderIndex: 0, musicalContextRef: me.ctx, color: std::ptr::null() };
         me.seq = call!(me.createRegionSequence(std::ptr::null_mut(), &seq_props));
         call!(me.endEditing());
@@ -211,6 +296,19 @@ impl TestHost {
                 vw.notifySelection.expect("sel")(ext.editorViewRef, &sel);
             }
         }
+    }
+
+    /// The song's tempo map ((s, quarter) points) and bar signatures ((numerator, denominator,
+    /// quarter)) change: the host tells the plug-in in an edit cycle.
+    pub fn set_time(&self, tempo: &[(f64, f64)], bars: &[(i32, i32, f64)]) {
+        {
+            let mut t = self.time.lock().unwrap();
+            t.tempo = tempo.iter().map(|&(s, q)| ARAContentTempoEntry { timePosition: s, quarterPosition: q }).collect();
+            t.bars = bars.iter().map(|&(n, d, q)| ARAContentBarSignature { numerator: n, denominator: d, position: q }).collect();
+        }
+        call!(self.beginEditing());
+        call!(self.updateMusicalContextContent(self.ctx, std::ptr::null(), kARAContentUpdateEverythingChanged as ARAContentUpdateFlags));
+        call!(self.endEditing());
     }
 
     /// What a host does every so often while idle: lets the plug-in send its notifications.

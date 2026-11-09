@@ -480,3 +480,25 @@ fn bound_to_ara_the_whole_track_shows_and_a_click_edits_another_clip() {
     assert_eq!(s.take().expect("take").start, FS as i64);
     assert_eq!(s.edits()[0].shift_cents, 100.0);
 }
+
+#[test]
+fn timing_snaps_onto_the_songs_beats() {
+    let (mut view, host, shared) = ready("ed-beats");
+    let s = &shared.session;
+    // The host plays at 120 bpm in 4/4: a beat is 0.5 s; grid lines fall on 1/16 s.
+    s.set_song_time(120.0, (4, 4), FS, 24_000, 1.0, Some(0.0));
+    let a = s.analysis().expect("analysis");
+    let start = s.take().expect("take").start as f64 / FS;
+    let r = view.note_rect(2).expect("in view");
+    drag(&mut view, &host, r.center(), r.center() + (37.0, 0.0), MODS);
+    let e = s.edits()[2];
+    let at = start + (a.notes[2].start as f64 + e.offset) / FS;
+    assert!(e.offset.abs() > 1.0, "it moved");
+    assert!(((at / 0.0625) - (at / 0.0625).round()).abs() < 1e-6, "on a grid line: {at}");
+    // Alt: free.
+    let r = view.note_rect(2).expect("in view");
+    drag(&mut view, &host, r.center(), r.center() + (23.0, 0.0), Modifiers { alt: true, ..MODS });
+    let e = s.edits()[2];
+    let at = start + (a.notes[2].start as f64 + e.offset) / FS;
+    assert!(((at / 0.0625) - (at / 0.0625).round()).abs() > 1e-3, "free: {at}");
+}

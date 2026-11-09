@@ -109,6 +109,20 @@ pub struct PlaybackRegion {
     /// Where it plays on the song timeline and how long, s.
     pub start_in_playback: f64,
     pub duration_in_playback: f64,
+    /// Its musical context (ARA 1's own; ARA 2 hosts give it through the region sequence: see
+    /// [`Model::context_of`]).
+    pub context: u64,
+    host_ref: usize,
+}
+
+/// A musical context (the song's time): its tempo map and bar signatures, as the host gives them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MusicalContext {
+    pub name: String,
+    /// (song s, quarter) points.
+    pub tempo: Vec<(f64, f64)>,
+    /// (numerator, denominator, quarter where it starts).
+    pub bars: Vec<(i32, i32, f64)>,
     host_ref: usize,
 }
 
@@ -118,11 +132,18 @@ pub struct Model {
     pub modifications: BTreeMap<u64, AudioModification>,
     pub regions: BTreeMap<u64, PlaybackRegion>,
     pub sequences: BTreeMap<u64, String>,
-    contexts: BTreeMap<u64, String>,
+    /// Each region sequence's musical context.
+    pub sequence_contexts: BTreeMap<u64, u64>,
+    pub contexts: BTreeMap<u64, MusicalContext>,
     next: u64,
 }
 
 impl Model {
+    /// The musical context of a playback region: its region sequence's, else its own.
+    pub fn context_of(&self, region: &PlaybackRegion) -> Option<&MusicalContext> {
+        self.sequence_contexts.get(&region.sequence).and_then(|c| self.contexts.get(c)).or_else(|| self.contexts.get(&region.context))
+    }
+
     fn id(&mut self) -> u64 {
         self.next += 1;
         self.next
@@ -223,6 +244,67 @@ impl Document {
     pub fn shared(&self, modification: u64, state: &str) -> Option<SharedValue> {
         let map = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         map.get(&modification).filter(|(s, _)| s == state).map(|(_, v)| v.clone())
+    }
+
+    /// Reads a musical context's tempo map and bar signatures from the host (model thread: inside
+    /// the host's call that made or changed it).
+    fn read_context(&self, id: u64) {
+        let h = self.host.0;
+        if h.contentAccessControllerInterface.is_null() {
+            return;
+        }
+        // SAFETY: the host's content access interface.
+        let ca: ARAContentAccessControllerInterface = unsafe { std::ptr::read_unaligned(h.contentAccessControllerInterface) };
+        let (Some(available), Some(create), Some(count), Some(data), Some(destroy)) = (ca.isMusicalContextContentAvailable, ca.createMusicalContextContentReader, ca.getContentReaderEventCount, ca.getContentReaderDataForEvent, ca.destroyContentReader) else { return };
+        let Some(host_ref) = self.lock().contexts.get(&id).map(|c| c.host_ref) else { return };
+        let ctl = h.contentAccessControllerHostRef;
+        let ctx = host_ref as ARAMusicalContextHostRef;
+        // Every event of one content type, each read as `T`.
+        let read = |kind: u32, f: &mut dyn FnMut(*const c_void)| {
+            // SAFETY: the host's interface, on the model thread; the reader is ours until destroyed.
+            unsafe {
+                if available(ctl, ctx, kind as ARAContentType) == 0 {
+                    return;
+                }
+                let reader = create(ctl, ctx, kind as ARAContentType, std::ptr::null());
+                if reader.is_null() {
+                    return;
+                }
+                for i in 0..count(ctl, reader).max(0) {
+                    let p = data(ctl, reader, i);
+                    if !p.is_null() {
+                        f(p);
+                    }
+                }
+                destroy(ctl, reader);
+            }
+        };
+        let mut tempo = Vec::new();
+        // SAFETY: the host's data for these content types is an ARAContentTempoEntry and an
+        // ARAContentBarSignature, valid until the next call on the reader.
+        read(kARAContentTypeTempoEntries, &mut |p| {
+            let e = unsafe { std::ptr::read_unaligned(p as *const ARAContentTempoEntry) };
+            tempo.push((e.timePosition, e.quarterPosition));
+        });
+        let mut bars = Vec::new();
+        read(kARAContentTypeBarSignatures, &mut |p| {
+            let e = unsafe { std::ptr::read_unaligned(p as *const ARAContentBarSignature) };
+            bars.push((e.numerator, e.denominator, e.position));
+        });
+        let changed = {
+            let mut m = self.lock();
+            match m.contexts.get_mut(&id) {
+                Some(c) if c.tempo != tempo || c.bars != bars => {
+                    c.tempo = tempo;
+                    c.bars = bars;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.touch();
+        }
     }
 
     /// The host's `notifyModelUpdates()`: pending notifications go out (model thread).
@@ -611,18 +693,36 @@ unsafe extern "C" fn dc_store_document(r: ARADocumentControllerRef, writer: ARAA
 
 unsafe extern "C" fn dc_update_document(_r: ARADocumentControllerRef, _p: *const ARADocumentProperties) {}
 
-unsafe extern "C" fn dc_create_context(r: ARADocumentControllerRef, _h: ARAMusicalContextHostRef, p: *const ARAMusicalContextProperties) -> ARAMusicalContextRef {
+unsafe extern "C" fn dc_create_context(r: ARADocumentControllerRef, h: ARAMusicalContextHostRef, p: *const ARAMusicalContextProperties) -> ARAMusicalContextRef {
     let d = doc!(r);
-    let mut m = d.lock();
-    let id = m.id();
-    // SAFETY: valid properties for the call.
-    let name = if p.is_null() { String::new() } else { string(unsafe { std::ptr::read_unaligned(p) }.name) };
-    m.contexts.insert(id, name);
+    let id = {
+        let mut m = d.lock();
+        let id = m.id();
+        // SAFETY: valid properties for the call.
+        let name = if p.is_null() { String::new() } else { string(unsafe { std::ptr::read_unaligned(p) }.name) };
+        m.contexts.insert(id, MusicalContext { name, host_ref: h as usize, ..MusicalContext::default() });
+        id
+    };
+    d.read_context(id);
+    d.touch();
     ref_of(id)
 }
 
-unsafe extern "C" fn dc_update_context(_r: ARADocumentControllerRef, _c: ARAMusicalContextRef, _p: *const ARAMusicalContextProperties) {}
-unsafe extern "C" fn dc_update_context_content(_r: ARADocumentControllerRef, _c: ARAMusicalContextRef, _t: *const ARAContentTimeRange, _f: ARAContentUpdateFlags) {}
+unsafe extern "C" fn dc_update_context(r: ARADocumentControllerRef, c: ARAMusicalContextRef, p: *const ARAMusicalContextProperties) {
+    let d = doc!(r);
+    if !p.is_null() {
+        // SAFETY: valid properties for the call.
+        let name = string(unsafe { std::ptr::read_unaligned(p) }.name);
+        if let Some(x) = d.lock().contexts.get_mut(&id_of(c)) {
+            x.name = name;
+        }
+    }
+    d.touch();
+}
+
+unsafe extern "C" fn dc_update_context_content(r: ARADocumentControllerRef, c: ARAMusicalContextRef, _t: *const ARAContentTimeRange, _f: ARAContentUpdateFlags) {
+    doc!(r).read_context(id_of(c));
+}
 
 unsafe extern "C" fn dc_destroy_context(r: ARADocumentControllerRef, c: ARAMusicalContextRef) {
     doc!(r).lock().contexts.remove(&id_of(c));
@@ -769,7 +869,7 @@ unsafe extern "C" fn dc_create_region(r: ARADocumentControllerRef, md: ARAAudioM
     let Some(p) = region_props(p) else { return std::ptr::null_mut() };
     let mut m = d.lock();
     let id = m.id();
-    m.regions.insert(id, PlaybackRegion { id, modification: id_of(md), sequence: id_of(p.regionSequenceRef), name: string(p.name), start_in_modification: p.startInModificationTime, duration_in_modification: p.durationInModificationTime, start_in_playback: p.startInPlaybackTime, duration_in_playback: p.durationInPlaybackTime, host_ref: h as usize });
+    m.regions.insert(id, PlaybackRegion { id, modification: id_of(md), sequence: id_of(p.regionSequenceRef), name: string(p.name), start_in_modification: p.startInModificationTime, duration_in_modification: p.durationInModificationTime, start_in_playback: p.startInPlaybackTime, duration_in_playback: p.durationInPlaybackTime, context: id_of(p.musicalContextRef), host_ref: h as usize });
     drop(m);
     d.touch();
     ref_of(id)
@@ -780,6 +880,7 @@ unsafe extern "C" fn dc_update_region(r: ARADocumentControllerRef, rg: ARAPlayba
     let Some(p) = region_props(p) else { return };
     if let Some(x) = d.lock().regions.get_mut(&id_of(rg)) {
         x.sequence = id_of(p.regionSequenceRef);
+        x.context = id_of(p.musicalContextRef);
         x.name = string(p.name);
         x.start_in_modification = p.startInModificationTime;
         x.duration_in_modification = p.durationInModificationTime;
@@ -838,25 +939,34 @@ unsafe extern "C" fn dc_destroy_reader(_r: ARADocumentControllerRef, _c: ARACont
 unsafe extern "C" fn dc_create_sequence(r: ARADocumentControllerRef, _h: ARARegionSequenceHostRef, p: *const ARARegionSequenceProperties) -> ARARegionSequenceRef {
     let d = doc!(r);
     // SAFETY: valid properties for the call.
-    let name = if p.is_null() { String::new() } else { string(unsafe { std::ptr::read_unaligned(p) }.name) };
+    let props = (!p.is_null()).then(|| unsafe { std::ptr::read_unaligned(p) });
     let mut m = d.lock();
     let id = m.id();
-    m.sequences.insert(id, name);
+    m.sequences.insert(id, props.map(|p| string(p.name)).unwrap_or_default());
+    if let Some(p) = props {
+        m.sequence_contexts.insert(id, id_of(p.musicalContextRef));
+    }
     ref_of(id)
 }
 
 unsafe extern "C" fn dc_update_sequence(r: ARADocumentControllerRef, s: ARARegionSequenceRef, p: *const ARARegionSequenceProperties) {
     let d = doc!(r);
     // SAFETY: valid properties for the call.
-    let name = if p.is_null() { String::new() } else { string(unsafe { std::ptr::read_unaligned(p) }.name) };
-    if let Some(x) = d.lock().sequences.get_mut(&id_of(s)) {
-        *x = name;
+    let props = (!p.is_null()).then(|| unsafe { std::ptr::read_unaligned(p) });
+    let mut m = d.lock();
+    if let (Some(x), Some(p)) = (m.sequences.get_mut(&id_of(s)), props) {
+        *x = string(p.name);
+        m.sequence_contexts.insert(id_of(s), id_of(p.musicalContextRef));
     }
+    drop(m);
     d.touch();
 }
 
 unsafe extern "C" fn dc_destroy_sequence(r: ARADocumentControllerRef, s: ARARegionSequenceRef) {
-    doc!(r).lock().sequences.remove(&id_of(s));
+    let d = doc!(r);
+    let mut m = d.lock();
+    m.sequences.remove(&id_of(s));
+    m.sequence_contexts.remove(&id_of(s));
 }
 
 unsafe extern "C" fn dc_head_tail(_r: ARADocumentControllerRef, _p: ARAPlaybackRegionRef, head: *mut ARATimeDuration, tail: *mut ARATimeDuration) {

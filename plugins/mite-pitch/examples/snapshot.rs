@@ -36,6 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use mite_ara::testing::{Audio, TestHost};
         use mite_dsp::melody::voice::{sing, Sung};
         let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+        // 100 bpm in 4/4.
+        host.set_time(&[(0.0, 0.0), (0.6, 1.0)], &[(4, 4, 0.0)]);
         let a = common::take();
         let n = |cents: f64, seconds: f64| Sung { cents, seconds, vibrato_cents: 25.0, vibrato_hz: 5.0, db: -14.0 };
         let b = sing(&[n(6230.0, 0.45), n(6010.0, 0.35), n(5790.0, 0.7), n(5700.0, 0.5)], 0.08, common::FS).0;

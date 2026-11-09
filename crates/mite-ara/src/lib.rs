@@ -8,4 +8,4 @@ pub mod document;
 pub mod sys;
 pub mod testing;
 
-pub use document::{bind, document, factory, AudioModification, AudioSource, Document, FactoryInfo, Instance, InstanceState, Model, PlaybackRegion};
+pub use document::{bind, document, factory, AudioModification, AudioSource, Document, FactoryInfo, Instance, InstanceState, Model, MusicalContext, PlaybackRegion};
