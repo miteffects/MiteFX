@@ -530,6 +530,14 @@ wherever when not on a note"):** the ruler sits over the notes; a click off the 
 the lane, or another clip's empty stretch) puts the play cursor there (playing: the host jumps);
 a drag still selects a box.
 
+**Fix 2026-11-09 (user: "Ctrl+Z doesn't work, I have to type Ctrl+Y on my QWERTZ keyboard"; "if I
+leave the plugin and come back it forgets its history"):** with Ctrl held, baseview names a key as
+on a US keyboard (its xkb lookup is skipped then), so every plugin's Ctrl shortcuts followed key
+positions, not labels. `mite_ui` now looks the letter and digit keys up in the X server's current
+layout and group while Ctrl is down (`keymap::layout_char`, the UI thread's own x11rb connection,
+XKB for the group). The editor's undo and redo, per take, move into `Session::history` when the
+editor closes and come back when it opens (tested).
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).

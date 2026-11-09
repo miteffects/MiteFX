@@ -520,3 +520,27 @@ fn a_click_off_the_notes_moves_the_play_cursor_and_a_drag_selects() {
     assert!((view.cue_s() - 1.3).abs() < 0.01);
     let _ = s;
 }
+
+#[test]
+fn undo_survives_closing_the_editor() {
+    let (mut view, host, shared) = ready("ed-reopen");
+    let s = &shared.session;
+    let r = view.note_rect(1).expect("in view");
+    drag(&mut view, &host, r.center(), r.center() - (0.0, 2.2 * r.height() / 0.8), MODS);
+    assert!(!s.edits()[1].is_neutral());
+    // Closed and opened again: the step is still there.
+    drop(view);
+    let mut view = PitchView::new(shared.clone());
+    view.tick(&host);
+    draw(&mut view, &host);
+    let key = |view: &mut PitchView, shift| {
+        view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, shift, ..MODS } }, &host)
+    };
+    key(&mut view, false);
+    assert!(s.edits()[1].is_neutral(), "undone after reopening");
+    drop(view);
+    let mut view = PitchView::new(shared.clone());
+    view.tick(&host);
+    key(&mut view, true);
+    assert!(!s.edits()[1].is_neutral(), "and redone after another");
+}

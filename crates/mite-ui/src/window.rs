@@ -279,7 +279,8 @@ impl UiWindow {
             keyboard_types::Key::Named(keyboard_types::NamedKey::PageUp) => Key::PageUp,
             keyboard_types::Key::Named(keyboard_types::NamedKey::PageDown) => Key::PageDown,
             keyboard_types::Key::Character(s) => match s.chars().next() {
-                Some(c) => Key::Character(c),
+                // With Ctrl, baseview names the key as on a US keyboard: ask the user's layout.
+                Some(c) => Key::Character(ctrl_char(event).unwrap_or(c)),
                 None => return EventStatus::Ignored,
             },
             _ => return EventStatus::Ignored,
@@ -641,4 +642,21 @@ fn trace(msg: &str) {
     if tracing() {
         eprintln!("[mite-ui] {msg}");
     }
+}
+
+/// With Ctrl held, the character the user's layout puts on the key (baseview names it as on a US
+/// keyboard then), upper case with Shift.
+#[cfg(target_os = "linux")]
+fn ctrl_char(event: &keyboard_types::KeyboardEvent) -> Option<char> {
+    use keyboard_types::Modifiers as K;
+    if !event.modifiers.contains(K::CONTROL) {
+        return None;
+    }
+    let c = crate::keymap::layout_char(event.code)?;
+    Some(if event.modifiers.contains(K::SHIFT) { c.to_uppercase().next().unwrap_or(c) } else { c })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ctrl_char(_: &keyboard_types::KeyboardEvent) -> Option<char> {
+    None
 }

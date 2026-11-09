@@ -251,8 +251,22 @@ pub struct PitchView {
     stacks: HashMap<String, (Vec<Snapshot>, Vec<Snapshot>)>,
 }
 
+impl Drop for PitchView {
+    /// The undo history outlives the editor: closing and reopening it keeps every step.
+    fn drop(&mut self) {
+        let mut stacks = std::mem::take(&mut self.stacks);
+        if let Some((id, _)) = &self.take_seen {
+            stacks.insert(id.clone(), (std::mem::take(&mut self.undo), std::mem::take(&mut self.redo)));
+        }
+        if let Ok(mut h) = self.shared.session.history.lock() {
+            *h = stacks;
+        }
+    }
+}
+
 impl PitchView {
     pub fn new(shared: Arc<PitchShared>) -> Self {
+        let stacks = shared.session.history.lock().map(|mut h| std::mem::take(&mut *h)).unwrap_or_default();
         let footer = Footer::new(FOOTER_TOP, (VIEW_W, VIEW_H), vec![FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input as it comes (the take is kept)" }], vec![]);
         Self {
             shared,
@@ -277,7 +291,7 @@ impl PitchView {
             redo: Vec::new(),
             seen_version: 0,
             take_seen: None,
-            stacks: HashMap::new(),
+            stacks,
         }
     }
 

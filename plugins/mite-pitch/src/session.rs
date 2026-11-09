@@ -289,7 +289,12 @@ pub struct Session {
     ara: Mutex<Option<Arc<mite_ara::Instance>>>,
     /// Where this session keeps takes (`data_dir()` unless set: tests).
     dir: Mutex<std::path::PathBuf>,
+    /// The editor's undo and redo per take, kept while the editor is closed.
+    pub history: Mutex<History>,
 }
+
+/// Undo and redo steps (oldest first) per take id.
+pub type History = std::collections::HashMap<String, (Vec<Snapshot>, Vec<Snapshot>)>;
 
 impl Session {
     pub fn new() -> Arc<Self> {
@@ -324,6 +329,7 @@ impl Session {
             busy: AtomicUsize::new(0),
             version: AtomicU64::new(0),
             renders_made: AtomicUsize::new(0),
+            history: Mutex::new(History::new()),
             diag_in: AtomicU32::new(0),
             diag_out: AtomicU32::new(0),
             diag_blocks: AtomicU64::new(0),

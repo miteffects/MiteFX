@@ -12,6 +12,8 @@ pub mod host;
 pub mod paint;
 #[cfg(target_os = "linux")]
 mod host_sync;
+#[cfg(target_os = "linux")]
+mod keymap;
 mod present;
 pub mod render;
 pub mod session;
