@@ -51,3 +51,28 @@ fn the_shimmer_type_puts_the_octave_in_the_tail() {
         assert!(s > 4.0 * p, "{switch:?}: the octave {s} against the plate's {p}");
     }
 }
+
+/// A short tail (the user's: DECAY 2 s, two decay bells at ×0.11, HIGH 2.2 kHz) still shimmers
+/// at once: the input is shifted as it comes in, not only after passes round the tank (with the
+/// passes alone, the octave was 21 dB under the note half a second on: "amount does nothing").
+#[test]
+fn a_short_tail_shimmers_at_once() {
+    let host = memory_host();
+    for (id, v) in [("mix", 100.0), ("reverb_type", 5.0), ("shimmer", 100.0), ("decay", 2.0), ("size", 30.0), ("mod_depth", 0.0), ("shimmer_high", 2230.0), ("d1_on", 1.0), ("d1_freq", 3184.0), ("d1_mult", 0.113), ("d2_on", 1.0), ("d2_freq", 190.0), ("d2_mult", 0.109)] {
+        host.set_plain(id, v);
+    }
+    let fs = 48_000.0;
+    let mut engine = VerbEngine::new(fs, &settings(&host), &output(&host));
+    let history: HistoryTap<{ record::WIDTH }> = HistoryTap::new(4096);
+    let mut out = Vec::new();
+    for b in 0..200 {
+        let mut l: Vec<f32> = (0..480).map(|i| { let k = b * 480 + i; if k < 48_000 { 0.3 * (std::f32::consts::TAU * 261.6 * k as f32 / fs).sin() } else { 0.0 } }).collect();
+        let mut r = l.clone();
+        engine.process(&mut [&mut l, &mut r], &settings(&host), &output(&host), &history, None);
+        out.extend_from_slice(&l);
+    }
+    let tail = &out[48_000..72_000];
+    let (note, octave) = (level(tail, 261.6), level(tail, 523.2));
+    // Measured 2026-11-09: the octave 0.5 dB under the note (was 21 dB).
+    assert!(octave > 0.5 * note, "the octave {octave} against the note {note}");
+}

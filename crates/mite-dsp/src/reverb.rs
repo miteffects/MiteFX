@@ -61,6 +61,8 @@ const DUCK_ATTACK_MS: f32 = 2.0;
 /// The share of the power crossing between the plate's halves that is shifted at SHIMMER
 /// AMOUNT 100 % (all of it climbed out of the top in 1.5 s; 70 % turned a late tail bright).
 const SHIM_SHARE_MAX: f32 = 0.5;
+/// The shifted input's gain (power-matching the grains' crossfade loss).
+const SHIM_IN_GAIN: f32 = 1.15;
 /// The shimmer's range dials' ends, Hz.
 pub const SHIM_RANGE_HZ: (f32, f32) = (20.0, 20_000.0);
 /// The interval glides with this time constant, ms.
@@ -1548,6 +1550,9 @@ struct PlateTank {
     /// voices' weights; per half, the range's low cut and high cut states; their coefficients;
     /// the sides' spread as a ratio.
     shift: [[Shifter; 2]; 2],
+    /// The input's own two voices (the octave from the first moment, not only after passes).
+    in_shift: [Shifter; 2],
+    in_range: [f32; 3],
     ratio: [f32; 2],
     weight: [f32; 2],
     range: [[f32; 3]; 2],
@@ -1590,6 +1595,8 @@ impl PlateTank {
             lfo: 0.0,
             cross: [0.0; 2],
             shift: std::array::from_fn(|h| std::array::from_fn(|v| Shifter::new(fs, SHIM_GRAIN_S[h][v]))),
+            in_shift: [Shifter::new(fs, 0.089), Shifter::new(fs, 0.101)],
+            in_range: [0.0; 3],
             ratio: [2.0; 2],
             weight: [1.0, 0.0],
             range: [[0.0; 3]; 2],
@@ -1612,9 +1619,10 @@ impl PlateTank {
         }
         self.lfo = 0.0;
         self.cross = [0.0; 2];
-        for sh in self.shift.iter_mut().flatten() {
+        for sh in self.shift.iter_mut().flatten().chain(self.in_shift.iter_mut()) {
             sh.reset();
         }
+        self.in_range = [0.0; 3];
         self.range = [[0.0; 3]; 2];
     }
 
@@ -1643,6 +1651,23 @@ impl PlateTank {
         let k = self.k;
         let gd = 0.5 + 0.5 * diffusion.clamp(0.0, 1.0);
         let mut u = x;
+        // Shimmer: the input itself shifted as it comes in (equal power with it as it is), so the
+        // interval sounds at once; the passes round the tank carry it further.
+        if share > 0.0 {
+            let mut y = 0.0;
+            for v in 0..2 {
+                if self.weight[v] > 0.0 {
+                    y += self.weight[v] * self.in_shift[v].process(x, self.ratio[v]);
+                }
+            }
+            let r = &mut self.in_range;
+            r[0] += (y - r[0]) * self.range_k.0;
+            let y = y - r[0];
+            r[1] += (y - r[1]) * self.range_k.1;
+            r[2] += (r[1] - r[2]) * self.range_k.1;
+            let keep = (1.0 - share * share).max(0.0).sqrt();
+            u = keep * x + share * r[2] * SHIM_IN_GAIN;
+        }
         for (a, &(_, g)) in self.diff.iter_mut().zip(&IN_DIFF) {
             u = a.process(u, g * gd, 0.0);
         }
