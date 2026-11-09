@@ -31,6 +31,8 @@ use crate::loudness::TruePeak;
 /// Gains as integers: 1.0 is `ONE`.
 const ONE: u32 = 1 << 24;
 const ONE_F: f32 = ONE as f32;
+/// dB in one doubling: 20 log10(2).
+const DB_PER_LOG2: f32 = 6.020_6;
 /// Below this gain reduction (dB) the release counts as at rest.
 const REST_DB: f32 = -1e-4;
 
@@ -503,9 +505,10 @@ impl Limiter {
         for c in 0..chans {
             let rel = &mut self.release[c];
             if s[c] < 1.0 || !rel.at_rest() {
-                let s_db = 20.0 * s[c].max(1e-12).log10();
+                // dB through base 2 (cheaper than log10 and powf; the clamp keeps the proof).
+                let s_db = DB_PER_LOG2 * s[c].max(1e-12).log2();
                 let db = rel.step(s_db, &self.coeffs);
-                r[c] = (10f32.powf(db / 20.0)).min(s[c]);
+                r[c] = (db * (1.0 / DB_PER_LOG2)).exp2().min(s[c]);
             }
         }
         if stereo && self.settings.link_release > 0.0 {

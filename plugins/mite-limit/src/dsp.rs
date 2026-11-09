@@ -208,9 +208,12 @@ impl LimitSettings {
     }
 }
 
-/// The true-peak interpolation at each factor: to at least 4× the base rate.
+/// The true-peak interpolation at each factor: to at least 8× the base rate below 4× (at 4× the
+/// base rate, a tone near fs/4 can fall between the points and pass the ceiling by up to 0.17 dB
+/// on a 32× reference; measured 0.151 dB at 2× with protection, 2026-11-09, 0.058 dB at 8×, for
+/// 0.7 % of a core more; `examples/truepeak`), 4× and over at 8× the base rate.
 fn phases(factor: usize) -> usize {
-    if factor == 1 { 4 } else { 2 }
+    if factor <= 2 { 4 } else { 2 }
 }
 
 /// The lookahead in engine samples (`L`, 1 = none) for `ms` at `factor`, with the pad that
@@ -504,7 +507,12 @@ impl LimitEngine {
         self.dither.set(BITS[s.dither.min(BITS.len() - 1)], Shaping::from_index(s.shaping));
         let curve = ClipCurve::from_index(s.clip_curve);
         // Unity: the output turned to the dry input's loudness (short-term; momentary for the
-        // first 3 s), held while either side is silent.
+        // first 3 s), held while either side is silent. Its meters run only while it is on (from
+        // the start each time: the first trim lands 400 ms after it is switched on).
+        if !s.unity && self.active.unity {
+            self.unity_in.reset();
+            self.unity_out.reset();
+        }
         let loud = |l: &Loudness| if l.short_term() > SILENCE_LUFS + 1.0 { l.short_term() } else { l.momentary() };
         let (li, lo) = (loud(&self.unity_in), loud(&self.unity_out));
         if li > UNITY_FLOOR_LUFS && lo > UNITY_FLOOR_LUFS {
@@ -541,14 +549,23 @@ impl LimitEngine {
             let n = (len - start).min(CHUNK).min(self.slice_len - self.slice_pos);
             let end = start + n;
             // The DC filter, then gain in, ceiling out: the limiter works at a ceiling of 1.
+            let dc_wanted = s.dc_filter;
+            if !dc_wanted && self.dc_mix.current() == 0.0 {
+                self.dc = [Tdf2::default(); 2];
+            }
             for i in 0..n {
                 let (g, c, dc) = (self.gain.next_value(), self.ceiling.next_value(), self.dc_mix.next_value());
                 self.scale_now[0][i] = c;
                 self.scale_now[1][i] = g;
                 for ch in 0..n_ch {
                     let x = channels[ch][start + i];
-                    let hp = self.dc[ch].process(&self.dc_coeffs, f64::from(x)) as f32;
-                    let x = if dc > 0.0 { x + (hp - x) * dc } else { x };
+                    // The filter runs only while it is on or fading (it starts from rest).
+                    let x = if dc > 0.0 || dc_wanted {
+                        let hp = self.dc[ch].process(&self.dc_coeffs, f64::from(x)) as f32;
+                        x + (hp - x) * dc
+                    } else {
+                        x
+                    };
                     self.scratch[ch][i] = x * g / c;
                 }
             }
@@ -662,8 +679,10 @@ impl LimitEngine {
                     out[1] = out[0];
                 }
                 self.loudness.push(out[0], stereo.then_some(out[1]));
-                self.unity_in.push(dry_pair[0], stereo.then_some(dry_pair[1]));
-                self.unity_out.push(wet_pair[0], stereo.then_some(wet_pair[1]));
+                if s.unity {
+                    self.unity_in.push(dry_pair[0], stereo.then_some(dry_pair[1]));
+                    self.unity_out.push(wet_pair[0], stereo.then_some(wet_pair[1]));
+                }
                 self.acc[record::CEILING] = gain_to_db(c);
                 self.acc[record::CLIP] = self.acc[record::CLIP].min(gain_to_db(1.0 - self.clip_delay.read(0, i)));
             }

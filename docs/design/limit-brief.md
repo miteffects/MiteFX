@@ -322,6 +322,12 @@ next with enhancing limiter").
    each band's share from the input instead (nulls when idle) was tried and dropped: the low
    band lags the kick, so the peak stayed and the hats ducked again (0.54). Its lookahead adds
    to the latency while it is on (on/off behind the dip; the amount glides).
+8. (partly, 2026-11-09) True-peak compliance measured (`examples/truepeak`, 9 hard signals,
+   +20 dB, −1 dB ceiling): true peak on, at most +0.005 dB over on the BS.1770 meter and
+   +0.085 dB on a 32× reference at every factor; the 2× detector now interpolates to 8× the base
+   rate (it read +0.151 dB with protection on a tone near fs/4; +0.7 % CPU). CPU (`examples/
+   bench`, 2× true peak on): 4.6 % of a core; protection +1 %, the rest ≤ 0.1 % each. Still to
+   do: presets for the new stages, `docs/compare/pro-l-2.md`, validators.
 7. Dither, noise shaping, DC filter (done 2026-11-09): `mite_dsp::dither`; one footer list holds
    the word length and the shaping (10 rows). Off under bypass, so bypass still nulls.
 8. Report and finish: `docs/dsp/limit-truepeak.md` (compliance and CPU per factor), presets,
