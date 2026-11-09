@@ -230,6 +230,9 @@ pub struct Session {
     busy: AtomicUsize,
     /// Bumped whenever the notes or edits change (the editor redraws).
     pub version: AtomicU64,
+    /// Renders this instance's worker has made, whole or in part (tests: a player instance takes
+    /// the editor's render and makes none).
+    pub renders_made: AtomicUsize,
     sample_rate: Mutex<f32>,
         /// The ARA plug-in instance, when the host bound this plugin to its document.
     ara: Mutex<Option<Arc<mite_ara::Instance>>>,
@@ -265,6 +268,7 @@ impl Session {
             jobs: Mutex::new(None),
             busy: AtomicUsize::new(0),
             version: AtomicU64::new(0),
+            renders_made: AtomicUsize::new(0),
             sample_rate: Mutex::new(48_000.0),
                         dir: Mutex::new(data_dir()),
             ara: Mutex::new(None),
@@ -709,7 +713,10 @@ pub fn parse_edits_json(json: &str, x: &[f32], a: &mut Analysis) -> (Vec<NoteEdi
 }
 
 /// One audio modification, worked out: its source's audio and analysis (notes rebuilt as its
-/// edits keep them), its edits, its render, and the state string they came from.
+/// edits keep them), its edits, its render, and the state string they came from. The editor
+/// instance shares it through the document with each edit, so the player instance plays the edit
+/// at once instead of rendering it again.
+#[derive(Clone)]
 struct ModCache {
     audio: Arc<Vec<f32>>,
     analysis: Arc<Analysis>,
@@ -772,15 +779,24 @@ impl AraState {
             }
             let stale = fresh_source || !self.mods.get(&m).is_some_and(|c| c.state == md.state && Arc::ptr_eq(&c.audio, &audio));
             if stale {
-                let mut a = (*self.sources[&src.id].1).clone();
-                let (edits, scale) = parse_edits_json(&md.state, &audio, &mut a);
-                let scale = scale.unwrap_or_else(|| {
-                    let (tonic, minor) = detect_key(&a.notes);
-                    Scale { tonic, minor, snap: Snap::Semitone }
-                });
-                let mut r = render(&audio, &a, &edits);
-                r.resize(audio.len(), 0.0);
-                self.mods.insert(m, ModCache { audio: audio.clone(), analysis: Arc::new(a), edits, scale, render: Arc::new(r), state: md.state.clone() });
+                // Another instance (the editor) already rendered this state: take its render.
+                let shared = inst.document.shared(m, &md.state).and_then(|v| v.downcast::<ModCache>().ok()).filter(|c| Arc::ptr_eq(&c.audio, &audio));
+                let entry = match shared {
+                    Some(c) => (*c).clone(),
+                    None => {
+                        let mut a = (*self.sources[&src.id].1).clone();
+                        let (edits, scale) = parse_edits_json(&md.state, &audio, &mut a);
+                        let scale = scale.unwrap_or_else(|| {
+                            let (tonic, minor) = detect_key(&a.notes);
+                            Scale { tonic, minor, snap: Snap::Semitone }
+                        });
+                        let old = self.mods.get(&m).filter(|c| !fresh_source && Arc::ptr_eq(&c.audio, &audio));
+                        let r = rerender(&audio, &a, &edits, old);
+                        s.renders_made.fetch_add(1, Ordering::AcqRel);
+                        ModCache { audio: audio.clone(), analysis: Arc::new(a), edits, scale, render: Arc::new(r), state: md.state.clone() }
+                    }
+                };
+                self.mods.insert(m, entry);
                 changed = true;
             }
         }
@@ -852,6 +868,7 @@ impl AraState {
         c.scale = scale;
         c.render = render;
         c.state = state.clone();
+        inst.document.share(m, &state, Arc::new(c.clone()));
         inst.document.set_state(m, state, edits.iter().all(NoteEdit::is_neutral));
         self.seen = inst.document.version.load(Ordering::Acquire).wrapping_add(inst.version.load(Ordering::Acquire));
     }
@@ -874,6 +891,28 @@ impl AraState {
             })
             .collect()
     }
+}
+
+/// The render of `x` with `edits` on analysis `a`: from `old` (the same audio's render with other
+/// edits on the same notes) only the notes whose edits changed are rendered again; otherwise
+/// all of it.
+fn rerender(x: &[f32], a: &Analysis, edits: &[NoteEdit], old: Option<&ModCache>) -> Vec<f32> {
+    let len = x.len();
+    if let Some(o) = old.filter(|o| o.render.len() == len && o.edits.len() == edits.len() && o.analysis.bounds() == a.bounds()) {
+        let changed: Vec<usize> = (0..edits.len()).filter(|&i| o.edits[i] != edits[i]).collect();
+        if changed.len() <= 6 {
+            let mut r = (*o.render).clone();
+            for i in changed {
+                let range = affected(a, i, len);
+                let part = render_range(x, a, edits, range.clone());
+                r[range].copy_from_slice(&part);
+            }
+            return r;
+        }
+    }
+    let mut r = render(x, a, edits);
+    r.resize(len, 0.0);
+    r
 }
 
 fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
@@ -953,6 +992,7 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
         };
         if let (true, Some(x), Some(a), Some(t)) = (rendering, audio, analysis, take.clone()) {
             let len = x.len();
+            s.renders_made.fetch_add(1, Ordering::AcqRel);
             let fresh = match current.take() {
                 Some((start, mut r)) if !render_all && start == t.start && r.len() == len => {
                     for i in notes {

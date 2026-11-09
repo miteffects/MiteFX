@@ -164,3 +164,73 @@ fn an_editor_instance_and_a_playback_instance_as_reaper_binds_them_over_vst3() {
     host.edit_cycle();
     assert_eq!(mite_ara::testing::violations(), Vec::<String>::new());
 }
+
+#[test]
+fn the_player_plays_the_editors_render_without_rendering_again() {
+    let x = take();
+    let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+    let dur = x.len() as f64 / FS;
+    let (_src, _md, rg) = host.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-s", c"mod-s", 0.0, 0.0, dur);
+    let editor = session("ara-share-ed");
+    let player = session("ara-share-pl");
+    let inst_ed = unsafe { mite_ara::bind(host.dc, 7, 6) };
+    let inst_pl = unsafe { mite_ara::bind(host.dc, 7, 1) };
+    host.show_track(inst_ed.extension());
+    host.render(inst_pl.extension(), rg);
+    assert!(inst_ed.document.wait_reads(Duration::from_secs(10)));
+    editor.bind_ara(inst_ed);
+    player.bind_ara(inst_pl);
+    assert!(editor.wait_idle(Duration::from_secs(30)) && player.wait_idle(Duration::from_secs(30)));
+    let mut e_pl = PitchEngine::new(FS as f32);
+    song(&mut e_pl, &player, 0, 480);
+    let made = player.renders_made.load(std::sync::atomic::Ordering::Acquire);
+    // Three edits in a row, as a drag makes them: each reaches the player already rendered.
+    for k in 1..=3 {
+        editor.set_edit(1, NoteEdit { shift_cents: 40.0 * f64::from(k), ..NoteEdit::default() });
+        assert!(editor.wait_idle(Duration::from_secs(30)));
+        player.sync_ara();
+        assert!(player.wait_idle(Duration::from_secs(30)));
+    }
+    assert_eq!(player.renders_made.load(std::sync::atomic::Ordering::Acquire), made, "the player rendered again");
+    // What it plays is the editor's render: the same as rendering the edits from scratch.
+    let a = editor.analysis().expect("analysis");
+    let mut want = mite_dsp::melody::render(&x, &a, &editor.edits());
+    want.resize(x.len(), 0.0);
+    let out = song(&mut e_pl, &player, 0, x.len());
+    let n1 = &a.notes[1];
+    let err = out[n1.start..n1.end].iter().zip(&want[n1.start..n1.end]).map(|(o, w)| (o - w).abs()).fold(0.0f32, f32::max);
+    assert!(err < 1e-5, "{err}");
+    assert_eq!(mite_ara::testing::violations(), Vec::<String>::new());
+}
+
+#[test]
+fn without_the_editors_render_the_player_renders_only_the_changed_note() {
+    // A player alone (no editor shares a render): the document's state changes, as when the host
+    // restores an edit; the player re-renders the note, and it equals a whole render.
+    let x = take();
+    let mut host = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+    let dur = x.len() as f64 / FS;
+    let (_src, _md, rg) = host.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-p", c"mod-p", 0.0, 0.0, dur);
+    let player = session("ara-partial-pl");
+    let inst = unsafe { mite_ara::bind(host.dc, 7, 7) };
+    host.give(inst.extension(), rg);
+    assert!(inst.document.wait_reads(Duration::from_secs(10)));
+    let doc = inst.document.clone();
+    player.bind_ara(inst);
+    assert!(player.wait_idle(Duration::from_secs(30)));
+    let a = player.analysis().expect("analysis");
+    let mut edits = vec![NoteEdit::default(); a.notes.len()];
+    edits[2].shift_cents = -150.0;
+    let id = doc.snapshot().modifications.values().find(|m| m.persistent_id == "mod-p").map(|m| m.id).expect("mod");
+    doc.set_state(id, mite_pitch::session::edits_json(&edits, &a, player.scale()), false);
+    player.sync_ara();
+    assert!(player.wait_idle(Duration::from_secs(30)));
+    assert_eq!(player.edits(), edits);
+    let mut e = PitchEngine::new(FS as f32);
+    song(&mut e, &player, 0, 480);
+    let out = song(&mut e, &player, 0, x.len());
+    let mut want = mite_dsp::melody::render(&x, &a, &edits);
+    want.resize(x.len(), 0.0);
+    let err = out.iter().zip(&want).skip(480).map(|(o, w)| (o - w).abs()).fold(0.0f32, f32::max);
+    assert!(err < 1e-5, "{err}");
+}

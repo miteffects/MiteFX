@@ -167,7 +167,14 @@ pub struct Document {
     /// The document's data changed: tell the host in its next `notifyModelUpdates()` (the only
     /// place ARA allows it).
     dirty: AtomicBool,
+    /// What one instance worked out for a modification's state (its render, say), for the
+    /// others bound to the same document: a player instance takes the editor's render instead of
+    /// rendering again. Keyed by modification, with the state it belongs to.
+    shared: Mutex<BTreeMap<u64, (String, SharedValue)>>,
 }
+
+/// A value instances share through the document (see [`Document::share`]).
+pub type SharedValue = Arc<dyn std::any::Any + Send + Sync>;
 
 /// The chunk an audio reader reads at a time, frames.
 const READ_CHUNK: i64 = 1 << 16;
@@ -204,6 +211,18 @@ impl Document {
             self.touch();
             self.dirty.store(true, Ordering::Release);
         }
+    }
+
+    /// Offers what this instance worked out for `modification` at `state` to the other instances
+    /// (call before [`Self::set_state`] with the same state, so they find it when they look).
+    pub fn share(&self, modification: u64, state: &str, value: SharedValue) {
+        self.shared.lock().unwrap_or_else(|e| e.into_inner()).insert(modification, (state.to_owned(), value));
+    }
+
+    /// What another instance shared for `modification` at exactly `state`.
+    pub fn shared(&self, modification: u64, state: &str) -> Option<SharedValue> {
+        let map = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&modification).filter(|(s, _)| s == state).map(|(_, v)| v.clone())
     }
 
     /// The host's `notifyModelUpdates()`: pending notifications go out (model thread).
@@ -518,7 +537,7 @@ unsafe extern "C" fn create_document_controller(host: *const ARADocumentControll
     }
     // SAFETY: the host passes a valid host instance.
     let host = Host(unsafe { std::ptr::read_unaligned(host) });
-    let doc = Arc::new(Document { host, model: Mutex::new(Model::default()), version: AtomicU64::new(0), reads: Mutex::new(BTreeMap::new()), instances: Mutex::new(Vec::new()), dirty: AtomicBool::new(false) });
+    let doc = Arc::new(Document { host, model: Mutex::new(Model::default()), version: AtomicU64::new(0), reads: Mutex::new(BTreeMap::new()), instances: Mutex::new(Vec::new()), dirty: AtomicBool::new(false), shared: Mutex::new(BTreeMap::new()) });
     let r = Arc::into_raw(doc) as ARADocumentControllerRef;
     // The instance struct lives as long as the document (freed in `dc_destroy`).
     let inst = Box::new(ARADocumentControllerInstance { structSize: std::mem::size_of::<ARADocumentControllerInstance>(), documentControllerRef: r, documentControllerInterface: &INTERFACE.0 });
@@ -731,6 +750,7 @@ unsafe extern "C" fn dc_deactivate_modification(_r: ARADocumentControllerRef, _m
 unsafe extern "C" fn dc_destroy_modification(r: ARADocumentControllerRef, md: ARAAudioModificationRef) {
     let d = doc!(r);
     d.lock().modifications.remove(&id_of(md));
+    d.shared.lock().unwrap_or_else(|e| e.into_inner()).remove(&id_of(md));
     d.touch();
 }
 
