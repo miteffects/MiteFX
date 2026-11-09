@@ -10,7 +10,10 @@ A meter for the master bus. The audio passes through untouched (no latency, null
 and true peak are measured on the audio thread (exact whether the editor is open or not); the
 editor reads the raw left and right streams for everything drawn from spectra and the scope.
 
-## 2. Editor (1280×760)
+## 2. Editor (1520×900)
+
+Bigger than the other plugins (user, 2026-11-09: "make more room for everything it can be bigger, fonts are small and numbers are changing way too fast … so they don't shake"): readings 24 px (integrated 64 px), labels 11–12 px. The numbers are sampled every 250 ms and right-aligned with tabular digits, so a digit stays where it is; the graphs, bars and scope stay live.
+
 
 - **Spectrum** (left, top): 8192-point FFT read at the shared analyzer points, 20 Hz–20 kHz,
   −96…−6 dB. View: the sum (L + R), Mid (lit) and Side, or Left (lit) and Right. Tilt Flat,

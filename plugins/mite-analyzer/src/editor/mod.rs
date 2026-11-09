@@ -35,49 +35,62 @@ use crate::AnalyzerShared;
 /// Mite Analyzer wears its accent (tokens.json `color.accent.analyzer`, pewter).
 pub const ACCENT: &str = "analyzer";
 
-const VIEW_W: f64 = 1280.0;
-const VIEW_H: f64 = 760.0;
+const VIEW_W: f64 = 1520.0;
+const VIEW_H: f64 = 900.0;
 const HEADER: f64 = 56.0;
 const DISPLAY_TOP: f64 = HEADER;
-const HELP_TOP: f64 = DISPLAY_TOP + 620.0;
-const FOOTER_TOP: f64 = HELP_TOP + 28.0;
+const FOOTER_TOP: f64 = VIEW_H - 56.0;
+const HELP_TOP: f64 = FOOTER_TOP - 28.0;
 
 /// The spectrum and the spectrogram share the frequency axis, 20 Hz…20 kHz.
-const SPEC: Rect = Rect::new(0.0, DISPLAY_TOP, 836.0, DISPLAY_TOP + 356.0);
-const GRAM: Rect = Rect::new(40.0, SPEC.y1 + 8.0, 820.0, HELP_TOP - 8.0);
-const X0: f64 = 40.0;
-const X1: f64 = 820.0;
+const SPEC: Rect = Rect::new(0.0, DISPLAY_TOP, 1000.0, DISPLAY_TOP + 430.0);
+const X0: f64 = 56.0;
+const X1: f64 = 980.0;
+const GRAM: Rect = Rect::new(X0, SPEC.y1 + 8.0, X1, HELP_TOP - 8.0);
 const TOP_DB: f64 = -6.0;
 const BOTTOM_DB: f64 = -96.0;
 /// The spectrogram: columns across, rows (one every `GRAM_ROW_S`) down.
-const GRAM_COLS: usize = 390;
+const GRAM_COLS: usize = 462;
 const GRAM_ROWS: usize = 240;
 const GRAM_ROW_S: f64 = 1.0 / 30.0;
 /// Silence (replaced by the theme's well), then a magma-like heat scale.
 const GRAM_PALETTE: [[u8; 4]; 6] = [[20, 22, 26, 255], [52, 16, 92, 255], [140, 34, 116, 255], [222, 73, 82, 255], [252, 160, 70, 255], [252, 246, 190, 255]];
 
 /// The right column's panels.
-const LOUD: Rect = Rect::new(846.0, DISPLAY_TOP + 8.0, 1272.0, DISPLAY_TOP + 340.0);
-const INTEGRATED: Rect = Rect::new(LOUD.x0 + 12.0, LOUD.y0 + 26.0, LOUD.x0 + 250.0, LOUD.y0 + 92.0);
-const LOUD_GRAPH: Rect = Rect::new(LOUD.x0 + 12.0, LOUD.y0 + 168.0, LOUD.x1 - 12.0, LOUD.y1 - 12.0);
+const RIGHT: (f64, f64) = (1010.0, VIEW_W - 12.0);
+const LOUD: Rect = Rect::new(RIGHT.0, DISPLAY_TOP + 8.0, RIGHT.1, DISPLAY_TOP + 414.0);
+const INTEGRATED: Rect = Rect::new(LOUD.x0 + 16.0, LOUD.y0 + 30.0, LOUD.x0 + 270.0, LOUD.y0 + 126.0);
+/// The integrated reading's right edge (its digits stay put as it changes).
+const INTEGRATED_X: f64 = LOUD.x0 + 250.0;
+const LOUD_GRAPH: Rect = Rect::new(LOUD.x0 + 16.0, LOUD.y0 + 204.0, LOUD.x1 - 16.0, LOUD.y1 - 16.0);
 const LOUD_TOP: f64 = -3.0;
 const LOUD_BOTTOM: f64 = -45.0;
 const LOUD_SECONDS: f64 = 60.0;
-const STEREO: Rect = Rect::new(846.0, LOUD.y1 + 8.0, 1272.0, HELP_TOP - 8.0);
-const SCOPE: Rect = Rect::new(STEREO.x0 + 12.0, STEREO.y0 + 24.0, STEREO.x0 + 212.0, STEREO.y0 + 224.0);
-const CORR: Rect = Rect::new(SCOPE.x0, SCOPE.y1 + 14.0, SCOPE.x1, SCOPE.y1 + 26.0);
-const BANDS: Rect = Rect::new(SCOPE.x1 + 18.0, SCOPE.y0, STEREO.x1 - 12.0, CORR.y1);
+const STEREO: Rect = Rect::new(RIGHT.0, LOUD.y1 + 8.0, RIGHT.1, HELP_TOP - 8.0);
+const SCOPE: Rect = Rect::new(STEREO.x0 + 16.0, STEREO.y0 + 36.0, STEREO.x0 + 256.0, STEREO.y0 + 276.0);
+const CORR: Rect = Rect::new(SCOPE.x0, SCOPE.y1 + 12.0, SCOPE.x1, SCOPE.y1 + 26.0);
+const BANDS: Rect = Rect::new(SCOPE.x1 + 24.0, SCOPE.y0, STEREO.x1 - 16.0, CORR.y1);
 /// The correlation bands, Hz.
 const BAND_EDGES: [f64; 6] = [20.0, 120.0, 500.0, 2000.0, 6000.0, 20_000.0];
 const BAND_NAMES: [&str; 5] = ["LOW", "LOW MID", "MID", "HIGH MID", "HIGH"];
 
 /// The footer's controls.
-const TARGET_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 196.0, FOOTER_TOP + 47.0);
-const VIEW_BUTTON: Rect = Rect::new(206.0, FOOTER_TOP + 9.0, 346.0, FOOTER_TOP + 47.0);
-const TILT_BUTTON: Rect = Rect::new(356.0, FOOTER_TOP + 9.0, 486.0, FOOTER_TOP + 47.0);
-const SPEED_BUTTON: Rect = Rect::new(496.0, FOOTER_TOP + 9.0, 616.0, FOOTER_TOP + 47.0);
-const HOLD_BUTTON: Rect = Rect::new(626.0, FOOTER_TOP + 9.0, 706.0, FOOTER_TOP + 47.0);
-const RESET_BUTTON: Rect = Rect::new(1176.0, FOOTER_TOP + 9.0, 1264.0, FOOTER_TOP + 47.0);
+const TARGET_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 236.0, FOOTER_TOP + 47.0);
+const VIEW_BUTTON: Rect = Rect::new(246.0, FOOTER_TOP + 9.0, 416.0, FOOTER_TOP + 47.0);
+const TILT_BUTTON: Rect = Rect::new(426.0, FOOTER_TOP + 9.0, 576.0, FOOTER_TOP + 47.0);
+const SPEED_BUTTON: Rect = Rect::new(586.0, FOOTER_TOP + 9.0, 726.0, FOOTER_TOP + 47.0);
+const HOLD_BUTTON: Rect = Rect::new(736.0, FOOTER_TOP + 9.0, 836.0, FOOTER_TOP + 47.0);
+const RESET_BUTTON: Rect = Rect::new(VIEW_W - 116.0, FOOTER_TOP + 9.0, VIEW_W - 16.0, FOOTER_TOP + 47.0);
+
+/// The readings change at most this often, s: a number that changes every frame cannot be read.
+const READOUT_S: f64 = 0.25;
+/// Text sizes: labels, small values, the readings, the integrated reading.
+const LABEL: TextStyle = TextStyle { size: 12.0, weight: 700.0, tracking: 0.08, tabular: false };
+const SMALL: TextStyle = TextStyle { size: 11.0, weight: 700.0, tracking: 0.08, tabular: false };
+const AXIS: TextStyle = TextStyle { size: 12.0, weight: 600.0, tracking: 0.0, tabular: true };
+const VALUE: TextStyle = TextStyle { size: 24.0, weight: 700.0, tracking: 0.0, tabular: true };
+const ROW_VALUE: TextStyle = TextStyle { size: 15.0, weight: 700.0, tracking: 0.0, tabular: true };
+const BIG: TextStyle = TextStyle { size: 64.0, weight: 700.0, tracking: 0.0, tabular: true };
 
 /// The FFTs: the spectrum's, and the bands' (left and right, complex).
 const FFT: usize = 8192;
@@ -236,6 +249,25 @@ impl BandFft {
     }
 }
 
+/// The numbers as shown.
+#[derive(Debug, Clone, Copy)]
+struct Shown {
+    momentary: f32,
+    short_term: f32,
+    integrated: f32,
+    range: f32,
+    true_peak: f32,
+    correlation: f64,
+    balance: f64,
+    bands: [(f64, f64); 5],
+}
+
+impl Default for Shown {
+    fn default() -> Self {
+        Self { momentary: SILENCE_LUFS, short_term: SILENCE_LUFS, integrated: SILENCE_LUFS, range: 0.0, true_peak: -150.0, correlation: 0.0, balance: 0.0, bands: [(0.0, 0.0); 5] }
+    }
+}
+
 pub struct AnalyzerView {
     shared: Arc<AnalyzerShared>,
     session: Session,
@@ -267,6 +299,9 @@ pub struct AnalyzerView {
     correlation: f64,
     balance: f64,
     bands: [(f64, f64); 5],
+    /// The numbers as shown (sampled every `READOUT_S`) and when they were last taken.
+    shown: Shown,
+    shown_at: Instant,
     menu: Option<(Menu, Dropdown)>,
     pointer: Option<Point>,
     hot: Option<Hot>,
@@ -300,6 +335,8 @@ impl AnalyzerView {
             correlation: 0.0,
             balance: 0.0,
             bands: [(0.0, 0.0); 5],
+            shown: Shown::default(),
+            shown_at: Instant::now(),
             menu: None,
             pointer: None,
             hot: None,
@@ -325,6 +362,23 @@ impl AnalyzerView {
         for _ in 0..GRAM_ROWS {
             self.push_gram_row(host);
         }
+        self.take_readings();
+    }
+
+    /// The numbers, now (they then hold for `READOUT_S`).
+    fn take_readings(&mut self) {
+        let tel = &self.shared.tel;
+        self.shown = Shown {
+            momentary: tel.momentary.load(),
+            short_term: tel.short_term.load(),
+            integrated: tel.integrated.load(),
+            range: tel.range.load(),
+            true_peak: tel.true_peak.load(),
+            correlation: self.correlation,
+            balance: self.balance,
+            bands: self.bands,
+        };
+        self.shown_at = Instant::now();
     }
 
     // ---- for tests and tools ----------------------------------------------------------------
@@ -464,17 +518,17 @@ impl AnalyzerView {
 
     fn draw_spectrum(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
-        let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0).weighted(600.0) };
-        for f in [50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10_000.0] {
+        let label = AXIS;
+        for f in [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10_000.0] {
             let x = freq_x(f);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((x, SPEC.y0 + 8.0), (x, SPEC.y1 - 22.0)));
             let t = if f >= 1000.0 { format!("{}k", f / 1000.0) } else { format!("{f}") };
-            cx.text.draw(cx.scene, &t, x, SPEC.y1 - 18.0, label, theme.text_lo, Align::Center);
+            cx.text.draw(cx.scene, &t, x, SPEC.y1 - 20.0, label, theme.text_lo, Align::Center);
         }
         for db in [-12.0, -24.0, -36.0, -48.0, -60.0, -72.0, -84.0] {
             let y = db_y(db);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((X0, y), (X1, y)));
-            cx.text.draw(cx.scene, &format!("{}", db as i32).replace('-', "−"), X0 - 6.0, y - 7.0, label, theme.text_lo, Align::Right);
+            cx.text.draw(cx.scene, &format!("{}", db as i32).replace('-', "−"), X0 - 8.0, y - 8.0, label, theme.text_lo, Align::Right);
         }
         let view = Self::index(cx.host, VIEW.id);
         let pts = |v: &[f32]| -> Vec<Point> {
@@ -517,7 +571,7 @@ impl AnalyzerView {
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_strong, None, &Circle::new((p.x, y), 3.0));
         }
         let names: [&str; 3] = ["L + R", "MID (lit) · SIDE", "LEFT (lit) · RIGHT"];
-        cx.text.draw(cx.scene, names[view.min(2)], X1, SPEC.y0 + 10.0, TextStyle::LABEL, theme.text_lo, Align::Right);
+        cx.text.draw(cx.scene, names[view.min(2)], X1, SPEC.y0 + 12.0, LABEL, theme.text_lo, Align::Right);
     }
 
     fn draw_gram(&self, cx: &mut DrawCx<'_>) {
@@ -530,7 +584,7 @@ impl AnalyzerView {
             let transform = Affine::translate((GRAM.x0, GRAM.y0)) * Affine::scale_non_uniform(k.0, k.1);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &brush, Some(transform), &GRAM);
         }
-        let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(9.0).weighted(600.0) };
+        let label = AXIS;
         let secs = GRAM_ROWS as f64 * GRAM_ROW_S;
         cx.text.draw(cx.scene, "now", GRAM.x0 - 6.0, GRAM.y0, label, theme.text_lo, Align::Right);
         cx.text.draw(cx.scene, &format!("−{secs:.0} s"), GRAM.x0 - 6.0, GRAM.y1 - 12.0, label, theme.text_lo, Align::Right);
@@ -538,54 +592,48 @@ impl AnalyzerView {
 
     fn draw_loudness(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
-        let tel = &self.shared.tel;
+        let n = &self.shown;
         panel(cx.scene, RoundedRect::from_rect(LOUD, 8.0), theme.display, theme.line);
-        cx.text.draw(cx.scene, "LOUDNESS", LOUD.x0 + 12.0, LOUD.y0 + 8.0, TextStyle::LABEL, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, "LOUDNESS", LOUD.x0 + 16.0, LOUD.y0 + 12.0, LABEL, theme.text_lo, Align::Left);
         let target_i = Self::index(cx.host, TARGET.id).min(TARGET_LUFS.len() - 1);
         let target = TARGET_LUFS[target_i];
-        let integrated = tel.integrated.load();
-        // The integrated reading, large, and how far from the target.
+        // The integrated reading, large, right-aligned so its digits stay put.
         let hot = self.hot == Some(Hot::Integrated);
-        let big = TextStyle { tabular: true, ..TextStyle::TITLE.sized(46.0).weighted(700.0) };
-        cx.text.draw(cx.scene, &fmt_lufs(integrated), INTEGRATED.x0, INTEGRATED.y0, big, if hot { theme.accent } else { theme.text_strong }, Align::Left);
-        cx.text.draw(cx.scene, "LUFS INTEGRATED", INTEGRATED.x0 + 2.0, INTEGRATED.y1 - 6.0, TextStyle::LABEL, theme.text_lo, Align::Left);
-        if integrated > SILENCE_LUFS + 1.0 {
-            let d = integrated - target;
+        cx.text.draw(cx.scene, &fmt_lufs(n.integrated), INTEGRATED_X, INTEGRATED.y0, BIG, if hot { theme.accent } else { theme.text_strong }, Align::Right);
+        cx.text.draw(cx.scene, "LUFS INTEGRATED", INTEGRATED.x0 + 4.0, INTEGRATED.y1 - 18.0, LABEL, theme.text_lo, Align::Left);
+        if n.integrated > SILENCE_LUFS + 1.0 {
+            let d = n.integrated - target;
             let color = if d.abs() <= 1.0 { theme.gain_up } else if d > 0.0 { theme.warn } else { theme.text_mid };
-            let mid = TextStyle { tabular: true, ..TextStyle::TITLE.sized(22.0).weighted(700.0) };
-            cx.text.draw(cx.scene, &format!("{:+.1} LU", d).replace('-', "−"), LOUD.x1 - 14.0, INTEGRATED.y0 + 12.0, mid, color, Align::Right);
+            cx.text.draw(cx.scene, &format!("{:+.1} LU", d).replace('-', "−"), LOUD.x1 - 18.0, INTEGRATED.y0 + 14.0, VALUE.sized(30.0), color, Align::Right);
         }
-        cx.text.draw(cx.scene, TARGET.choices[target_i], LOUD.x1 - 14.0, INTEGRATED.y0 + 44.0, TextStyle::LABEL, theme.text_lo, Align::Right);
-        // The row of readings.
-        let tp = tel.true_peak.load();
-        let short = tel.short_term.load();
-        let plr = if integrated > SILENCE_LUFS + 1.0 && tp > -140.0 { format!("{:.1}", tp - integrated) } else { "—".to_owned() };
+        cx.text.draw(cx.scene, TARGET.choices[target_i], LOUD.x1 - 18.0, INTEGRATED.y0 + 58.0, LABEL, theme.text_lo, Align::Right);
+        // The row of readings, each right-aligned in its cell.
+        let tp = n.true_peak;
+        let plr = if n.integrated > SILENCE_LUFS + 1.0 && tp > -140.0 { format!("{:.1}", tp - n.integrated) } else { "—".to_owned() };
         let tp_text = if tp > -140.0 { format!("{:.1}", tp).replace('-', "−") } else { "—".to_owned() };
-        let cells = [("MOMENTARY", fmt_lufs(tel.momentary.load()), theme.text_strong), ("SHORT-TERM", fmt_lufs(short), theme.text_strong), ("RANGE LU", format!("{:.1}", tel.range.load()), theme.text_strong), ("TRUE PEAK", tp_text, if tp > -1.0 { theme.danger } else { theme.text_strong }), ("PLR", plr, theme.text_strong)];
-        let w = (LOUD.width() - 24.0) / cells.len() as f64;
-        let value = TextStyle { tabular: true, ..TextStyle::TITLE.sized(18.0).weighted(700.0) };
+        let cells = [("MOMENTARY", fmt_lufs(n.momentary), theme.text_strong), ("SHORT-TERM", fmt_lufs(n.short_term), theme.text_strong), ("RANGE LU", format!("{:.1}", n.range), theme.text_strong), ("TRUE PEAK", tp_text, if tp > -1.0 { theme.danger } else { theme.text_strong }), ("PLR", plr, theme.text_strong)];
+        let w = (LOUD.width() - 32.0) / cells.len() as f64;
         for (i, (name, v, color)) in cells.into_iter().enumerate() {
-            let x = LOUD.x0 + 12.0 + (i as f64 + 0.5) * w;
-            cx.text.draw(cx.scene, &v, x, LOUD.y0 + 108.0, value, color, Align::Center);
-            cx.text.draw(cx.scene, name, x, LOUD.y0 + 136.0, TextStyle::LABEL.sized(8.5), theme.text_lo, Align::Center);
+            let x0 = LOUD.x0 + 16.0 + i as f64 * w;
+            cx.text.draw(cx.scene, &v, x0 + w - 16.0, LOUD.y0 + 140.0, VALUE, color, Align::Right);
+            cx.text.draw(cx.scene, name, x0 + w - 16.0, LOUD.y0 + 174.0, SMALL, theme.text_lo, Align::Right);
         }
         // The last minute: short-term (lit), momentary (dim), the target (dashed).
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &LOUD_GRAPH);
-        let label = TextStyle { tabular: true, ..TextStyle::BODY.sized(9.0).weighted(600.0) };
         for l in [-6.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0] {
             let y = lufs_y(l);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((LOUD_GRAPH.x0, y), (LOUD_GRAPH.x1, y)));
-            cx.text.draw(cx.scene, &format!("{}", l as i32).replace('-', "−"), LOUD_GRAPH.x0 + 4.0, y - 12.0, label, theme.text_lo, Align::Left);
+            cx.text.draw(cx.scene, &format!("{}", l as i32).replace('-', "−"), LOUD_GRAPH.x0 + 6.0, y - 15.0, AXIS, theme.text_lo, Align::Left);
         }
         let ty = lufs_y(f64::from(target));
-        cx.scene.stroke(&Stroke::new(1.3).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, theme.gain_up.multiply_alpha(0.8), None, &Line::new((LOUD_GRAPH.x0, ty), (LOUD_GRAPH.x1, ty)));
+        cx.scene.stroke(&Stroke::new(1.4).with_dashes(0.0, [6.0, 4.0]), Affine::IDENTITY, theme.gain_up.multiply_alpha(0.8), None, &Line::new((LOUD_GRAPH.x0, ty), (LOUD_GRAPH.x1, ty)));
         let per = (LOUD_SECONDS * 1000.0 / f64::from(HISTORY_SLICE_MS)) as usize;
-        let n = self.history.len().min(per);
-        if n >= 2 {
-            let x = |i: usize| LOUD_GRAPH.x1 - (n - 1 - i) as f64 / per as f64 * LOUD_GRAPH.width();
-            let recs: Vec<&[f32; record::WIDTH]> = self.history.iter().skip(self.history.len() - n).collect();
+        let count = self.history.len().min(per);
+        if count >= 2 {
+            let x = |i: usize| LOUD_GRAPH.x1 - (count - 1 - i) as f64 / per as f64 * LOUD_GRAPH.width();
+            let recs: Vec<&[f32; record::WIDTH]> = self.history.iter().skip(self.history.len() - count).collect();
             cx.begin_clip(&LOUD_GRAPH);
-            for (field, color, width) in [(record::MOMENTARY, theme.text_mid.multiply_alpha(0.5), 1.0), (record::SHORT_TERM, theme.accent, 1.8)] {
+            for (field, color, width) in [(record::MOMENTARY, theme.text_mid.multiply_alpha(0.5), 1.0), (record::SHORT_TERM, theme.accent, 2.0)] {
                 let mut path = BezPath::new();
                 let mut open = false;
                 for (i, r) in recs.iter().enumerate() {
@@ -610,24 +658,24 @@ impl AnalyzerView {
             }
             cx.end_clip();
         }
-        cx.text.draw(cx.scene, "LAST MINUTE · SHORT-TERM", LOUD_GRAPH.x1 - 4.0, LOUD_GRAPH.y0 + 4.0, TextStyle::LABEL.sized(8.5), theme.text_lo, Align::Right);
+        cx.text.draw(cx.scene, "LAST MINUTE · SHORT-TERM", LOUD_GRAPH.x1 - 6.0, LOUD_GRAPH.y0 + 6.0, SMALL, theme.text_lo, Align::Right);
     }
 
     fn draw_stereo(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
+        let n = &self.shown;
         panel(cx.scene, RoundedRect::from_rect(STEREO, 8.0), theme.display, theme.line);
-        cx.text.draw(cx.scene, "STEREO", STEREO.x0 + 12.0, STEREO.y0 + 8.0, TextStyle::LABEL, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, "STEREO", STEREO.x0 + 16.0, STEREO.y0 + 12.0, LABEL, theme.text_lo, Align::Left);
         // The vectorscope: mono straight up, left and right on the diagonals.
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &SCOPE);
         let c = SCOPE.center();
-        let r = SCOPE.width() / 2.0 - 6.0;
+        let r = SCOPE.width() / 2.0 - 8.0;
         for (a, b) in [((c.x, SCOPE.y0 + 4.0), (c.x, SCOPE.y1 - 4.0)), ((SCOPE.x0 + 4.0, c.y), (SCOPE.x1 - 4.0, c.y)), ((c.x - r * 0.707, c.y - r * 0.707), (c.x + r * 0.707, c.y + r * 0.707)), ((c.x + r * 0.707, c.y - r * 0.707), (c.x - r * 0.707, c.y + r * 0.707))] {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new(a, b));
         }
-        let small = TextStyle::LABEL.sized(8.5);
-        cx.text.draw(cx.scene, "L", c.x - r * 0.707 - 2.0, c.y - r * 0.707 - 2.0, small, theme.text_lo, Align::Right);
-        cx.text.draw(cx.scene, "R", c.x + r * 0.707 + 2.0, c.y - r * 0.707 - 2.0, small, theme.text_lo, Align::Left);
-        cx.text.draw(cx.scene, "M", c.x + 4.0, SCOPE.y0 + 4.0, small, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, "L", c.x - r * 0.707 - 4.0, c.y - r * 0.707 - 4.0, SMALL, theme.text_lo, Align::Right);
+        cx.text.draw(cx.scene, "R", c.x + r * 0.707 + 4.0, c.y - r * 0.707 - 4.0, SMALL, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, "M", c.x + 6.0, SCOPE.y0 + 4.0, SMALL, theme.text_lo, Align::Left);
         if self.scope.len() > 1 {
             let g = self.scope_gain * r;
             let mut path = BezPath::new();
@@ -643,29 +691,28 @@ impl AnalyzerView {
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.45), None, &path);
             cx.end_clip();
         }
-        // Correlation: −1 (out of phase) … +1 (mono).
+        // Correlation: −1 (out of phase) … +1 (mono). The bar moves live, the number holds.
         bar(cx, CORR, self.correlation, if self.correlation < 0.0 { theme.danger } else { theme.accent });
-        cx.text.draw(cx.scene, "−1", CORR.x0, CORR.y1 + 3.0, small, theme.text_lo, Align::Left);
-        cx.text.draw(cx.scene, &format!("CORRELATION {:+.2}", self.correlation).replace('-', "−"), CORR.center().x, CORR.y1 + 3.0, small, theme.text_mid, Align::Center);
-        cx.text.draw(cx.scene, "+1", CORR.x1, CORR.y1 + 3.0, small, theme.text_lo, Align::Right);
+        cx.text.draw(cx.scene, "CORRELATION", CORR.x0, CORR.y1 + 6.0, SMALL, theme.text_lo, Align::Left);
+        cx.text.draw(cx.scene, &format!("{:+.2}", n.correlation).replace('-', "−"), CORR.x1, CORR.y1 + 3.0, ROW_VALUE, if n.correlation < 0.0 { theme.danger } else { theme.text_strong }, Align::Right);
         // Balance and the bands' correlation.
         let rows = BAND_NAMES.len() + 1;
         let h = BANDS.height() / rows as f64;
         for i in 0..rows {
             let y = BANDS.y0 + i as f64 * h;
-            let track = Rect::new(BANDS.x0, y + h * 0.55, BANDS.x1, y + h * 0.55 + 10.0);
+            let track = Rect::new(BANDS.x0, y + h - 18.0, BANDS.x1, y + h - 6.0);
             if i == 0 {
-                cx.text.draw(cx.scene, "BALANCE", BANDS.x0, y + 4.0, small, theme.text_lo, Align::Left);
-                let side = if self.balance.abs() < 0.05 { "C".to_owned() } else if self.balance > 0.0 { format!("R {:.1} dB", self.balance) } else { format!("L {:.1} dB", -self.balance) };
-                cx.text.draw(cx.scene, &side, BANDS.x1, y + 4.0, small, theme.text_mid, Align::Right);
+                cx.text.draw(cx.scene, "BALANCE", BANDS.x0, y + 4.0, SMALL, theme.text_lo, Align::Left);
+                let side = if n.balance.abs() < 0.05 { "C".to_owned() } else if n.balance > 0.0 { format!("R {:.1}", n.balance) } else { format!("L {:.1}", -n.balance) };
+                cx.text.draw(cx.scene, &side, BANDS.x1, y, ROW_VALUE, theme.text_strong, Align::Right);
                 bar(cx, track, (self.balance / 12.0).clamp(-1.0, 1.0), theme.text_mid);
             } else {
-                let (corr, power) = self.bands[i - 1];
-                let quiet = power < 1e-6;
-                cx.text.draw(cx.scene, BAND_NAMES[i - 1], BANDS.x0, y + 4.0, small, theme.text_lo, Align::Left);
-                let words = if quiet { "—".to_owned() } else { format!("{:+.2}", corr).replace('-', "−") };
-                cx.text.draw(cx.scene, &words, BANDS.x1, y + 4.0, small, if !quiet && corr < 0.0 { theme.danger } else { theme.text_mid }, Align::Right);
-                bar(cx, track, if quiet { 0.0 } else { corr }, if corr < 0.0 { theme.danger } else { theme.accent });
+                let (live, power_live) = self.bands[i - 1];
+                let (corr, power) = n.bands[i - 1];
+                cx.text.draw(cx.scene, BAND_NAMES[i - 1], BANDS.x0, y + 4.0, SMALL, theme.text_lo, Align::Left);
+                let words = if power < 1e-6 { "—".to_owned() } else { format!("{:+.2}", corr).replace('-', "−") };
+                cx.text.draw(cx.scene, &words, BANDS.x1, y, ROW_VALUE, if power >= 1e-6 && corr < 0.0 { theme.danger } else { theme.text_strong }, Align::Right);
+                bar(cx, track, if power_live < 1e-6 { 0.0 } else { live }, if live < 0.0 { theme.danger } else { theme.accent });
             }
         }
     }
@@ -681,7 +728,7 @@ impl AnalyzerView {
             let is_hot = self.hot == Some(hot);
             let border = if on || is_hot { theme.accent } else { theme.panel_control_border };
             raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, border, theme.shadows);
-            cx.text.draw(cx.scene, text, r.center().x, r.center().y - 6.0, TextStyle::LABEL, if on { theme.accent } else { theme.text_mid }, Align::Center);
+            cx.text.draw(cx.scene, text, r.center().x, r.center().y - 7.0, LABEL, if on { theme.accent } else { theme.text_mid }, Align::Center);
         }
     }
 
@@ -906,6 +953,9 @@ impl View for AnalyzerView {
         while self.gram_due >= GRAM_ROW_S {
             self.gram_due -= GRAM_ROW_S;
             self.push_gram_row(host);
+        }
+        if self.shown_at.elapsed().as_secs_f64() >= READOUT_S {
+            self.take_readings();
         }
         let history = &mut self.history;
         self.shared.tel.history.read_since(&mut self.seen, |r| {
