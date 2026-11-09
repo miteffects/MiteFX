@@ -464,14 +464,38 @@ impl Limiter {
                 *p += (loud - *p) * self.settings.link_transients;
             }
         }
+        let mut g = [ONE; 2];
+        for c in 0..chans {
+            if v[c] > 1.0 {
+                g[c] = ((ONE_F / v[c]) as u32).min(ONE);
+            }
+        }
+        self.smooth(x, g, stereo)
+    }
+
+    /// One frame whose needed gains are given (each in 0…1; the protection stage's band shares)
+    /// rather than found from the peaks: the same ramp, release and links, so the output never
+    /// exceeds `need × input` of the sample it carries. The detector is not used.
+    #[inline]
+    pub fn process_needs(&mut self, x: [f32; 2], mut need: [f32; 2], stereo: bool) -> ([f32; 2], [f32; 2]) {
+        if stereo && self.settings.link_transients > 0.0 {
+            let low = need[0].min(need[1]);
+            for g in &mut need {
+                *g += (low - *g) * self.settings.link_transients;
+            }
+        }
+        let g = need.map(|n| ((n.clamp(0.0, 1.0) * ONE_F) as u32).min(ONE));
+        self.smooth(x, g, stereo)
+    }
+
+    /// The gains each sample needs (integers) through the sliding minimum, the ramp, the release
+    /// and the release link, onto the delayed input.
+    #[inline]
+    fn smooth(&mut self, x: [f32; 2], g: [u32; 2], stereo: bool) -> ([f32; 2], [f32; 2]) {
+        let chans = if stereo { 2 } else { 1 };
         let mut s = [1.0f32; 2];
         for c in 0..chans {
-            let g = if v[c] > 1.0 {
-                ((ONE_F / v[c]) as u32).min(ONE)
-            } else {
-                ONE
-            };
-            let m = self.min[c].push(g);
+            let m = self.min[c].push(g[c]);
             let b = self.box2[c].push(self.box1[c].push(m));
             s[c] = b as f32 / ONE_F;
         }
@@ -496,6 +520,188 @@ impl Limiter {
             y[c] = self.delay[c].run(x[c], len) * r[c];
         }
         (y, r)
+    }
+}
+
+// ---- Clipper (brief §1.4) -------------------------------------------------------------------
+
+/// The clipper's curves, in the parameter's frozen order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipCurve {
+    Hard,
+    Soft,
+    Round,
+}
+
+impl ClipCurve {
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            0 => Self::Hard,
+            2 => Self::Round,
+            _ => Self::Soft,
+        }
+    }
+}
+
+/// Soft's knee, each side of the level, as a share of it.
+pub const SOFT_KNEE: f32 = 0.25;
+
+/// `x` clipped to ±`level` (the ceiling at 1, `level` ≥ 1), never past it, without a corner
+/// except on Hard:
+/// - **Hard:** clamped.
+/// - **Soft:** a quadratic knee `SOFT_KNEE × level` wide each side of the level (slope 1 → 0).
+/// - **Round:** untouched up to the ceiling, then a tanh into the level: the knee as wide as the
+///   level is above the ceiling (Hard when they meet).
+#[inline]
+pub fn clip(x: f32, level: f32, curve: ClipCurve) -> f32 {
+    let a = x.abs();
+    let y = match curve {
+        ClipCurve::Hard => a.min(level),
+        ClipCurve::Soft => {
+            let w = SOFT_KNEE * level;
+            let knee = level - w;
+            if a <= knee {
+                a
+            } else if a >= level + w {
+                level
+            } else {
+                a - (a - knee) * (a - knee) / (4.0 * w)
+            }
+        }
+        ClipCurve::Round => {
+            let span = level - 1.0;
+            if a <= 1.0 {
+                a
+            } else if span <= 1e-6 {
+                level
+            } else {
+                1.0 + span * ((a - 1.0) / span).tanh()
+            }
+        }
+    };
+    y.copysign(x)
+}
+
+// ---- Transient protection (brief §1.5) -------------------------------------------------------
+
+/// The protection stage's split points, Hz (not exposed).
+pub const PROTECT_SPLITS: [f32; 2] = [150.0, 3000.0];
+
+/// The multiband pre-stage: three bands (LR4, allpass-compensated, so they sum to an allpass of
+/// the input). For each sample over the ceiling the excess is taken from the bands that make it
+/// (those with the peak's sign), the biggest first. Each band runs the limiter's own ramp and
+/// release on its gain, on the same lookahead, and the bands are summed. So a kick ducks the low
+/// band and leaves the hats and the voice alone. What it leaves over, the broadband limiter after
+/// it takes, so the ceiling holds whatever this does.
+///
+/// **The output is the bands' sum:** with nothing over the ceiling, an allpass of the input (the
+/// crossovers' phase, as in any multiband processor), not the input itself. Tried 2026-11-09 and
+/// dropped: the input less what each band gave up (`x + Σ bₖ (rₖ − 1)`), which nulls when idle,
+/// but the low band lags the input (55 Hz under a 150 Hz LR4), so taking it off the input left
+/// most of a kick's peak and the broadband limiter ducked the hats again (0.54 of their level,
+/// against 0.97 summed). At 0 % the plugin does not run this stage, and that path nulls.
+/// Allocates in `new` only.
+#[derive(Clone, Debug)]
+pub struct Protect {
+    split: crate::crossover::Split<3>,
+    layout: crate::crossover::Layout<3>,
+    sections: [crate::crossover::Cross; 3],
+    bands: [Limiter; 3],
+}
+
+impl Protect {
+    /// `rate` the rate it runs at, `max_lookahead` its longest lookahead there, samples.
+    pub fn new(rate: f32, max_lookahead: usize) -> Self {
+        let fs = f64::from(rate);
+        let cross = |f: f32| crate::crossover::Cross::new(f64::from(f), fs);
+        let lim = Limiter::new(rate, max_lookahead, 1);
+        Self {
+            split: Default::default(),
+            layout: crate::crossover::Layout::new(&[Some(PROTECT_SPLITS[0]), Some(PROTECT_SPLITS[1])]),
+            sections: [cross(PROTECT_SPLITS[0]), cross(PROTECT_SPLITS[1]), cross(PROTECT_SPLITS[1])],
+            bands: [lim.clone(), lim.clone(), lim],
+        }
+    }
+
+    /// Sets the lookahead (samples, as the limiter's) and clears the state.
+    pub fn configure(&mut self, lookahead: usize, settings: Settings) {
+        self.split.reset();
+        for b in &mut self.bands {
+            b.configure(lookahead, false, settings);
+        }
+    }
+
+    pub fn set(&mut self, settings: Settings) {
+        for b in &mut self.bands {
+            b.set(settings);
+        }
+    }
+
+    /// Its delay, samples.
+    pub fn latency(&self) -> usize {
+        self.bands[0].latency()
+    }
+
+    pub fn latency_for(lookahead: usize) -> usize {
+        Limiter::latency_for(lookahead, false)
+    }
+
+    /// The gain each band needs (bands from the bottom) for a sample `x` whose bands are
+    /// `bands`: 1 while `|x|` is under the ceiling. Over it, the excess `|x| − 1` is taken from
+    /// the bands with the peak's sign, the biggest first: it comes down to the next one's size
+    /// before that one is touched (water-filling), so the band that makes the over is the band
+    /// that ducks, and a quiet band riding along with it is left alone. `x − Σ (1 − gₖ) bₖ`
+    /// lands on the ceiling when the bands bring enough. `amount` (0…1) moves each gain from 1
+    /// (broadband does it all) to that, in dB.
+    #[inline]
+    pub fn needs(bands: &[f64; 3], x: f64, amount: f32) -> [f32; 3] {
+        let mut g = [1.0f32; 3];
+        let excess = x.abs() - 1.0;
+        if excess <= 0.0 || amount <= 0.0 {
+            return g;
+        }
+        let sign = x.signum();
+        let c = bands.map(|b| b * sign);
+        let mut order = [0usize, 1, 2];
+        order.sort_by(|&i, &j| c[j].total_cmp(&c[i]));
+        let pos = order.map(|k| c[k].max(0.0));
+        // The level `t` the top bands are cut to: Σ max(0, c − t) = excess.
+        let mut t = 0.0;
+        let mut top = 0.0;
+        for j in 1..=3 {
+            top += pos[j - 1];
+            t = (top - excess) / j as f64;
+            if j == 3 || t >= pos[j] {
+                break;
+            }
+        }
+        let t = t.max(0.0);
+        for &k in &order {
+            if c[k] > t {
+                let full = (t / c[k]) as f32;
+                g[k] = if amount >= 1.0 { full } else { full.max(1e-6).powf(amount) };
+            }
+        }
+        g
+    }
+
+    /// One frame at the ceiling of 1: the bands, each after its share of the reduction, summed.
+    #[inline]
+    pub fn process(&mut self, x: [f32; 2], stereo: bool, amount: f32) -> [f32; 2] {
+        let chans = if stereo { 2 } else { 1 };
+        let mut b = [[0.0f64; 3]; 2];
+        let mut need = [[1.0f32; 3]; 2];
+        for c in 0..chans {
+            self.split.process(c, f64::from(x[c]), &self.layout, &self.sections, &mut b[c]);
+            need[c] = Self::needs(&b[c], b[c].iter().sum(), amount);
+        }
+        let mut out = [0.0f32; 2];
+        for (k, band) in self.bands.iter_mut().enumerate() {
+            let (y, _) = band.process_needs([b[0][k] as f32, b[1][k] as f32], [need[0][k], need[1][k]], stereo);
+            out[0] += y[0];
+            out[1] += y[1];
+        }
+        out
     }
 }
 
@@ -811,5 +1017,92 @@ mod tests {
         // No lookahead: no ramp, the gain drops on the burst itself.
         let none = probe(&s, 0.0, rate);
         assert!(none.iter().filter(|p| p.0 < 0.0).all(|p| p.1.abs() < 1e-3));
+    }
+
+    #[test]
+    fn the_clipper_never_passes_its_level_and_has_no_corner_but_hard() {
+        for curve in [ClipCurve::Hard, ClipCurve::Soft, ClipCurve::Round] {
+            for level in [1.0f32, 1.1, 1.41, 3.98] {
+                let mut last = 0.0f32;
+                let mut last_slope = 1.0f32;
+                for k in 0..=40000 {
+                    let x = k as f32 * 1e-4;
+                    let y = clip(x, level, curve);
+                    assert!(y <= level + 1e-6, "{curve:?} {level}: {x} → {y}");
+                    assert!(y >= last - 1e-6, "{curve:?} {level}: falls at {x}");
+                    assert_eq!(clip(-x, level, curve), -y, "odd");
+                    let slope = (y - last) / 1e-4;
+                    if k > 1 && curve != ClipCurve::Hard && !(curve == ClipCurve::Round && level == 1.0) {
+                        assert!((slope - last_slope).abs() < 0.02, "{curve:?} {level}: a corner at {x}");
+                    }
+                    (last, last_slope) = (y, slope);
+                }
+            }
+        }
+        // Round leaves everything under the ceiling alone; Soft starts a quarter under its level.
+        assert_eq!(clip(0.999, 2.0, ClipCurve::Round), 0.999);
+        assert_eq!(clip(1.49, 2.0, ClipCurve::Soft), 1.49);
+        assert!(clip(1.6, 2.0, ClipCurve::Soft) < 1.6);
+    }
+
+    #[test]
+    fn a_bands_share_goes_to_the_bands_that_make_the_over() {
+        // Kick and hat up, a mid down: only the kick is turned down, and the sum lands on the
+        // ceiling.
+        let g = Protect::needs(&[1.6, 0.2, -0.3], 1.5, 1.0);
+        assert_eq!((g[1], g[2]), (1.0, 1.0));
+        let left = 1.5 - 1.6 * (1.0 - f64::from(g[0]));
+        assert!((left - 1.0).abs() < 1e-6, "{g:?} → {left}");
+        assert_eq!(Protect::needs(&[0.5, 0.3, 0.1], 0.9, 1.0), [1.0; 3]);
+        assert_eq!(Protect::needs(&[1.6, 0.2, 0.0], 1.8, 0.0), [1.0; 3]);
+        // Two big ones share once the first is down to the second.
+        let g = Protect::needs(&[1.0, 0.9, 0.0], 1.9, 1.0);
+        assert!((g[0] - 0.5).abs() < 1e-6 && (g[1] - 0.5 / 0.9).abs() < 1e-6, "{g:?}");
+        let half = Protect::needs(&[1.6, 0.2, 0.0], 1.8, 0.5);
+        assert!(half[0] > g[0] && half[0] < 1.0);
+    }
+
+    #[test]
+    fn protection_keeps_the_hats_up_under_a_kick_and_the_ceiling_holds() {
+        let rate = 48000.0;
+        let n = 48000;
+        // A 55 Hz kick 8 dB over, twice a second, and a quiet 7 kHz hat throughout.
+        let x: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = (i % 24000) as f32 / rate;
+                let kick = 2.5 * (t * 55.0 * std::f32::consts::TAU).sin() * (-t * 6.0).exp();
+                kick + 0.2 * (i as f32 / rate * 7000.0 * std::f32::consts::TAU).sin()
+            })
+            .collect();
+        let look = 96;
+        let s = Settings { release_ms: 80.0, ..Settings::default() };
+        let hats = |y: &[f32]| {
+            // The hat's level while the kick sounds: the output high-passed at 3 kHz (LR4).
+            let c = crate::crossover::Cross::new(3000.0, f64::from(rate));
+            let (mut a, mut b) = (crate::filter::Tdf2::default(), crate::filter::Tdf2::default());
+            let hp: Vec<f64> = y.iter().map(|&v| b.process(&c.hp, a.process(&c.hp, f64::from(v)))).collect();
+            let during: Vec<f64> = (0..2).flat_map(|k| hp[k * 24000 + 2000..k * 24000 + 8000].to_vec()).collect();
+            (during.iter().map(|v| v * v).sum::<f64>() / during.len() as f64).sqrt()
+        };
+        let mut plain = Limiter::new(rate, 256, 1);
+        plain.configure(look, false, s);
+        let y0: Vec<f32> = x.iter().map(|&v| plain.process([v, v], false).0[0]).collect();
+        let mut protect = Protect::new(rate, 256);
+        protect.configure(look, s);
+        let mut after = Limiter::new(rate, 256, 1);
+        after.configure(look, false, s);
+        let y1: Vec<f32> = x.iter().map(|&v| after.process(protect.process([v, v], false, 1.0), false).0[0]).collect();
+        assert!(y0.iter().chain(&y1).all(|v| v.abs() <= 1.0 + 1e-6), "the ceiling holds");
+        let (h0, h1) = (hats(&y0), hats(&y1));
+        // Under the ceiling it is an allpass of the input: a steady tone keeps its level.
+        let mut quiet = Protect::new(rate, 256);
+        quiet.configure(look, s);
+        let tone: Vec<f32> = (0..n).map(|i| 0.5 * (i as f32 * 0.031).sin()).collect();
+        let y: Vec<f32> = tone.iter().map(|&v| quiet.process([v, v], false, 1.0)[0]).collect();
+        let rms = |v: &[f32]| (v.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+        assert!((rms(&y[8000..]) / rms(&tone[8000..]) - 1.0).abs() < 1e-3);
+        let open = 0.2 / 2f64.sqrt();
+        // Measured 2026-11-09: broadband ducks the hat to 0.50 of its level, protected 0.97.
+        assert!(h1 > 1.6 * h0 && h1 > 0.7 * open, "hats: broadband {h0:.4}, protected {h1:.4} (open {open:.4})");
     }
 }

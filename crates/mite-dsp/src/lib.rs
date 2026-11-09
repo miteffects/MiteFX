@@ -7,6 +7,7 @@ pub mod analyzer;
 pub mod conv;
 pub mod crossover;
 pub mod deess;
+pub mod dither;
 pub mod delay;
 pub mod doubler;
 pub mod dynamics;

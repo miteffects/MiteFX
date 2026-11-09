@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_limit::editor::{memory_host, LimitView};
-use mite_limit::params::{ATTACK, BYPASS, DELTA, TRUE_PEAK, CEILING, GAIN, LOOKAHEAD, OVERSAMPLING, PREVIEW, RELEASE, SLOW, STYLE, TARGET, TARGET_CUSTOM};
+use mite_limit::params::{ATTACK, BYPASS, CLIP_CURVE, CLIP_LEVEL, CLIP_ON, DC_FILTER, DELTA, DITHER, SHAPING, TRUE_PEAK, CEILING, GAIN, LOOKAHEAD, OVERSAMPLING, PREVIEW, PROTECT, RELEASE, SLOW, STYLE, TARGET, TARGET_CUSTOM, UNITY};
 use mite_limit::LimitShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -213,4 +213,71 @@ fn the_footer_toggles_switch_on_and_back_off() {
         click(&mut view, &host, at);
         assert_eq!(plain(&host, id), default, "{id} second click");
     }
+}
+
+#[test]
+fn the_clipper_is_picked_from_its_list_and_its_grip_sets_the_level() {
+    let (mut view, host, _) = setup();
+    assert!(view.clip_grip(&host).is_none(), "off: no grip");
+    // Pick Round.
+    let at = view.clip_button().center();
+    click(&mut view, &host, at);
+    let rows = view.menu_rows();
+    assert_eq!(rows.len(), 4);
+    click(&mut view, &host, rows[3].center());
+    assert_eq!(plain(&host, CLIP_ON.id), 1.0);
+    assert_eq!(plain(&host, CLIP_CURVE.id), 2.0);
+    // Its grip sits its level over the ceiling, at the levels' scale; dragging it down lowers it.
+    let grip = view.clip_grip(&host).expect("on: a grip");
+    let want = view.level_y(plain(&host, CEILING.id) + plain(&host, CLIP_LEVEL.id));
+    assert!((grip.center().y - want).abs() < 0.5);
+    let per_db = view.level_y(-10.0) - view.level_y(-9.0);
+    drag(&mut view, &host, grip.center(), grip.center() + (0.0, 2.0 * per_db), MODS);
+    assert!((plain(&host, CLIP_LEVEL.id) - 1.0).abs() < 0.06, "{}", plain(&host, CLIP_LEVEL.id));
+    // Double-click: back to +3; undo steps back.
+    let grip = view.clip_grip(&host).expect("grip");
+    view.event(&UiEvent::DoubleClick { pos: grip.center(), mods: MODS }, &host);
+    assert_eq!(plain(&host, CLIP_LEVEL.id), 3.0);
+    undo(&mut view, &host);
+    assert!((plain(&host, CLIP_LEVEL.id) - 1.0).abs() < 0.06);
+    // Off again from the list.
+    let at = view.clip_button().center();
+    click(&mut view, &host, at);
+    let rows = view.menu_rows();
+    click(&mut view, &host, rows[0].center());
+    assert_eq!(plain(&host, CLIP_ON.id), 0.0);
+    assert!(view.clip_grip(&host).is_none());
+}
+
+#[test]
+fn dither_picks_a_word_length_and_shaping_in_one_list() {
+    let (mut view, host, _) = setup();
+    let at = view.dither_button().center();
+    click(&mut view, &host, at);
+    let rows = view.menu_rows();
+    assert_eq!(rows.len(), 10);
+    // 16 bit, strong.
+    click(&mut view, &host, rows[9].center());
+    assert_eq!((plain(&host, DITHER.id), plain(&host, SHAPING.id)), (3.0, 2.0));
+    let at = view.dither_button().center();
+    click(&mut view, &host, at);
+    let rows = view.menu_rows();
+    // 20 bit, flat.
+    click(&mut view, &host, rows[4].center());
+    assert_eq!((plain(&host, DITHER.id), plain(&host, SHAPING.id)), (2.0, 0.0));
+}
+
+#[test]
+fn unity_and_the_dc_filter_are_footer_toggles_and_protect_a_footer_dial() {
+    let (mut view, host, _) = setup();
+    for id in [UNITY.id, DC_FILTER.id] {
+        let r = view.footer_toggle(id).expect("drawn");
+        click(&mut view, &host, r.center());
+        assert_eq!(plain(&host, id), 1.0, "{id}");
+    }
+    // The dial right of the toggles, left of GAIN: drag it up.
+    let r = view.footer_toggle(BYPASS.id).expect("drawn");
+    let dial = Point::new(1196.0 - 2.0 * 92.0, r.center().y);
+    drag(&mut view, &host, dial, dial - (0.0, 60.0), MODS);
+    assert!(plain(&host, PROTECT.id) > 20.0, "{}", plain(&host, PROTECT.id));
 }

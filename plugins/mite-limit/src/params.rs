@@ -1,9 +1,8 @@
 //! Mite Limit parameters (docs/design/limit-brief.md §4).
 //!
 //! IDs are frozen once released (`tests/golden/mite_limit.params.txt`). Every parameter of the
-//! full design exists from slice 1, so the state stays at version 1 while the features arrive; a
-//! parameter whose feature is not built yet sits at its neutral default and the editor does not
-//! show it.
+//! full design existed from slice 1, so the state stays at version 1 while the features arrived
+//! (all built 2026-11-09); each one's default is its neutral setting.
 
 use mite_core::presets::CurrentPreset;
 use mite_core::snapshots::Snapshots;
@@ -201,6 +200,14 @@ impl LimitParams {
             oversampling: factor(self.oversampling.value()),
             delta: self.delta.value(),
             bypass: self.bypass.value(),
+            clip_on: self.clip_on.value(),
+            clip_db: self.clip_level.value(),
+            clip_curve: self.clip_curve.value().max(0) as usize,
+            protect: self.protect.value() / 100.0,
+            unity: self.unity.value(),
+            dither: self.dither.value().max(0) as usize,
+            shaping: self.shaping.value().max(0) as usize,
+            dc_filter: self.dc_filter.value(),
             target: self.target.value().max(0) as usize,
             target_custom: self.target_custom.value(),
             preview: self.preview.value(),

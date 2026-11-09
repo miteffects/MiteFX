@@ -2,8 +2,9 @@
 //!
 //! The display: the history on the left (shared with Comp, `mite_ui::widgets::history`): the
 //! input after the gain dim, the output lit, the gain reduction hanging from the top, the
-//! ceiling as a line with its grip. Drag the waveform up or down for gain, the grip for the
-//! ceiling. Under it the control strip: the styles (each glyph a drawing of its gain shape) and
+//! ceiling as a line with its grip, and while the clipper is on its level as a dashed line with
+//! its own grip, what it shaved off tinted on the input's peaks. Drag the waveform up or down for
+//! gain, the grips for the ceiling and the clip level. Under it the control strip: the styles (each glyph a drawing of its gain shape) and
 //! the dials. On the right the meters (IN, GR, OUT) and the loudness column, the one place the
 //! suite shows numbers (user, 2026-11-03). Everything drawn comes from the engine's records.
 
@@ -50,9 +51,18 @@ const HIST_SECONDS: f64 = 6.0;
 const LEVEL_SPAN_PX: f64 = HIST_BOTTOM - DISPLAY_TOP - 24.0 - 12.0;
 const LEVEL_RANGES: &[f32] = &[12.0, 24.0, 36.0, 48.0];
 const LEVEL_RANGE_LABELS: &[&str] = &["Auto", "12 dB", "24 dB", "36 dB", "48 dB"];
-/// The ceiling's grip at the history's right edge.
+/// The ceiling's grip at the history's right edge; the clipper's just left of it.
 const GRIP_X: f64 = HIST_W - 40.0;
 const GRIP_SIZE: (f64, f64) = (34.0, 22.0);
+const CLIP_GRIP_X: f64 = GRIP_X - 44.0;
+/// The footer's menus: the clipper (off or its curve) and dither (off or a word length and
+/// shaping).
+const CLIP_BUTTON: Rect = Rect::new(214.0, FOOTER_TOP + 9.0, 334.0, FOOTER_TOP + 47.0);
+const DITHER_BUTTON: Rect = Rect::new(344.0, FOOTER_TOP + 9.0, 534.0, FOOTER_TOP + 47.0);
+const CLIP_ROWS: [&str; 4] = ["Off", "Hard", "Soft", "Round"];
+const DITHER_ROWS: [&str; 10] = ["Off", "24 bit", "24 bit · light", "24 bit · strong", "20 bit", "20 bit · light", "20 bit · strong", "16 bit", "16 bit · light", "16 bit · strong"];
+/// Dither: a staircase (the word length's steps) over a dim slope.
+const DITHER_GLYPH: &str = "M4 18 H8 V14 H12 V10 H16 V6 H20";
 
 /// The control strip under the history.
 const STRIP_TOP: f64 = HIST_BOTTOM + 8.0;
@@ -202,6 +212,14 @@ pub fn settings(host: &dyn ParamHost) -> crate::dsp::LimitSettings {
         oversampling: factor(p(OVERSAMPLING.id).round() as i32),
         delta: p(DELTA.id) >= 0.5,
         bypass: p(BYPASS.id) >= 0.5,
+        clip_on: p(CLIP_ON.id) >= 0.5,
+        clip_db: p(CLIP_LEVEL.id),
+        clip_curve: p(CLIP_CURVE.id).round().max(0.0) as usize,
+        protect: p(PROTECT.id) / 100.0,
+        unity: p(UNITY.id) >= 0.5,
+        dither: p(DITHER.id).round().max(0.0) as usize,
+        shaping: p(SHAPING.id).round().max(0.0) as usize,
+        dc_filter: p(DC_FILTER.id) >= 0.5,
         target: p(TARGET.id).round().max(0.0) as usize,
         target_custom: p(TARGET_CUSTOM.id),
         preview: p(PREVIEW.id) >= 0.5,
@@ -212,6 +230,8 @@ pub fn settings(host: &dyn ParamHost) -> crate::dsp::LimitSettings {
 enum Drag {
     /// The ceiling's grip.
     Ceiling { start: Point, ceiling: f32 },
+    /// The clipper's grip: its level over the ceiling.
+    Clip { start: Point, level: f32 },
     /// The waveform: gain, at the levels' scale (the input follows the pointer).
     Gain { start: Point, gain: f32 },
     /// A part of the gain shape: its parameter, from its value at the start.
@@ -221,6 +241,9 @@ enum Drag {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
     Ceiling,
+    Clip,
+    ClipMenu,
+    DitherMenu,
     History,
     Style(usize),
     Shape(shape::Part),
@@ -248,6 +271,8 @@ pub struct LimitView {
     drag: Option<Drag>,
     os_menu: Option<Dropdown>,
     target_menu: Option<Dropdown>,
+    clip_menu: Option<Dropdown>,
+    dither_menu: Option<Dropdown>,
     os_hit: Rect,
     /// Custom's target dial (shown on Custom only).
     custom_knob: Knob,
@@ -268,10 +293,13 @@ impl LimitView {
             (WIDTH, HEIGHT),
             vec![
                 FooterToggle { id: TRUE_PEAK.id, glyph: ToggleGlyph::TruePeak, words: "True peak — the ceiling holds between the samples too, as a converter or an encoder hears it" },
+                FooterToggle { id: DC_FILTER.id, glyph: ToggleGlyph::DcFilter, words: "DC filter — takes out an offset below 5 Hz before anything else, so it cannot eat the headroom" },
+                FooterToggle { id: UNITY.id, glyph: ToggleGlyph::Unity, words: "Unity gain — hear the limiting at the input's loudness, so louder never sounds better by itself (monitoring: off before you render)" },
                 FooterToggle { id: DELTA.id, glyph: ToggleGlyph::Delta, words: "Delta — hear only what the limiter takes away, time-aligned" },
                 FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input, latency kept" },
             ],
             vec![
+                FooterDial { spec: PROTECT, kind: KnobKind::Unipolar, name: "PROTECT", words: "Protect — a kick ducks only the lows, not the hats and the voice over it (three bands decide who ducks)" },
                 FooterDial { spec: GAIN, kind: KnobKind::Unipolar, name: "GAIN", words: "Gain — how hard the music is pushed into the ceiling (or drag the waveform)" },
                 FooterDial { spec: CEILING, kind: KnobKind::Unipolar, name: "CEILING", words: "Ceiling — the most the output ever reaches (or drag its grip)" },
             ],
@@ -300,6 +328,8 @@ impl LimitView {
             drag: None,
             os_menu: None,
             target_menu: None,
+            clip_menu: None,
+            dither_menu: None,
             os_hit: Rect::ZERO,
             shape: shape::Shape::default(),
             custom_knob: Knob::new(TARGET_CUSTOM, "TARGET", KnobKind::Unipolar, Point::new((LOUD_X0 + LOUD_X1) / 2.0, TARGET_Y + 138.0), 44.0),
@@ -413,6 +443,24 @@ impl LimitView {
         Self::custom(host).then_some(self.custom_knob.center)
     }
 
+    /// The clipper's grip while it is on (tests and tools).
+    pub fn clip_grip(&self, host: &dyn ParamHost) -> Option<Rect> {
+        Self::on(host, CLIP_ON.id).then(|| Self::clip_rect(host))
+    }
+
+    pub fn clip_button(&self) -> Rect {
+        CLIP_BUTTON
+    }
+
+    pub fn dither_button(&self) -> Rect {
+        DITHER_BUTTON
+    }
+
+    /// The open footer menu's rows (the clipper's or dither's).
+    pub fn menu_rows(&self) -> Vec<Rect> {
+        self.clip_menu.as_ref().or(self.dither_menu.as_ref()).map(Dropdown::item_rects).unwrap_or_default()
+    }
+
     pub fn open_oversampling(&mut self, host: &dyn ParamHost) {
         self.os_menu = Some(Self::os_list(host));
     }
@@ -477,6 +525,29 @@ impl LimitView {
         Dropdown::new(TARGET_BUTTON, &TARGETS, Self::target(host), (DISPLAY_TOP, FOOTER_TOP)).with_min_width(LOUD_X1 - LOUD_X0)
     }
 
+    /// The clipper's row: off, or its curve.
+    fn clip_row(host: &dyn ParamHost) -> usize {
+        if Self::on(host, CLIP_ON.id) {
+            1 + (Self::plain(host, CLIP_CURVE.id).round().max(0.0) as usize).min(2)
+        } else {
+            0
+        }
+    }
+
+    /// Dither's row: off, or a word length and its shaping.
+    fn dither_row(host: &dyn ParamHost) -> usize {
+        let d = (Self::plain(host, DITHER.id).round().max(0.0) as usize).min(3);
+        if d == 0 { 0 } else { 1 + (d - 1) * 3 + (Self::plain(host, SHAPING.id).round().max(0.0) as usize).min(2) }
+    }
+
+    fn clip_list(host: &dyn ParamHost) -> Dropdown {
+        Dropdown::new(CLIP_BUTTON, &CLIP_ROWS, Self::clip_row(host), (DISPLAY_TOP, FOOTER_TOP)).with_min_width(150.0)
+    }
+
+    fn dither_list(host: &dyn ParamHost) -> Dropdown {
+        Dropdown::new(DITHER_BUTTON, &DITHER_ROWS, Self::dither_row(host), (DISPLAY_TOP, FOOTER_TOP)).with_min_width(200.0)
+    }
+
     fn os_list(host: &dyn ParamHost) -> Dropdown {
         let current = Self::plain(host, OVERSAMPLING.id).round().max(0.0) as usize;
         let anchor = Rect::new(16.0, FOOTER_TOP + 9.0, 126.0, FOOTER_TOP + 47.0);
@@ -488,6 +559,16 @@ impl LimitView {
     fn grip_rect(host: &dyn ParamHost) -> Rect {
         let y = lv_y(Self::plain(host, CEILING.id));
         Rect::new(GRIP_X, y - GRIP_SIZE.1 / 2.0, GRIP_X + GRIP_SIZE.0, y + GRIP_SIZE.1 / 2.0)
+    }
+
+    /// The clipper's level, absolute dB (the ceiling plus its level over it).
+    fn clip_db(host: &dyn ParamHost) -> f32 {
+        Self::plain(host, CEILING.id) + Self::plain(host, CLIP_LEVEL.id)
+    }
+
+    fn clip_rect(host: &dyn ParamHost) -> Rect {
+        let y = lv_y(Self::clip_db(host));
+        Rect::new(CLIP_GRIP_X, y - GRIP_SIZE.1 / 2.0, CLIP_GRIP_X + GRIP_SIZE.0, y + GRIP_SIZE.1 / 2.0)
     }
 
     fn style_rect(i: usize) -> Rect {
@@ -543,10 +624,35 @@ impl LimitView {
                 let edge = line(&|c| DISPLAY_TOP + (f64::from(-c.low[record::GR].min(c.low[record::GR + 1])) * px_per_db()).clamp(0.0, HIST_BOTTOM - DISPLAY_TOP));
                 history::draw_reduction(cx, &cols, &edge, DISPLAY_TOP, 0.5 * LEVEL_SPAN_PX);
             }
+            // What the clipper shaved: from the input's peak down by what it took, in the accent.
+            if cols.iter().any(|c| c.low[record::CLIP] < -0.05) {
+                let mut band = BezPath::new();
+                for (k, c) in cols.iter().enumerate() {
+                    let p = (c.x, lv_y(level(c, record::IN)));
+                    if k == 0 { band.move_to(p) } else { band.line_to(p) }
+                }
+                for c in cols.iter().rev() {
+                    band.line_to((c.x, lv_y(level(c, record::IN) + c.low[record::CLIP])));
+                }
+                band.close_path();
+                // Hatched: taken away, not a level of its own.
+                cx.begin_clip(&band);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.14), None, &band);
+                let mut hatch = BezPath::new();
+                let mut x = -(HIST_BOTTOM - DISPLAY_TOP);
+                while x < HIST_W {
+                    hatch.move_to((x, HIST_BOTTOM));
+                    hatch.line_to((x + (HIST_BOTTOM - DISPLAY_TOP), DISPLAY_TOP));
+                    x += 6.0;
+                }
+                cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.accent.multiply_alpha(0.8), None, &hatch);
+                cx.end_clip();
+            }
             // The input's line on top of everything: always in view.
             cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85), None, &input);
         }
         cx.end_clip();
+        self.draw_clip_line(cx);
         self.draw_ceiling(cx);
         self.range.draw(cx, self.range_shown);
     }
@@ -571,6 +677,23 @@ impl LimitView {
         mark.curve_to((c.x - 3.0, c.y + 5.0), (c.x - 2.5, c.y - 1.5), (c.x, c.y - 1.5));
         mark.curve_to((c.x + 2.5, c.y - 1.5), (c.x + 3.0, c.y + 5.0), (c.x + 7.0, c.y + 5.0));
         cx.scene.stroke(&Stroke::new(1.4).with_caps(Cap::Round).with_join(Join::Round), Affine::IDENTITY, ink, None, &mark);
+    }
+
+    /// The clipper's level: a dashed accent line with its grip, while it is on.
+    fn draw_clip_line(&self, cx: &mut DrawCx<'_>) {
+        if !Self::on(cx.host, CLIP_ON.id) {
+            return;
+        }
+        let theme = cx.theme;
+        let hot = self.hot == Some(Hot::Clip) || matches!(self.drag, Some(Drag::Clip { .. }));
+        let r = Self::clip_rect(cx.host);
+        let y = r.center().y;
+        let dash = Stroke::new(1.4).with_dashes(0.0, [6.0, 5.0]);
+        cx.scene.stroke(&dash, Affine::IDENTITY, theme.accent.multiply_alpha(if hot { 1.0 } else { 0.75 }), None, &Line::new((0.0, y), (CLIP_GRIP_X - 2.0, y)));
+        let shape = RoundedRect::from_rect(r, 11.0);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { theme.accent } else { theme.display }, None, &shape);
+        glow_stroke(cx, &shape, 1.2, theme.accent, theme.accent, if hot { 3.5 } else { 1.5 });
+        mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Clip, r.center(), if hot { theme.display } else { theme.accent });
     }
 
     fn draw_strip(&self, cx: &mut DrawCx<'_>) {
@@ -717,6 +840,16 @@ impl LimitView {
         self.os_hit = r;
         let sample_rate = f64::from(self.shared.sample_rate.load()).max(1.0);
         self.footer.draw_latency(cx, 142.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
+        let hot_c = self.hot == Some(Hot::ClipMenu);
+        let clip_on = Self::on(cx.host, CLIP_ON.id);
+        draw_dropdown_button(cx, CLIP_BUTTON, CLIP_ROWS[Self::clip_row(cx.host)], self.clip_menu.is_some(), hot_c, |scene, at| {
+            mite_ui::widgets::footer::draw_toggle_glyph(scene, ToggleGlyph::Clip, at + (9.0, 7.0), if clip_on { theme.accent } else { theme.text_mid });
+        });
+        let hot_d = self.hot == Some(Hot::DitherMenu);
+        let dither_on = Self::dither_row(cx.host) > 0;
+        draw_dropdown_button(cx, DITHER_BUTTON, DITHER_ROWS[Self::dither_row(cx.host)], self.dither_menu.is_some(), hot_d, |scene, at| {
+            draw_glyph(scene, DITHER_GLYPH, at + (9.0, 7.0), 20.0, if dither_on { theme.accent } else { theme.text_mid }, 1.6);
+        });
         self.footer.draw_controls(cx);
         if let Some(list) = &self.os_menu {
             list.draw(cx, theme.accent, |scene, i, at, ink| {
@@ -735,6 +868,29 @@ impl LimitView {
                 scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, ink, None, &p);
             });
         }
+        if let Some(list) = &self.clip_menu {
+            list.draw(cx, theme.accent, |scene, i, at, ink| {
+                // Each curve's knee, drawn.
+                let mut p = BezPath::new();
+                for k in 0..=24 {
+                    let x = k as f32 / 24.0 * 2.0;
+                    let y = match i {
+                        0 => x,
+                        _ => mite_dsp::limit::clip(x, 1.35, mite_dsp::limit::ClipCurve::from_index(i - 1)),
+                    };
+                    let pt = (at.x + 1.0 + 10.0 * f64::from(x), at.y + 20.0 - 12.0 * f64::from(y));
+                    if k == 0 { p.move_to(pt) } else { p.line_to(pt) }
+                }
+                scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, ink, None, &p);
+            });
+        }
+        if let Some(list) = &self.dither_menu {
+            list.draw(cx, theme.accent, |scene, i, at, ink| {
+                if i > 0 {
+                    draw_glyph(scene, DITHER_GLYPH, at + (10.0, 12.0), 20.0, ink, 1.4);
+                }
+            });
+        }
     }
 
     fn draw_states(&self, cx: &mut DrawCx<'_>) {
@@ -745,9 +901,17 @@ impl LimitView {
             glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
             mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Delta, r.center(), theme.accent);
         }
+        let mut x = if Self::on(cx.host, DELTA.id) { HIST_W - 100.0 } else { HIST_W - 56.0 };
+        if Self::on(cx.host, UNITY.id) {
+            // Heard at the input's loudness: say so where the output is drawn.
+            let r = RoundedRect::from_rect(Rect::new(x, DISPLAY_TOP + 10.0, x + 36.0, DISPLAY_TOP + 46.0), 10.0);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.18), None, &r);
+            glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
+            mite_ui::widgets::footer::draw_toggle_glyph(cx.scene, ToggleGlyph::Unity, r.center(), theme.accent);
+            x -= 44.0;
+        }
         if Self::on(cx.host, PREVIEW.id) {
             // Heard as the platform plays it: say so where the output is drawn.
-            let x = if Self::on(cx.host, DELTA.id) { HIST_W - 100.0 } else { HIST_W - 56.0 };
             let r = RoundedRect::from_rect(Rect::new(x, DISPLAY_TOP + 10.0, x + 36.0, DISPLAY_TOP + 46.0), 10.0);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.18), None, &r);
             glow_stroke(cx, &r, 1.5, theme.accent, theme.accent, 9.0);
@@ -762,6 +926,7 @@ impl LimitView {
         let gain = Self::plain(host, GAIN.id);
         match self.drag {
             Some(Drag::Ceiling { .. }) => return Help::default().text("Ceiling ").slot(format!("{} dB", fmt_db(ceiling)), "−30.0 dB").text(" — nothing comes out above this line. Shift is fine."),
+            Some(Drag::Clip { .. }) => return Self::clip_help(host),
             Some(Drag::Shape { part, .. }) => return Self::shape_help(host, part),
             Some(Drag::Gain { .. }) => return Help::default().text("Gain ").slot(format!("+{gain:.1} dB"), "+30.0 dB").text(" — the music follows the pointer; what rises over the ceiling is limited. Shift is fine."),
             None => {}
@@ -772,6 +937,28 @@ impl LimitView {
                 let tp = p.true_peak.map_or("no true-peak limit".to_owned(), |l| format!("true peak at most {} dBTP", fmt_db(l)));
                 let how = if p.turns_up { "turns louder masters down and quieter ones up (as far as their peaks allow)" } else { "turns louder masters down, leaves quieter ones" };
                 return Help::default().text(format!("{} — {} LUFS integrated, {tp}; {how}", p.name, fmt_db(p.lufs)));
+            }
+        }
+        if let Some(list) = &self.clip_menu {
+            if let Some(i) = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))) {
+                return Help::default().text(match i {
+                    0 => "Clipper off — the limiter alone",
+                    1 => "Hard — the peaks cut flat at the level: the most bite, the most edge",
+                    2 => "Soft — the peaks eased over a knee around the level",
+                    _ => "Round — nothing under the ceiling is touched; the peaks bend into the level",
+                });
+            }
+        }
+        if let Some(list) = &self.dither_menu {
+            if let Some(i) = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p))) {
+                return Help::default().text(match i {
+                    0 => "Dither off — the output as float",
+                    _ => match (i - 1) % 3 {
+                        0 => "TPDF dither to that word length, flat: the noise even across the band",
+                        1 => "TPDF dither, light shaping: the noise tilted up, a little out of the ear's keenest band",
+                        _ => "TPDF dither, strong shaping: the noise moved well above 10 kHz, 18 dB quieter where hearing is keenest",
+                    },
+                }).text(if i > 0 { " — the last step: render at this word length, and nothing after it" } else { "" });
             }
         }
         if let Some(list) = &self.os_menu {
@@ -792,6 +979,9 @@ impl LimitView {
         }
         match self.hot {
             Some(Hot::Ceiling) => return Help::default().text("Ceiling ").slot(format!("{} dB", fmt_db(ceiling)), "−30.0 dB").text(" — drag it; wheel for fine steps; double-click: −1 dB, the streaming platforms' limit."),
+            Some(Hot::Clip) => return Self::clip_help(host),
+            Some(Hot::ClipMenu) => return Help::default().text("Clipper — shaves the sharpest peaks before the limiter, so it pumps less; its level is the dashed line"),
+            Some(Hot::DitherMenu) => return Help::default().text("Dither — the word length the master is rendered at, with noise shaping; last in the chain"),
             Some(Hot::History) => {
                 if let Some(p) = self.pointer {
                     let (range, head) = (level_range() as f32, headroom() as f32);
@@ -845,6 +1035,14 @@ impl LimitView {
         }
     }
 
+    fn clip_help(host: &dyn ParamHost) -> Help {
+        let v = Self::plain(host, CLIP_LEVEL.id);
+        Help::default()
+            .text("Clip level ")
+            .slot(format!("+{v:.1} dB"), "+12.0 dB")
+            .text(" over the ceiling — the clipper shaves what crosses the dashed line, the limiter takes the rest; down to the ceiling clips the most. Double-click: +3 dB.")
+    }
+
     fn shape_help(host: &dyn ParamHost, part: shape::Part) -> Help {
         let spec = Self::shape_spec(part);
         let v = Self::plain(host, spec.id);
@@ -896,6 +1094,15 @@ impl LimitView {
         if Self::grip_rect(host).inflate(4.0, 4.0).contains(p) {
             return Some(Hot::Ceiling);
         }
+        if Self::on(host, CLIP_ON.id) && Self::clip_rect(host).inflate(4.0, 4.0).contains(p) {
+            return Some(Hot::Clip);
+        }
+        if CLIP_BUTTON.contains(p) {
+            return Some(Hot::ClipMenu);
+        }
+        if DITHER_BUTTON.contains(p) {
+            return Some(Hot::DitherMenu);
+        }
         if let Some(i) = (0..STYLE_GLYPHS.len()).find(|&i| Self::style_rect(i).contains(p)) {
             return Some(Hot::Style(i));
         }
@@ -939,6 +1146,19 @@ impl LimitView {
             Some(Hot::Ceiling) => {
                 host.begin_gesture(CEILING.id);
                 self.drag = Some(Drag::Ceiling { start: pos, ceiling: Self::plain(host, CEILING.id) });
+                true
+            }
+            Some(Hot::Clip) => {
+                host.begin_gesture(CLIP_LEVEL.id);
+                self.drag = Some(Drag::Clip { start: pos, level: Self::plain(host, CLIP_LEVEL.id) });
+                true
+            }
+            Some(Hot::ClipMenu) => {
+                self.clip_menu = Some(Self::clip_list(host));
+                true
+            }
+            Some(Hot::DitherMenu) => {
+                self.dither_menu = Some(Self::dither_list(host));
                 true
             }
             Some(Hot::History) => {
@@ -994,6 +1214,39 @@ impl LimitView {
             }
             return true;
         }
+        if let Some(list) = &mut self.clip_menu {
+            if let UiEvent::PointerMove { pos, .. } = *event {
+                self.pointer = Some(pos);
+            }
+            match list.event(event) {
+                DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) => {
+                    self.clip_menu = None;
+                    Self::set(host, CLIP_ON.id, if i > 0 { 1.0 } else { 0.0 });
+                    if i > 0 {
+                        Self::set(host, CLIP_CURVE.id, (i - 1) as f32);
+                    }
+                }
+                DropdownEvent::Closed => self.clip_menu = None,
+            }
+            return true;
+        }
+        if let Some(list) = &mut self.dither_menu {
+            if let UiEvent::PointerMove { pos, .. } = *event {
+                self.pointer = Some(pos);
+            }
+            match list.event(event) {
+                DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) => {
+                    self.dither_menu = None;
+                    let (d, sh) = if i == 0 { (0, 0) } else { (1 + (i - 1) / 3, (i - 1) % 3) };
+                    Self::set(host, DITHER.id, d as f32);
+                    Self::set(host, SHAPING.id, sh as f32);
+                }
+                DropdownEvent::Closed => self.dither_menu = None,
+            }
+            return true;
+        }
         if let Some(list) = &mut self.target_menu {
             if let UiEvent::PointerMove { pos, .. } = *event {
                 self.pointer = Some(pos);
@@ -1035,6 +1288,11 @@ impl LimitView {
                         Self::set_raw(host, CEILING.id, CEILING.snap(db.clamp(CEILING.min, CEILING.max)));
                         return true;
                     }
+                    Some(Drag::Clip { start, level }) => {
+                        let db = level - ((pos.y - start.y) / px_per_db()) as f32 * k;
+                        Self::set_raw(host, CLIP_LEVEL.id, CLIP_LEVEL.snap(db.clamp(CLIP_LEVEL.min, CLIP_LEVEL.max)));
+                        return true;
+                    }
                     Some(Drag::Shape { part, start, value }) => {
                         let spec = Self::shape_spec(part);
                         let dx = (pos.x - start.x) as f32 * k;
@@ -1066,6 +1324,10 @@ impl LimitView {
                     host.end_gesture(CEILING.id);
                     true
                 }
+                Some(Drag::Clip { .. }) => {
+                    host.end_gesture(CLIP_LEVEL.id);
+                    true
+                }
                 Some(Drag::Gain { .. }) => {
                     host.end_gesture(GAIN.id);
                     true
@@ -1080,6 +1342,11 @@ impl LimitView {
                 Some(Hot::Ceiling) => {
                     self.end_drag(host);
                     Self::set(host, CEILING.id, CEILING.default);
+                    true
+                }
+                Some(Hot::Clip) => {
+                    self.end_drag(host);
+                    Self::set(host, CLIP_LEVEL.id, CLIP_LEVEL.default);
                     true
                 }
                 Some(Hot::History) => {
@@ -1100,6 +1367,10 @@ impl LimitView {
                     Self::set(host, CEILING.id, CEILING.wheel(Self::plain(host, CEILING.id), lines, mods.fine()));
                     true
                 }
+                Some(Hot::Clip) => {
+                    Self::set(host, CLIP_LEVEL.id, CLIP_LEVEL.wheel(Self::plain(host, CLIP_LEVEL.id), lines, mods.fine()));
+                    true
+                }
                 Some(Hot::History) => {
                     Self::set(host, GAIN.id, GAIN.wheel(Self::plain(host, GAIN.id), lines, mods.fine()));
                     true
@@ -1118,6 +1389,7 @@ impl LimitView {
     fn end_drag(&mut self, host: &dyn ParamHost) {
         match self.drag.take() {
             Some(Drag::Ceiling { .. }) => host.end_gesture(CEILING.id),
+            Some(Drag::Clip { .. }) => host.end_gesture(CLIP_LEVEL.id),
             Some(Drag::Gain { .. }) => host.end_gesture(GAIN.id),
             Some(Drag::Shape { part, .. }) => host.end_gesture(Self::shape_spec(part).id),
             None => {}

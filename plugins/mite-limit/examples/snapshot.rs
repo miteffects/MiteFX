@@ -4,7 +4,9 @@
 //!     cargo run -p mite_limit --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
 //! SNAPSHOT_VARIANT: default, hot (pushed 12 dB), delta, custom, oversampling, quiet (no gain),
-//! targets (the list open), preview (as Spotify plays it), custom-target, broadcast (EBU R128).
+//! targets (the list open), preview (as Spotify plays it), custom-target, broadcast (EBU R128),
+//! clip (pushed, the clipper 1.5 dB over the ceiling), clip-menu and dither-menu (open), unity
+//! (unity gain and protection on).
 //! SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_RANGE=24 picks the level range.
 
 #[path = "common/music.rs"]
@@ -34,7 +36,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let v = |name: &str| variant == name;
 
     let host = memory_host();
-    host.set_plain(GAIN.id, if v("quiet") { 0.0 } else if v("hot") { 12.0 } else { 6.0 });
+    host.set_plain(GAIN.id, if v("quiet") { 0.0 } else if v("hot") || v("clip") { 12.0 } else { 6.0 });
+    if v("clip") || v("clip-menu") {
+        host.set_plain(CLIP_ON.id, 1.0);
+        host.set_plain(CLIP_LEVEL.id, 1.5);
+    }
+    if v("unity") {
+        host.set_plain(UNITY.id, 1.0);
+        host.set_plain(PROTECT.id, 60.0);
+    }
+    if v("dither-menu") {
+        host.set_plain(DITHER.id, 3.0);
+        host.set_plain(SHAPING.id, 2.0);
+    }
     if v("delta") {
         host.set_plain(DELTA.id, 1.0);
     }
@@ -76,6 +90,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if v("targets") {
         view.open_targets(&host);
+    }
+    let click = |view: &mut LimitView, at: Point| {
+        view.event(&UiEvent::PointerDown { pos: at, button: mite_ui::MouseButton::Left, mods }, &host);
+        view.event(&UiEvent::PointerUp { pos: at, button: mite_ui::MouseButton::Left, mods }, &host);
+    };
+    if v("clip-menu") {
+        let at = view.clip_button().center();
+        click(&mut view, at);
+    }
+    if v("dither-menu") {
+        let at = view.dither_button().center();
+        click(&mut view, at);
     }
     view.update_shape(&host);
     if let Ok(p) = std::env::var("SNAPSHOT_HOVER") {

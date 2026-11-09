@@ -297,12 +297,32 @@ telemetry atomics; peak hold with its value in the loudness column (exception).
    only within half the shallower one (exact elsewhere, 0 at rest, never shallower than either,
    so the proof holds). A 4-norm was tried first and dropped: it took up to 0.66 dB more than
    needed under sustained limiting (Dense).
-**Slices 0–3 are the baseline (user, 2026-11-03): 4–8 are deferred**; their parameters stay at
-neutral defaults and the editor does not show them.
+**Slices 0–3 were the baseline (user, 2026-11-03); 4–7 built 2026-11-09** (user: "let's go
+next with enhancing limiter").
 
-4. Unity-gain audition (loudness-matched).
-5. Clipper stage, its line and grip.
-6. Transient protection.
-7. Dither, noise shaping, DC filter.
+4. Unity-gain audition (done 2026-11-09): the limited sound (not the dry, not Delta) turned by
+   the dry input's short-term loudness over the wet's (momentary for the first 3 s), −40…+12 dB,
+   2 s glide, held while either is under −70 LUFS. Tested within 0.5 LU of the input on music
+   pushed 12 dB; the loudness column and the platform gain still read the master (the column
+   measures before unity and the preview; the meters and history show what is heard). A badge
+   on the history while it is on.
+5. Clipper (done 2026-11-09): after the protection, at the engine rate, faded in and out over
+   10 ms, its level gliding. Soft's knee is a quadratic `SOFT_KNEE` = 0.25 of the level each
+   side (rather than cubic: the same no-corner promise, simpler); Round is a tanh from the
+   ceiling into the level. Footer list Off/Hard/Soft/Round (each row draws its knee), the dashed
+   line and grip over the ceiling (drag, wheel, double-click +3 dB), the shaved part hatched in
+   the accent (a flat tint in silver read as more input). With the level at the ceiling (Hard,
+   1×) the limiter takes nothing; above 1× the guard still acts, since a hard clip at the high
+   rate rings through the down filter (1.7 dB on the test material at 2×).
+6. Transient protection (done 2026-11-09): at the base rate before the up filter (cheaper, and
+   the low band is what matters). The bands' share is water-filled (the biggest contributor down
+   to the next one's size first) rather than shared by sign: shared by sign, a hat in phase with
+   the kick took the kick's cut and, through the lookahead's minimum, stayed down (0.50 of its
+   level, as broadband). The output is the bands' sum, an allpass of the input; subtracting
+   each band's share from the input instead (nulls when idle) was tried and dropped: the low
+   band lags the kick, so the peak stayed and the hats ducked again (0.54). Its lookahead adds
+   to the latency while it is on (on/off behind the dip; the amount glides).
+7. Dither, noise shaping, DC filter (done 2026-11-09): `mite_dsp::dither`; one footer list holds
+   the word length and the shaping (10 rows). Off under bypass, so bypass still nulls.
 8. Report and finish: `docs/dsp/limit-truepeak.md` (compliance and CPU per factor), presets,
    `docs/compare/pro-l-2.md`, validators, CI.

@@ -37,6 +37,10 @@ pub enum ToggleGlyph {
     Freeze,
     /// Mute (silence the output, e.g. while tuning): a speaker with a cross.
     Mute,
+    /// Unity-gain audition: a tall and a short bar, met by one level line.
+    Unity,
+    /// DC filter: a wave lifted off the centre line, brought back onto it.
+    DcFilter,
 }
 
 /// A toggle: its parameter (on at ≥ 0.5), glyph, and what the help strip says about it.
@@ -269,6 +273,35 @@ pub fn draw_toggle_glyph(scene: &mut Scene, glyph: ToggleGlyph, c: Point, color:
             cross.move_to((c.x + 8.0, c.y - 3.0));
             cross.line_to((c.x + 2.5, c.y + 3.0));
             scene.stroke(&round, Affine::IDENTITY, color, None, &cross);
+        }
+        ToggleGlyph::Unity => {
+            let mut bars = BezPath::new();
+            bars.move_to((c.x - 4.5, c.y + 7.0));
+            bars.line_to((c.x - 4.5, c.y - 7.0));
+            bars.move_to((c.x + 4.5, c.y + 7.0));
+            bars.line_to((c.x + 4.5, c.y - 1.0));
+            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.5), None, &bars);
+            let mut level = BezPath::new();
+            level.move_to((c.x - 8.5, c.y - 1.0));
+            level.line_to((c.x + 8.5, c.y - 1.0));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &level);
+        }
+        ToggleGlyph::DcFilter => {
+            let wave = |dy: f64| {
+                let mut p = BezPath::new();
+                p.move_to((c.x - 8.0, c.y + dy));
+                p.curve_to((c.x - 5.0, c.y + dy - 5.0), (c.x - 3.0, c.y + dy - 5.0), (c.x, c.y + dy));
+                p.curve_to((c.x + 3.0, c.y + dy + 5.0), (c.x + 5.0, c.y + dy + 5.0), (c.x + 8.0, c.y + dy));
+                p
+            };
+            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.4), None, &wave(-4.0));
+            scene.stroke(&round, Affine::IDENTITY, color, None, &wave(2.5));
+            let mut mid = BezPath::new();
+            mid.move_to((c.x - 9.0, c.y + 2.5));
+            mid.line_to((c.x - 8.0, c.y + 2.5));
+            mid.move_to((c.x + 8.0, c.y + 2.5));
+            mid.line_to((c.x + 9.0, c.y + 2.5));
+            scene.stroke(&round, Affine::IDENTITY, color.multiply_alpha(0.6), None, &mid);
         }
         ToggleGlyph::Bypass => {
             let mut stem = BezPath::new();

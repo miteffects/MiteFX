@@ -16,7 +16,8 @@ fn engine_process_never_allocates() {
     let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
     for i in 0..1600 {
         // Everything switching: oversampling, lookahead, true peak (each behind the dip), styles,
-        // release, links, ceiling, delta, bypass, the loudness reset, mono blocks.
+        // release, links, ceiling, delta, bypass, the loudness reset, mono blocks, and the
+        // clipper, protection, unity, dither and the DC filter.
         s.oversampling = FACTORS[(i / 150) % 5];
         s.lookahead_ms = [0.0, 2.0, 10.0][(i / 70) % 3];
         s.true_peak = (i / 110) % 2 == 0;
@@ -26,6 +27,15 @@ fn engine_process_never_allocates() {
         s.ceiling_db = if (i / 60) % 2 == 0 { -1.0 } else { -6.0 };
         s.delta = (i / 90) % 3 == 2;
         s.bypass = (i / 130) % 4 == 3;
+        // The clipper, protection (on and off: behind the dip), unity, dither, the DC filter.
+        s.clip_on = (i / 45) % 3 != 0;
+        s.clip_curve = (i / 35) % 3;
+        s.clip_db = [0.0, 3.0, 12.0][(i / 55) % 3];
+        s.protect = [0.0, 0.5, 1.0][(i / 95) % 3];
+        s.unity = (i / 65) % 2 == 1;
+        s.dither = (i / 75) % 4;
+        s.shaping = (i / 85) % 3;
+        s.dc_filter = (i / 105) % 2 == 1;
         if i % 200 == 0 {
             tap.reset.store(true, std::sync::atomic::Ordering::Relaxed);
         }
