@@ -14,7 +14,7 @@
 
 use crate::eq::{BandProcessor, BandSettings, BandType};
 use crate::filter::Coeffs;
-use crate::shimmer::Shifter;
+use crate::shimmer::SpectralShifter;
 use crate::smooth::LinearSmoother;
 
 pub const LINES: usize = 32;
@@ -55,8 +55,6 @@ const SIZE_GLIDE_MS: f32 = 200.0;
 const PREDELAY_FADE_MS: f32 = 30.0;
 const FREEZE_MS: f32 = 50.0;
 const DUCK_ATTACK_MS: f32 = 2.0;
-/// The shimmer's grain windows per side, s (different, so the sides' grains never line up).
-const SHIM_WINDOW_S: [f32; 2] = [0.100, 0.113];
 /// What is fed back loses its lows below and its highs above these, Hz (the top after the
 /// shift, 24 dB/oct: the octave over it is 24 dB down, so a pass up darkens and the cascade
 /// fades instead of piling up; what folds over Nyquist is far above it).
@@ -919,7 +917,7 @@ fn unpack(
 /// The shimmer's feedback at 100 % for a 1 s tail (÷ √T60: a longer tail holds more energy). At
 /// 8 s, 100 % blooms about 5–10 dB over the reverb alone and still decays; twice it runs into
 /// the ceiling (measured with `examples/shimmer_probe.rs`, 2026-11-09).
-const SHIM_K: f32 = 2.2;
+const SHIM_K: f32 = 1.8;
 
 /// The shimmer's feedback gain for `amount` (0…1) at a decay of `decay_s`, shifting by
 /// `semitones`. Under two semitones it fades out: unshifted, the feedback lands on the tail's
@@ -992,7 +990,7 @@ pub struct Reverb {
     /// Shimmer: the shifters, what goes back in next sample, the band's filter states per side
     /// (low cut, two lowpass poles), the feedback gain (as `er`), the ratio, its lowpass
     /// coefficient, and the fixed coefficients (low cut, glide).
-    shift: [Shifter; 2],
+    shift: SpectralShifter,
     shim_fb: [f32; 2],
     shim_f: [[f32; 5]; 2],
     shim: [f32; 2],
@@ -1043,7 +1041,7 @@ impl Reverb {
             duck_k: 1.0 - (-1.0 / (0.003 * fs)).exp(),
             phase: 0,
             designed: None,
-            shift: std::array::from_fn(|c| Shifter::new(fs, SHIM_WINDOW_S[c])),
+            shift: SpectralShifter::new(fs),
             shim_fb: [0.0; 2],
             shim_f: [[0.0; 5]; 2],
             shim: [0.0; 2],
@@ -1099,9 +1097,7 @@ impl Reverb {
         self.phase = 0;
         self.duck_g = 1.0;
         self.designed = None;
-        for sh in &mut self.shift {
-            sh.reset();
-        }
+        self.shift.reset();
         self.shim_fb = [0.0; 2];
         self.shim_f = [[0.0; 5]; 2];
         self.control(s, true);
@@ -1353,10 +1349,17 @@ impl Reverb {
             if shimmering {
                 let g = lerp(self.shim);
                 let (lc, [b0, b1, b2, a1, a2]) = (self.shim_k.0, self.shim_lp);
+                let mut pre = [0.0f32; 2];
                 for (c, x) in [ol * OUT_GAIN, or * OUT_GAIN].into_iter().enumerate() {
                     let f = &mut self.shim_f[c];
                     f[0] += (x - f[0]) * lc;
-                    let mut v = self.shift[c].process(x - f[0], self.shim_ratio);
+                    pre[c] = x - f[0];
+                }
+                let [pl, pr] = &mut pre;
+                self.shift.process(std::slice::from_mut(pl), std::slice::from_mut(pr), self.shim_ratio);
+                for (c, &shifted) in pre.iter().enumerate() {
+                    let f = &mut self.shim_f[c];
+                    let mut v = shifted;
                     // After the shift: what goes back in stays under the top.
                     for z in [1, 3] {
                         let y = b0 * v + f[z];
