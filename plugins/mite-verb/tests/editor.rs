@@ -265,3 +265,21 @@ fn the_shimmer_type_brings_its_panel_and_takes_it_away() {
     view.tick(&host);
     assert!(view.dial("shimmer").is_none());
 }
+
+#[test]
+fn picking_shimmer_brings_its_amount_back() {
+    let (mut view, host) = setup();
+    host.set_plain("shimmer", 0.0);
+    let button = Point::new(96.0, 735.0);
+    view.event(&UiEvent::PointerMove { pos: button, mods: MODS }, &host);
+    view.event(&UiEvent::PointerDown { pos: button, button: MouseButton::Left, mods: MODS }, &host);
+    view.event(&UiEvent::PointerUp { pos: button, button: MouseButton::Left, mods: MODS }, &host);
+    let rows = view.menu_rows();
+    assert_eq!(rows.len(), 6, "the type menu");
+    let pick = rows[5].center();
+    view.event(&UiEvent::PointerMove { pos: pick, mods: MODS }, &host);
+    view.event(&UiEvent::PointerDown { pos: pick, button: MouseButton::Left, mods: MODS }, &host);
+    view.event(&UiEvent::PointerUp { pos: pick, button: MouseButton::Left, mods: MODS }, &host);
+    assert_eq!(plain(&host, "reverb_type"), 5.0);
+    assert_eq!(plain(&host, "shimmer"), 50.0);
+}

@@ -34,11 +34,15 @@ pub fn v5_to_v6(_state: &mut PluginState) {}
 /// **6 → 7 (2026-11-09): shimmer is a type.** Version 6 ran a shimmer plate beside the room
 /// whenever `shimmer` was above 0; version 7 has a Shimmer type instead. A state with shimmer on
 /// becomes that type (the nearest sound: the room it ran beside goes); one with it off keeps its
-/// type and gets `shimmer` back at 0 (which only the Shimmer type reads).
+/// type, and its `shimmer` (now the Shimmer type's AMOUNT, read by no other type) goes to the
+/// default: kept at 0, picking the Shimmer type later gave a plain plate (user: "shimmer
+/// doesnt work", 2026-11-09).
 pub fn v6_to_v7(state: &mut PluginState) {
     let on = matches!(state.params.get("shimmer"), Some(ParamValue::F32(v)) if *v > 0.0);
     if on {
         state.params.insert("reverb_type".to_owned(), ParamValue::I32(mite_dsp::reverb::ReverbKind::Shimmer.index() as i32));
+    } else {
+        state.params.insert("shimmer".to_owned(), ParamValue::F32(crate::params::SHIMMER.default));
     }
 }
 
@@ -216,5 +220,7 @@ mod tests {
         let mut off = state(&[("shimmer", ParamValue::F32(0.0)), ("reverb_type", ParamValue::I32(1))]);
         v6_to_v7(&mut off);
         assert_eq!(val(&off.params, "reverb_type"), Some(1.0));
+        // Off, its amount comes back to the default, so the Shimmer type is never silent.
+        assert_eq!(val(&off.params, "shimmer"), Some(crate::params::SHIMMER.default));
     }
 }

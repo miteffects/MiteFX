@@ -980,6 +980,12 @@ impl VerbView {
                         host.begin_gesture(REVERB_TYPE.id);
                         Self::set(host, REVERB_TYPE.id, i as f32);
                         host.end_gesture(REVERB_TYPE.id);
+                        // Shimmer at AMOUNT 0 is a plain plate: picking it brings the amount back.
+                        if i == mite_dsp::reverb::ReverbKind::Shimmer.index() && Self::plain(host, SHIMMER.id) <= 0.0 {
+                            host.begin_gesture(SHIMMER.id);
+                            Self::set(host, SHIMMER.id, SHIMMER.default);
+                            host.end_gesture(SHIMMER.id);
+                        }
                     }
                     MenuFor::New(layer, at) => {
                         self.add_band(host, layer, i, at);
