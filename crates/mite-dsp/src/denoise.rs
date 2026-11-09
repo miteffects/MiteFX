@@ -51,6 +51,8 @@ const ADAPT_BIAS: f64 = 20.0;
 /// at 0.8 both ways a voice 48 dB over the noise fell only 19 dB through a 0.23 s pause, so its
 /// harmonics never reached the floor and the tracker took the voice for noise (2026-11-09).
 const ADAPT_SMOOTH: (f64, f64) = (0.8, 0.4);
+/// A frame whose every bin is under this power (−140 dB of full scale) is digital silence.
+const SILENCE_POWER: f64 = 1e-14;
 /// Frames a learned profile needs at least.
 pub const MIN_LEARN_FRAMES: usize = 8;
 
@@ -212,6 +214,19 @@ impl Core {
             let p = if mono { left[k].norm_sqr() } else { 0.5 * (left[k].norm_sqr() + right[k].norm_sqr()) };
             self.power[k] = p * self.scale;
         }
+        // Digital silence (an edit's gap, the STFT filling) says nothing about the noise: the
+        // tracker and learning skip it. Taken in, it pulled the floor to nothing and the noise
+        // came back unreduced for over 2 s after a 1 s gap (2026-11-09).
+        let silent = self.power.iter().all(|&p| p < SILENCE_POWER);
+        if !silent {
+            self.track();
+        }
+        self.finish(left, right, s);
+    }
+
+    /// The learning sum and the adaptive floor, for a frame that is not silent.
+    fn track(&mut self) {
+        let bins = self.power.len();
         self.frames += 1;
         if self.learning {
             for (a, p) in self.learn_acc.iter_mut().zip(&self.power) {
@@ -235,12 +250,18 @@ impl Core {
             self.slot = (self.slot + 1) % ADAPT_SUBS;
             self.sub_frames = 0;
         }
-        let mean_c = (self.hop as f64 / (ADAPT_S * self.sample_rate)).min(1.0);
+        // A running average until the memory is full, so it settles as fast as it can.
+        let mean_c = (self.hop as f64 / (ADAPT_S * self.sample_rate)).max(1.0 / self.frames as f64).min(1.0);
         for k in 0..bins {
             self.mean[k] = if self.frames == 1 { self.power[k] } else { self.mean[k] + (self.power[k] - self.mean[k]) * mean_c };
             let held = self.ring[k * ADAPT_SUBS..(k + 1) * ADAPT_SUBS].iter().fold(self.sub_min[k], |m, &v| m.min(v));
             self.tracked[k] = if held.is_finite() && held > 0.0 { held * (self.mean[k] / held).clamp(1.0, ADAPT_BIAS) } else { 0.0 };
         }
+    }
+
+    /// The gains from the floor, applied, and the display.
+    fn finish(&mut self, left: &mut [Complex<f64>], right: &mut [Complex<f64>], s: &DenoiseSettings) {
+        let bins = left.len();
         let have_floor = s.adaptive || self.has_learned;
         for k in 0..bins {
             self.floor[k] = if s.adaptive { self.tracked[k] } else if self.has_learned { self.learned[k] } else { 0.0 };
@@ -693,5 +714,22 @@ mod tests {
         let over = shown.noise[i] - shown.input[i];
         // Measured 2026-11-09: 0.2 dB under (a fixed lift of 13.8 put it 11 dB over).
         assert!(over.abs() < 2.0, "the floor {over:.1} dB off the hum");
+    }
+
+    #[test]
+    fn a_gap_of_digital_silence_leaves_the_adaptive_floor_alone() {
+        let mut d = Denoiser::new(FS);
+        let s = DenoiseSettings::default();
+        let mut l = noise(96_000, 3, 0.01);
+        l.extend(vec![0.0; 48_000]);
+        l.extend(noise(48_000, 9, 0.01));
+        let src = l.clone();
+        let mut r = l.clone();
+        run(&mut d, &mut l, &mut r, &s);
+        let lat = d.latency();
+        // 0.1–0.4 s after the noise comes back.
+        let (a, b) = (144_000 + 4800, 144_000 + 19_200);
+        let cut = 20.0 * (rms(&l[a + lat..b + lat]) / rms(&src[a..b])).log10();
+        assert!(cut < -9.0, "{cut:.1} dB");
     }
 }
