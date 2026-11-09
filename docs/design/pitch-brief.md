@@ -132,7 +132,7 @@ REAPER config folder, `-cfgfile`, a `__startup.lua` that adds the FX, gdb with b
 the addresses above.
 
 ARA over CLAP is now off unless `MITE_PITCH_CLAP_ARA` is set. Next: A6, ARA over VST3 (REAPER's
-mature ARA path), and report the CLAP crash to Cockos.
+mature ARA path), and report the CLAP crash to Cockos. The report, ready to post: `reaper-clap-ara-report.md`.
 
 ### 1d. ARA over VST3 (A6, 2026-11-05)
 

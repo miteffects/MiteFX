@@ -503,6 +503,19 @@ unstretched, and level edits reach it. On the user's vocal the energy outside an
 6.7 % to 0.9 % (room tone, long breaths); the editor draws them as a faint lead-in and tail
 (`examples/melody_gaps`). User confirmed ARA over VST3 works in REAPER (c61d2e1).
 
+**2026-11-09 (user: "go with everything"):** (1) **Edits play at once under ARA:** the editor
+instance shares its render through the document (`Document::share`, keyed by the modification's
+state); the hidden player takes it instead of rendering the whole clip again (~2 s on a 4-minute
+vocal); without it, the player re-renders only the notes whose edits changed. (2) **The whole
+track:** the editor shows every clip on its track in its place on the song, the current one in the
+accent, the others faint (notes, curves, waveform); a click edits another clip, the view, cursor
+and loop staying on the song, each clip with its own undo; a clip's notes outside its region are
+hidden; unedited clips need no render. (3) **Bars and beats:** the tempo map and bar signatures
+from the ARA musical context (host content access, model thread) or, without ARA, the transport
+(`grid::Grid`); the ruler counts bars and beats, a timing drag puts the note's start on the nearest
+line (Alt or snap off: free). (4) The CLAP crash written up for Cockos:
+`docs/design/reaper-clap-ara-report.md` (not posted: the user posts it).
+
 ### 15. Mite Amp (later)
 
 - NAM neural amp models (A1 and A2).
