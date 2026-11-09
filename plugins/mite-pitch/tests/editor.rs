@@ -412,3 +412,71 @@ fn the_ruler_sets_the_cursor_and_the_loop_and_space_plays() {
     assert!(!s.local_play.load(Ordering::Acquire));
     draw(&mut view, &host);
 }
+
+/// Clicks at `pos` (a press and a release) and lets the session's worker catch up.
+fn click_and_settle(view: &mut PitchView, host: &MemoryParamHost, s: &mite_pitch::session::Session, pos: Point) {
+    view.event(&UiEvent::PointerMove { pos, mods: MODS }, host);
+    view.event(&UiEvent::PointerDown { pos, button: MouseButton::Left, mods: MODS }, host);
+    view.event(&UiEvent::PointerUp { pos, button: MouseButton::Left, mods: MODS }, host);
+    assert!(s.wait_idle(std::time::Duration::from_secs(30)));
+    view.tick(host);
+    draw(view, host);
+}
+
+#[test]
+fn bound_to_ara_the_whole_track_shows_and_a_click_edits_another_clip() {
+    use mite_ara::testing::{Audio, TestHost};
+    use mite_dsp::melody::NoteEdit;
+    use std::time::Duration;
+    let x = take();
+    let dur = x.len() as f64 / FS;
+    let mut ara = TestHost::new(mite_ara::factory(&mite_pitch::ara::INFO));
+    let (_, md_a, rg_a) = ara.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-a", c"mod-a", 1.0, 0.0, dur);
+    let (_, _, rg_b) = ara.add_clip(Audio { fs: FS, l: x.clone(), r: x.clone() }, c"src-b", c"mod-b", 1.0 + dur + 1.0, 0.0, dur);
+    let s = session("ed-track");
+    // As REAPER's visible FX: the editor roles and the track.
+    let inst = unsafe { mite_ara::bind(ara.dc, 7, 6) };
+    ara.show_track(inst.extension());
+    assert!(inst.document.wait_reads(Duration::from_secs(10)));
+    s.bind_ara(inst);
+    assert!(s.wait_idle(Duration::from_secs(30)));
+    let shared = Arc::new(PitchShared { session: s.clone(), sample_rate: mite_core::AtomicF32::new(FS as f32) });
+    let host = memory_host();
+    let mut view = PitchView::new(shared);
+    view.tick(&host);
+    draw(&mut view, &host);
+    let (id_a, id_b) = (mite_ara::document::region_id(rg_a), mite_ara::document::region_id(rg_b));
+    // The first clip is edited; the second is drawn beside it.
+    assert_eq!(s.take().expect("take").start, FS as i64);
+    let others = s.others();
+    assert_eq!(others.iter().map(|o| o.region).collect::<Vec<_>>(), vec![id_b]);
+    // Edit a note of the first clip.
+    s.set_edit(0, NoteEdit { shift_cents: 100.0, ..NoteEdit::default() });
+    assert!(s.wait_idle(Duration::from_secs(30)));
+    // Zoom out over both and click the second clip's first note.
+    let ctrl = Modifiers { ctrl: true, ..MODS };
+    view.event(&UiEvent::Wheel { pos: Point::new(700.0, 300.0), lines: -8.0, mods: ctrl }, &host);
+    let o = &others[0];
+    let n = &o.analysis.notes[0];
+    let t = o.song_s - 1.0 + (n.start + n.end) as f64 / 2.0 / FS;
+    let p = Point::new(view.x_of(t), view.y_of(n.cents));
+    let x_before = view.x_of(t);
+    click_and_settle(&mut view, &host, &s, p);
+    // Now the second clip is edited, at its place on the song; the view did not move.
+    assert_eq!(s.take().expect("take").start, ((1.0 + dur + 1.0) * FS).round() as i64);
+    assert!((view.x_of(t - (dur + 1.0)) - x_before).abs() < 1e-6, "the view stayed on the song");
+    assert_eq!(s.others().iter().map(|o| o.region).collect::<Vec<_>>(), vec![id_a]);
+    assert!(s.edits().iter().all(NoteEdit::is_neutral), "the second clip has its own edits");
+    // The first clip kept its edit (drawn faint now), in the document too.
+    assert_eq!(s.others()[0].edits[0].shift_cents, 100.0);
+    let md_a = mite_ara::document::region_id(md_a.cast());
+    let state_a = s.ara().expect("bound").document.snapshot().modifications[&md_a].state.clone();
+    assert!(state_a.contains("100"), "{state_a}");
+    // Click back on the first clip: its edit is there.
+    let t_a = 1.0 + (s.others()[0].analysis.notes[2].start as f64) / FS - s.take().expect("take").start as f64 / FS + 0.05;
+    let n2 = &s.others()[0].analysis.notes[2];
+    let p = Point::new(view.x_of(t_a), view.y_of(n2.cents));
+    click_and_settle(&mut view, &host, &s, p);
+    assert_eq!(s.take().expect("take").start, FS as i64);
+    assert_eq!(s.edits()[0].shift_cents, 100.0);
+}

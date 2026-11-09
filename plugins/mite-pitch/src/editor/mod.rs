@@ -11,8 +11,11 @@
 //! TRANSFER, the snap (semitones, the key's scale, free), the key, and the Correct macro (Centre:
 //! the selection, or every note, pulled onto the snap; Drift: their slow drift taken out).
 //! Wheel: scroll in time (Ctrl: zoom, Shift: pitch). Ctrl+Z / Ctrl+Shift+Z: undo, redo.
+//!
+//! Bound to ARA, the editor shows the whole track: the other clips on it sit in their places on
+//! the song, faint; a click on one makes it the clip being edited (each clip keeps its own undo).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -29,7 +32,7 @@ use mite_ui::widgets::{Footer, FooterToggle, Help, ToggleGlyph};
 use mite_ui::{Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, TextStyle, UiEvent, View};
 
 use crate::params::BYPASS;
-use crate::session::{Snap, Snapshot, Status};
+use crate::session::{OtherClip, Snap, Snapshot, Status};
 use crate::PitchShared;
 
 /// Mite Pitch wears the Pitch accent (tokens.json `color.accent.pitch`, blush).
@@ -174,6 +177,8 @@ enum Hot {
     Ruler,
     Play,
     Loop,
+    /// Another clip on the track (ARA), by its playback region: a click edits it.
+    Clip(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -233,6 +238,10 @@ pub struct PitchView {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     seen_version: u64,
+    /// The take shown (its id and where it starts on the song, s), and the undo and redo of the
+    /// other takes edited (ARA: each clip keeps its own).
+    take_seen: Option<(String, f64)>,
+    stacks: HashMap<String, (Vec<Snapshot>, Vec<Snapshot>)>,
 }
 
 impl PitchView {
@@ -260,6 +269,8 @@ impl PitchView {
             undo: Vec::new(),
             redo: Vec::new(),
             seen_version: 0,
+            take_seen: None,
+            stacks: HashMap::new(),
         }
     }
 
@@ -347,8 +358,10 @@ impl PitchView {
         let mid = 0.5 * (lo + hi);
         let half = (0.5 * (hi - lo)).max(0.5 * MIN_PITCH_SPAN);
         self.pitch = (mid - half, mid + half);
-        self.t0 = (a.notes[0].start as f64 / a.fs - 0.5).max(0.0);
-        let last = a.notes.last().map_or(0.0, |n| n.end as f64 / a.fs);
+        let clip: Vec<&Note> = a.notes.iter().filter(|n| self.in_clip(n)).collect();
+        let (Some(first), Some(last)) = (clip.first(), clip.last()) else { return };
+        self.t0 = (first.start as f64 / a.fs - 0.5).max(self.extent().0);
+        let last = last.end as f64 / a.fs;
         self.span = (last + 0.5 - self.t0).clamp(2.0, SPAN_S);
     }
 
@@ -365,10 +378,79 @@ impl PitchView {
     }
 
     fn rect_of(&self, n: &Note, e: &NoteEdit, fs: f64) -> Rect {
+        self.rect_at(n, e, fs, 0.0)
+    }
+
+    /// As [`Self::rect_of`] for a note of a take that starts `shift` s after the shown one.
+    fn rect_at(&self, n: &Note, e: &NoteEdit, fs: f64, shift: f64) -> Rect {
         let (s, t) = Self::span_of(n, e, fs);
+        let (s, t) = (s + shift, t + shift);
         let yc = self.y_of(n.cents + e.shift_cents);
         let h = (self.row_h() * 0.8).clamp(6.0, 22.0);
         Rect::new(self.x_of(s), yc - h / 2.0, self.x_of(t).max(self.x_of(s) + 3.0), yc + h / 2.0)
+    }
+
+    /// Where the shown take starts on the song, s (0 without ARA: the take's own time).
+    fn take_song_s(&self) -> f64 {
+        let s = &self.shared.session;
+        match (s.ara(), s.take()) {
+            (Some(_), Some(t)) => t.start as f64 / t.sample_rate,
+            _ => 0.0,
+        }
+    }
+
+    /// Whether note `n` lies in the current clip (ARA: the region's part of the take; the rest of
+    /// the take belongs to other clips or to none).
+    fn in_clip(&self, n: &Note) -> bool {
+        self.shared.session.clip().is_none_or(|(from, to)| n.end > from && n.start < to)
+    }
+
+    /// An other clip's offset from the shown take, s.
+    fn shift_of(&self, o: &OtherClip) -> f64 {
+        o.song_s - self.take_song_s()
+    }
+
+    /// The times the view may scroll over, s of the take: the take, and the other clips.
+    fn extent(&self) -> (f64, f64) {
+        let s = &self.shared.session;
+        let len = s.take().map_or(SPAN_S, |t| t.len as f64 / t.sample_rate);
+        let (mut lo, mut hi) = match s.clip() {
+            Some((a, b)) => {
+                let fs = s.take().map_or(48_000.0, |t| t.sample_rate);
+                (a as f64 / fs, b as f64 / fs)
+            }
+            None => (0.0, len),
+        };
+        for o in s.others().iter() {
+            let (sh, fs) = (self.shift_of(o), o.analysis.fs);
+            lo = lo.min(sh + o.from as f64 / fs);
+            hi = hi.max(sh + o.to as f64 / fs);
+        }
+        (lo, hi)
+    }
+
+    /// The other clip at `p` (in the roll): one whose note is under it, else one whose stretch
+    /// of the song it is in.
+    fn clip_at(&self, p: Point) -> Option<u64> {
+        let s = &self.shared.session;
+        let others = s.others();
+        let t = self.t_of(p.x);
+        others
+            .iter()
+            .find(|o| {
+                let sh = self.shift_of(o);
+                o.analysis.notes.iter().enumerate().filter(|(_, n)| n.end > o.from && n.start < o.to).any(|(i, n)| self.rect_at(n, &o.edits.get(i).copied().unwrap_or_default(), o.analysis.fs, sh).inflate(2.0, 3.0).contains(p))
+            })
+            .or_else(|| {
+                // In a clip's stretch, and not in the current clip's.
+                let fs = s.take().map_or(48_000.0, |t| t.sample_rate);
+                let in_current = s.clip().is_some_and(|(a, b)| t >= a as f64 / fs && t < b as f64 / fs);
+                (!in_current).then(|| others.iter().find(|o| {
+                    let sh = self.shift_of(o);
+                    t >= sh + o.from as f64 / o.analysis.fs && t < sh + o.to as f64 / o.analysis.fs
+                })).flatten()
+            })
+            .map(|o| o.region)
     }
 
     fn hot_at(&self, p: Point) -> Option<Hot> {
@@ -402,12 +484,12 @@ impl PitchView {
         if !ROLL.contains(p) {
             return None;
         }
-        let a = self.shared.session.analysis()?;
+        let Some(a) = self.shared.session.analysis() else { return self.clip_at(p).map(Hot::Clip) };
         let edits = self.shared.session.edits();
         let e = |i: usize| edits.get(i).copied().unwrap_or_default();
         if self.tool == Tool::Split {
             // Where two notes meet (as drawn), within a few pixels.
-            for i in 0..a.notes.len().saturating_sub(1) {
+            for i in (0..a.notes.len().saturating_sub(1)).filter(|&i| self.in_clip(&a.notes[i]) && self.in_clip(&a.notes[i + 1])) {
                 let (r0, r1) = (self.rect_of(&a.notes[i], &e(i), a.fs), self.rect_of(&a.notes[i + 1], &e(i + 1), a.fs));
                 if (r1.x0 - r0.x1).abs() < 4.0 && (p.x - r0.x1).abs() < 5.0 && p.y > r0.y0.min(r1.y0) - 4.0 && p.y < r0.y1.max(r1.y1) + 4.0 {
                     return Some(Hot::Seam(i));
@@ -415,7 +497,9 @@ impl PitchView {
             }
         }
         // The topmost (last drawn) note under the pointer, a little forgiving.
-        let i = (0..a.notes.len()).rev().find(|&i| self.rect_of(&a.notes[i], &e(i), a.fs).inflate(2.0, 3.0).contains(p))?;
+        let Some(i) = (0..a.notes.len()).rev().find(|&i| self.in_clip(&a.notes[i]) && self.rect_of(&a.notes[i], &e(i), a.fs).inflate(2.0, 3.0).contains(p)) else {
+            return self.clip_at(p).map(Hot::Clip);
+        };
         let r = self.rect_of(&a.notes[i], &e(i), a.fs);
         if self.tool == Tool::Main && r.width() > 3.0 * EDGE_GRIP {
             if p.x < r.x0 + EDGE_GRIP {
@@ -444,10 +528,15 @@ impl PitchView {
     fn targets(&self) -> Vec<usize> {
         let n = self.shared.session.analysis().map_or(0, |a| a.notes.len());
         if self.selected.is_empty() {
-            (0..n).collect()
+            self.clip_notes()
         } else {
             self.selected.iter().copied().filter(|&i| i < n).collect()
         }
+    }
+
+    /// The current clip's notes.
+    fn clip_notes(&self) -> Vec<usize> {
+        self.shared.session.analysis().map(|a| (0..a.notes.len()).filter(|&i| self.in_clip(&a.notes[i])).collect()).unwrap_or_default()
     }
 
     fn select(&mut self, i: usize, mods: Modifiers) {
@@ -486,8 +575,10 @@ impl PitchView {
     fn set_cue(&mut self, t: f64) {
         let s = &self.shared.session;
         let Some(take) = s.take() else { return };
-        let k = (t.max(0.0) * take.sample_rate) as i64;
-                s.cue.store(k.min(take.len as i64), Ordering::Release);
+        let k = (t * take.sample_rate) as i64;
+        // The plugin's own transport plays the take; the host's, the whole song.
+        let k = if s.ara().is_some() { k } else { k.clamp(0, take.len as i64) };
+        s.cue.store(k, Ordering::Release);
         s.seek.store(true, Ordering::Release);
         // Bound to ARA: the host's transport goes there.
         if let Some(inst) = s.ara() {
@@ -627,16 +718,19 @@ impl PitchView {
         // The ruler: seconds from the take's start (a step that keeps labels apart).
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &RULER);
         let step = [0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0].into_iter().find(|s| s / self.span * ROLL.width() >= 70.0).unwrap_or(120.0);
-        let mut k = (self.t0 / step).ceil() as i64;
+        // Lines on round song times.
+        let origin = self.take_song_s();
+        let mut k = ((self.t0 + origin) / step).ceil() as i64;
         let mut guard = 0;
-        while (k as f64) * step <= self.t0 + self.span && guard < 200 {
-            let t = k as f64 * step;
+        while (k as f64) * step - origin <= self.t0 + self.span && guard < 200 {
+            let t = k as f64 * step - origin;
             let x = self.x_of(t);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((x, ROLL.y0), (x, ROLL.y1)));
             if x + 44.0 > ROLL.x1 {
                 break;
             }
-            let label = if step < 1.0 { format!("{t:.2} s") } else { format!("{t:.0} s") };
+            let song = t + self.take_song_s();
+            let label = if step < 1.0 { format!("{song:.2} s") } else { format!("{song:.0} s") };
             cx.text.draw(cx.scene, &label, x + 4.0, RULER.y0 + 6.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(10.0) }, theme.text_lo, Align::Left);
                         k += 1;
             guard += 1;
@@ -678,7 +772,11 @@ impl PitchView {
         let loud = a.notes.iter().map(|n| n.db).fold(f64::MIN, f64::max);
         cx.begin_clip(&ROLL);
         let (v0, v1) = (self.t0, self.t0 + self.span);
+        self.draw_others(cx);
         for (i, n) in a.notes.iter().enumerate() {
+            if !self.in_clip(n) {
+                continue;
+            }
             let e = edits.get(i).copied().unwrap_or_default();
                         let (ts, te) = Self::span_of(n, &e, a.fs);
             let (lead_s, tail_s) = (n.lead as f64 / a.fs, n.tail as f64 / a.fs);
@@ -795,29 +893,85 @@ impl PitchView {
         cx.end_clip();
     }
 
-        /// The waveform lane: what plays (the rendered take), one low–high line per pixel.
-    fn draw_lane(&self, cx: &mut DrawCx<'_>) {
+    /// The other clips on the track (ARA), faint, where they sit on the song; and the song outside
+    /// the current clip a little darker.
+    fn draw_others(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &LANE);
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((LANE.x0, LANE.y0 + 0.5), (LANE.x1, LANE.y0 + 0.5)));
         let s = &self.shared.session;
-        let (Some(t), peaks) = (s.take(), s.peaks()) else { return };
+        let others = s.others();
+        if let (Some((a, b)), Some(t)) = (s.clip(), s.take()) {
+            let (xa, xb) = (self.x_of(a as f64 / t.sample_rate).clamp(ROLL.x0, ROLL.x1), self.x_of(b as f64 / t.sample_rate).clamp(ROLL.x0, ROLL.x1));
+            for r in [Rect::new(ROLL.x0, ROLL.y0, xa, ROLL.y1), Rect::new(xb, ROLL.y0, ROLL.x1, ROLL.y1)] {
+                if r.width() > 0.0 {
+                    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well.multiply_alpha(0.35), None, &r);
+                }
+            }
+        }
+        let (v0, v1) = (self.t0, self.t0 + self.span);
+        for o in others.iter() {
+            let sh = self.shift_of(o);
+            let a = &o.analysis;
+            if sh + o.to as f64 / a.fs < v0 || sh + o.from as f64 / a.fs > v1 {
+                continue;
+            }
+            let hot = self.hot == Some(Hot::Clip(o.region));
+            let ink = if hot { theme.text_hi } else { theme.text_mid };
+            for (i, n) in a.notes.iter().enumerate().filter(|(_, n)| n.end > o.from && n.start < o.to) {
+                let e = o.edits.get(i).copied().unwrap_or_default();
+                let r = self.rect_at(n, &e, a.fs, sh);
+                if r.x1 < ROLL.x0 || r.x0 > ROLL.x1 {
+                    continue;
+                }
+                let rr = RoundedRect::from_rect(r, r.height() / 2.0);
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, ink.multiply_alpha(if hot { 0.2 } else { 0.1 }), None, &rr);
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, ink.multiply_alpha(if hot { 0.55 } else { 0.3 }), None, &rr);
+                let mut curve = BezPath::new();
+                let mut started = false;
+                for (f, d) in n.drift.iter().enumerate() {
+                    let t_in = (f * a.hop) as f64;
+                    if !a.frames.get((n.start + f * a.hop) / a.hop).is_some_and(|fr| fr.cents.is_some()) {
+                        started = false;
+                        continue;
+                    }
+                    let c = n.cents + d + pitch_offset(a, &o.edits, i, n.start as f64 + t_in);
+                    let p = Point::new(self.x_of(sh + (n.start as f64 + e.offset + t_in * e.stretch) / a.fs), self.y_of(c));
+                    if started {
+                        curve.line_to(p);
+                    } else {
+                        curve.move_to(p);
+                        started = true;
+                    }
+                }
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, ink.multiply_alpha(if hot { 0.6 } else { 0.35 }), None, &curve);
+            }
+        }
+    }
+
+    /// One take's waveform in the lane: `peaks` of a take starting `shift` s after the shown one,
+    /// over its samples `from..to`.
+    fn draw_peaks(&self, cx: &mut DrawCx<'_>, peaks: &[(f32, f32)], fs: f64, shift: f64, (from, to): (usize, usize), ink: mite_ui::peniko::Color) {
         if peaks.is_empty() {
             return;
         }
-        let per_s = t.sample_rate / crate::session::PEAK_HOP as f64;
+        let per_s = fs / crate::session::PEAK_HOP as f64;
         let mid = LANE.center().y;
         let half = LANE.height() / 2.0 - 4.0;
+        let x0 = self.x_of(shift + from as f64 / fs).max(LANE.x0).floor();
+        let x1 = self.x_of(shift + to as f64 / fs).min(LANE.x1).ceil();
+        if x1 <= x0 {
+            return;
+        }
+        let (lo_k, hi_k) = (from / crate::session::PEAK_HOP, to.div_ceil(crate::session::PEAK_HOP).min(peaks.len()));
         let mut top = BezPath::new();
         let mut bottom: Vec<Point> = Vec::new();
-        let columns = LANE.width() as usize;
-        for c in 0..columns {
-            let x = LANE.x0 + c as f64;
+        let columns = (x1 - x0) as usize;
+        for c in 0..=columns {
+            let x = x0 + c as f64;
             // At least 10 ms around the column (longer than a sung period): no notches between pulses.
             let reach = (0.005 * per_s).max(0.5 * (self.t_of(x + 1.0) - self.t_of(x)) * per_s);
-            let centre = self.t_of(x + 0.5) * per_s;
-            let (a, b) = ((centre - reach).max(0.0) as usize, (centre + reach).max(0.0) as usize);
-            let (lo, hi) = peaks.get(a.min(peaks.len())..(b + 1).min(peaks.len())).unwrap_or(&[]).iter().fold((0.0f32, 0.0f32), |(l, h), p| (l.min(p.0), h.max(p.1)));
+            let centre = (self.t_of(x + 0.5) - shift) * per_s;
+            let (a, b) = (((centre - reach).max(0.0) as usize).max(lo_k), ((centre + reach).max(0.0) as usize + 1).min(hi_k));
+            let (lo, hi) = peaks.get(a.min(b)..b).unwrap_or(&[]).iter().fold((0.0f32, 0.0f32), |(l, h), p| (l.min(p.0), h.max(p.1)));
             let p = Point::new(x, mid - f64::from(hi.clamp(0.0, 1.0)) * half);
             if c == 0 {
                 top.move_to(p);
@@ -830,7 +984,25 @@ impl PitchView {
             top.line_to(*p);
         }
         top.close_path();
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.45), None, &top);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, ink, None, &top);
+    }
+
+    /// The waveform lane: what plays (the rendered take; bound to ARA the current clip, and the
+    /// track's other clips faint), one low–high line per pixel.
+    fn draw_lane(&self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &LANE);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((LANE.x0, LANE.y0 + 0.5), (LANE.x1, LANE.y0 + 0.5)));
+        let s = &self.shared.session;
+        let Some(t) = s.take() else { return };
+        cx.begin_clip(&LANE);
+        for o in s.others().iter() {
+            self.draw_peaks(cx, &o.peaks, o.analysis.fs, self.shift_of(o), (o.from, o.to), theme.text_mid.multiply_alpha(0.3));
+        }
+        let peaks = s.peaks();
+        let range = s.clip().unwrap_or((0, t.len));
+        self.draw_peaks(cx, &peaks, t.sample_rate, 0.0, range, theme.accent.multiply_alpha(0.45));
+        cx.end_clip();
                 if let Some(at) = self.playing_at() {
             if (self.t0..=self.t0 + self.span).contains(&at) {
                 let x = self.x_of(at);
@@ -959,6 +1131,7 @@ impl PitchView {
         match self.hot {
                         Some(Hot::Seam(_)) => Help::default().text("Click to join these two notes"),
             Some(Hot::Ruler) => Help::default().text("Click: the play cursor here; drag: a loop range"),
+            Some(Hot::Clip(_)) => Help::default().text("Another clip on this track — click to edit its notes"),
                         Some(Hot::Play) if self.shared.session.ara().is_some() => Help::default().text("Play from the cursor, or stop (Space) — the host's transport"),
             Some(Hot::Play) => Help::default().text("Play from the cursor, or stop (Space) — the plugin plays the take itself while the host is stopped"),
             Some(Hot::Loop) => Help::default().text("Loop the range on the ruler (L); drag along the ruler to set it"),
@@ -1115,7 +1288,7 @@ impl PitchView {
                 true
             }
             UiEvent::KeyDown { key: Key::Character('a' | 'A'), mods } if mods.ctrl => {
-                self.selected = (0..session.analysis().map_or(0, |a| a.notes.len())).collect();
+                self.selected = self.clip_notes().into_iter().collect();
                 true
             }
                         UiEvent::KeyDown { key: Key::Character(' '), mods } if !mods.ctrl && session.take().is_some() => {
@@ -1182,6 +1355,10 @@ impl PitchView {
                 }
                 Some(Hot::Ruler) => {
                     self.ruler_from = Some(self.t_of(pos.x));
+                    true
+                }
+                Some(Hot::Clip(region)) => {
+                    session.pick_clip(region);
                     true
                 }
                 Some(Hot::KeyButton) => {
@@ -1254,8 +1431,9 @@ impl PitchView {
                     let to = self.t_of(pos.x);
                     if (self.x_of(from) - pos.x).abs() > 4.0 {
                         if let Some(t) = session.take() {
-                            session.loop_start.store((from.min(to).max(0.0) * t.sample_rate) as i64, Ordering::Release);
-                            session.loop_end.store((from.max(to).max(0.0) * t.sample_rate) as i64, Ordering::Release);
+                            let floor = if session.ara().is_some() { f64::MIN } else { 0.0 };
+                            session.loop_start.store((from.min(to).max(floor) * t.sample_rate) as i64, Ordering::Release);
+                            session.loop_end.store((from.max(to).max(floor) * t.sample_rate) as i64, Ordering::Release);
                                                         session.loop_on.store(true, Ordering::Release);
                         }
                         self.loop_to_host();
@@ -1278,12 +1456,8 @@ impl PitchView {
                     let r = Rect::from_points(from, pos);
                     if let Some(a) = session.analysis() {
                         let edits = session.edits();
-                        for (i, n) in a.notes.iter().enumerate() {
-                            let nr = self.rect_of(n, &edits.get(i).copied().unwrap_or_default(), a.fs);
-                            if r.width() > 2.0 && nr.intersect(r).area() > 0.0 {
-                                self.selected.insert(i);
-                            }
-                        }
+                        let boxed: Vec<usize> = a.notes.iter().enumerate().filter(|(i, n)| self.in_clip(n) && r.width() > 2.0 && self.rect_of(n, &edits.get(*i).copied().unwrap_or_default(), a.fs).intersect(r).area() > 0.0).map(|(i, _)| i).collect();
+                        self.selected.extend(boxed);
                     }
                     self.hot = self.hot_at(pos);
                     return true;
@@ -1329,17 +1503,17 @@ impl PitchView {
                 _ => false,
             },
             UiEvent::Wheel { pos, lines, mods } if ROLL.contains(pos) || RULER.contains(pos) || KEYS.contains(pos) || LANE.contains(pos) => {
-                let take_s = session.take().map_or(SPAN_S, |t| t.len as f64 / t.sample_rate);
+                let (lo, hi) = self.extent();
                 if mods.ctrl {
                     let at = self.t_of(pos.x);
-                    let span = (self.span * 0.85f64.powf(f64::from(lines))).clamp(SPAN_RANGE_S.0, SPAN_RANGE_S.1.max(take_s));
-                    self.t0 = (at - (pos.x - ROLL.x0) / ROLL.width() * span).max(0.0);
+                    let span = (self.span * 0.85f64.powf(f64::from(lines))).clamp(SPAN_RANGE_S.0, SPAN_RANGE_S.1.max(hi - lo));
+                    self.t0 = (at - (pos.x - ROLL.x0) / ROLL.width() * span).max(lo);
                     self.span = span;
                 } else if mods.shift || KEYS.contains(pos) {
                     let d = f64::from(lines) * 100.0;
                     self.pitch = (self.pitch.0 + d, self.pitch.1 + d);
                 } else {
-                    self.t0 = (self.t0 - f64::from(lines) * 0.1 * self.span).clamp(0.0, (take_s - 0.5 * self.span).max(0.0));
+                    self.t0 = (self.t0 - f64::from(lines) * 0.1 * self.span).clamp(lo, (hi - 0.5 * self.span).max(lo));
                 }
                 true
             }
@@ -1408,12 +1582,41 @@ impl View for PitchView {
         if matches!(s.status(), Status::Analysing | Status::Recording) {
             self.fitted = false;
         }
+        // Another clip became the current one (ARA): the view stays on the song, the selection
+        // goes, and each clip keeps its own undo.
+        let now = s.take().map(|t| (t.id.clone(), t.start as f64 / t.sample_rate));
+        if now.as_ref().map(|n| &n.0) != self.take_seen.as_ref().map(|n| &n.0) {
+            if let (Some((old_id, old_s)), Some((_, new_s))) = (&self.take_seen, &now) {
+                if s.ara().is_some() {
+                    self.t0 -= new_s - old_s;
+                }
+                let stacks = (std::mem::take(&mut self.undo), std::mem::take(&mut self.redo));
+                self.stacks.insert(old_id.clone(), stacks);
+            }
+            if let Some((id, _)) = &now {
+                let (u, r) = self.stacks.remove(id).unwrap_or_default();
+                self.undo = u;
+                self.redo = r;
+            }
+            self.selected.clear();
+            self.drag = None;
+            self.macro_drag = None;
+            self.box_from = None;
+            self.take_seen = now;
+        } else if let (Some((_, old_s)), Some((_, new_s))) = (&self.take_seen, &now) {
+            // The current clip moved on the song.
+            if s.ara().is_some() && (new_s - old_s).abs() > 1e-9 {
+                self.t0 -= new_s - old_s;
+                self.take_seen = now;
+            }
+        }
         // Follow the playhead a page at a time while the take plays.
                 let playing = s.playing.load(Ordering::Relaxed) || s.local_active.load(Ordering::Acquire);
         if playing && self.drag.is_none() {
-            if let (Some(t), Some(at)) = (s.take(), self.playing_at()) {
-                if (at > self.t0 + self.span * 0.95 || at < self.t0) && at >= 0.0 && at <= t.len as f64 / t.sample_rate {
-                    self.t0 = (at - 0.05 * self.span).max(0.0);
+            if let Some(at) = self.playing_at() {
+                let (lo, hi) = self.extent();
+                if (at > self.t0 + self.span * 0.95 || at < self.t0) && at >= lo && at <= hi {
+                    self.t0 = (at - 0.05 * self.span).max(lo);
                 }
             }
         }

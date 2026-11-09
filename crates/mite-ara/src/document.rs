@@ -465,6 +465,11 @@ fn id_of<T>(r: *mut T) -> u64 {
     r as usize as u64
 }
 
+/// The id [`Model::regions`] keys a playback region by (a host or test that holds its ref).
+pub fn region_id(r: ARAPlaybackRegionRef) -> u64 {
+    id_of(r)
+}
+
 fn ref_of<T>(id: u64) -> *mut T {
     id as usize as *mut T
 }

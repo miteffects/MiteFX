@@ -126,6 +126,31 @@ pub enum Status {
     Problem(String),
 }
 
+/// Another clip on the editor's track (bound to ARA): drawn beside the current one, in its
+/// place on the song; a click makes it the current one.
+#[derive(Clone)]
+pub struct OtherClip {
+    /// Its playback region.
+    pub region: u64,
+    /// Where its take (its audio source) starts on the song, s.
+    pub song_s: f64,
+    /// The region's part of its take, samples.
+    pub from: usize,
+    pub to: usize,
+    pub analysis: Arc<Analysis>,
+    pub edits: Vec<NoteEdit>,
+    /// Its rendered waveform (see [`State::peaks`]).
+    pub peaks: Arc<Vec<(f32, f32)>>,
+}
+
+/// A waveform: the lowest and highest sample in each [`PEAK_HOP`].
+pub type Peaks = Arc<Vec<(f32, f32)>>;
+
+/// The waveform lane's peaks of `r`: its lowest and highest sample in each [`PEAK_HOP`].
+pub fn peaks_of(r: &[f32]) -> Vec<(f32, f32)> {
+    r.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect()
+}
+
 /// What a drag snaps pitch to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Snap {
@@ -186,6 +211,12 @@ pub struct State {
     pub peaks: Arc<Vec<(f32, f32)>>,
     pub edits: Vec<NoteEdit>,
     pub status: Status,
+    /// Bound to ARA: the current clip's part of the take (samples; `None`: all of it), the other
+    /// clips on the editor's track, and the clip picked in the editor (a playback region; until the
+    /// host's selection changes).
+    pub clip: Option<(usize, usize)>,
+    pub others: Arc<Vec<OtherClip>>,
+    pub pick: Option<u64>,
 }
 
 enum Job {
@@ -249,6 +280,9 @@ impl Session {
                 peaks: Arc::new(Vec::new()),
                 edits: Vec::new(),
                 status: Status::Empty,
+                clip: None,
+                others: Arc::new(Vec::new()),
+                pick: None,
             }),
             renders: Handover::new(),
             records: Handover::new(),
@@ -306,6 +340,22 @@ impl Session {
 
     pub fn ara(&self) -> Option<Arc<mite_ara::Instance>> {
         self.ara.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The other clips on the editor's track (ARA).
+    pub fn others(&self) -> Arc<Vec<OtherClip>> {
+        self.lock().others.clone()
+    }
+
+    /// The current clip's part of the take, samples (ARA; `None`: all of it).
+    pub fn clip(&self) -> Option<(usize, usize)> {
+        self.lock().clip
+    }
+
+    /// Makes another clip on the track (playback region `region`) the one being edited.
+    pub fn pick_clip(&self, region: u64) {
+        self.lock().pick = Some(region);
+        self.send(Job::Sync);
     }
 
     /// Looks at the ARA document now (tests; the worker also looks every 40 ms).
@@ -733,8 +783,14 @@ struct AraState {
     /// Analyses by audio source, with the audio they came from.
     sources: std::collections::HashMap<u64, (Arc<Vec<f32>>, Arc<Analysis>)>,
     mods: std::collections::HashMap<u64, ModCache>,
-    /// The modification the editor shows, and the timeline sample its source starts at.
-    current: Option<(u64, i64)>,
+    /// The region the editor shows, its modification, and the timeline sample its source starts at.
+    current: Option<(u64, u64, i64)>,
+    /// The host's selection as last seen (a change drops the editor's pick).
+    selection_seen: Vec<u64>,
+    /// The other clips as last published: (region, modification state, from, to, song start bits).
+    others_key: Vec<(u64, String, usize, usize, u64)>,
+    /// The waveform of each modification's render (by the render it came from).
+    peaks: std::collections::HashMap<u64, (Arc<Vec<f32>>, Peaks)>,
     /// The regions this instance plays: (modification, timeline start, offset, length), samples.
     regions: Vec<(u64, i64, usize, usize)>,
 }
@@ -757,12 +813,26 @@ impl AraState {
         }
                 // The regions this instance's editor shows: those given to it, and those on the tracks
         // (region sequences) given to it (REAPER gives the editor its track, not the clips).
-        let shown: Vec<u64> = st.editor.iter().copied().chain(model.regions.values().filter(|r| st.sequences.contains(&r.sequence) || st.selected_sequences.contains(&r.sequence)).map(|r| r.id)).collect();
-        let current_region = st.selection.iter().filter(|id| shown.contains(id) || st.playback.contains(id)).chain(shown.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
+        let mut shown: Vec<u64> = st.editor.iter().copied().chain(model.regions.values().filter(|r| st.sequences.contains(&r.sequence) || st.selected_sequences.contains(&r.sequence)).map(|r| r.id)).collect();
+        {
+            let mut seen = std::collections::HashSet::new();
+            shown.retain(|id| seen.insert(*id));
+        }
+        // The host's selection moved: it wins over the clip picked in the editor.
+        if st.selection != self.selection_seen {
+            self.selection_seen = st.selection.clone();
+            s.lock().pick = None;
+        }
+        let pick = s.lock().pick.filter(|p| shown.contains(p));
+        let current_region = pick.iter().chain(st.selection.iter().filter(|id| shown.contains(id) || st.playback.contains(id))).chain(shown.iter()).chain(st.playback.iter()).find_map(|id| model.regions.get(id)).cloned();
         let mut wanted: Vec<u64> = st.playback.iter().filter_map(|id| model.regions.get(id).map(|r| r.modification)).collect();
         if let Some(r) = &current_region {
             wanted.push(r.modification);
         }
+        // Every clip on the track is drawn.
+        wanted.extend(shown.iter().filter_map(|id| model.regions.get(id).map(|r| r.modification)));
+        wanted.sort_unstable();
+        wanted.dedup();
         let mut changed = false;
         let mut pending = false;
         for &m in &wanted {
@@ -790,10 +860,16 @@ impl AraState {
                             let (tonic, minor) = detect_key(&a.notes);
                             Scale { tonic, minor, snap: Snap::Semitone }
                         });
-                        let old = self.mods.get(&m).filter(|c| !fresh_source && Arc::ptr_eq(&c.audio, &audio));
-                        let r = rerender(&audio, &a, &edits, old);
-                        s.renders_made.fetch_add(1, Ordering::AcqRel);
-                        ModCache { audio: audio.clone(), analysis: Arc::new(a), edits, scale, render: Arc::new(r), state: md.state.clone() }
+                        // Unedited, a render is its audio exactly: none needed (a track of many
+                        // clips comes up at once).
+                        let r = if edits.iter().all(NoteEdit::is_neutral) {
+                            audio.clone()
+                        } else {
+                            let old = self.mods.get(&m).filter(|c| !fresh_source && Arc::ptr_eq(&c.audio, &audio));
+                            s.renders_made.fetch_add(1, Ordering::AcqRel);
+                            Arc::new(rerender(&audio, &a, &edits, old))
+                        };
+                        ModCache { audio: audio.clone(), analysis: Arc::new(a), edits, scale, render: r, state: md.state.clone() }
                     }
                 };
                 self.mods.insert(m, entry);
@@ -819,16 +895,53 @@ impl AraState {
         // The editor's take: the current region's modification.
         let current = current_region.as_ref().and_then(|r| {
             let fs = model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate)?;
-            Some((r.modification, ((r.start_in_playback - r.start_in_modification) * fs).round() as i64))
+            Some((r.id, r.modification, ((r.start_in_playback - r.start_in_modification) * fs).round() as i64))
         });
+        // The other clips on the track, where they sit.
+        let fs_of = |r: &mite_ara::PlaybackRegion| model.modifications.get(&r.modification).and_then(|m| model.sources.get(&m.source)).map(|s| s.sample_rate);
+        let others: Vec<(&mite_ara::PlaybackRegion, f64)> = shown.iter().filter(|id| current.is_none_or(|c| c.0 != **id)).filter_map(|id| model.regions.get(id)).filter_map(|r| Some((r, fs_of(r)?))).filter(|(r, _)| self.mods.contains_key(&r.modification)).collect();
+        let span = |r: &mite_ara::PlaybackRegion, fs: f64| ((r.start_in_modification * fs).round().max(0.0) as usize, ((r.start_in_modification + r.duration_in_modification) * fs).round().max(0.0) as usize);
+        let key: Vec<(u64, String, usize, usize, u64)> = others.iter().map(|(r, fs)| {
+            let (from, to) = span(r, *fs);
+            (r.id, self.mods[&r.modification].state.clone(), from, to, (r.start_in_playback - r.start_in_modification).to_bits())
+        }).collect();
+        if key != self.others_key {
+            let list: Vec<OtherClip> = others.iter().map(|(r, fs)| {
+                let c = &self.mods[&r.modification];
+                let peaks = match self.peaks.get(&r.modification) {
+                    Some((src, p)) if Arc::ptr_eq(src, &c.render) => p.clone(),
+                    _ => {
+                        let p = Arc::new(peaks_of(&c.render));
+                        self.peaks.insert(r.modification, (c.render.clone(), p.clone()));
+                        p
+                    }
+                };
+                let (from, to) = span(r, *fs);
+                OtherClip { region: r.id, song_s: r.start_in_playback - r.start_in_modification, from, to, analysis: c.analysis.clone(), edits: c.edits.clone(), peaks }
+            }).collect();
+            self.peaks.retain(|m, _| model.modifications.contains_key(m));
+            self.others_key = key;
+            s.lock().others = Arc::new(list);
+            changed = true;
+        }
         let mut take = None;
-        if let Some((m, start)) = current {
+        if let Some((rid, m, start)) = current {
             if let Some(c) = self.mods.get(&m) {
                 if self.current != current || changed {
-                    let name = current_region.as_ref().map(|r| r.name.clone()).unwrap_or_default();
                     let fs = c.analysis.fs;
+                    let clip = current_region.as_ref().map(|r| span(r, fs));
                     let mut stl = s.lock();
-                    stl.take = Some(TakeInfo { id: format!("ara:{name}"), start, sample_rate: fs, len: c.audio.len() });
+                    // The cursor and the loop keep their place on the song.
+                    if let (Some(old), Some((orid, _, ostart))) = (&stl.take, self.current) {
+                        let delta = ostart - start;
+                        if orid != rid && delta != 0 && (old.sample_rate - fs).abs() < 1e-6 {
+                            for a in [&s.cue, &s.loop_start, &s.loop_end] {
+                                a.fetch_add(delta, Ordering::AcqRel);
+                            }
+                        }
+                    }
+                    stl.take = Some(TakeInfo { id: format!("ara:{m}"), start, sample_rate: fs, len: c.audio.len() });
+                    stl.clip = clip;
                     stl.audio = Some(c.audio.clone());
                     stl.analysis = Some(c.analysis.clone());
                     stl.edits = c.edits.clone();
@@ -843,6 +956,7 @@ impl AraState {
             self.current = None;
             let mut stl = s.lock();
             stl.take = None;
+            stl.clip = None;
             stl.analysis = None;
             stl.audio = None;
             stl.status = if pending { Status::Analysing } else { Status::Empty };
@@ -856,7 +970,7 @@ impl AraState {
 
     /// The editor changed the current modification's edits: keep them and tell the document.
     fn edited(&mut self, s: &Session, inst: &mite_ara::Instance, render: Arc<Vec<f32>>) {
-        let Some((m, _)) = self.current else { return };
+        let Some((_, m, _)) = self.current else { return };
         let (analysis, edits, scale) = {
             let st = s.lock();
             (st.analysis.clone(), st.edits.clone(), st.scale)
@@ -1023,7 +1137,7 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                     None => Rendered { segments: vec![Segment { start: *start, offset: 0, len: r.len(), audio: shared.clone() }], ara: false, take: Some(shared) },
                 };
                 s.renders.send(Box::new(rendered));
-                let peaks: Vec<(f32, f32)> = r.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect();
+                let peaks = peaks_of(r);
                 s.lock().peaks = Arc::new(peaks);
                 s.version.fetch_add(1, Ordering::AcqRel);
             } else if let Some(inst) = s.ara() {
