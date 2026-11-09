@@ -413,7 +413,7 @@ pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, bias: f32, a:
 
 // ---- Settings ------------------------------------------------------------------------------
 
-/// The L/R and M/S balance glide, s.
+/// The band output's L/R and M/S balance glide, s.
 const BALANCE_GLIDE_S: f64 = 0.02;
 
 /// What part of the stereo image a band saturates (frozen order, as the `stereo` parameter).
@@ -488,9 +488,8 @@ pub struct BandSat {
     pub bypass: bool,
     pub mute: bool,
     pub solo: bool,
-    /// Where the saturation lands, −1…1 (0: everywhere): toward the left (−) or the right (+),
-    /// and toward the mid (−) or the side (+). They weigh what the band changes, so at the far
-    /// end the other part passes as it came.
+    /// The band's output balance, −1…1 (0: as it is), as Saturn 2's band output: left (−) or
+    /// right (+), then mid (−, at −1 the side is gone: mono) or side (+, at +1 the mid is gone).
     pub lr: f32,
     pub ms: f32,
 }
@@ -2102,7 +2101,7 @@ impl Saturator {
                             ys[c] = if driven[c] { (xds[c][i] + diff[c][i]) * post } else { xds[c][i] * fader };
                         }
                     }
-                    // The balance: what the band changes, weighed toward one side (L/R), then
+                    // The output balance: the band's output toward the left or the right (L/R), then
                     // toward the mid or the side (M/S). Centred, it is left alone (bit for bit).
                     let bal = &mut band.balance;
                     for (v, &to) in bal.iter_mut().zip(&bal_to) {
@@ -2115,10 +2114,9 @@ impl Saturator {
                     if n_ch == 2 && (bal[0] != 0.0 || bal[1] != 0.0) {
                         let (wl, wr) = ((1.0 - bal[0]).min(1.0), (1.0 + bal[0]).min(1.0));
                         let (wm, ws) = ((1.0 - bal[1]).min(1.0), (1.0 + bal[1]).min(1.0));
-                        let (dl, dr) = (xds[0][i] * fader, xds[1][i] * fader);
-                        let (el, er) = ((ys[0] - dl) * wl, (ys[1] - dr) * wr);
-                        let (em, es) = (0.5 * (el + er) * wm, 0.5 * (el - er) * ws);
-                        ys = [dl + em + es, dr + em - es];
+                        let (l, r) = (ys[0] * wl, ys[1] * wr);
+                        let (m, sd) = (0.5 * (l + r) * wm, 0.5 * (l - r) * ws);
+                        ys = [m + sd, m - sd];
                     }
                     for c in 0..n_ch {
                         out[ci][c][i] += ys[c];
@@ -2480,33 +2478,26 @@ mod tests {
     }
 
     #[test]
-    fn the_balance_knobs_move_the_saturation_and_centred_change_nothing() {
+    fn the_output_balance_pans_and_narrows_the_band_and_centred_changes_nothing() {
         let (l, r) = stereo_input();
-        let mut s = band(Model::Tube, 18.0);
+        let s = band(Model::Tube, 18.0);
         let (a0, b0, _, _) = run_stereo(&s, &l, &r);
-        // Centred: exactly as without them.
-        s.bands[0].lr = 0.0;
-        s.bands[0].ms = 0.0;
-        let (a, b, _, _) = run_stereo(&s, &l, &r);
-        assert_eq!((a, b), (a0.clone(), b0.clone()));
-        // All the way left: the right as it came; all the way to the mid: the side as it came.
-        let worst = |x: &[f32], y: &[f32]| x.iter().zip(y).fold(0.0f32, |m, (p, q)| m.max((p - q).abs()));
+        let peak = |x: &[f32]| x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        let mid = |x: &[f32], y: &[f32]| -> Vec<f32> { x.iter().zip(y).map(|(p, q)| 0.5 * (p + q)).collect() };
         let side = |x: &[f32], y: &[f32]| -> Vec<f32> { x.iter().zip(y).map(|(p, q)| 0.5 * (p - q)).collect() };
-        for (lr, ms) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        // Past the glide (a 20 ms time constant lands within 1e-4 after ~9 of them).
+        let k = 12_000;
+        for (lr, ms) in [(-1.0f32, 0.0f32), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (0.0, 0.0)] {
             let mut s = band(Model::Tube, 18.0);
             s.bands[0].lr = lr;
             s.bands[0].ms = ms;
-            let (a, b, da, db) = run_stereo(&s, &l, &r);
-            // Past the glide (a 20 ms time constant lands within 1e-4 after ~9 of them), compare.
-            let k = 12_000;
+            let (a, b, _, _) = run_stereo(&s, &l, &r);
             match (lr as i32, ms as i32) {
-                (-1, 0) => assert!(worst(&b[k..], &db[k..]) < 1e-5 && worst(&a[k..], &da[k..]) > 0.01, "left only: right off by {}, left moved {}, len {}", worst(&b[k..], &db[k..]), worst(&a[k..], &da[k..]), a.len()),
-                (1, 0) => assert!(worst(&a[k..], &da[k..]) < 1e-5 && worst(&b[k..], &db[k..]) > 0.01, "right only"),
-                (0, -1) => assert!(worst(&side(&a, &b)[k..], &side(&da, &db)[k..]) < 1e-5, "mid only: the side clean"),
-                _ => {
-                    let mid = |x: &[f32], y: &[f32]| -> Vec<f32> { x.iter().zip(y).map(|(p, q)| 0.5 * (p + q)).collect() };
-                    assert!(worst(&mid(&a, &b)[k..], &mid(&da, &db)[k..]) < 1e-5, "side only: the mid clean");
-                }
+                (-1, 0) => assert!(peak(&b[k..]) < 1e-5 && (peak(&a[k..]) - peak(&a0[k..])).abs() < 1e-5, "left only"),
+                (1, 0) => assert!(peak(&a[k..]) < 1e-5 && (peak(&b[k..]) - peak(&b0[k..])).abs() < 1e-5, "right only"),
+                (0, -1) => assert!(peak(&side(&a, &b)[k..]) < 1e-5 && peak(&mid(&a, &b)[k..]) > 0.05, "mid only (mono)"),
+                (0, 1) => assert!(peak(&mid(&a, &b)[k..]) < 1e-5 && peak(&side(&a, &b)[k..]) > 0.05, "side only"),
+                _ => assert_eq!((a, b), (a0.clone(), b0.clone()), "centred: as without them, bit for bit"),
             }
         }
     }

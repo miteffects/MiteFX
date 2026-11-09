@@ -19,8 +19,8 @@ use nih_plug::prelude::*;
 /// means.
 /// - 2 (2026-11-10): Left and Right appended to each band's stereo choices; snapshots rescaled
 ///   ([`crate::migrate::v1_to_v2`]).
-/// - 3 (2026-11-10): each band's L/R and M/S balance (`b{N}_lr`, `b{N}_ms`) appended; a version 2
-///   state gets them centred, what it was.
+/// - 3 (2026-11-10): each band's output L/R and M/S balance (`b{N}_lr`, `b{N}_ms`) appended; a
+///   version 2 state gets them centred, what it was.
 pub const STATE_VERSION: u32 = 3;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
@@ -68,8 +68,8 @@ pub const B_DYN_THR: ParamSpec = spec("dyn_thr", "Dynamics Threshold", "dBFS", -
 pub const B_DYN_ATT: ParamSpec = spec("dyn_att", "Dynamics Attack", "ms", 0.1, 100.0, 10.0, ParamScale::Log, 1, (0.25, 1.0 / 16.0), ParamDisplay::Time);
 pub const B_DYN_REL: ParamSpec = spec("dyn_rel", "Dynamics Release", "ms", 10.0, 1000.0, 150.0, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::Time);
 /// What part of the stereo image the band saturates (slice 5).
-/// Where the band's saturation lands: −100 % the left only … 0 both … +100 % the right only;
-/// and −100 % the mid only … +100 % the side only.
+/// The band's output balance (as Saturn 2's band output): −100 % the left only … 0 … +100 %
+/// the right only; and −100 % the mid only (mono) … +100 % the side only.
 pub const B_LR: ParamSpec = spec("lr", "L/R Balance", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_MS: ParamSpec = spec("ms", "M/S Balance", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &["Stereo", "Mid", "Side", "M/S", "Left", "Right"], default: 0 };

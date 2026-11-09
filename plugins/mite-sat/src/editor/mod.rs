@@ -122,7 +122,8 @@ const DIALS: [(ParamSpec, &str, KnobKind); 10] = [
     (B_DYN, "DYNAMICS", KnobKind::Bipolar),
     (B_DYN_ATT, "ATTACK", KnobKind::Unipolar),
     (B_DYN_REL, "RELEASE", KnobKind::Unipolar),
-    // Where the saturation lands (user, 2026-11-10: "where are l/r and mid/side knobs").
+    // The band's output balance, under MIX and OUTPUT (user, 2026-11-10: "i need it as output
+    // control... just like saturn 2").
     (B_LR, "L/R", KnobKind::Bipolar),
     (B_MS, "M/S", KnobKind::Bipolar),
 ];
@@ -1381,6 +1382,8 @@ fn knob_words(id: &str) -> &'static str {
         "dyn" => " — after the curve, against the band's own average level (dashed in the square): left compresses, right brings back the hits the curve flattened",
         "dyn_att" => " — how fast the dynamics move once the band rises past its average",
         "dyn_rel" => " — how fast they let go",
+        "lr" => " — this band's output panned: left takes the right away, right the left",
+        "ms" => " — this band's output, mid against side: left narrows it to mono, right keeps only the sides",
         _ => "",
     }
 }
