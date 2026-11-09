@@ -236,6 +236,51 @@ impl Knob {
         cx.scene.fill(Fill::NonZero, vello::kurbo::Affine::IDENTITY, cx.theme.text_strong, None, &dot);
     }
 
+    /// A live level on the dial (`level` in the dial's own units, e.g. dBFS on a threshold): an
+    /// arc just outside the ticks from the start to where the level plays, dim up to the dial's
+    /// value and lit past it (what is over a threshold), lit only while `active`. Call after
+    /// [`Knob::draw`].
+    pub fn draw_level(&self, cx: &mut DrawCx<'_>, level: f32, active: bool) {
+        let s = self.scale();
+        let color = self.color.unwrap_or(cx.theme.accent);
+        let deg = |plain: f32| {
+            let p = match self.curve {
+                Some(c) => c.to_position(plain.clamp(self.spec.min, self.spec.max)),
+                None => self.spec.normalize(plain.clamp(self.spec.min, self.spec.max)),
+            };
+            -SWEEP_DEG / 2.0 + SWEEP_DEG * f64::from(p)
+        };
+        if level <= self.spec.min {
+            return;
+        }
+        let start = -SWEEP_DEG / 2.0;
+        let at = deg(level);
+        let value = deg(cx.host.plain(&self.id, cx.host.normalized(&self.id)));
+        let arc = |d0: f64, d1: f64| {
+            let steps = (((d1 - d0).abs() / 4.0).ceil() as usize).max(1);
+            let mut path = BezPath::new();
+            for i in 0..=steps {
+                let p = self.point(d0 + (d1 - d0) * i as f64 / steps as f64, 33.0);
+                if i == 0 {
+                    path.move_to(p);
+                } else {
+                    path.line_to(p);
+                }
+            }
+            path
+        };
+        let stroke = Stroke::new(2.0 * s).with_caps(vello::kurbo::Cap::Round);
+        cx.scene.stroke(&stroke, vello::kurbo::Affine::IDENTITY, cx.theme.text_lo.multiply_alpha(0.7), None, &arc(start, at.min(value)));
+        if at > value {
+            let over = arc(value, at);
+            if active {
+                glow_stroke(cx, &over, 2.0 * s, color, color, 1.6 * s);
+            } else {
+                cx.scene.stroke(&stroke, vello::kurbo::Affine::IDENTITY, cx.theme.text_mid, None, &over);
+            }
+        }
+    }
+
     /// Handles input. Returns `true` when the knob needs a redraw.
     pub fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         let id = self.id.as_str();

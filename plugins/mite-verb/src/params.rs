@@ -23,7 +23,9 @@ use crate::dsp::Output;
 ///   (`lo_cut`, `hi_cut`) are gone: [`crate::migrate::v2_to_v3`] turns them into bands.
 /// - 4 (2026-11-09): shimmer (`shimmer`, `shimmer_pitch`) appended; a version 3 state gets
 ///   their defaults (off).
-pub const STATE_VERSION: u32 = 4;
+/// - 5 (2026-11-09): the shimmer's range (`shimmer_low`, `shimmer_high`) appended; a version 4
+///   state gets 150 Hz–6.5 kHz, what version 4 had built in.
+pub const STATE_VERSION: u32 = 5;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -46,9 +48,12 @@ pub const EARLY_SEND: ParamSpec = spec("early_send", "Early Send", "%", 0.0, 100
 // ---- Shimmer -----------------------------------------------------------------------------------
 
 /// How fast the tail climbs (or falls) by the interval: 0 off, 100 % most of it each second.
-pub const SHIMMER: ParamSpec = spec("shimmer", "Shimmer", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
+pub const SHIMMER: ParamSpec = spec("shimmer", "Shimmer Feedback", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (2.0, 0.5), ParamDisplay::Number);
 /// The interval, semitones.
 pub const SHIMMER_PITCH: ParamSpec = spec("shimmer_pitch", "Shimmer Pitch", "st", -24.0, 24.0, 12.0, ParamScale::Linear, 1, (1.0, 0.1), ParamDisplay::Number);
+/// The shimmer's range as heard: its low cut and high cut.
+pub const SHIMMER_LOW: ParamSpec = spec("shimmer_low", "Shimmer Low Cut", "Hz", 20.0, 2000.0, 150.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
+pub const SHIMMER_HIGH: ParamSpec = spec("shimmer_high", "Shimmer High Cut", "Hz", 1000.0, 20_000.0, 6500.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 
 // ---- Freeze and ducking --------------------------------------------------------------------------
 
@@ -111,7 +116,7 @@ pub fn manifest() -> String {
         let prefix = |line: String| format!("e{}_{line}", b + 1);
         lines.extend([E_ON.manifest_line(), E_TYPE.manifest_line(), E_FREQ.manifest_line(), E_GAIN.manifest_line(), E_Q.manifest_line(), E_SLOPE.manifest_line()].map(prefix));
     }
-    lines.extend([SHIMMER.manifest_line(), SHIMMER_PITCH.manifest_line()]);
+    lines.extend([SHIMMER.manifest_line(), SHIMMER_PITCH.manifest_line(), SHIMMER_LOW.manifest_line(), SHIMMER_HIGH.manifest_line()]);
     lines.join("\n") + "\n"
 }
 
@@ -144,7 +149,7 @@ fn split_band_id(id: &str) -> Option<(char, usize, &str)> {
 
 /// Every continuous spec by its id, for stand-in hosts.
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
-    if let Some(s) = CONTINUOUS[..15].iter().chain(&[SHIMMER, SHIMMER_PITCH]).find(|s| s.id == id) {
+    if let Some(s) = CONTINUOUS[..15].iter().chain(&[SHIMMER, SHIMMER_PITCH, SHIMMER_LOW, SHIMMER_HIGH]).find(|s| s.id == id) {
         return Some(*s);
     }
     match split_band_id(id)? {
@@ -226,6 +231,8 @@ pub struct VerbParams {
     pub early_send: FloatParam,
     pub shimmer: FloatParam,
     pub shimmer_pitch: FloatParam,
+    pub shimmer_low: FloatParam,
+    pub shimmer_high: FloatParam,
     pub bands: [DecayBandParams; DECAY_BANDS],
     pub tone: [ToneBandParams; TONE_BANDS],
     pub snapshots: std::sync::Arc<Snapshots>,
@@ -257,6 +264,8 @@ impl Default for VerbParams {
             early_send: float_param(&EARLY_SEND),
             shimmer: float_param(&SHIMMER),
             shimmer_pitch: float_param(&SHIMMER_PITCH),
+            shimmer_low: float_param(&SHIMMER_LOW),
+            shimmer_high: float_param(&SHIMMER_HIGH),
             bands: std::array::from_fn(DecayBandParams::new),
             tone: std::array::from_fn(ToneBandParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
@@ -286,6 +295,8 @@ pub fn reverb_settings(p: impl Fn(&str) -> f32) -> ReverbSettings {
         early_send: p(EARLY_SEND.id) / 100.0,
         shimmer: p(SHIMMER.id) / 100.0,
         shimmer_pitch: p(SHIMMER_PITCH.id),
+        shimmer_low_hz: p(SHIMMER_LOW.id),
+        shimmer_high_hz: p(SHIMMER_HIGH.id),
         bands: std::array::from_fn(|b| {
             let v = |id: &str| p(&band_id(b, id));
             DecayBand { on: v(D_ON.id) >= 0.5, shape: DecayShape::from_index(index(v(D_TYPE.id))), freq: v(D_FREQ.id), mult: v(D_MULT.id), q: v(D_Q.id) }
@@ -327,6 +338,8 @@ impl VerbParams {
             "early_send" => f(&self.early_send),
             "shimmer" => f(&self.shimmer),
             "shimmer_pitch" => f(&self.shimmer_pitch),
+            "shimmer_low" => f(&self.shimmer_low),
+            "shimmer_high" => f(&self.shimmer_high),
             _ => match split_band_id(id) {
                 Some(('d', b, short)) => {
                     let band = &self.bands[b];
@@ -410,6 +423,8 @@ unsafe impl Params for VerbParams {
         }
         map.push(p(SHIMMER.id, self.shimmer.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_PITCH.id, self.shimmer_pitch.as_ptr(), "Shimmer"));
+        map.push(p(SHIMMER_LOW.id, self.shimmer_low.as_ptr(), "Shimmer"));
+        map.push(p(SHIMMER_HIGH.id, self.shimmer_high.as_ptr(), "Shimmer"));
         map
     }
 }

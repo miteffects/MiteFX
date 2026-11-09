@@ -55,10 +55,14 @@ const SIZE_GLIDE_MS: f32 = 200.0;
 const PREDELAY_FADE_MS: f32 = 30.0;
 const FREEZE_MS: f32 = 50.0;
 const DUCK_ATTACK_MS: f32 = 2.0;
-/// What is fed back loses its lows below and its highs above these, Hz (the top after the
-/// shift, 24 dB/oct: the octave over it is 24 dB down, so a pass up darkens and the cascade
-/// fades instead of piling up; what folds over Nyquist is far above it).
-const SHIM_BAND: (f32, f32) = (150.0, 6500.0);
+/// Ahead of the shift, the sub-bass goes (Hz, 6 dB/oct): shifted down it would only rumble.
+const SHIM_SUB_HZ: f32 = 40.0;
+/// The range dials' ends, Hz. The high cut (24 dB/oct, after the shift) is what makes the cascade
+/// fade: the octave over it is 24 dB down each pass. Wider than 150 Hz–6.5 kHz brightens it (8 kHz
+/// put 37 % of a late tail over 6 kHz).
+pub const SHIM_RANGE_HZ: (f32, f32) = (20.0, 20_000.0);
+/// The shimmer's two voices (left, right) sit this far either side of the interval, cents.
+const SHIM_DETUNE_CENTS: f32 = 6.0;
 /// The fed-back tail's ceiling (soft), full scale.
 const SHIM_CEILING: f32 = 0.3;
 /// The interval glides with this time constant, ms.
@@ -285,6 +289,10 @@ pub struct ReverbSettings {
     /// back into the room. Each octave comes back softer and darker than the one before.
     pub shimmer: f32,
     pub shimmer_pitch: f32,
+    /// The shimmer's range as heard (after the shift), Hz: a low cut (12 dB/oct) and a high cut
+    /// (24 dB/oct) on what goes back in.
+    pub shimmer_low_hz: f32,
+    pub shimmer_high_hz: f32,
 }
 
 impl Default for ReverbSettings {
@@ -308,6 +316,8 @@ impl Default for ReverbSettings {
             duck_release_ms: 300.0,
             shimmer: 0.0,
             shimmer_pitch: 12.0,
+            shimmer_low_hz: 150.0,
+            shimmer_high_hz: 6500.0,
         }
     }
 }
@@ -910,7 +920,25 @@ fn unpack(
         // Read from the settings themselves (they never redesign the lines).
         shimmer: 0.0,
         shimmer_pitch: 0.0,
+        shimmer_low_hz: 0.0,
+        shimmer_high_hz: 0.0,
         ..*s
+    }
+}
+
+/// A second-order Butterworth low- or highpass at `fc` (b0, b1, b2, a1, a2; a0 = 1).
+fn butterworth(fc: f32, fs: f32, high: bool) -> [f32; 5] {
+    let w = std::f32::consts::TAU * fc / fs;
+    let (sn, cs) = w.sin_cos();
+    let alpha = sn / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
+    let a0 = 1.0 + alpha;
+    let (a1, a2) = (-2.0 * cs / a0, (1.0 - alpha) / a0);
+    if high {
+        let b = (1.0 + cs) / 2.0 / a0;
+        [b, -2.0 * b, b, a1, a2]
+    } else {
+        let b = (1.0 - cs) / 2.0 / a0;
+        [b, 2.0 * b, b, a1, a2]
     }
 }
 
@@ -992,10 +1020,11 @@ pub struct Reverb {
     /// coefficient, and the fixed coefficients (low cut, glide).
     shift: SpectralShifter,
     shim_fb: [f32; 2],
-    shim_f: [[f32; 5]; 2],
+    shim_f: [[f32; 7]; 2],
     shim: [f32; 2],
     shim_ratio: f32,
     shim_lp: [f32; 5],
+    shim_hp: [f32; 5],
     shim_k: (f32, f32),
 }
 
@@ -1043,12 +1072,13 @@ impl Reverb {
             designed: None,
             shift: SpectralShifter::new(fs),
             shim_fb: [0.0; 2],
-            shim_f: [[0.0; 5]; 2],
+            shim_f: [[0.0; 7]; 2],
             shim: [0.0; 2],
             shim_ratio: 2.0,
             shim_lp: [1.0, 0.0, 0.0, 0.0, 0.0],
+            shim_hp: [1.0, 0.0, 0.0, 0.0, 0.0],
             shim_k: (
-                1.0 - (-std::f32::consts::TAU * SHIM_BAND.0 / fs).exp(),
+                1.0 - (-std::f32::consts::TAU * SHIM_SUB_HZ / fs).exp(),
                 1.0 - (-(CONTROL as f32) / (SHIM_GLIDE_MS * 0.001 * fs)).exp(),
             ),
         };
@@ -1099,7 +1129,7 @@ impl Reverb {
         self.designed = None;
         self.shift.reset();
         self.shim_fb = [0.0; 2];
-        self.shim_f = [[0.0; 5]; 2];
+        self.shim_f = [[0.0; 7]; 2];
         self.control(s, true);
         self.control(s, true);
     }
@@ -1168,15 +1198,10 @@ impl Reverb {
         }
         let to = (s.shimmer_pitch.clamp(-24.0, 24.0) / 12.0).exp2();
         self.shim_ratio = if jump { to } else { self.shim_ratio + (to - self.shim_ratio) * self.shim_k.1 };
-        let top = SHIM_BAND.1.min(0.4 * fs);
-        // Butterworth lowpass (b0, b1, b2, a1, a2), run twice: 24 dB/oct, so the octave a pass
-        // up from the top is already 24 dB down and the cascade fades instead of piling up.
-        let w = std::f32::consts::TAU * top / fs;
-        let (sn, cs) = w.sin_cos();
-        let alpha = sn / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
-        let a0 = 1.0 + alpha;
-        let b = (1.0 - cs) / 2.0 / a0;
-        self.shim_lp = [b, 2.0 * b, b, -2.0 * cs / a0, (1.0 - alpha) / a0];
+        // Butterworth sections (b0, b1, b2, a1, a2): the high cut runs twice (24 dB/oct).
+        let (lo, hi) = (s.shimmer_low_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1), s.shimmer_high_hz.clamp(SHIM_RANGE_HZ.0, SHIM_RANGE_HZ.1));
+        self.shim_lp = butterworth(hi.min(0.45 * fs), fs, false);
+        self.shim_hp = butterworth(lo.min(0.45 * fs), fs, true);
         let d = g.diffusion.clamp(0.0, 1.0);
         let next = [
             g.mod_depth * (MOD_MS * 0.001 * fs).min(0.2 * self.len[1][0]),
@@ -1348,7 +1373,7 @@ impl Reverb {
             }
             if shimmering {
                 let g = lerp(self.shim);
-                let (lc, [b0, b1, b2, a1, a2]) = (self.shim_k.0, self.shim_lp);
+                let (lc, lp, hp) = (self.shim_k.0, self.shim_lp, self.shim_hp);
                 let mut pre = [0.0f32; 2];
                 for (c, x) in [ol * OUT_GAIN, or * OUT_GAIN].into_iter().enumerate() {
                     let f = &mut self.shim_f[c];
@@ -1356,12 +1381,15 @@ impl Reverb {
                     pre[c] = x - f[0];
                 }
                 let [pl, pr] = &mut pre;
-                self.shift.process(std::slice::from_mut(pl), std::slice::from_mut(pr), self.shim_ratio);
+                // The sides a few cents apart: two voices beating slowly against each other, a
+                // chorus in the octave, wide (one voice on both sides sounds thin).
+                let spread = (SHIM_DETUNE_CENTS / 1200.0).exp2();
+                self.shift.process(std::slice::from_mut(pl), std::slice::from_mut(pr), [self.shim_ratio / spread, self.shim_ratio * spread]);
                 for (c, &shifted) in pre.iter().enumerate() {
                     let f = &mut self.shim_f[c];
                     let mut v = shifted;
-                    // After the shift: what goes back in stays under the top.
-                    for z in [1, 3] {
+                    // After the shift: what goes back in stays within the range.
+                    for (z, [b0, b1, b2, a1, a2]) in [(1, lp), (3, lp), (5, hp)] {
                         let y = b0 * v + f[z];
                         f[z] = b1 * v - a1 * y + f[z + 1];
                         f[z + 1] = b2 * v - a2 * y;

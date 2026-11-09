@@ -24,6 +24,10 @@ pub fn v1_to_v2(_state: &mut PluginState) {}
 /// **3 → 4 (2026-11-09):** shimmer appended; a version 3 state gets its defaults (off).
 pub fn v3_to_v4(_state: &mut PluginState) {}
 
+/// **4 → 5 (2026-11-09):** the shimmer's range appended; its defaults (150 Hz–6.5 kHz) are what
+/// version 4 had built in.
+pub fn v4_to_v5(_state: &mut PluginState) {}
+
 const fn old(id: &'static str, min: f32, max: f32, default: f32) -> ParamSpec {
     ParamSpec { id, name: id, unit: "", min, max, default, scale: ParamScale::Log, smoothing_ms: 20.0, decimals: 0, wheel_step: 0.0, wheel_step_fine: 0.0, display: ParamDisplay::Number }
 }

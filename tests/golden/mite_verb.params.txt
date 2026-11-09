@@ -105,3 +105,5 @@ e8_q |  | 0.1 | 10 | 0.70710677 | Log
 e8_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
 shimmer | % | 0 | 100 | 0 | Linear
 shimmer_pitch | st | -24 | 24 | 12 | Linear
+shimmer_low | Hz | 20 | 2000 | 150 | Log
+shimmer_high | Hz | 1000 | 20000 | 6500 | Log

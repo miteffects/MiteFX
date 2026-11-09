@@ -9,7 +9,7 @@ use mite_dsp::reverb::decay_at;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
 use mite_verb::editor::{memory_host, settings, Layer, Node, VerbView};
-use mite_verb::params::{ids, DECAY, DUCK_THRESH, FREEZE};
+use mite_verb::params::{ids, DECAY, FREEZE};
 use mite_verb::VerbShared;
 
 const MODS: Modifiers = Modifiers { shift: false, alt: false, ctrl: false, meta: false };
@@ -214,8 +214,8 @@ fn the_dials_sit_in_their_groups() {
     let (view, _host) = setup();
     let groups = view.dial_groups();
     let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
-    assert_eq!(names, ["SPACE", "MOD", "EARLY", "SHIMMER", "DUCK"]);
-    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("SHIMMER", &["shimmer", "shimmer_pitch"]), ("DUCK", &["duck", "duck_release"])];
+    assert_eq!(names, ["SPACE", "DUCK", "EARLY", "SHIMMER", "MOD"]);
+    let member = [("SPACE", &["size", "decay", "diffusion", "width", "predelay"][..]), ("MOD", &["mod_depth", "mod_rate"]), ("EARLY", &["early", "early_size", "early_send"]), ("SHIMMER", &["shimmer", "shimmer_pitch", "shimmer_low", "shimmer_high"]), ("DUCK", &["duck", "duck_thresh", "duck_release"])];
     for (name, members) in member {
         let rect = groups.iter().find(|g| g.0 == name).expect("group").1;
         for id in members {
@@ -230,19 +230,6 @@ fn the_dials_sit_in_their_groups() {
     }
 }
 
-#[test]
-fn the_ducking_threshold_drags_at_the_history_scale() {
-    let (mut view, host) = setup();
-    let grip = view.duck_grip(&host).center();
-    let to = Point::new(grip.x, view.level_y(-18.0));
-    drag(&mut view, &host, grip, to);
-    assert!((plain(&host, DUCK_THRESH.id) + 18.0).abs() < 0.2, "{}", plain(&host, DUCK_THRESH.id));
-    // The wheel steps it.
-    let at = view.duck_grip(&host).center();
-    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
-    view.event(&UiEvent::Wheel { pos: at, lines: 2.0, mods: MODS }, &host);
-    assert!(plain(&host, DUCK_THRESH.id) > -18.0);
-}
 
 #[test]
 fn freeze_toggles_from_the_footer() {

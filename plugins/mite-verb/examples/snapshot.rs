@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (s, out) = (settings(&host), output(&host));
     let mut engine = VerbEngine::new(sample_rate, &s, &out);
     let [mut l, mut r] = music::music(6.0, sample_rate);
-    let gap = (sample_rate * 5.0) as usize;
+    let gap = if v("duck") { l.len() } else { (sample_rate * 5.0) as usize };
     for x in l[gap..].iter_mut().chain(r[gap..].iter_mut()) {
         *x = 0.0;
     }

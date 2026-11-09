@@ -31,13 +31,20 @@ pub struct Stft {
 }
 
 impl Stft {
-    /// Frames of `size` samples (a power of two, at least 16). Allocates.
+    /// Frames of `size` samples (a power of two, at least 16), 75 % overlap. Allocates.
     pub fn new(size: usize) -> Self {
+        Self::with_overlap(size, 4)
+    }
+
+    /// Frames of `size` samples every `size / overlap` (`overlap` a power of two, at least 4:
+    /// 8 suits pitch shifting, whose phases move more between frames). Allocates.
+    pub fn with_overlap(size: usize, overlap: usize) -> Self {
         assert!(
             size.is_power_of_two() && size >= 16,
             "STFT size must be a power of two"
         );
-        let hop = size / 4;
+        assert!(overlap.is_power_of_two() && overlap >= 4 && overlap <= size, "STFT overlap must be a power of two ≥ 4");
+        let hop = size / overlap;
         let mut planner = RealFftPlanner::<f64>::new();
         let r2c = planner.plan_fft_forward(size);
         let c2r = planner.plan_fft_inverse(size);
@@ -46,8 +53,8 @@ impl Stft {
                 (0.5 - 0.5 * (2.0 * std::f64::consts::PI * n as f64 / size as f64).cos()).sqrt()
             })
             .collect();
-        // Hann copies at a quarter-frame hop sum to 2; the inverse FFT scales by `size`.
-        let norm = 1.0 / (2.0 * size as f64);
+        // Hann copies at a hop of size/overlap sum to overlap/2; the inverse FFT scales by `size`.
+        let norm = 1.0 / (overlap as f64 / 2.0 * size as f64);
         let zeros = |n: usize| vec![0.0; n];
         Self {
             size,

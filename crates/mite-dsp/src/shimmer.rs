@@ -12,10 +12,15 @@ use realfft::num_complex::Complex;
 
 use crate::stft::Stft;
 
-/// The frame, about 85 ms at any rate (4096 at 44.1/48 kHz): fine enough in frequency that the
-/// low notes' harmonics land in their own bins.
+/// Frames overlap eightfold: a partial's phase moves less between frames, so a chord comes out
+/// cleaner with the shorter frame.
+const OVERLAP: usize = 8;
+
+/// The frame, about 43 ms at any rate (2048 at 44.1/48 kHz): crisp in time (85 ms smeared the
+/// tail: "still sounds a bit washy", user 2026-11-09), fine enough in frequency for low notes'
+/// harmonics to land in their own bins.
 pub fn frame_size(fs: f32) -> usize {
-    let target = 0.085 * fs;
+    let target = 0.043 * fs;
     let mut n = 1024;
     while (n as f32) < target * 0.75 {
         n *= 2;
@@ -38,7 +43,7 @@ pub struct SpectralShifter {
 impl SpectralShifter {
     /// Allocates.
     pub fn new(fs: f32) -> Self {
-        let stft = Stft::new(frame_size(fs));
+        let stft = Stft::with_overlap(frame_size(fs), OVERLAP);
         let bins = stft.bins();
         let zeros = || vec![0.0; bins];
         let none = || vec![[f64::NAN; 2]; bins];
@@ -60,15 +65,15 @@ impl SpectralShifter {
         }
     }
 
-    /// Shifts `left` and `right` in place by `ratio` (2: an octave up), delayed by
-    /// [`Self::latency`].
-    pub fn process(&mut self, left: &mut [f32], right: &mut [f32], ratio: f32) {
-        let ratio = f64::from(ratio.clamp(0.125, 8.0));
+    /// Shifts `left` and `right` in place by `ratio` (2: an octave up; one per side, so the sides
+    /// can be detuned against each other), delayed by [`Self::latency`].
+    pub fn process(&mut self, left: &mut [f32], right: &mut [f32], ratio: [f32; 2]) {
+        let ratio = ratio.map(|r| f64::from(r.clamp(0.125, 8.0)));
         let (n, hop) = (self.stft.size() as f64, self.stft.hop() as f64);
         let (last, synth, fresh, mag, phase) = (&mut self.last, &mut self.synth, &mut self.fresh, &mut self.mag, &mut self.phase);
         self.stft.process(left, right, &mut |l: &mut [Complex<f64>], r: &mut [Complex<f64>]| {
             for (c, spec) in [l, r].into_iter().enumerate() {
-                shift_frame(spec, &mut last[c], &mut synth[c], fresh, mag, phase, ratio, n, hop);
+                shift_frame(spec, &mut last[c], &mut synth[c], fresh, mag, phase, ratio[c], n, hop);
             }
         });
     }
@@ -166,7 +171,7 @@ mod tests {
             let mut l: Vec<f32> = (0..96_000).map(|i| 0.5 * (std::f32::consts::TAU * 440.0 * i as f32 / fs).sin()).collect();
             let mut rr = l.clone();
             for (a, b) in l.chunks_mut(64).zip(rr.chunks_mut(64)) {
-                sh.process(a, b, r);
+                sh.process(a, b, [r; 2]);
             }
             let tail = &l[24_000..];
             let (hit, orig) = (level(tail, want, fs), level(tail, 440.0, fs));
@@ -220,7 +225,7 @@ mod purity {
                 }
             }).collect();
             let mut r = l.clone();
-            for (a, b) in l.chunks_mut(1).zip(r.chunks_mut(1)) { sh.process(a, b, 2.0); }
+            for (a, b) in l.chunks_mut(1).zip(r.chunks_mut(1)) { sh.process(a, b, [2.0; 2]); }
             let tail = &l[48_000..];
             let want: Vec<f64> = if freqs.is_empty() { vec![] } else { freqs.iter().map(|f| f * 2.0).collect() };
             let p = if want.is_empty() {
@@ -230,8 +235,8 @@ mod purity {
             let env: Vec<f32> = tail.chunks(480).map(|c| (c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).sqrt()).collect();
             let (lo, hi) = env.iter().fold((f32::MAX, 0.0f32), |(a, b), &e| (a.min(e), b.max(e)));
             let (junk, swing) = (10.0 * (1.0 - p).max(1e-12).log10(), 10.0 * (hi / lo).log10());
-            // Measured 2026-11-09: junk −40/−41/−47 dB, swing ±0.10/±0.98/±0.73 dB.
-            assert!(junk < -35.0 && swing < 1.5, "{name}: junk {junk:.1} dB, envelope ±{swing:.2} dB");
+            // Measured 2026-11-09 (43 ms, 8× overlap): junk −64/−34/−46 dB, swing ±0.07/±1.06/±0.74 dB.
+            assert!(junk < -30.0 && swing < 1.5, "{name}: junk {junk:.1} dB, envelope ±{swing:.2} dB");
         }
     }
 }

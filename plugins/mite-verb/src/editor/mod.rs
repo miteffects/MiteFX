@@ -9,7 +9,7 @@
 //! dragged against `DecayModel` (one mean line, designed once per change: a drag costs well under
 //! a millisecond; the exact 32-line mean froze the UI). Under the plot the history
 //! (the input dim, the reverb lit; the ducking threshold to drag), then the dials grouped by what
-//! they do (SPACE, MOD, EARLY, DUCK); the meters on the right.
+//! they do (SPACE, DUCK; EARLY, SHIMMER, MOD); the meters on the right.
 
 mod spectrum;
 
@@ -69,15 +69,15 @@ const PILL_Y: f64 = PLOT.y0 + 8.0;
 /// The history under the plot.
 const HIST_TOP: f64 = PLOT.y1 + 8.0;
 const HIST_BOTTOM: f64 = HELP_TOP - 4.0;
-const HIST_W: f64 = 620.0;
+const HIST_W: f64 = 420.0;
 const HIST_SECONDS: f64 = 6.0;
 const HIST_RANGE: f64 = 60.0;
-const DUCK_GRIP_X: f64 = HIST_W - 38.0;
-const DUCK_GRIP: (f64, f64) = (34.0, 20.0);
 
 /// The dials beside the history, grouped: two rows, a wide and a narrow panel in each.
 const DIAL_D: f64 = 56.0;
-const GROUP_COLS: [(f64, f64); 2] = [(632.0, 1024.0), (1032.0, 1172.0)];
+/// The dials' span (x) and the gap between panels.
+const GROUPS_X: (f64, f64) = (HIST_W + 12.0, 1172.0);
+const GROUP_GAP: f64 = 8.0;
 const GROUP_ROWS: [(f64, f64); 2] = [(HIST_TOP, HIST_TOP + 104.0), (HIST_BOTTOM - 104.0, HIST_BOTTOM)];
 /// A dial's centre below its panel's top.
 const DIAL_DY: f64 = 52.0;
@@ -130,10 +130,6 @@ fn px_per_db() -> f64 {
 
 fn history_lane() -> HistoryLane {
     HistoryLane { x0: 0.0, width: HIST_W, top: HIST_TOP, bottom: HIST_BOTTOM, seconds: HIST_SECONDS, slice_ms: HISTORY_SLICE_MS }
-}
-
-fn fmt_db(v: f32) -> String {
-    format!("{}{:.1}", if v < -0.05 { "−" } else { "" }, v.abs())
 }
 
 fn fmt_s(t: f64) -> String {
@@ -225,15 +221,12 @@ impl Node {
 enum Drag {
     /// A grip: where it was grabbed and where it sat, and a decay band's multiplier then.
     Node { node: Node, start: Point, at: Point, mult: f32 },
-    /// The ducking threshold on the history.
-    Duck { start: Point, thresh: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
     Node(Node),
     Layer(Layer),
-    Duck,
 }
 
 /// What an open shape menu is for.
@@ -294,25 +287,34 @@ impl VerbView {
             ],
         );
         type Dial = (ParamSpec, &'static str, Option<mite_core::DialCurve>);
-        // Columns: SPACE spans the wide one; below it EARLY and SHIMMER share it.
-        let wide = GROUP_COLS[0];
-        let split = wide.1 - (GROUP_COLS[1].1 - GROUP_COLS[1].0);
-        let cols = [wide, GROUP_COLS[1], (wide.0, split - 8.0), (split, wide.1)];
-        let layout: [(&'static str, &'static str, usize, usize, Vec<Dial>); 5] = [
-            ("SPACE", "the room itself", 0, 0, vec![(SIZE, "SIZE", None), (DECAY, "DECAY", None), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL))]),
-            ("MOD", "the room's slow drift", 0, 1, vec![(MOD_DEPTH, "DEPTH", None), (MOD_RATE, "RATE", None)]),
-            ("EARLY", "the first reflections", 1, 2, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
-            ("SHIMMER", "the tail climbing by an interval, pass after pass", 1, 3, vec![(SHIMMER, "AMOUNT", None), (SHIMMER_PITCH, "PITCH", None)]),
-            ("DUCK", "the reverb stepping back while the input plays", 1, 1, vec![(DUCK, "DEPTH", None), (DUCK_RELEASE, "RELEASE", None)]),
+        // Two rows; each panel as wide as its dials need.
+        let layout: [(&'static str, &'static str, usize, Vec<Dial>); 5] = [
+            ("SPACE", "the room itself", 0, vec![(SIZE, "SIZE", None), (DECAY, "DECAY", None), (DIFFUSION, "DIFFUSION", None), (WIDTH, "WIDTH", None), (PREDELAY, "PREDELAY", Some(PREDELAY_DIAL))]),
+            ("DUCK", "the reverb stepping back while the input plays: the ring on THRESHOLD is the input, lit where it is over", 0, vec![(DUCK, "DEPTH", None), (DUCK_THRESH, "THRESHOLD", None), (DUCK_RELEASE, "RELEASE", None)]),
+            ("EARLY", "the first reflections", 1, vec![(EARLY, "LEVEL", None), (EARLY_SIZE, "SIZE", None), (EARLY_SEND, "SEND", None)]),
+            ("SHIMMER", "the tail climbing by an interval, pass after pass; LOW and HIGH bound what climbs", 1, vec![(SHIMMER, "FEEDBACK", None), (SHIMMER_PITCH, "PITCH", None), (SHIMMER_LOW, "LOW", None), (SHIMMER_HIGH, "HIGH", None)]),
+            ("MOD", "the room's slow drift", 1, vec![(MOD_DEPTH, "DEPTH", None), (MOD_RATE, "RATE", None)]),
         ];
+        let mut rects = Vec::new();
+        for (row, &(top, bottom)) in GROUP_ROWS.iter().enumerate() {
+            let in_row: Vec<usize> = (0..layout.len()).filter(|&g| layout[g].2 == row).collect();
+            let dials: usize = in_row.iter().map(|&g| layout[g].3.len()).sum();
+            let per = (GROUPS_X.1 - GROUPS_X.0 - GROUP_GAP * (in_row.len() - 1) as f64) / dials as f64;
+            let mut x = GROUPS_X.0;
+            for &g in &in_row {
+                let w = per * layout[g].3.len() as f64;
+                rects.push((g, Rect::new(x, top, x + w, bottom)));
+                x += w + GROUP_GAP;
+            }
+        }
+        rects.sort_by_key(|r| r.0);
         let mut knobs = Vec::new();
         let mut groups = Vec::new();
-        for (name, words, row, col, dials) in layout {
-            let rect = Rect::new(cols[col].0, GROUP_ROWS[row].0, cols[col].1, GROUP_ROWS[row].1);
+        for ((name, words, _, dials), (_, rect)) in layout.into_iter().zip(rects) {
             let n = dials.len() as f64;
             for (i, (spec, label, curve)) in dials.into_iter().enumerate() {
                 let at = Point::new(rect.x0 + rect.width() * (i as f64 + 0.5) / n, rect.y0 + DIAL_DY);
-                let kind = if spec.min < 0.0 { KnobKind::Bipolar } else { KnobKind::Unipolar };
+                let kind = if spec.min < 0.0 && spec.max > 0.0 { KnobKind::Bipolar } else { KnobKind::Unipolar };
                 let k = Knob::new(spec, label, kind, at, DIAL_D);
                 knobs.push(match curve {
                     Some(c) => k.with_curve(c),
@@ -432,11 +434,6 @@ impl VerbView {
             Layer::Decay => tone.into_iter().chain(decay).collect(),
             Layer::Tone => decay.into_iter().chain(tone).collect(),
         }
-    }
-
-    pub fn duck_grip(&self, host: &dyn ParamHost) -> Rect {
-        let y = lv_y(Self::plain(host, DUCK_THRESH.id));
-        Rect::new(DUCK_GRIP_X, y - DUCK_GRIP.1 / 2.0, DUCK_GRIP_X + DUCK_GRIP.0, y + DUCK_GRIP.1 / 2.0)
     }
 
     pub fn decay_y(&self, t: f64) -> f64 {
@@ -693,15 +690,10 @@ impl VerbView {
         // ducking is off.
         let host = cx.host;
         let on = Self::plain(host, DUCK.id) > 0.0;
-        let hot = self.hot == Some(Hot::Duck) || matches!(self.drag, Some(Drag::Duck { .. }));
         let y = lv_y(Self::plain(host, DUCK_THRESH.id));
         let ink = if on { theme.accent } else { theme.text_lo };
         let stroke = Stroke::new(1.3).with_dashes(0.0, [5.0, 4.0]);
-        cx.scene.stroke(&stroke, Affine::IDENTITY, ink.multiply_alpha(if on { 0.9 } else { 0.5 }), None, &Line::new((0.0, y), (DUCK_GRIP_X - 2.0, y)));
-        let r = RoundedRect::from_rect(self.duck_grip(host), 9.0);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { ink } else { theme.display }, None, &r);
-        cx.scene.stroke(&Stroke::new(1.3), Affine::IDENTITY, ink, None, &r);
-        draw_chevrons(cx, r.center(), if hot { theme.display } else { ink });
+        cx.scene.stroke(&stroke, Affine::IDENTITY, ink.multiply_alpha(if on { 0.9 } else { 0.5 }), None, &Line::new((0.0, y), (HIST_W, y)));
     }
 
     /// The dial groups' panels, each named at its top left.
@@ -805,14 +797,12 @@ impl VerbView {
         }
         match self.drag {
             Some(Drag::Node { node, .. }) => return self.node_help(host, node, true),
-            Some(Drag::Duck { .. }) => return Help::default().text("Ducking threshold ").slot(format!("{} dB", fmt_db(Self::plain(host, DUCK_THRESH.id))), "−60.0 dB").text(" — where the input crosses it, the reverb is turned down (1 dB per dB, at most DEPTH)."),
             None => {}
         }
         match self.hot {
             Some(Hot::Node(node)) => return self.node_help(host, node, false),
             Some(Hot::Layer(Layer::Decay)) => return Help::default().text("Decay EQ — how long each frequency rings. Double-click the plot for a band; right-click for its shape."),
             Some(Hot::Layer(Layer::Tone)) => return Help::default().text("Tone EQ — the reverb's own EQ (cuts, shelves, bells…); the dry signal is untouched. Double-click the plot for a band; right-click for its shape."),
-            Some(Hot::Duck) => return Help::default().text("Ducking threshold — drag it; the reverb is turned down while the input is over it (DUCK DEPTH sets how far)"),
             None => {}
         }
         if let Some(h) = self.footer.help(host) {
@@ -858,9 +848,6 @@ impl VerbView {
                     return Some(Hot::Node(node));
                 }
             }
-        }
-        if self.duck_grip(host).inflate(3.0, 2.0).contains(p) {
-            return Some(Hot::Duck);
         }
         None
     }
@@ -914,11 +901,6 @@ impl VerbView {
                 self.drag = Some(Drag::Node { node, start: pos, at: self.node(host, node), mult });
                 true
             }
-            Some(Hot::Duck) => {
-                host.begin_gesture(DUCK_THRESH.id);
-                self.drag = Some(Drag::Duck { start: pos, thresh: Self::plain(host, DUCK_THRESH.id) });
-                true
-            }
             None => false,
         }
     }
@@ -930,7 +912,6 @@ impl VerbView {
                     host.end_gesture(&id);
                 }
             }
-            Some(Drag::Duck { .. }) => host.end_gesture(DUCK_THRESH.id),
             None => {}
         }
     }
@@ -1051,11 +1032,6 @@ impl VerbView {
                         self.move_node(host, node, to, (at, mult));
                         return true;
                     }
-                    Some(Drag::Duck { start, thresh }) => {
-                        let d = ((start.y - pos.y) / px_per_db()) as f32;
-                        Self::set_raw(host, DUCK_THRESH.id, DUCK_THRESH.snap((thresh + d * k as f32).clamp(DUCK_THRESH.min, DUCK_THRESH.max)));
-                        return true;
-                    }
                     None => {}
                 }
                 self.hot = self.hot_at(host, pos);
@@ -1082,7 +1058,6 @@ impl VerbView {
                 match hot {
                     Some(Hot::Node(Node::Decay(b))) => Self::set(host, &band_id(b, D_ON.id), 0.0),
                     Some(Hot::Node(Node::Tone(b))) => Self::set(host, &tone_id(b, E_ON.id), 0.0),
-                    Some(Hot::Duck) => Self::set(host, DUCK_THRESH.id, DUCK_THRESH.default),
                     Some(Hot::Layer(_)) => return false,
                     None if PLOT.contains(pos) => return self.add_band(host, self.layer, 0, pos),
                     None => return false,
@@ -1106,7 +1081,6 @@ impl VerbView {
                             Self::set(host, &id, E_Q.wheel(Self::plain(host, &id), lines, fine));
                         }
                     }
-                    Some(Hot::Duck) => Self::set(host, DUCK_THRESH.id, DUCK_THRESH.wheel(Self::plain(host, DUCK_THRESH.id), lines, fine)),
                     _ => return false,
                 }
                 true
@@ -1114,17 +1088,6 @@ impl VerbView {
             _ => false,
         }
     }
-}
-
-fn draw_chevrons(cx: &mut DrawCx<'_>, c: Point, ink: Color) {
-    let mut chev = BezPath::new();
-    chev.move_to((c.x - 3.0, c.y - 2.0));
-    chev.line_to((c.x, c.y - 5.0));
-    chev.line_to((c.x + 3.0, c.y - 2.0));
-    chev.move_to((c.x - 3.0, c.y + 2.0));
-    chev.line_to((c.x, c.y + 5.0));
-    chev.line_to((c.x + 3.0, c.y + 2.0));
-    cx.scene.stroke(&Stroke::new(1.3).with_caps(Cap::Round).with_join(Join::Round), Affine::IDENTITY, ink, None, &chev);
 }
 
 /// A layer pill's glyph: a tail falling away (decay) or a bell on its line (tone).
@@ -1184,6 +1147,11 @@ impl View for VerbView {
         self.draw_groups(cx);
         for k in &self.knobs {
             k.draw(cx);
+        }
+        // The input on the threshold dial: where it plays, lit over the threshold (ducking).
+        if let Some(k) = self.knobs.iter().find(|k| k.id == DUCK_THRESH.id) {
+            let input = self.meters[0].max(self.meters[1]);
+            k.draw_level(cx, input, Self::plain(cx.host, DUCK.id) > 0.0);
         }
         self.draw_meters(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
