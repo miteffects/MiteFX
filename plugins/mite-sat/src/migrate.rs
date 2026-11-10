@@ -38,6 +38,9 @@ fn rescale_stereo(json: &str) -> Option<String> {
     serde_json::to_string(&v).ok()
 }
 
+/// **3 → 4 (2026-11-10):** `phase` appended; a version 3 state gets Minimum Phase, what it had.
+pub fn v3_to_v4(_state: &mut PluginState) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

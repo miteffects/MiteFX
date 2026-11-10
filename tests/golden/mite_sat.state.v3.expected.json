@@ -1,0 +1,465 @@
+{
+  "fields": {
+    "mitefx_state": "4",
+    "preset": "Warm Tube",
+    "snapshots": "{\"active\":0,\"slots\":[{\"auto_gain\":0.0,\"b1_bias\":0.4,\"b1_bypass\":0.0,\"b1_drive\":0.3888889,\"b1_dyn\":0.5,\"b1_dyn_att\":0.6314289,\"b1_dyn_rel\":0.5681164,\"b1_dyn_thr\":0.6,\"b1_lr\":0.5,\"b1_mix\":1.0,\"b1_model\":0.42857143,\"b1_ms\":0.5,\"b1_mute\":0.0,\"b1_out\":0.5,\"b1_stereo\":0.0,\"b1_tone\":0.5,\"b2_bias\":0.5,\"b2_bypass\":0.0,\"b2_drive\":0.25,\"b2_dyn\":0.5,\"b2_dyn_att\":0.6314289,\"b2_dyn_rel\":0.5681164,\"b2_dyn_thr\":0.6,\"b2_lr\":0.5,\"b2_mix\":0.6,\"b2_model\":0.85714287,\"b2_ms\":0.5,\"b2_mute\":0.0,\"b2_out\":0.5,\"b2_stereo\":0.0,\"b2_tone\":0.375,\"b3_bias\":0.5,\"b3_bypass\":0.0,\"b3_drive\":0.0,\"b3_dyn\":0.5,\"b3_dyn_att\":0.6314289,\"b3_dyn_rel\":0.5681164,\"b3_dyn_thr\":0.6,\"b3_lr\":0.5,\"b3_mix\":1.0,\"b3_model\":0.14285715,\"b3_ms\":0.5,\"b3_mute\":0.0,\"b3_out\":0.5,\"b3_stereo\":0.0,\"b3_tone\":0.5,\"b4_bias\":0.5,\"b4_bypass\":1.0,\"b4_drive\":0.0,\"b4_dyn\":0.5,\"b4_dyn_att\":0.6314289,\"b4_dyn_rel\":0.5681164,\"b4_dyn_thr\":0.6,\"b4_lr\":0.5,\"b4_mix\":1.0,\"b4_model\":0.14285715,\"b4_ms\":0.5,\"b4_mute\":1.0,\"b4_out\":0.5,\"b4_stereo\":0.0,\"b4_tone\":0.5,\"b5_bias\":0.5,\"b5_bypass\":0.0,\"b5_drive\":0.0,\"b5_dyn\":0.5,\"b5_dyn_att\":0.6314289,\"b5_dyn_rel\":0.5681164,\"b5_dyn_thr\":0.6,\"b5_lr\":0.5,\"b5_mix\":1.0,\"b5_model\":0.14285715,\"b5_ms\":0.5,\"b5_mute\":0.0,\"b5_out\":0.5,\"b5_stereo\":0.0,\"b5_tone\":0.5,\"b6_bias\":0.5,\"b6_bypass\":0.0,\"b6_drive\":0.0,\"b6_dyn\":0.5,\"b6_dyn_att\":0.6314289,\"b6_dyn_rel\":0.5681164,\"b6_dyn_thr\":0.6,\"b6_lr\":0.5,\"b6_mix\":1.0,\"b6_model\":0.14285715,\"b6_ms\":0.5,\"b6_mute\":0.0,\"b6_out\":0.5,\"b6_stereo\":0.0,\"b6_tone\":0.5,\"env_att\":0.5292774,\"env_gain\":0.5,\"env_rel\":0.5889439,\"env_src\":0.0,\"lfo1_div\":0.53333336,\"lfo1_phase\":0.0,\"lfo1_rate\":0.5104419,\"lfo1_shape\":0.0,\"lfo1_sync\":0.0,\"lfo2_div\":0.53333336,\"lfo2_phase\":0.0,\"lfo2_rate\":0.5104419,\"lfo2_shape\":0.0,\"lfo2_sync\":0.0,\"m1_amt\":0.625,\"m1_dst\":0.023255814,\"m1_src\":0.33333334,\"m2_amt\":0.5,\"m2_dst\":0.0,\"m2_src\":0.0,\"m3_amt\":0.5,\"m3_dst\":0.0,\"m3_src\":0.0,\"m4_amt\":0.5,\"m4_dst\":0.0,\"m4_src\":0.0,\"m5_amt\":0.5,\"m5_dst\":0.0,\"m5_src\":0.0,\"m6_amt\":0.5,\"m6_dst\":0.0,\"m6_src\":0.0,\"m7_amt\":0.5,\"m7_dst\":0.0,\"m7_src\":0.0,\"m8_amt\":0.5,\"m8_dst\":0.0,\"m8_src\":0.0,\"mix\":1.0,\"out_gain\":0.5,\"out_pan\":0.5,\"oversampling\":0.6666667,\"phase\":0.0,\"x1_freq\":0.36735705,\"x1_on\":1.0,\"x2_freq\":0.47634372,\"x2_on\":0.0,\"x3_freq\":0.7063767,\"x3_on\":1.0,\"x4_freq\":0.78668463,\"x4_on\":0.0,\"x5_freq\":0.90327084,\"x5_on\":0.0},{\"b1_drive\":0.5},null,null]}"
+  },
+  "params": {
+    "auto_gain": {
+      "bool": false
+    },
+    "b1_bias": {
+      "f32": -20.0
+    },
+    "b1_bypass": {
+      "bool": false
+    },
+    "b1_drive": {
+      "f32": 14.0
+    },
+    "b1_dyn": {
+      "f32": 0.0
+    },
+    "b1_dyn_att": {
+      "f32": 10.0
+    },
+    "b1_dyn_rel": {
+      "f32": 150.0
+    },
+    "b1_dyn_thr": {
+      "f32": -24.0
+    },
+    "b1_lr": {
+      "f32": 0.0
+    },
+    "b1_mix": {
+      "f32": 100.0
+    },
+    "b1_model": {
+      "i32": 3
+    },
+    "b1_ms": {
+      "f32": 0.0
+    },
+    "b1_mute": {
+      "bool": false
+    },
+    "b1_out": {
+      "f32": 0.0
+    },
+    "b1_solo": {
+      "bool": false
+    },
+    "b1_stereo": {
+      "i32": 0
+    },
+    "b1_tone": {
+      "f32": 0.0
+    },
+    "b2_bias": {
+      "f32": 0.0
+    },
+    "b2_bypass": {
+      "bool": false
+    },
+    "b2_drive": {
+      "f32": 9.0
+    },
+    "b2_dyn": {
+      "f32": 0.0
+    },
+    "b2_dyn_att": {
+      "f32": 10.0
+    },
+    "b2_dyn_rel": {
+      "f32": 150.0
+    },
+    "b2_dyn_thr": {
+      "f32": -24.0
+    },
+    "b2_lr": {
+      "f32": 0.0
+    },
+    "b2_mix": {
+      "f32": 60.0
+    },
+    "b2_model": {
+      "i32": 6
+    },
+    "b2_ms": {
+      "f32": 0.0
+    },
+    "b2_mute": {
+      "bool": false
+    },
+    "b2_out": {
+      "f32": 0.0
+    },
+    "b2_solo": {
+      "bool": false
+    },
+    "b2_stereo": {
+      "i32": 0
+    },
+    "b2_tone": {
+      "f32": -3.0
+    },
+    "b3_bias": {
+      "f32": 0.0
+    },
+    "b3_bypass": {
+      "bool": false
+    },
+    "b3_drive": {
+      "f32": 0.0
+    },
+    "b3_dyn": {
+      "f32": 0.0
+    },
+    "b3_dyn_att": {
+      "f32": 10.0
+    },
+    "b3_dyn_rel": {
+      "f32": 150.0
+    },
+    "b3_dyn_thr": {
+      "f32": -24.0
+    },
+    "b3_lr": {
+      "f32": 0.0
+    },
+    "b3_mix": {
+      "f32": 100.0
+    },
+    "b3_model": {
+      "i32": 1
+    },
+    "b3_ms": {
+      "f32": 0.0
+    },
+    "b3_mute": {
+      "bool": false
+    },
+    "b3_out": {
+      "f32": 0.0
+    },
+    "b3_solo": {
+      "bool": false
+    },
+    "b3_stereo": {
+      "i32": 0
+    },
+    "b3_tone": {
+      "f32": 0.0
+    },
+    "b4_bias": {
+      "f32": 0.0
+    },
+    "b4_bypass": {
+      "bool": true
+    },
+    "b4_drive": {
+      "f32": 0.0
+    },
+    "b4_dyn": {
+      "f32": 0.0
+    },
+    "b4_dyn_att": {
+      "f32": 10.0
+    },
+    "b4_dyn_rel": {
+      "f32": 150.0
+    },
+    "b4_dyn_thr": {
+      "f32": -24.0
+    },
+    "b4_lr": {
+      "f32": 0.0
+    },
+    "b4_mix": {
+      "f32": 100.0
+    },
+    "b4_model": {
+      "i32": 1
+    },
+    "b4_ms": {
+      "f32": 0.0
+    },
+    "b4_mute": {
+      "bool": true
+    },
+    "b4_out": {
+      "f32": 0.0
+    },
+    "b4_solo": {
+      "bool": false
+    },
+    "b4_stereo": {
+      "i32": 0
+    },
+    "b4_tone": {
+      "f32": 0.0
+    },
+    "b5_bias": {
+      "f32": 0.0
+    },
+    "b5_bypass": {
+      "bool": false
+    },
+    "b5_drive": {
+      "f32": 0.0
+    },
+    "b5_dyn": {
+      "f32": 0.0
+    },
+    "b5_dyn_att": {
+      "f32": 10.0
+    },
+    "b5_dyn_rel": {
+      "f32": 150.0
+    },
+    "b5_dyn_thr": {
+      "f32": -24.0
+    },
+    "b5_lr": {
+      "f32": 0.0
+    },
+    "b5_mix": {
+      "f32": 100.0
+    },
+    "b5_model": {
+      "i32": 1
+    },
+    "b5_ms": {
+      "f32": 0.0
+    },
+    "b5_mute": {
+      "bool": false
+    },
+    "b5_out": {
+      "f32": 0.0
+    },
+    "b5_solo": {
+      "bool": false
+    },
+    "b5_stereo": {
+      "i32": 0
+    },
+    "b5_tone": {
+      "f32": 0.0
+    },
+    "b6_bias": {
+      "f32": 0.0
+    },
+    "b6_bypass": {
+      "bool": false
+    },
+    "b6_drive": {
+      "f32": 0.0
+    },
+    "b6_dyn": {
+      "f32": 0.0
+    },
+    "b6_dyn_att": {
+      "f32": 10.0
+    },
+    "b6_dyn_rel": {
+      "f32": 150.0
+    },
+    "b6_dyn_thr": {
+      "f32": -24.0
+    },
+    "b6_lr": {
+      "f32": 0.0
+    },
+    "b6_mix": {
+      "f32": 100.0
+    },
+    "b6_model": {
+      "i32": 1
+    },
+    "b6_ms": {
+      "f32": 0.0
+    },
+    "b6_mute": {
+      "bool": false
+    },
+    "b6_out": {
+      "f32": 0.0
+    },
+    "b6_solo": {
+      "bool": false
+    },
+    "b6_stereo": {
+      "i32": 0
+    },
+    "b6_tone": {
+      "f32": 0.0
+    },
+    "bypass": {
+      "bool": false
+    },
+    "delta": {
+      "bool": false
+    },
+    "env_att": {
+      "f32": 10.0
+    },
+    "env_gain": {
+      "f32": 0.0
+    },
+    "env_rel": {
+      "f32": 200.0
+    },
+    "env_src": {
+      "i32": 0
+    },
+    "lfo1_div": {
+      "i32": 8
+    },
+    "lfo1_phase": {
+      "f32": 0.0
+    },
+    "lfo1_rate": {
+      "f32": 1.0
+    },
+    "lfo1_shape": {
+      "i32": 0
+    },
+    "lfo1_sync": {
+      "bool": false
+    },
+    "lfo2_div": {
+      "i32": 8
+    },
+    "lfo2_phase": {
+      "f32": 0.0
+    },
+    "lfo2_rate": {
+      "f32": 1.0
+    },
+    "lfo2_shape": {
+      "i32": 0
+    },
+    "lfo2_sync": {
+      "bool": false
+    },
+    "m1_amt": {
+      "f32": 25.0
+    },
+    "m1_dst": {
+      "i32": 1
+    },
+    "m1_src": {
+      "i32": 1
+    },
+    "m2_amt": {
+      "f32": 0.0
+    },
+    "m2_dst": {
+      "i32": 0
+    },
+    "m2_src": {
+      "i32": 0
+    },
+    "m3_amt": {
+      "f32": 0.0
+    },
+    "m3_dst": {
+      "i32": 0
+    },
+    "m3_src": {
+      "i32": 0
+    },
+    "m4_amt": {
+      "f32": 0.0
+    },
+    "m4_dst": {
+      "i32": 0
+    },
+    "m4_src": {
+      "i32": 0
+    },
+    "m5_amt": {
+      "f32": 0.0
+    },
+    "m5_dst": {
+      "i32": 0
+    },
+    "m5_src": {
+      "i32": 0
+    },
+    "m6_amt": {
+      "f32": 0.0
+    },
+    "m6_dst": {
+      "i32": 0
+    },
+    "m6_src": {
+      "i32": 0
+    },
+    "m7_amt": {
+      "f32": 0.0
+    },
+    "m7_dst": {
+      "i32": 0
+    },
+    "m7_src": {
+      "i32": 0
+    },
+    "m8_amt": {
+      "f32": 0.0
+    },
+    "m8_dst": {
+      "i32": 0
+    },
+    "m8_src": {
+      "i32": 0
+    },
+    "mix": {
+      "f32": 100.0
+    },
+    "out_gain": {
+      "f32": 0.0
+    },
+    "out_pan": {
+      "f32": 0.0
+    },
+    "oversampling": {
+      "i32": 2
+    },
+    "phase": {
+      "i32": 0
+    },
+    "x1_freq": {
+      "f32": 150.0
+    },
+    "x1_on": {
+      "bool": true
+    },
+    "x2_freq": {
+      "f32": 500.0
+    },
+    "x2_on": {
+      "bool": false
+    },
+    "x3_freq": {
+      "f32": 3500.0
+    },
+    "x3_on": {
+      "bool": true
+    },
+    "x4_freq": {
+      "f32": 6000.0
+    },
+    "x4_on": {
+      "bool": false
+    },
+    "x5_freq": {
+      "f32": 12000.0
+    },
+    "x5_on": {
+      "bool": false
+    }
+  }
+}

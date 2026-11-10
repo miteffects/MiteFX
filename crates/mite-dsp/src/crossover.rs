@@ -242,6 +242,60 @@ impl<const B: usize> Split<B> {
     }
 }
 
+/// The share of each half of a linear-phase band kernel its window spends tapering (Tukey).
+const LP_TAPER: f64 = 0.3;
+/// The design grid, as a multiple of the kernel length (less time aliasing of the long low bands).
+const LP_GRID: usize = 4;
+
+/// The split as linear-phase FIR kernels (Mite Sat's Linear Phase; built off the audio thread,
+/// allocates): by band slot, `len` taps (a power of two) centred on `len / 2`, each band the same
+/// LR4 magnitude as the minimum-phase split's ([`Layout::weights`]) with zero phase. They add up
+/// to a delay of `len / 2` exactly: the top band is that delay less the others, so the window's
+/// smoothing of the lower bands moves into it instead of into the sum. Slots the layout does not
+/// use get all-zero kernels.
+pub fn linear_phase_kernels<const B: usize>(layout: &Layout<B>, crossovers: &[Option<f32>], fs: f64, len: usize) -> [Vec<f64>; B] {
+    assert!(len.is_power_of_two() && len >= 8, "kernel length must be a power of two");
+    let mut out: [Vec<f64>; B] = std::array::from_fn(|_| vec![0.0; len]);
+    let half = len / 2;
+    let fine = LP_GRID * len;
+    let ifft = realfft::RealFftPlanner::<f64>::new().plan_fft_inverse(fine);
+    let mut spectrum = ifft.make_input_vec();
+    let mut h = ifft.make_output_vec();
+    let window = |m: usize| {
+        // m = 0 … half − 1 from the centre; flat, then a cosine to zero at the ends.
+        let t = m as f64 / half as f64;
+        let edge = 1.0 - LP_TAPER;
+        if t <= edge { 1.0 } else { 0.5 + 0.5 * (PI * (t - edge) / LP_TAPER).cos() }
+    };
+    let top = layout.owners[layout.n];
+    for p in 0..layout.n {
+        let slot = layout.owners[p];
+        for (k, v) in spectrum.iter_mut().enumerate() {
+            let f = k as f64 * fs / fine as f64;
+            *v = realfft::num_complex::Complex::new(layout.weights(crossovers, f)[slot] / fine as f64, 0.0);
+        }
+        if ifft.process(&mut spectrum, &mut h).is_err() {
+            continue;
+        }
+        let kernel = &mut out[slot];
+        // Zero phase: h is symmetric about index 0 (and fine − m mirrors m).
+        kernel[half] = h[0];
+        for m in 1..half {
+            let w = window(m);
+            kernel[half + m] = h[m] * w;
+            kernel[half - m] = h[fine - m] * w;
+        }
+    }
+    let rest: Vec<f64> = (0..len)
+        .map(|i| {
+            let below: f64 = (0..layout.n).map(|p| out[layout.owners[p]][i]).sum();
+            f64::from(u8::from(i == half)) - below
+        })
+        .collect();
+    out[top] = rest;
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +347,46 @@ mod tests {
         let (old, new) = (Layout::<4>::new(&before), Layout::<4>::new(&after));
         let parents = Split::<4>::default().restructure(&old, &new, &after);
         assert_eq!(parents, [None, None, None, Some(1)]);
+    }
+
+    /// A kernel's magnitude at `f` Hz, its delay taken out.
+    fn kernel_gain(kernel: &[f64], f: f64, fs: f64) -> f64 {
+        let w = 2.0 * PI * f / fs;
+        let (re, im) = kernel.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| (re + v * (w * i as f64).cos(), im - v * (w * i as f64).sin()));
+        (re * re + im * im).sqrt()
+    }
+
+    #[test]
+    fn linear_phase_bands_sum_to_a_pure_delay_and_follow_lr4() {
+        let x = [Some(80.0), Some(500.0), None, Some(4000.0), Some(12_000.0)];
+        let layout = Layout::<6>::new(&x);
+        let fs = 48_000.0;
+        let len = 8192;
+        let k = linear_phase_kernels(&layout, &x, fs, len);
+        // The sum is exactly a delay of len / 2.
+        for i in 0..len {
+            let sum: f64 = k.iter().map(|v| v[i]).sum();
+            let want = if i == len / 2 { 1.0 } else { 0.0 };
+            assert!((sum - want).abs() < 1e-12, "sum at {i}: {sum}");
+        }
+        // The unused slot is silent.
+        assert!(k[3].iter().all(|&v| v == 0.0), "crossover slot 2 is off: band slot 3 is unused");
+        // Each band is the minimum-phase split's magnitude, within 0.3 dB where it is over −30 dB.
+        for f in [30.0, 80.0, 160.0, 500.0, 1500.0, 4000.0, 9000.0, 12_000.0, 18_000.0] {
+            let want = layout.weights(&x, f);
+            for slot in layout.bands() {
+                let got = kernel_gain(&k[*slot], f, fs);
+                if want[*slot] > 0.03 {
+                    let db = 20.0 * (got / want[*slot]).log10();
+                    assert!(db.abs() < 0.3, "slot {slot} at {f} Hz: {db:+.2} dB");
+                }
+            }
+        }
+        // Symmetric: linear phase about len / 2.
+        for slot in layout.bands() {
+            for m in 1..len / 2 {
+                assert!((k[*slot][len / 2 + m] - k[*slot][len / 2 - m]).abs() < 1e-12);
+            }
+        }
     }
 }

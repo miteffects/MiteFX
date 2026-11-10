@@ -58,6 +58,8 @@ const METER_RELEASE_DB_S: f32 = 20.0;
 const METER_TOP: f64 = DISPLAY_TOP + 20.0;
 /// The modulation matrix: its button (footer, after the oversampling and the latency) and the
 /// panel it opens over the cards.
+/// The phase list's button (footer, after the matrix button).
+const PHASE_BUTTON: Rect = Rect::new(380.0, FOOTER_TOP + 9.0, 540.0, FOOTER_TOP + 47.0);
 const MATRIX_BUTTON: Rect = Rect::new(268.0, FOOTER_TOP + 15.0, 364.0, FOOTER_TOP + 41.0);
 const MATRIX_PANEL: Rect = Rect::new(8.0, DISPLAY_TOP + 226.0, 1172.0, HELP_TOP - 4.0);
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
@@ -288,6 +290,7 @@ enum Hot {
     Card(usize),
     Rail(RailHot),
     Oversampling,
+    Phase,
 }
 
 pub struct SatView {
@@ -302,7 +305,9 @@ pub struct SatView {
     pointer: Option<Point>,
     hot: Option<Hot>,
     drag: Option<Drag>,
+    /// The footer's open list: oversampling, or the phase when `phase_menu`.
     os_menu: Option<Dropdown>,
+    phase_menu: bool,
     /// The stereo list and the band it is for.
     stereo_menu: Option<(usize, Dropdown)>,
     os_hit: Rect,
@@ -362,6 +367,7 @@ impl SatView {
             hot: None,
             drag: None,
             os_menu: None,
+            phase_menu: false,
             stereo_menu: None,
             os_hit: Rect::ZERO,
             menu: None,
@@ -478,6 +484,7 @@ impl SatView {
     /// Opens the oversampling list (tools).
     pub fn open_oversampling(&mut self, host: &dyn ParamHost) {
         self.os_menu = Some(Self::os_list(host));
+        self.phase_menu = false;
     }
 
     /// The open oversampling list's rows, 1× first (tests and tools).
@@ -594,6 +601,11 @@ impl SatView {
         let mix = if x.bands[b].bypass { 0.0 } else { x.bands[b].mix };
         let fs = self.shared.sample_rate.load().max(1.0);
         self.probe.update(b, &c, tone_db, mix, fs, dt)
+    }
+
+    fn phase_list(host: &dyn ParamHost) -> Dropdown {
+        let current = Self::plain(host, PHASE.id).round().max(0.0) as usize;
+        Dropdown::new(PHASE_BUTTON, PHASE.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(170.0)
     }
 
     fn os_list(host: &dyn ParamHost) -> Dropdown {
@@ -884,7 +896,12 @@ impl SatView {
         self.footer.draw_latency(cx, 142.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
         self.footer.draw_controls(cx);
         draw_matrix_button(cx, MATRIX_BUTTON, self.matrix_open, self.matrix_button_hot, active_routes(cx.host));
-        if let Some(list) = &self.os_menu {
+        let phase = (Self::plain(cx.host, PHASE.id).round().max(0.0) as usize).min(1);
+        let hot = self.pointer.is_some_and(|p| PHASE_BUTTON.contains(p));
+        draw_dropdown_button(cx, PHASE_BUTTON, PHASE.choices[phase], self.os_menu.is_some() && self.phase_menu, hot, |_, _| {});
+        if let Some(list) = self.os_menu.as_ref().filter(|_| self.phase_menu) {
+            list.draw(cx, theme.accent, |_, _, _, _| {});
+        } else if let Some(list) = &self.os_menu {
             list.draw(cx, theme.accent, |scene, i, at, ink| {
                 // Each factor's icon: as many waves as it oversamples.
                 let n = [1usize, 2, 4, 8][i];
@@ -946,6 +963,10 @@ impl SatView {
         if let Some(list) = &self.os_menu {
             let fs = f64::from(self.shared.sample_rate.load()).max(1.0);
             let hovered = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p)));
+            if let (Some(i), true) = (hovered, self.phase_menu) {
+                let ms = crate::dsp::linear_phase_latency(fs as f32) as f64 / fs * 1000.0;
+                return Help::default().text(format!("{} — ", PHASE.choices[i])).text(if i == 0 { "LR4 crossovers: no latency; each band's phase turns around its crossovers".to_owned() } else { format!("the same bands without any phase shift, so they add back to the input exactly; adds {ms:.0} ms of latency") });
+            }
             if let Some(i) = hovered {
                 let f = [1usize, 2, 4, 8][i];
                 let ms = mite_dsp::oversample::Oversampler::latency_for(f) as f64 / fs * 1000.0;
@@ -968,6 +989,7 @@ impl SatView {
             Some(Hot::Mute(_)) => return Help::default().text("Mute — take this band out of the sum (M)"),
             Some(Hot::Remove(b)) => return Help::default().text(format!("Remove band {} — its region joins the band below (Delete)", number(b))),
             Some(Hot::Oversampling) => return Help::default().text("Oversampling — how many times faster the curves run, so their harmonics do not fold back into the audible band."),
+            Some(Hot::Phase) => return Help::default().text("Phase — how the bands are split: Minimum Phase (no latency) or Linear Phase (no phase shift between bands, more latency)."),
             Some(Hot::Rail(RailHot::Region(b))) | Some(Hot::Card(b)) if layout.n > 0 => {
                 let (drive, _, _) = values(b);
                 return Help::default()
@@ -1075,6 +1097,9 @@ impl SatView {
         }
         if self.os_hit.contains(p) {
             return Some(Hot::Oversampling);
+        }
+        if PHASE_BUTTON.contains(p) {
+            return Some(Hot::Phase);
         }
         None
     }
@@ -1189,6 +1214,12 @@ impl SatView {
             }
             Some(Hot::Oversampling) => {
                 self.os_menu = Some(Self::os_list(host));
+                self.phase_menu = false;
+                true
+            }
+            Some(Hot::Phase) => {
+                self.os_menu = Some(Self::phase_list(host));
+                self.phase_menu = true;
                 true
             }
             Some(Hot::Stereo(b)) => {
@@ -1242,7 +1273,7 @@ impl SatView {
                 DropdownEvent::Open => {}
                 DropdownEvent::Picked(i) => {
                     self.os_menu = None;
-                    Self::set(host, OVERSAMPLING.id, i as f32);
+                    Self::set(host, if self.phase_menu { PHASE.id } else { OVERSAMPLING.id }, i as f32);
                 }
                 DropdownEvent::Closed => self.os_menu = None,
             }

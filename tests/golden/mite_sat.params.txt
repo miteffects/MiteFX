@@ -149,3 +149,4 @@ b5_lr | % | -100 | 100 | 0 | Linear
 b5_ms | % | -100 | 100 | 0 | Linear
 b6_lr | % | -100 | 100 | 0 | Linear
 b6_ms | % | -100 | 100 | 0 | Linear
+phase | choice | Minimum Phase, Linear Phase | 0

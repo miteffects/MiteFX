@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = SatEngine::new(sample_rate, factor, &settings);
     let [mut l, mut r] = music::music(4.0, sample_rate);
     for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-        engine.process(&mut [a, b], &settings, factor, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
+        engine.process(&mut [a, b], &settings, factor, false, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
     }
     shared.latency.store(engine.latency() as f32);
 

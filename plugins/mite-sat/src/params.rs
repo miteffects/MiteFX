@@ -21,7 +21,9 @@ use nih_plug::prelude::*;
 ///   ([`crate::migrate::v1_to_v2`]).
 /// - 3 (2026-11-10): each band's output L/R and M/S balance (`b{N}_lr`, `b{N}_ms`) appended; a
 ///   version 2 state gets them centred, what it was.
-pub const STATE_VERSION: u32 = 3;
+/// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
+///   version 3 state gets Minimum Phase, what it was.
+pub const STATE_VERSION: u32 = 4;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -31,6 +33,9 @@ const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32
 // ---- Global -------------------------------------------------------------------------------
 
 pub const OVERSAMPLING: ChoiceSpec = ChoiceSpec { id: "oversampling", name: "Oversampling", choices: &["1×", "2×", "4×", "8×"], default: 1 };
+/// How the bands are split: LR4 crossovers (no latency; each band's phase turns around its
+/// crossovers) or linear-phase FIR bands (the same magnitudes, no phase shift; ~91 ms latency).
+pub const PHASE: ChoiceSpec = ChoiceSpec { id: "phase", name: "Phase", choices: &["Minimum Phase", "Linear Phase"], default: 0 };
 /// Each band matches its loudness to what goes in (sat-brief §1.1).
 pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: true };
 pub const MIX: ParamSpec = spec("mix", "Mix", "%", 0.0, 100.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
@@ -255,6 +260,7 @@ pub fn manifest() -> String {
     for b in 0..BANDS {
         lines.extend([B_LR, B_MS].iter().map(|s| format!("b{}_{}", b + 1, s.manifest_line())));
     }
+    lines.push(PHASE.manifest_line());
     lines.join("\n") + "\n"
 }
 
@@ -345,6 +351,7 @@ impl BandParams {
 
 pub struct SatParams {
     pub oversampling: IntParam,
+    pub phase: IntParam,
     pub auto_gain: BoolParam,
     pub mix: FloatParam,
     pub out_pan: FloatParam,
@@ -366,6 +373,7 @@ impl Default for SatParams {
         let flag = |spec: &'static BoolSpec| bool_param(spec, spec.name.to_owned());
         Self {
             oversampling: choice_param(&OVERSAMPLING, OVERSAMPLING.name.to_owned()),
+            phase: choice_param(&PHASE, PHASE.name.to_owned()),
             auto_gain: flag(&AUTO_GAIN),
             mix: float_param(&MIX),
             out_pan: float_param(&OUT_PAN),
@@ -395,6 +403,11 @@ impl SatParams {
 
     pub fn factor(&self) -> usize {
         factor(self.oversampling.value())
+    }
+
+    /// Whether the bands are split in linear phase.
+    pub fn linear(&self) -> bool {
+        self.phase.value() == 1
     }
 }
 
@@ -443,6 +456,7 @@ unsafe impl Params for SatParams {
             map.push((band_id(i, B_LR.id), b.lr.as_ptr(), group.clone()));
             map.push((band_id(i, B_MS.id), b.ms.as_ptr(), group));
         }
+        map.push(global(PHASE.id, self.phase.as_ptr()));
         map
     }
 }

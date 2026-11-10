@@ -24,7 +24,7 @@ fn base() -> SatSettings {
 fn render(ms: &MatrixSettings, block: usize, x: &[f32]) -> (Vec<f32>, f32) {
     let (s0, out0) = (base(), Output::default());
     let mut engine = SatEngine::new(FS, 2, &s0);
-    engine.prepare(FS, 2, &s0, &out0);
+    engine.prepare(FS, 2, &s0, &out0, false);
     let mut runner = MatrixRunner::default();
     runner.prepare(FS, 4096);
     let history: HistoryTap<{ record::WIDTH }> = HistoryTap::new(64);
@@ -35,7 +35,7 @@ fn render(ms: &MatrixSettings, block: usize, x: &[f32]) -> (Vec<f32>, f32) {
         runner.run(ms, &Transport::default(), &mut [a, b], None, &tap, MOD_TARGETS.len(), |sub, _, offsets| {
             let (mut s, mut out) = (s0, out0);
             modulate_settings(&mut s, &mut out, offsets);
-            engine.process(sub, &s, 2, &out, &history, None);
+            engine.process(sub, &s, 2, false, &out, &history, None);
         });
         peak = peak.max(tap.offsets.iter().map(|o| o.load().abs()).fold(0.0, f32::max));
     }
@@ -60,11 +60,11 @@ fn a_route_moves_the_sound_and_nothing_routed_is_the_plain_engine() {
     let (plain, none) = render(&MatrixSettings::default(), 512, &x);
     let s = base();
     let mut engine = SatEngine::new(FS, 2, &s);
-    engine.prepare(FS, 2, &s, &Output::default());
+    engine.prepare(FS, 2, &s, &Output::default(), false);
     let history: HistoryTap<{ record::WIDTH }> = HistoryTap::new(64);
     let (mut l, mut r) = (x.clone(), x.clone());
     for (a, b) in l.chunks_mut(512).zip(r.chunks_mut(512)) {
-        engine.process(&mut [a, b], &s, 2, &Output::default(), &history, None);
+        engine.process(&mut [a, b], &s, 2, false, &Output::default(), &history, None);
     }
     assert_eq!(plain, l);
     assert_eq!(none, 0.0);

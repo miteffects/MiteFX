@@ -102,7 +102,7 @@ impl Plugin for MiteSat {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3, migrate::v3_to_v4]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -116,7 +116,7 @@ impl Plugin for MiteSat {
 
     fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {
         let settings = self.params.settings();
-        self.engine.prepare(config.sample_rate, self.params.factor(), &settings, &self.output());
+        self.engine.prepare(config.sample_rate, self.params.factor(), &settings, &self.output(), self.params.linear());
         self.shared.sample_rate.store(config.sample_rate);
         self.matrix.prepare(config.sample_rate, config.max_buffer_size as usize);
         self.reported_latency = self.engine.latency() as u32;
@@ -135,19 +135,19 @@ impl Plugin for MiteSat {
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let t = context.transport();
         let transport = mite_dsp::modulation::Transport { tempo: t.tempo.filter(|v| v.is_finite() && *v > 0.0), beats: t.pos_beats(), playing: t.playing };
-        let (settings, output, factor) = (self.params.settings(), self.output(), self.params.factor());
+        let (settings, output, factor, linear) = (self.params.settings(), self.output(), self.params.factor(), self.params.linear());
         let ms = self.params.matrix.settings();
         let (engine, shared) = (&mut self.engine, &self.shared);
         self.matrix.run(&ms, &transport, buffer.as_slice(), None, &self.shared.matrix, params::MOD_TARGETS.len(), |sub, _, offsets| {
             if offsets.iter().any(|o| *o != 0.0) {
                 let (mut s, mut out) = (settings, output);
                 params::modulate_settings(&mut s, &mut out, offsets);
-                engine.process(sub, &s, factor, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
+                engine.process(sub, &s, factor, linear, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
             } else {
-                engine.process(sub, &settings, factor, &output, &shared.history, Some([&shared.spectrum, &shared.post]));
+                engine.process(sub, &settings, factor, linear, &output, &shared.history, Some([&shared.spectrum, &shared.post]));
             }
         });
-        // An oversampling change switched the latency behind its dip: tell the host.
+        // An oversampling or phase change switched the latency behind its dip: tell the host.
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {
             self.reported_latency = latency;

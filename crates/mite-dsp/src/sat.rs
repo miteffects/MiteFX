@@ -1745,6 +1745,29 @@ impl Saturator {
         dry: &mut [&mut [f32]],
         s: &SatSettings,
     ) -> SatTelemetry {
+        self.process_split(channels, dry, s, None)
+    }
+
+    /// [`Self::process`] with the bands split outside (Linear Phase): `bands[slot][channel]`, as
+    /// long as `channels`, replaces the minimum-phase split (whose state then stands still). The
+    /// result and `dry` follow the bands' timing: their split's delay adds to [`Self::latency`].
+    pub fn process_bands(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        dry: &mut [&mut [f32]],
+        s: &SatSettings,
+        bands: &[[&[f32]; 2]; BANDS],
+    ) -> SatTelemetry {
+        self.process_split(channels, dry, s, Some(bands))
+    }
+
+    fn process_split(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        dry: &mut [&mut [f32]],
+        s: &SatSettings,
+        bands: Option<&[[&[f32]; 2]; BANDS]>,
+    ) -> SatTelemetry {
         let mut telemetry = SatTelemetry::default();
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
@@ -1780,7 +1803,7 @@ impl Saturator {
             if let Some(d) = drest.first_mut() {
                 dr[1] = &mut d[start..start + n];
             }
-            self.chunk(&mut ch[..n_ch], &mut dr, n, s, &mut telemetry);
+            self.chunk(&mut ch[..n_ch], &mut dr, n, s, &mut telemetry, bands.map(|b| (b, start)));
             start += n;
         }
         telemetry
@@ -1794,6 +1817,7 @@ impl Saturator {
         n: usize,
         s: &SatSettings,
         telemetry: &mut SatTelemetry,
+        bands: Option<(&[[&[f32]; 2]; BANDS], usize)>,
     ) {
         let n_ch = channels.len();
         let fading = self.fade.is_some();
@@ -1835,6 +1859,14 @@ impl Saturator {
                 }
                 let core = &mut self.cores[ci];
                 let layout = core.layout;
+                if let Some((lp, offset)) = bands {
+                    for c in 0..n_ch {
+                        for p in 0..=layout.n {
+                            self.split[at(ci, p, c) + i] = lp[layout.owners[p]][c][offset + i];
+                        }
+                    }
+                    continue;
+                }
                 let mut sig = [0.0f64; BANDS];
                 for c in 0..n_ch {
                     core.split

@@ -45,6 +45,9 @@ fn main() {
     for (name, s, factor) in cases.into_iter().filter(|c| only.as_ref().is_none_or(|o| c.0.contains(o.as_str()))) {
         let out = Output::default();
         let mut engine = SatEngine::new(fs, factor, &s);
+        // LINEAR=1 measures Linear Phase (its kernels designed up front).
+        let linear = std::env::var("LINEAR").is_ok_and(|v| v == "1");
+        engine.prepare(fs, factor, &s, &out, linear);
         let history = HistoryTap::new(6000);
         let mut buf = input.clone();
         let t0 = std::time::Instant::now();
@@ -52,9 +55,10 @@ fn main() {
             let end = (start + block).min(n);
             let [l, r] = &mut buf;
             let mut chans: [&mut [f32]; 2] = [&mut l[start..end], &mut r[start..end]];
-            engine.process(&mut chans, &s, factor, &out, &history, None);
+            engine.process(&mut chans, &s, factor, linear, &out, &history, None);
         }
         let took = t0.elapsed().as_secs_f64();
+        assert_eq!(engine.linear(), linear);
         println!("{name:22}: {:.2} % of one core", took / f64::from(seconds) * 100.0);
     }
 }

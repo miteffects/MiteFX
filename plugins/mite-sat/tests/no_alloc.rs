@@ -24,7 +24,8 @@ fn engine_process_never_allocates() {
     let tap = MatrixTap::new();
     for i in 0..2400 {
         // Everything switching all along: bands made and removed, models, drive to and from 0
-        // (bands waking up), bypass, solo and mute, oversampling, auto gain and the output stage.
+        // (bands waking up), bypass, solo and mute, oversampling, Linear Phase (its kernels swapped
+        // in and handed back as the crossovers move), auto gain and the output stage.
         s.crossovers = [
             ((i / 40) % 2 == 0).then_some(150.0),
             ((i / 70) % 3 != 0).then_some(1000.0 + (i % 9) as f32 * 50.0),
@@ -43,6 +44,11 @@ fn engine_process_never_allocates() {
         s.bands[3].mute = (i / 60) % 2 == 1;
         s.auto_gain = (i / 140) % 2 == 0;
         let factor = [1, 2, 4, 8][(i / 170) % 4];
+        let linear = (i / 190) % 3 != 0;
+        if i % 20 == 0 {
+            // Time for the designer to hand kernels over.
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
         let out = Output { mix: if (i / 80) % 2 == 0 { 1.0 } else { 0.5 }, delta: (i / 100) % 2 == 1, bypass: (i / 210) % 4 == 3, gain_db: -3.0, pan: 0.2 };
         for (k, (a, b)) in l.iter_mut().zip(r.iter_mut()).enumerate() {
             let x = (((i * 256 + k) as f32) * 0.05).sin() * if (i / 7) % 2 == 0 { 0.5 } else { 0.01 };
@@ -62,14 +68,14 @@ fn engine_process_never_allocates() {
                 if offsets.iter().any(|o| *o != 0.0) {
                     let (mut sm, mut om) = (s, out);
                     mite_sat::params::modulate_settings(&mut sm, &mut om, offsets);
-                    engine.process(sub, &sm, factor, &om, &history, Some([&spectrum, &spectrum]));
+                    engine.process(sub, &sm, factor, linear, &om, &history, Some([&spectrum, &spectrum]));
                 } else {
-                    engine.process(sub, &s, factor, &out, &history, Some([&spectrum, &spectrum]));
+                    engine.process(sub, &s, factor, linear, &out, &history, Some([&spectrum, &spectrum]));
                 }
             });
         });
         if i % 50 == 0 {
-            process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, factor, &out, &history, Some([&spectrum, &spectrum])));
+            process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, factor, linear, &out, &history, Some([&spectrum, &spectrum])));
         }
         assert!(l.iter().chain(&r).all(|x| x.is_finite()));
     }
