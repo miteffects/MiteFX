@@ -316,7 +316,10 @@ impl SatEngine {
             }
             return;
         }
-        if fading || self.switch != Switch::Steady {
+        // Only while Linear Phase runs: switching into it, the kernels must wait in the handover
+        // for `install_kernels` (taken here, they went into idle convolvers and the switch waited,
+        // muted, for kernels that never came — 2026-11-10).
+        if fading || self.switch != Switch::Steady || !self.linear {
             return;
         }
         if let Some(mut set) = self.kernels.take() {
@@ -581,6 +584,29 @@ mod tests {
         assert_eq!(latency, Oversampler::latency_for(2) + linear_phase_latency(FS));
         let worst = (latency..input.len()).map(|i| (y[i] - input[i - latency]).abs()).fold(0.0f32, f32::max);
         assert!(worst < 1e-5, "worst {worst}");
+    }
+
+    #[test]
+    fn switching_to_linear_phase_in_small_blocks_comes_back_with_sound() {
+        // As in a host: small blocks, the designer's kernels arriving while the dip still fades.
+        let s = driven();
+        let mut e = SatEngine::new(FS, 2, &s);
+        let input = noise(64, 3);
+        let tap = HistoryTap::new(1024);
+        let mut heard = 0.0f32;
+        for k in 0..3000 {
+            let mut y = input.clone();
+            e.process(&mut [&mut y[..]], &s, 2, true, &Output::default(), &tap, None);
+            if k == 0 {
+                // The dip has begun (64 of its 480 samples); the kernels arrive before it ends.
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            if k > 2500 {
+                heard = heard.max(y.iter().fold(0.0f32, |m, v| m.max(v.abs())));
+            }
+        }
+        assert!(e.linear(), "never switched");
+        assert!(heard > 0.1, "silent: {heard}");
     }
 
     #[test]
