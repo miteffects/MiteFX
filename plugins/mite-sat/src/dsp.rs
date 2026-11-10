@@ -162,6 +162,8 @@ pub struct SatEngine {
     kernels: Arc<Handover<SplitKernels>>,
     requests: TripleWriter<SplitRequest>,
     last_request: Option<SplitRequest>,
+    /// What the convolvers' kernels were made for (kept across a switch out and back in).
+    installed: Option<SplitRequest>,
     spare: Option<Box<SplitKernels>>,
     stop: Arc<AtomicBool>,
     designer: Option<JoinHandle<()>>,
@@ -208,6 +210,7 @@ impl SatEngine {
             kernels,
             requests,
             last_request: None,
+            installed: None,
             spare: None,
             stop,
             designer,
@@ -227,6 +230,7 @@ impl SatEngine {
         self.lp_bands = (0..BANDS).map(|_| [vec![0.0; CHUNK], vec![0.0; CHUNK]]).collect();
         self.spare = None;
         self.last_request = None;
+        self.installed = None;
         self.linear = linear;
         if linear {
             let mut set = design_split(&req);
@@ -236,6 +240,7 @@ impl SatEngine {
                 }
             }
             self.last_request = Some(req);
+            self.installed = Some(req);
             self.requests.write(req);
         }
         self.wet = [vec![0.0; CHUNK], vec![0.0; CHUNK]];
@@ -334,14 +339,31 @@ impl SatEngine {
                     }
                 }
             }
+            self.installed = Some(set.request);
             self.spare = Some(set);
         }
     }
 
-    /// Switching into Linear Phase behind the dip: the newest kernels go in at once (no fade; the
-    /// convolvers start empty). Whether there were any.
-    fn install_kernels(&mut self) -> bool {
-        let Some(mut set) = self.kernels.take() else { return false };
+    /// Switching into Linear Phase behind the dip: the convolvers start empty, with the kernels
+    /// they kept if those still fit the crossovers, else the newest designed (no fade). Whether
+    /// they have kernels to run.
+    fn install_kernels(&mut self, s: &SatSettings) -> bool {
+        let req = SplitRequest::new(s.crossovers, self.sample_rate);
+        if self.installed == Some(req) {
+            for conv in &mut self.convs {
+                conv.reset();
+            }
+            return true;
+        }
+        let Some(mut set) = self.kernels.take() else {
+            // Nothing designed (the last set went in before a switch out and back): ask again.
+            // (2026-11-10: the second switch into Linear Phase stayed muted waiting for it.)
+            if self.last_request != Some(req) || self.installed.is_some() {
+                self.requests.write(req);
+                self.last_request = Some(req);
+            }
+            return false;
+        };
         if set.request.sample_rate != f64::from(self.sample_rate) {
             self.give_back(set);
             return false;
@@ -352,6 +374,7 @@ impl SatEngine {
             }
             conv.reset();
         }
+        self.installed = Some(set.request);
         self.give_back(set);
         true
     }
@@ -400,7 +423,7 @@ impl SatEngine {
                     }
                 }
                 Switch::Waiting => {
-                    if linear && !self.linear && !self.install_kernels() {
+                    if linear && !self.linear && !self.install_kernels(s) {
                         // Still designing: stay muted.
                     } else {
                         self.linear = linear;
@@ -607,6 +630,36 @@ mod tests {
         }
         assert!(e.linear(), "never switched");
         assert!(heard > 0.1, "silent: {heard}");
+    }
+
+    #[test]
+    fn linear_phase_switched_on_again_and_again_comes_back_with_sound() {
+        // Minimum → Linear → Minimum → … in small blocks: every switch into Linear Phase ends
+        // with sound (the second one used to wait, muted, for kernels never asked for again).
+        let mut s = driven();
+        let mut e = SatEngine::new(FS, 2, &s);
+        let input = noise(64, 4);
+        let tap = HistoryTap::new(1024);
+        for round in 0..6 {
+            let linear = round % 2 == 0;
+            // Round 3: a crossover moves while in Minimum Phase, so round 4 needs new kernels.
+            if round == 3 {
+                s.crossovers[0] = Some(300.0);
+            }
+            let mut heard = 0.0f32;
+            for k in 0..2000 {
+                let mut y = input.clone();
+                e.process(&mut [&mut y[..]], &s, 2, linear, &Output::default(), &tap, None);
+                if k % 50 == 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                if k > 1500 {
+                    heard = heard.max(y.iter().fold(0.0f32, |m, v| m.max(v.abs())));
+                }
+            }
+            assert_eq!(e.linear(), linear, "round {round}");
+            assert!(heard > 0.1, "round {round} (linear {linear}): silent, {heard}");
+        }
     }
 
     #[test]
