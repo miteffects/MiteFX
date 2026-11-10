@@ -2,8 +2,9 @@
 //!
 //! Pre-delay; an early field of 24 reflections a side (denser as they come later, as a room's
 //! image sources), blurred by short allpasses and sent partly into the tail; input diffusion; a
-//! 16-line feedback delay network under a Hadamard matrix in which every line carries two
-//! allpass diffusers (each pass round the loop is smeared, so the tail turns dense fast and does
+//! 32-line feedback delay network under a Hadamard matrix in which every line carries two long
+//! allpasses that wander (they add modes without a coarse echo, so a small room does not ring)
+//! and two short ones (each pass round the loop is smeared, so the tail turns dense fast and does
 //! not repeat), modulated by smoothed random motion, with per-line absorption: decay time per
 //! frequency from the decay EQ's bands (each a bell, a shelf or a tilt, none by default). Then
 //! width, ducking and the tone EQ (Mite EQ's bands, every shape) on the reverb. This makes the reverb only; the plugin mixes it with the dry signal.
@@ -37,8 +38,20 @@ pub const CONTROL: usize = 32;
 const MAIN_MS: (f32, f32) = (47.0, 123.0);
 /// The smallest size's scale on the main delays (6…16 ms: a small room; the allpasses add 4–6 ms).
 const MIN_SCALE: f32 = 0.13;
-/// Each line's two in-loop allpasses span these, ms. Not scaled with Size (they never glide).
+/// Each line's two short in-loop allpasses span these, ms. Not scaled with Size (they never
+/// glide): they keep the build-up fast.
 const LOOP_AP_MS: [(f32, f32); 2] = [(1.1, 2.3), (0.5, 0.9)];
+/// Each line's two long, modulated in-loop allpasses span these at Size 0, ms (Zita-rev1 and Cloud
+/// Seed's lesson). A loop's modes per Hz are its whole delay: at Size 0 the main delays alone
+/// gave 3 Hz between modes, each 1 Hz wide at 2 s, and the small rooms rang. An allpass adds delay
+/// (modes) without a coarse echo; modulated, it does not ring at its own length.
+/// The long allpasses' coefficient (alternating in sign by line). Not DIFFUSION's: tied to it,
+/// at 0.65 (DIFFUSION 100 %) a minute of noise under the fastest, deepest modulation grew. From
+/// 0.45 a deep decay bell measured over 10 % long (an allpass's group delay swings with
+/// frequency; the modes where it is longest decay slowest and outlast the rest); 0.5 rang a
+/// little less at Size 0 (0.06 % peaky against 0.13).
+const LONG_G: f32 = 0.35;
+const LONG_AP_MS: [(f32, f32); 2] = [(5.0, 11.0), (2.0, 4.0)];
 /// Modulation depth at MOD 100 %, ms (at most a fifth of the line's main delay).
 const MOD_MS: f32 = 1.6;
 /// The input diffusers' lengths per side, ms.
@@ -50,7 +63,8 @@ const ER_AP_MS: [[f32; 2]; 2] = [[0.53, 0.83], [0.61, 0.97]];
 /// The tank's input and output gains, and the early field's.
 /// (Scaled by √(16/N): the same level whatever the line count.)
 const IN_GAIN: f32 = 0.35;
-const OUT_GAIN: f32 = 1.95;
+/// (+1.8 dB since the long in-loop allpasses: the room keeps its level.)
+const OUT_GAIN: f32 = 2.40;
 const GLIDE_MS: f32 = 20.0;
 const SIZE_GLIDE_MS: f32 = 200.0;
 /// A pre-delay change crossfades between two read heads over this long (a glide would be a
@@ -90,6 +104,8 @@ const SPRING_OUT: f32 = 1.58;
 pub struct Topology {
     pub main_ms: [f32; LINES],
     pub ap_ms: [[f32; 2]; LINES],
+    /// The long, modulated allpasses at Size 0, ms.
+    pub long_ms: [[f32; 2]; LINES],
     pub in_sign: [f32; LINES],
     pub out: [[f32; LINES]; 2],
     pub out_at: [[f32; LINES]; 2],
@@ -103,6 +119,7 @@ impl Topology {
         let mut t = Self {
             main_ms: [0.0; LINES],
             ap_ms: [[0.0; 2]; LINES],
+            long_ms: [[0.0; 2]; LINES],
             in_sign: [0.0; LINES],
             out: [[0.0; LINES]; 2],
             out_at: [[0.0; LINES]; 2],
@@ -124,6 +141,13 @@ impl Topology {
                 t.out_at[c][i] = 0.3 + 0.45 * rng.next();
             }
             t.mix_perm[i] = i;
+        }
+        // The long allpasses: their own draws, so the others stay as they were.
+        let mut lr = Rng(0x3C6E_F372);
+        for i in 0..LINES {
+            for (k, &(lo, hi)) in LONG_AP_MS.iter().enumerate() {
+                t.long_ms[i][k] = lo + (hi - lo) * lr.next();
+            }
         }
         // Fisher–Yates.
         for i in (1..LINES).rev() {
@@ -156,6 +180,11 @@ impl Topology {
         ((self.ap_ms[i][k] * 0.001 * fs).round() as usize).max(2)
     }
 
+    /// Line `i`'s long allpass `k` at `size`, samples (before modulation).
+    pub fn long_len_scaled(&self, i: usize, k: usize, size: f32, fs: f32, scale: f32) -> f32 {
+        self.long_ms[i][k] * long_scale(size) * scale * 0.001 * fs
+    }
+
     /// Line `i`'s whole loop at `size`, samples: its main delay and its allpasses' (whose mean
     /// group delay is their length).
     pub fn line_len(&self, i: usize, size: f32, fs: f32) -> f32 {
@@ -164,7 +193,10 @@ impl Topology {
 
     /// [`Self::line_len`] with the main delay scaled by `scale` (a type's voicing).
     pub fn line_len_scaled(&self, i: usize, size: f32, fs: f32, scale: f32) -> f32 {
-        self.main_len_scaled(i, size, fs, scale) + (self.ap_len(i, 0, fs) + self.ap_len(i, 1, fs)) as f32
+        self.main_len_scaled(i, size, fs, scale)
+            + (self.ap_len(i, 0, fs) + self.ap_len(i, 1, fs)) as f32
+            + self.long_len_scaled(i, 0, size, fs, scale)
+            + self.long_len_scaled(i, 1, size, fs, scale)
     }
 }
 
@@ -405,6 +437,13 @@ impl Default for ReverbSettings {
 /// Size's scale on the lines' main delays.
 pub fn tank_scale(size: f32) -> f32 {
     MIN_SCALE * (1.0 / MIN_SCALE).powf(size.clamp(0.0, 1.0))
+}
+
+/// Size's scale on the long allpasses: 1 at Size 0, the square root of the main delays' growth
+/// (×2.8 at Size 100), so they stay a fair share of a small loop and a modest one of a big one
+/// (measured: 10…22 ms at Size 0 rang less early but more late, 4…8 ms rang more).
+pub fn long_scale(size: f32) -> f32 {
+    (tank_scale(size) / MIN_SCALE).sqrt()
 }
 
 /// Line `i`'s whole loop at `size`, samples (see [`Topology::line_len`]).
@@ -719,6 +758,37 @@ impl Allpass {
     }
 }
 
+/// A Schroeder allpass whose length glides and wanders: read through [`AllpassRead`], so it stays
+/// lossless at every frequency (an allpass inside an allpass is one).
+#[derive(Debug, Clone)]
+struct ModAllpass {
+    line: Delay,
+    read: AllpassRead,
+}
+
+impl ModAllpass {
+    fn new(max_len: usize) -> Self {
+        Self {
+            line: Delay::new(max_len + 4),
+            read: AllpassRead::default(),
+        }
+    }
+
+    /// `len` (samples, ≥ 2.5) this sample.
+    #[inline]
+    fn process(&mut self, x: f32, g: f32, len: f32) -> f32 {
+        let delayed = self.read.read(&self.line, len - 1.0);
+        let w = x + g * delayed;
+        self.line.write(w);
+        delayed - g * w
+    }
+
+    fn reset(&mut self) {
+        self.line.reset();
+        self.read = AllpassRead::default();
+    }
+}
+
 /// A line's absorption in the audio path: the sections that do something (f32, transposed
 /// direct form II) and a gain. A new design is reached along a straight line over one control
 /// step, every sample (a step every 32 samples is heard when the decay's tone moves fast). A
@@ -818,6 +888,13 @@ impl LineFilter {
         self.on = [false; DECAY_BANDS];
         self.left = 0;
     }
+}
+
+/// The long allpasses' motions (deterministic seeds, apart from the main delays').
+fn long_wanders() -> [[Wander; 2]; LINES] {
+    std::array::from_fn(|i| {
+        std::array::from_fn(|k| Wander::new(0x85EB_CA6Bu32.wrapping_mul((2 * i + k) as u32 + 7)))
+    })
 }
 
 /// In-place fast Walsh–Hadamard transform over the lines, scaled to be orthonormal.
@@ -1039,6 +1116,9 @@ pub struct Reverb {
     lines: [Delay; LINES],
     reads: [AllpassRead; LINES],
     loop_ap: [[Allpass; 2]; LINES],
+    long_ap: [[ModAllpass; 2]; LINES],
+    /// The long allpasses' motion.
+    long_wander: [[Wander; 2]; LINES],
     filters: [LineFilter; LINES],
     /// The shape each decay band is running.
     shapes: [DecayShape; DECAY_BANDS],
@@ -1054,6 +1134,8 @@ pub struct Reverb {
     /// main delay (samples), the ducking gain.
     er: [f32; 2],
     len: [[f32; LINES]; 2],
+    /// Each line's long allpasses' lengths, samples (as `len`).
+    long_len: [[[f32; 2]; LINES]; 2],
     duck: [f32; 2],
     wander: [Wander; LINES],
     /// Gains that glide per sample within a control step: start and end, as `er`.
@@ -1099,6 +1181,16 @@ impl Reverb {
             loop_ap: std::array::from_fn(|i| {
                 std::array::from_fn(|k| Allpass::new(topo.ap_len(i, k, fs)))
             }),
+            long_ap: std::array::from_fn(|i| {
+                std::array::from_fn(|k| {
+                    ModAllpass::new(
+                        (topo.long_len_scaled(i, k, 1.0, fs, MAX_VOICE_SCALE) + MOD_MS * MAX_VOICE_MOD * 0.001 * fs)
+                            .ceil() as usize
+                            + 8,
+                    )
+                })
+            }),
+            long_wander: long_wanders(),
             filters: [LineFilter::default(); LINES],
             shapes: [DecayShape::Bell; DECAY_BANDS],
             tone: std::array::from_fn(|_| BandProcessor::new(f64::from(fs), TONE_SMOOTH_MS)),
@@ -1109,6 +1201,7 @@ impl Reverb {
             pd_step: 1.0 / (PREDELAY_FADE_MS * 0.001 * fs),
             er: [0.0; 2],
             len: [[0.0; LINES]; 2],
+            long_len: [[[0.0; 2]; LINES]; 2],
             duck: [1.0; 2],
             wander: std::array::from_fn(|i| Wander::new(0x9E37_79B9u32.wrapping_mul(i as u32 + 1))),
             depth: [0.0; 2],
@@ -1157,6 +1250,9 @@ impl Reverb {
         {
             a.line.reset();
         }
+        for a in self.long_ap.iter_mut().flatten() {
+            a.reset();
+        }
         for f in &mut self.filters {
             f.reset();
         }
@@ -1171,6 +1267,7 @@ impl Reverb {
         self.freeze.reset(if s.freeze { 1.0 } else { 0.0 });
         self.wander =
             std::array::from_fn(|i| Wander::new(0x9E37_79B9u32.wrapping_mul(i as u32 + 1)));
+        self.long_wander = long_wanders();
         self.env = 0.0;
         self.phase = 0;
         self.duck_g = 1.0;
@@ -1190,6 +1287,9 @@ impl Reverb {
         }
         for a in self.loop_ap.iter_mut().flatten() {
             a.line.reset();
+        }
+        for a in self.long_ap.iter_mut().flatten() {
+            a.reset();
         }
         for f in &mut self.filters {
             f.reset();
@@ -1239,10 +1339,15 @@ impl Reverb {
         for i in 0..LINES {
             self.len[0][i] = self.len[1][i];
             self.len[1][i] = self.topo.main_len_scaled(i, g.size, fs, v.scale);
+            self.long_len[0][i] = self.long_len[1][i];
+            for k in 0..2 {
+                self.long_len[1][i][k] = self.topo.long_len_scaled(i, k, g.size, fs, v.scale);
+            }
         }
         if jump {
             self.er[0] = self.er[1];
             self.len[0] = self.len[1];
+            self.long_len[0] = self.long_len[1];
         }
         if self.designed != Some((g, freeze, self.kind)) {
             let design = |len: f32| design_absorption(f64::from(len), &g, f64::from(fs), f64::from(freeze));
@@ -1268,7 +1373,7 @@ impl Reverb {
                 }
             }
             let step = g.mod_rate.max(0.01) / fs;
-            for w in &mut self.wander {
+            for w in self.wander.iter_mut().chain(self.long_wander.iter_mut().flatten()) {
                 w.step = step;
             }
             self.designed = Some((g, freeze, self.kind));
@@ -1318,7 +1423,15 @@ impl Reverb {
         for i in 0..LINES {
             let len = self.len[0][i] + (self.len[1][i] - self.len[0][i]) * t;
             let m = self.wander[i].next();
-            let d = self.reads[i].read(&self.lines[i], len - 1.0 + depth * m);
+            let mut d = self.reads[i].read(&self.lines[i], len - 1.0 + depth * m);
+            // The long allpasses, alternating in sign by line (as Zita-rev1's), each wandering
+            // by its own motion as far as the main delay does (at most a quarter of its length).
+            let sign = if i & 1 == 0 { 1.0 } else { -1.0 };
+            for k in 0..2 {
+                let base = self.long_len[0][i][k] + (self.long_len[1][i][k] - self.long_len[0][i][k]) * t;
+                let wobble = depth.min(0.25 * base) * self.long_wander[i][k].next();
+                d = self.long_ap[i][k].process(d, sign * LONG_G, (base + wobble).max(2.5));
+            }
             let a = self.loop_ap[i][0].process(d, loop_g);
             v[i] = self.loop_ap[i][1].process(a, -loop_g);
             ol += self.topo.out[0][i] * self.lines[i].read_linear(len * self.topo.out_at[0][i]);
