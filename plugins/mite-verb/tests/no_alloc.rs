@@ -19,7 +19,7 @@ fn engine_process_never_allocates() {
         s.predelay_ms = [0.0, 30.0, 500.0][(i / 70) % 3];
         s.decay_s = [0.1, 2.0, 30.0][(i / 90) % 3];
         s.freeze = (i / 110) % 3 == 2;
-        s.bands[0] = DecayBand { shape: DecayShape::from_index((i / 45) % 4), ..DecayBand::low_shelf(300.0, [0.25, 1.0, 4.0][(i / 50) % 3]) };
+        s.bands[0] = DecayBand { shape: DecayShape::from_index((i / 45) % 6), ..DecayBand::low_shelf(300.0, [0.25, 1.0, 4.0][(i / 50) % 3]) };
         s.bands[1] = DecayBand::high_shelf(1000.0 + (i % 7) as f32 * 2000.0, 0.5);
         s.bands[2].on = (i / 65) % 2 == 0;
         s.eq[0] = BandSettings { enabled: (i / 55) % 3 != 0, kind: BandType::from_index((i / 33) % 10), freq: 200.0 + (i % 9) as f64 * 900.0, gain_db: 6.0, slope: (i / 20) % 9, ..BandSettings::default() };

@@ -104,7 +104,7 @@ const TYPE_WORDS: [&str; 6] = [
 ];
 
 /// The shape menus: every shape, then Remove.
-const DECAY_MENU: [&str; 5] = ["Bell", "Low Shelf", "High Shelf", "Tilt", "Remove"];
+const DECAY_MENU: [&str; 7] = ["Bell", "Low Shelf", "High Shelf", "Tilt", "Low Cut", "High Cut", "Remove"];
 const TONE_MENU: [&str; 11] = ["Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf", "Flat Tilt", "All Pass", "Remove"];
 
 /// The frequency at `x` on the plot.
@@ -744,13 +744,19 @@ impl VerbView {
                 let band = s.bands[b];
                 let f = f64::from(band.freq);
                 let t = self.model(&s).at(f);
-                Help::default()
+                let h = Help::default()
                     .text(format!("Decay band {} · {} · ", b + 1, DECAY_MENU[band.shape.index()]))
                     .slot(fmt_s(t), "30.00 s")
                     .text(" at ")
-                    .slot(fmt_hz(f), "16.00 kHz")
-                    .text(format!(" · ×{:.2} the decay · Q {:.2}", band.mult, band.q))
-                    .text(if dragging { " — Shift is fine." } else { " — drag; wheel: width; right-click: shape or remove; double-click removes it." })
+                    .slot(fmt_hz(f), "16.00 kHz");
+                if band.shape.is_cut() {
+                    h.text(" · ")
+                        .slot(format!("{} dB/oct", SLOPES_DB[band.slope.min(SLOPES_DB.len() - 1)]), "96 dB/oct")
+                        .text(if dragging { " — Shift is fine." } else { " — the tail past it dies within a few passes. Drag; wheel: slope; right-click: shape or remove; double-click removes it." })
+                } else {
+                    h.text(format!(" · ×{:.2} the decay · Q {:.2}", band.mult, band.q))
+                        .text(if dragging { " — Shift is fine." } else { " — drag; wheel: width; right-click: shape or remove; double-click removes it." })
+                }
             }
             Node::Tone(b) => {
                 let band = s.eq[b];
@@ -854,11 +860,12 @@ impl VerbView {
                 let f = (f as f32).clamp(D_FREQ.min, D_FREQ.max);
                 let q = if shape == DecayShape::Bell { D_Q.default } else { std::f32::consts::FRAC_1_SQRT_2 };
                 let mut s = settings(host);
-                s.bands[b] = mite_dsp::reverb::DecayBand { on: true, shape, freq: f, mult: 1.0, q };
+                s.bands[b] = mite_dsp::reverb::DecayBand { on: true, shape, freq: f, mult: 1.0, q, ..Default::default() };
                 let target = y_decay(at.y.clamp(DECAY_TOP, DECAY_BOTTOM));
-                // A tilt does nothing at its pivot: it starts flat, to be dragged.
-                let m = if shape == DecayShape::Tilt { 1.0 } else { self.solve_mult(&s, b, f64::from(f), target) };
-                for (id, v) in [(band_id(b, D_FREQ.id), D_FREQ.snap(f)), (band_id(b, D_TYPE.id), kind as f32), (band_id(b, D_Q.id), q), (band_id(b, D_MULT.id), D_MULT.snap(m.clamp(D_MULT.min, D_MULT.max))), (band_id(b, D_ON.id), 1.0)] {
+                // A tilt does nothing at its pivot: it starts flat, to be dragged. A cut has no
+                // multiplier: it sits where the curve passes its corner.
+                let m = if shape == DecayShape::Tilt || shape.is_cut() { 1.0 } else { self.solve_mult(&s, b, f64::from(f), target) };
+                for (id, v) in [(band_id(b, D_FREQ.id), D_FREQ.snap(f)), (band_id(b, D_TYPE.id), kind as f32), (band_id(b, D_Q.id), q), (band_id(b, D_MULT.id), D_MULT.snap(m.clamp(D_MULT.min, D_MULT.max))), (band_id(b, D_SLOPE.id), D_SLOPE.default as f32), (band_id(b, D_ON.id), 1.0)] {
                     Self::set(host, &id, v);
                 }
             }
@@ -920,6 +927,10 @@ impl VerbView {
                 let f = (x_freq(to.x) as f32).clamp(D_FREQ.min, D_FREQ.max);
                 Self::set_raw(host, &band_id(b, D_FREQ.id), D_FREQ.snap(f));
                 s.bands[b].freq = f;
+                if s.bands[b].shape.is_cut() {
+                    // Only its corner moves (as a tone EQ cut).
+                    return;
+                }
                 let m = if s.bands[b].shape == DecayShape::Tilt {
                     // Nothing moves at a tilt's pivot: up doubles it per 80 px.
                     mult * 2f32.powf(((at.y - to.y) / 80.0) as f32)
@@ -1074,8 +1085,14 @@ impl VerbView {
                 let fine = mods.fine();
                 match self.hot_at(host, pos) {
                     Some(Hot::Node(Node::Decay(b))) => {
-                        let id = band_id(b, D_Q.id);
-                        Self::set(host, &id, D_Q.wheel(Self::plain(host, &id), lines, fine));
+                        if DecayShape::from_index(Self::plain(host, &band_id(b, D_TYPE.id)).round() as usize).is_cut() {
+                            let id = band_id(b, D_SLOPE.id);
+                            let n = D_SLOPE.choices.len() as f32 - 1.0;
+                            Self::set(host, &id, (Self::plain(host, &id) + lines.signum()).clamp(0.0, n));
+                        } else {
+                            let id = band_id(b, D_Q.id);
+                            Self::set(host, &id, D_Q.wheel(Self::plain(host, &id), lines, fine));
+                        }
                     }
                     Some(Hot::Node(Node::Tone(b))) => {
                         if BandType::from_index(Self::plain(host, &tone_id(b, E_TYPE.id)).round() as usize).has_slope() {

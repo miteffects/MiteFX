@@ -16,42 +16,42 @@ bypass | bool | false
 early_size | ms | 2 | 200 | 35 | Log
 early_send | % | 0 | 100 | 0 | Linear
 d1_on | bool | false
-d1_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d1_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d1_freq | Hz | 20 | 20000 | 1000 | Log
 d1_mult | × | 0.1 | 4 | 1 | Log
 d1_q |  | 0.3 | 6 | 1 | Log
 d2_on | bool | false
-d2_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d2_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d2_freq | Hz | 20 | 20000 | 1000 | Log
 d2_mult | × | 0.1 | 4 | 1 | Log
 d2_q |  | 0.3 | 6 | 1 | Log
 d3_on | bool | false
-d3_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d3_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d3_freq | Hz | 20 | 20000 | 1000 | Log
 d3_mult | × | 0.1 | 4 | 1 | Log
 d3_q |  | 0.3 | 6 | 1 | Log
 d4_on | bool | false
-d4_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d4_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d4_freq | Hz | 20 | 20000 | 1000 | Log
 d4_mult | × | 0.1 | 4 | 1 | Log
 d4_q |  | 0.3 | 6 | 1 | Log
 d5_on | bool | false
-d5_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d5_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d5_freq | Hz | 20 | 20000 | 1000 | Log
 d5_mult | × | 0.1 | 4 | 1 | Log
 d5_q |  | 0.3 | 6 | 1 | Log
 d6_on | bool | false
-d6_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d6_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d6_freq | Hz | 20 | 20000 | 1000 | Log
 d6_mult | × | 0.1 | 4 | 1 | Log
 d6_q |  | 0.3 | 6 | 1 | Log
 d7_on | bool | false
-d7_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d7_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d7_freq | Hz | 20 | 20000 | 1000 | Log
 d7_mult | × | 0.1 | 4 | 1 | Log
 d7_q |  | 0.3 | 6 | 1 | Log
 d8_on | bool | false
-d8_type | choice | Bell, Low Shelf, High Shelf, Tilt | 0
+d8_type | choice | Bell, Low Shelf, High Shelf, Tilt, Low Cut, High Cut | 0
 d8_freq | Hz | 20 | 20000 | 1000 | Log
 d8_mult | × | 0.1 | 4 | 1 | Log
 d8_q |  | 0.3 | 6 | 1 | Log
@@ -111,3 +111,11 @@ reverb_type | choice | Room, Hall, Plate, Chamber, Spring, Shimmer | 0
 shimmer_pitch2 | st | -24 | 24 | 19 | Linear
 shimmer_blend | % | 0 | 100 | 0 | Linear
 shimmer_detune | ct | 0 | 50 | 6 | Linear
+d1_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d2_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d3_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d4_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d5_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d6_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d7_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3
+d8_slope | choice | 6 dB/oct, 12 dB/oct, 18 dB/oct, 24 dB/oct, 30 dB/oct, 36 dB/oct, 48 dB/oct, 72 dB/oct, 96 dB/oct | 3

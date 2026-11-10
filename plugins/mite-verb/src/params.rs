@@ -31,7 +31,10 @@ use crate::dsp::Output;
 ///   more options"): `reverb_type` gains Shimmer, `shimmer` is its amount (50 % by default), and
 ///   `shimmer_pitch2`, `shimmer_blend`, `shimmer_detune` are appended. A version 6 state with
 ///   shimmer on becomes the Shimmer type ([`crate::migrate::v6_to_v7`]).
-pub const STATE_VERSION: u32 = 7;
+/// - 8 (2026-11-10): the decay EQ's cuts (user: "just allow it in eq as input eq has it"):
+///   `d1…d8_type` gains Low Cut and High Cut, and `d1…d8_slope` are appended (24 dB/oct by
+///   default). A version 7 state has no cuts; its bands keep their shapes.
+pub const STATE_VERSION: u32 = 8;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -90,6 +93,8 @@ pub const D_TYPE: ChoiceSpec = ChoiceSpec { id: "type", name: "Shape", choices: 
 pub const D_FREQ: ParamSpec = spec("freq", "Frequency", "Hz", 20.0, 20_000.0, 1000.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 pub const D_MULT: ParamSpec = spec("mult", "Decay", "×", 0.1, 4.0, 1.0, ParamScale::Log, 2, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Number);
 pub const D_Q: ParamSpec = spec("q", "Q", "", 0.3, 6.0, 1.0, ParamScale::Log, 2, (1.0 / 12.0, 1.0 / 48.0), ParamDisplay::Number);
+/// A decay cut's steepness: the tone EQ's slopes (a cut of Mite EQ inside the loops).
+pub const D_SLOPE: ChoiceSpec = ChoiceSpec { id: "slope", name: "Slope", choices: E_SLOPE.choices, default: DEFAULT_SLOPE };
 
 // ---- The tone EQ: `e{N}_…` (Mite EQ's bands on the reverb) -------------------------------------
 
@@ -134,6 +139,9 @@ pub fn manifest() -> String {
     lines.extend([SHIMMER.manifest_line(), SHIMMER_PITCH.manifest_line(), SHIMMER_LOW.manifest_line(), SHIMMER_HIGH.manifest_line()]);
     lines.push(REVERB_TYPE.manifest_line());
     lines.extend([SHIMMER_PITCH2.manifest_line(), SHIMMER_BLEND.manifest_line(), SHIMMER_DETUNE.manifest_line()]);
+    for b in 0..DECAY_BANDS {
+        lines.push(format!("d{}_{}", b + 1, D_SLOPE.manifest_line()));
+    }
     lines.join("\n") + "\n"
 }
 
@@ -187,6 +195,7 @@ pub fn choice_for(id: &str) -> Option<ChoiceSpec> {
     }
     match split_band_id(id)? {
         ('d', _, "type") => Some(D_TYPE),
+        ('d', _, "slope") => Some(D_SLOPE),
         ('e', _, "type") => Some(E_TYPE),
         ('e', _, "slope") => Some(E_SLOPE),
         _ => None,
@@ -199,12 +208,13 @@ pub struct DecayBandParams {
     pub freq: FloatParam,
     pub mult: FloatParam,
     pub q: FloatParam,
+    pub slope: IntParam,
 }
 
 impl DecayBandParams {
     fn new(band: usize) -> Self {
         let name = |what: &str| format!("Decay Band {} {what}", band + 1);
-        Self { on: bool_param(&D_ON, name("On")), kind: choice_param(&D_TYPE, name("Shape")), freq: float_param_named(&D_FREQ, name("Frequency")), mult: float_param_named(&D_MULT, name("Decay")), q: float_param_named(&D_Q, name("Q")) }
+        Self { on: bool_param(&D_ON, name("On")), kind: choice_param(&D_TYPE, name("Shape")), freq: float_param_named(&D_FREQ, name("Frequency")), mult: float_param_named(&D_MULT, name("Decay")), q: float_param_named(&D_Q, name("Q")), slope: choice_param(&D_SLOPE, name("Slope")) }
     }
 }
 
@@ -331,7 +341,7 @@ pub fn reverb_settings(p: impl Fn(&str) -> f32) -> ReverbSettings {
         shimmer_high_hz: p(SHIMMER_HIGH.id),
         bands: std::array::from_fn(|b| {
             let v = |id: &str| p(&band_id(b, id));
-            DecayBand { on: v(D_ON.id) >= 0.5, shape: DecayShape::from_index(index(v(D_TYPE.id))), freq: v(D_FREQ.id), mult: v(D_MULT.id), q: v(D_Q.id) }
+            DecayBand { on: v(D_ON.id) >= 0.5, shape: DecayShape::from_index(index(v(D_TYPE.id))), freq: v(D_FREQ.id), mult: v(D_MULT.id), q: v(D_Q.id), slope: index(v(D_SLOPE.id)).min(D_SLOPE.choices.len() - 1), amount: 1.0 }
         }),
         eq: std::array::from_fn(|b| {
             let v = |id: &str| p(&tone_id(b, id));
@@ -385,6 +395,7 @@ impl VerbParams {
                         "freq" => f(&band.freq),
                         "mult" => f(&band.mult),
                         "q" => f(&band.q),
+                        "slope" => int(&band.slope),
                         _ => 0.0,
                     }
                 }
@@ -465,6 +476,9 @@ unsafe impl Params for VerbParams {
         map.push(p(SHIMMER_PITCH2.id, self.shimmer_pitch2.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_BLEND.id, self.shimmer_blend.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_DETUNE.id, self.shimmer_detune.as_ptr(), "Shimmer"));
+        for (b, band) in self.bands.iter().enumerate() {
+            map.push((band_id(b, D_SLOPE.id), band.slope.as_ptr(), "Decay EQ".to_owned()));
+        }
         map
     }
 }

@@ -1,4 +1,4 @@
-//! Times the editor while a decay band is dragged (four bands on): the worst event and the worst
+//! Times the editor while a decay band is dragged (four bands and two steep cuts on): the worst event and the worst
 //! draw. The exact 32-line decay mean cost 16 ms an event and froze the UI (2026-11-04); the
 //! decay model brought it under a millisecond.
 //!
@@ -15,6 +15,12 @@ fn main() {
     let host = memory_host();
     for (b, f, t) in [(0, 200.0, 1.0), (1, 2000.0, 2.0), (2, 600.0, 2.0), (3, 6000.0, 1.0)] {
         for (id, v) in [("on", 1.0), ("type", t), ("freq", f), ("mult", 0.6)] {
+            host.set_plain(&format!("d{}_{id}", b + 1), v);
+        }
+    }
+    // And two cuts at the steepest slope (eight sections each in every line).
+    for (b, f, t) in [(4, 120.0, 4.0), (5, 9000.0, 5.0)] {
+        for (id, v) in [("on", 1.0), ("type", t), ("freq", f), ("slope", 8.0)] {
             host.set_plain(&format!("d{}_{id}", b + 1), v);
         }
     }

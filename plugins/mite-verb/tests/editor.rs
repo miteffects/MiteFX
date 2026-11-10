@@ -138,9 +138,26 @@ fn a_decay_band_takes_any_shape_from_its_menu() {
     assert_eq!(plain(&host, "d1_type"), 2.0);
     let s = settings(&host);
     assert!(decay_at(&s, 15_000.0, 48_000.0) < decay_at(&s, 200.0, 48_000.0) * 0.6);
-    // Remove (the last row).
+    // Low Cut: under its corner the tail is gone within a few passes; the wheel steps its slope;
+    // a drag moves only its corner.
     let p = view.node(&host, Node::Decay(0));
     pick_shape(&mut view, &host, p, 4);
+    assert_eq!(plain(&host, "d1_type"), 4.0);
+    let s = settings(&host);
+    let corner = f64::from(s.bands[0].freq);
+    assert!(decay_at(&s, corner / 4.0, 48_000.0) < decay_at(&s, corner * 4.0, 48_000.0) * 0.2);
+    let p = view.node(&host, Node::Decay(0));
+    let slope = plain(&host, "d1_slope");
+    view.event(&UiEvent::PointerMove { pos: p, mods: MODS }, &host);
+    view.event(&UiEvent::Wheel { pos: p, lines: 1.0, mods: MODS }, &host);
+    assert_eq!(plain(&host, "d1_slope"), slope + 1.0);
+    let mult = plain(&host, "d1_mult");
+    drag(&mut view, &host, p, Point::new(p.x - 60.0, p.y - 80.0));
+    assert!(f64::from(plain(&host, "d1_freq")) < corner * 0.8);
+    assert_eq!(plain(&host, "d1_mult"), mult);
+    // Remove (the last row).
+    let p = view.node(&host, Node::Decay(0));
+    pick_shape(&mut view, &host, p, 6);
     assert_eq!(plain(&host, "d1_on"), 0.0);
 }
 

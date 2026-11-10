@@ -37,12 +37,44 @@ pub fn v5_to_v6(_state: &mut PluginState) {}
 /// type, and its `shimmer` (now the Shimmer type's AMOUNT, read by no other type) goes to the
 /// default: kept at 0, picking the Shimmer type later gave a plain plate (user: "shimmer
 /// doesnt work", 2026-11-09).
+///
+/// `reverb_type` went from five choices to six: the snapshots' normalized types are rescaled
+/// (found 2026-11-10; before, a version 6 snapshot holding Plate came back as Chamber).
 pub fn v6_to_v7(state: &mut PluginState) {
+    rescale_snapshot_choices(state, &["reverb_type".to_owned()], 5, mite_dsp::reverb::ReverbKind::NAMES.len());
     let on = matches!(state.params.get("shimmer"), Some(ParamValue::F32(v)) if *v > 0.0);
     if on {
         state.params.insert("reverb_type".to_owned(), ParamValue::I32(mite_dsp::reverb::ReverbKind::Shimmer.index() as i32));
     } else {
         state.params.insert("shimmer".to_owned(), ParamValue::F32(crate::params::SHIMMER.default));
+    }
+}
+
+/// **7 → 8 (2026-11-10):** the decay EQ's cuts and their slopes appended; a version 7 state has
+/// no cuts. Its parameters keep their shapes (stored as indices), but the snapshots store
+/// normalized values: `d…_type` was index / 3 and is now index / 5 (unchanged, a Low Shelf
+/// snapshot would come back a High Shelf), so every slot's shapes are rescaled.
+pub fn v7_to_v8(state: &mut PluginState) {
+    let ids: Vec<String> = (0..mite_dsp::reverb::DECAY_BANDS).map(|b| band_id(b, D_TYPE.id)).collect();
+    rescale_snapshot_choices(state, &ids, 4, D_TYPE.choices.len());
+}
+
+/// Every snapshot slot's normalized choice `ids`, from `old` choices to `new` (the same index).
+fn rescale_snapshot_choices(state: &mut PluginState, ids: &[String], old: usize, new: usize) {
+    let Some(json) = state.fields.get_mut(mite_plugin::state::SNAPSHOTS_KEY) else { return };
+    let Ok(mut snaps) = serde_json::from_str::<serde_json::Value>(json) else { return };
+    let Some(slots) = snaps.get_mut("slots").and_then(serde_json::Value::as_array_mut) else { return };
+    for slot in slots.iter_mut() {
+        let Some(values) = slot.as_object_mut() else { continue };
+        for id in ids {
+            if let Some(n) = values.get(id).and_then(serde_json::Value::as_f64) {
+                let index = (n * (old - 1) as f64).round().clamp(0.0, (old - 1) as f64);
+                values.insert(id.clone(), (index / (new - 1) as f64).into());
+            }
+        }
+    }
+    if let Ok(out) = serde_json::to_string(&snaps) {
+        *json = out;
     }
 }
 
@@ -222,5 +254,33 @@ mod tests {
         assert_eq!(val(&off.params, "reverb_type"), Some(1.0));
         // Off, its amount comes back to the default, so the Shimmer type is never silent.
         assert_eq!(val(&off.params, "shimmer"), Some(crate::params::SHIMMER.default));
+    }
+
+    #[test]
+    fn version_7_snapshots_keep_their_decay_shapes() {
+        let mut state = PluginState { version: String::new(), params: BTreeMap::new(), fields: BTreeMap::new() };
+        state.fields.insert(
+            mite_plugin::state::SNAPSHOTS_KEY.to_owned(),
+            r#"{"active":0,"slots":[{"d1_type":0.33333334,"d2_type":0.6666667,"d3_type":1.0,"size":0.5},null,null,null]}"#.to_owned(),
+        );
+        v7_to_v8(&mut state);
+        let snaps: serde_json::Value = serde_json::from_str(&state.fields[mite_plugin::state::SNAPSHOTS_KEY]).unwrap();
+        let slot = &snaps["slots"][0];
+        // Low Shelf, High Shelf, Tilt: indices 1, 2, 3 of six.
+        for (id, index) in [("d1_type", 1.0), ("d2_type", 2.0), ("d3_type", 3.0)] {
+            let n = slot[id].as_f64().unwrap();
+            assert!((n * 5.0 - index).abs() < 1e-6, "{id}: {n}");
+        }
+        assert_eq!(slot["size"].as_f64(), Some(0.5));
+    }
+
+    #[test]
+    fn version_6_snapshots_keep_their_type() {
+        let mut state = PluginState { version: String::new(), params: BTreeMap::new(), fields: BTreeMap::new() };
+        state.fields.insert(mite_plugin::state::SNAPSHOTS_KEY.to_owned(), r#"{"active":0,"slots":[{"reverb_type":0.5},null,null,null]}"#.to_owned());
+        v6_to_v7(&mut state);
+        let snaps: serde_json::Value = serde_json::from_str(&state.fields[mite_plugin::state::SNAPSHOTS_KEY]).unwrap();
+        // Plate: index 2 of six.
+        assert!((snaps["slots"][0]["reverb_type"].as_f64().unwrap() * 5.0 - 2.0).abs() < 1e-6);
     }
 }

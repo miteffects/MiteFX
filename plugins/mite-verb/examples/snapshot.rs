@@ -4,7 +4,7 @@
 //!     cargo run -p mite_verb --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
 //! SNAPSHOT_VARIANT: default, hall (a large dark hall: shelves, cuts and a bell), bands (two decay
-//! bells), freeze, duck. SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_CLICK=x,y clicks one (a layer
+//! bells), cuts (a decay low cut and high cut), freeze, duck. SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_CLICK=x,y clicks one (a layer
 //! pill), SNAPSHOT_RCLICK=x,y right-clicks one (a shape menu).
 
 #[path = "common/music.rs"]
@@ -43,6 +43,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             host.set_plain(id, v);
         }
         for (id, v) in [("e1_on", 1.0), ("e1_type", 3.0), ("e1_freq", 60.0), ("e2_on", 1.0), ("e2_type", 4.0), ("e2_freq", 9000.0), ("e3_on", 1.0), ("e3_freq", 2500.0), ("e3_gain", -4.0), ("e3_q", 1.2)] {
+            host.set_plain(id, v);
+        }
+    }
+    if v("cuts") {
+        // A decay low cut at 150 Hz (24 dB/oct) and high cut at 6 kHz (12 dB/oct).
+        for (id, v) in [("d1_on", 1.0), ("d1_type", 4.0), ("d1_freq", 150.0), ("d1_slope", 3.0), ("d2_on", 1.0), ("d2_type", 5.0), ("d2_freq", 6000.0), ("d2_slope", 1.0)] {
             host.set_plain(id, v);
         }
     }

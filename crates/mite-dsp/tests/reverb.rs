@@ -169,6 +169,9 @@ fn the_loop_never_gains_at_any_extreme() {
                         shape: DecayShape::Tilt,
                         ..DecayBand::bell(hi_freq, lo_mult, 1.0)
                     };
+                    // And both cuts, the steepest.
+                    s.bands[4] = DecayBand::cut(true, lo_freq, 8);
+                    s.bands[5] = DecayBand::cut(false, hi_freq, 8);
                     for i in 0..LINES {
                         let a = design_absorption(
                             f64::from(line_len(i, size, fs)),
@@ -375,7 +378,7 @@ fn moving_any_setting_fast_never_clicks() {
         f(&mut s);
         s
     };
-    let cases: [(&str, ReverbSettings); 15] = [
+    let cases: [(&str, ReverbSettings); 17] = [
         ("predelay", with(&|s| s.predelay_ms = 500.0)),
         ("size", with(&|s| s.size = 0.8)),
         ("decay", with(&|s| s.decay_s = 20.0)),
@@ -383,6 +386,8 @@ fn moving_any_setting_fast_never_clicks() {
         ("hi_mult", with(&|s| s.bands[1].mult = 0.1)),
         ("lo_freq", with(&|s| s.bands[0].freq = 2000.0)),
         ("shape", with(&|s| s.bands[0].shape = DecayShape::Bell)),
+        ("cut on", with(&|s| s.bands[3] = DecayBand::cut(false, 3000.0, 3))),
+        ("cut shape", with(&|s| s.bands[0].shape = DecayShape::LowCut)),
         (
             "band on",
             with(&|s| s.bands[2] = DecayBand::bell(300.0, 3.0, 1.0)),
@@ -532,4 +537,32 @@ fn band_t60(s: &ReverbSettings, fc: f64, fs: f64) -> f64 {
         }
     }
     -60.0 / ((m * sxy - sx * sy) / (m * sxx - sx * sx))
+}
+
+#[test]
+fn a_decay_cut_shortens_the_tail_past_its_corner_as_drawn() {
+    // A low cut at 250 Hz (24 dB/oct) and a high cut at 4 kHz (12 dB/oct) inside the loops: each
+    // octave measures what `decay_at` draws there, and past the corners the tail is short.
+    let fs = 48_000.0;
+    let mut s = plain(ReverbSettings { decay_s: 2.0, ..ReverbSettings::default() });
+    s.bands[0] = DecayBand::cut(true, 250.0, 3);
+    s.bands[1] = DecayBand::cut(false, 4000.0, 1);
+    let n = (fs * 2.6) as usize;
+    let [l, r] = render(fs, &s, &impulse(n), 512);
+    let mono: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a + b).collect();
+    for fc in [500.0, 1000.0, 2000.0] {
+        let measured = t60(&octave(&mono, fc, f64::from(fs)), f64::from(fs));
+        let predicted = band_t60(&s, fc, f64::from(fs));
+        assert!((measured / predicted - 1.0).abs() < 0.1, "{fc} Hz: measured {measured:.3} s, drawn {predicted:.3} s");
+    }
+    for (fc, most) in [(125.0, 0.25), (8000.0, 0.5)] {
+        let at = decay_at(&s, fc, f64::from(fs));
+        assert!(at < most, "{fc} Hz: {at:.3} s");
+    }
+    // Off, a cut leaves no trace.
+    let mut off = s;
+    off.bands[0].on = false;
+    off.bands[1].on = false;
+    let flat = decay_at(&plain(ReverbSettings { decay_s: 2.0, ..ReverbSettings::default() }), 125.0, f64::from(fs));
+    assert!((decay_at(&off, 125.0, f64::from(fs)) - flat).abs() < 1e-9);
 }

@@ -219,11 +219,18 @@ pub enum DecayShape {
     /// A first-order tilt pivoting on `freq`: half the band's rate change at the top, the
     /// opposite half at DC (`mult` > 1: the highs ring longer and the lows shorter).
     Tilt,
+    /// Mite EQ's low cut at the band's slope inside every loop: each pass round loses its
+    /// response, so below `freq` the tail dies within a few passes (and a little above it, the
+    /// more the shorter the loops). `mult` and `q` play no part. A decay shape built of shelves
+    /// could not be steep: a shelf changes by 12 dB an octave at most.
+    LowCut,
+    /// The same with a high cut, above `freq`.
+    HighCut,
 }
 
 impl DecayShape {
-    pub const ALL: [Self; 4] = [Self::Bell, Self::LowShelf, Self::HighShelf, Self::Tilt];
-    pub const NAMES: [&'static str; 4] = ["Bell", "Low Shelf", "High Shelf", "Tilt"];
+    pub const ALL: [Self; 6] = [Self::Bell, Self::LowShelf, Self::HighShelf, Self::Tilt, Self::LowCut, Self::HighCut];
+    pub const NAMES: [&'static str; 6] = ["Bell", "Low Shelf", "High Shelf", "Tilt", "Low Cut", "High Cut"];
 
     pub fn from_index(i: usize) -> Self {
         Self::ALL.get(i).copied().unwrap_or_default()
@@ -240,12 +247,19 @@ impl DecayShape {
             Self::LowShelf => BandType::LowShelf,
             Self::HighShelf => BandType::HighShelf,
             Self::Tilt => BandType::TiltShelf,
+            Self::LowCut => BandType::LowCut,
+            Self::HighCut => BandType::HighCut,
         }
+    }
+
+    /// A cut (its slope acts; `mult` and `q` do not).
+    pub fn is_cut(self) -> bool {
+        matches!(self, Self::LowCut | Self::HighCut)
     }
 }
 
 /// One band of the decay EQ: its shape multiplies the decay around (bell), below or above
-/// (shelves) `freq` by `mult`.
+/// (shelves) `freq` by `mult`, or shortens it past `freq` at `slope` (cuts).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DecayBand {
     pub on: bool,
@@ -253,6 +267,10 @@ pub struct DecayBand {
     pub freq: f32,
     pub mult: f32,
     pub q: f32,
+    /// A cut's slope: an index into [`crate::eq::SLOPES_DB`].
+    pub slope: usize,
+    /// How much of a cut sounds, 0…1 (the engine glides it in and out; not a parameter).
+    pub amount: f32,
 }
 
 impl Default for DecayBand {
@@ -263,6 +281,8 @@ impl Default for DecayBand {
             freq: 1000.0,
             mult: 1.0,
             q: 1.0,
+            slope: crate::eq::DEFAULT_SLOPE,
+            amount: 1.0,
         }
     }
 }
@@ -275,6 +295,18 @@ impl DecayBand {
             freq,
             mult,
             q,
+            ..Self::default()
+        }
+    }
+
+    /// A low cut (`low`) or a high cut at `freq`, `slope` an index into [`crate::eq::SLOPES_DB`].
+    pub fn cut(low: bool, freq: f32, slope: usize) -> Self {
+        Self {
+            on: true,
+            shape: if low { DecayShape::LowCut } else { DecayShape::HighCut },
+            freq,
+            slope,
+            ..Self::default()
         }
     }
 
@@ -285,6 +317,7 @@ impl DecayBand {
             freq,
             mult,
             q: std::f32::consts::FRAC_1_SQRT_2,
+            ..Self::default()
         }
     }
 
@@ -295,6 +328,7 @@ impl DecayBand {
             freq,
             mult,
             q: std::f32::consts::FRAC_1_SQRT_2,
+            ..Self::default()
         }
     }
 }
@@ -462,6 +496,23 @@ impl ReverbSettings {
 }
 
 /// A decay band's section for a loss of `db` (dB a pass) against the rest of the loop.
+/// A decay cut's sections at `amount` (0…1): coming in (or freezing), its corner slides in
+/// from outside the audio band (10 Hz for a low cut, 30 kHz for a high one) along a log line.
+fn decay_cut(b: &DecayBand, amount: f64, fs: f64) -> crate::eq::Sections {
+    let fc = f64::from(b.freq).clamp(crate::eq::FREQ_MIN, crate::eq::FREQ_MAX);
+    let low = b.shape == DecayShape::LowCut;
+    let far = if low { crate::eq::FREQ_MIN } else { crate::eq::FREQ_MAX };
+    let settings = BandSettings {
+        enabled: true,
+        kind: b.shape.band_type(),
+        freq: fc * (far / fc).powf(1.0 - amount),
+        q: std::f64::consts::FRAC_1_SQRT_2,
+        slope: b.slope.min(crate::eq::SLOPES_DB.len() - 1),
+        ..BandSettings::default()
+    };
+    crate::eq::design(&settings, fs)
+}
+
 fn decay_section(b: &DecayBand, db: f64, fs: f64) -> Coeffs {
     let settings = BandSettings {
         enabled: true,
@@ -478,11 +529,17 @@ fn decay_section(b: &DecayBand, db: f64, fs: f64) -> Coeffs {
         .unwrap_or(Coeffs::IDENTITY)
 }
 
-/// One line's absorption: a gain and a section per decay band.
+/// Sections per decay band: a bell, shelf or tilt uses the first, a cut as many as its slope
+/// needs (96 dB/oct: eight).
+pub const CUT_SECTIONS: usize = 8;
+/// A line's absorption sections: [`CUT_SECTIONS`] per band, band `k`'s from `k × CUT_SECTIONS`.
+pub const SECTIONS: usize = DECAY_BANDS * CUT_SECTIONS;
+
+/// One line's absorption: a gain and the decay bands' sections.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Absorption {
     pub gain: f64,
-    pub sections: [Coeffs; DECAY_BANDS],
+    pub sections: [Coeffs; SECTIONS],
 }
 
 impl Absorption {
@@ -529,9 +586,17 @@ pub fn design_absorption(len: f64, s: &ReverbSettings, fs: f64, freeze: f64) -> 
     let per_pass = |t60: f64| (-60.0 * len / (fs * t60.max(0.01))).max(-100.0) * keep;
     let mid = per_pass(t);
     let db = |d: f64| 10f64.powf(d / 20.0);
-    let mut sections = [Coeffs::IDENTITY; DECAY_BANDS];
+    let mut sections = [Coeffs::IDENTITY; SECTIONS];
     for (k, b) in s.bands.iter().enumerate() {
-        if b.on && (b.mult - 1.0).abs() > 1e-6 {
+        if b.on && b.shape.is_cut() {
+            let a = f64::from(b.amount.clamp(0.0, 1.0)) * keep;
+            if a > 1e-6 {
+                let cut = decay_cut(b, a, fs);
+                for (j, c) in cut.as_slice().iter().take(CUT_SECTIONS).enumerate() {
+                    sections[k * CUT_SECTIONS + j] = *c;
+                }
+            }
+        } else if b.on && (b.mult - 1.0).abs() > 1e-6 {
             let d = per_pass(t * f64::from(b.mult)) - mid;
             // A tilt's gain is the swing from DC to the top: the band's rate change at the top.
             let d = if b.shape == DecayShape::Tilt {
@@ -539,7 +604,7 @@ pub fn design_absorption(len: f64, s: &ReverbSettings, fs: f64, freeze: f64) -> 
             } else {
                 d
             };
-            sections[k] = decay_section(b, d, fs);
+            sections[k * CUT_SECTIONS] = decay_section(b, d, fs);
         }
     }
     let mut a = Absorption {
@@ -603,6 +668,12 @@ pub fn decay_curve(s: &ReverbSettings, freqs: &[f64], fs: f64, out: &mut [f64]) 
     out.iter_mut().for_each(|v| *v /= LINES as f64);
 }
 
+/// The network's mean loop length for `s`, samples (what the cuts are fitted for).
+fn mean_line_len(topo: &Topology, s: &ReverbSettings, fs: f64) -> f64 {
+    let scale = s.kind.voicing().scale;
+    (0..LINES).map(|i| f64::from(topo.line_len_scaled(i, s.size, fs as f32, scale))).sum::<f64>() / LINES as f64
+}
+
 /// The decay EQ's T60 curve, cheaply: one line of the lines' mean loop length, designed once
 /// (with the same loop-gain check). Every line's band sections scale with its length (a band's
 /// dB a pass is proportional to it), so each line gives nearly the same T60(f) and the mean line
@@ -617,12 +688,7 @@ pub struct DecayModel {
 
 impl DecayModel {
     pub fn new(s: &ReverbSettings, fs: f64) -> Self {
-        let topo = Topology::new();
-        let scale = s.kind.voicing().scale;
-        let len = (0..LINES)
-            .map(|i| f64::from(topo.line_len_scaled(i, s.size, fs as f32, scale)))
-            .sum::<f64>()
-            / LINES as f64;
+        let len = mean_line_len(&Topology::new(), s, fs);
         Self {
             len,
             fs,
@@ -793,20 +859,50 @@ impl ModAllpass {
 /// direct form II) and a gain. A new design is reached along a straight line over one control
 /// step, every sample (a step every 32 samples is heard when the decay's tone moves fast). A
 /// section that becomes identity stops running and forgets its state once it has glided there.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct LineFilter {
     gain: f32,
-    c: [[f32; 5]; DECAY_BANDS],
+    c: [[f32; 5]; SECTIONS],
     /// Per sample towards the target, while `left` > 0.
     d_gain: f32,
-    dc: [[f32; 5]; DECAY_BANDS],
+    dc: [[f32; 5]; SECTIONS],
     left: u32,
-    on: [bool; DECAY_BANDS],
-    off_after: [bool; DECAY_BANDS],
-    z: [[f32; 2]; DECAY_BANDS],
+    on: [bool; SECTIONS],
+    off_after: [bool; SECTIONS],
+    z: [[f32; 2]; SECTIONS],
+    /// The sections that run, in order (the first `count`): a line's 64 slots are mostly idle.
+    active: [u8; SECTIONS],
+    count: usize,
+}
+
+impl Default for LineFilter {
+    fn default() -> Self {
+        Self {
+            gain: 0.0,
+            c: [[0.0; 5]; SECTIONS],
+            d_gain: 0.0,
+            dc: [[0.0; 5]; SECTIONS],
+            left: 0,
+            on: [false; SECTIONS],
+            off_after: [false; SECTIONS],
+            z: [[0.0; 2]; SECTIONS],
+            active: [0; SECTIONS],
+            count: 0,
+        }
+    }
 }
 
 impl LineFilter {
+    fn reindex(&mut self) {
+        self.count = 0;
+        for k in 0..SECTIONS {
+            if self.on[k] {
+                self.active[self.count] = k as u8;
+                self.count += 1;
+            }
+        }
+    }
+
     /// `glide`: reach `a` over [`CONTROL`] samples (else at once).
     fn set(&mut self, a: &Absorption, glide: bool) {
         let n = CONTROL as f32;
@@ -848,6 +944,7 @@ impl LineFilter {
             }
         }
         self.left = if glide { CONTROL as u32 } else { 0 };
+        self.reindex();
     }
 
     #[inline]
@@ -855,38 +952,38 @@ impl LineFilter {
         if self.left > 0 {
             self.left -= 1;
             self.gain += self.d_gain;
-            for k in 0..DECAY_BANDS {
-                if self.on[k] {
-                    for j in 0..5 {
-                        self.c[k][j] += self.dc[k][j];
-                    }
+            for &k in &self.active[..self.count] {
+                let k = usize::from(k);
+                for j in 0..5 {
+                    self.c[k][j] += self.dc[k][j];
                 }
             }
             if self.left == 0 {
-                for k in 0..DECAY_BANDS {
+                for k in 0..SECTIONS {
                     if self.on[k] && self.off_after[k] {
                         self.on[k] = false;
                         self.z[k] = [0.0; 2];
                     }
                 }
+                self.reindex();
             }
         }
-        for k in 0..DECAY_BANDS {
-            if self.on[k] {
-                let (c, z) = (&self.c[k], &mut self.z[k]);
-                let y = c[0] * x + z[0];
-                z[0] = c[1] * x - c[3] * y + z[1];
-                z[1] = c[2] * x - c[4] * y;
-                x = y;
-            }
+        for &k in &self.active[..self.count] {
+            let k = usize::from(k);
+            let (c, z) = (&self.c[k], &mut self.z[k]);
+            let y = c[0] * x + z[0];
+            z[0] = c[1] * x - c[3] * y + z[1];
+            z[1] = c[2] * x - c[4] * y;
+            x = y;
         }
         x * self.gain
     }
 
     fn reset(&mut self) {
-        self.z = [[0.0; 2]; DECAY_BANDS];
-        self.on = [false; DECAY_BANDS];
+        self.z = [[0.0; 2]; SECTIONS];
+        self.on = [false; SECTIONS];
         self.left = 0;
+        self.count = 0;
     }
 }
 
@@ -1038,10 +1135,12 @@ fn pack(s: &ReverbSettings, shapes: &[DecayShape; DECAY_BANDS]) -> [f32; SMOOTHE
     ]);
     for (k, b) in s.bands.iter().enumerate() {
         v[SCALARS + 3 * k] = b.freq;
-        v[SCALARS + 3 * k + 1] = if b.on && b.shape == shapes[k] {
-            b.mult
-        } else {
-            1.0
+        // A cut glides its amount here as 1 − amount (1: nothing, as a ×1 band).
+        let live = b.on && b.shape == shapes[k];
+        v[SCALARS + 3 * k + 1] = match (live, shapes[k].is_cut()) {
+            (false, _) => 1.0,
+            (true, true) => 0.0,
+            (true, false) => b.mult,
         };
         v[SCALARS + 3 * k + 2] = b.q;
     }
@@ -1056,11 +1155,19 @@ fn unpack(
     let mut bands = s.bands;
     for (k, b) in bands.iter_mut().enumerate() {
         b.freq = v[SCALARS + 3 * k];
-        b.mult = v[SCALARS + 3 * k + 1];
+        let slot = v[SCALARS + 3 * k + 1];
         b.q = v[SCALARS + 3 * k + 2];
         b.shape = shapes[k];
-        // Still sounding while it glides back to nothing.
-        b.on = (b.mult - 1.0).abs() > 1e-6;
+        if b.shape.is_cut() {
+            b.amount = 1.0 - slot;
+            b.mult = 1.0;
+            b.on = b.amount > 1e-6;
+        } else {
+            b.mult = slot;
+            b.amount = 1.0;
+            // Still sounding while it glides back to nothing.
+            b.on = (b.mult - 1.0).abs() > 1e-6;
+        }
     }
     ReverbSettings {
         predelay_ms: v[0],

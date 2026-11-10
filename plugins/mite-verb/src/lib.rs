@@ -77,7 +77,7 @@ impl Plugin for MiteVerb {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3, migrate::v3_to_v4, migrate::v4_to_v5, migrate::v5_to_v6, migrate::v6_to_v7]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3, migrate::v3_to_v4, migrate::v4_to_v5, migrate::v5_to_v6, migrate::v6_to_v7, migrate::v7_to_v8]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
