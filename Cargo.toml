@@ -41,6 +41,16 @@ symphonia = { version = "0.5.4", features = ["mp3", "aac", "isomp4", "alac", "ai
 rfd = "0.15"
 vello = "0.11"
 
+# Debug builds (tests, the allocation guard) kept small (2026-11-10: target/debug had grown to
+# 238 GB): line numbers only for backtraces, dependencies without debug info, and no incremental
+# cache (it keeps stale copies of every crate it ever built).
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 strip = "symbols"
