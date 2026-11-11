@@ -110,8 +110,8 @@ MiteFX/
 | Per-slice history telemetry (levels, GR) | `mite_core::HistoryTap` (Comp records one per 5 ms) |
 | Drawing that history: columns, grid, level lanes, GR from the top | `mite_ui::widgets::history` (`HistoryLane`; Comp and Limit, 2026-11-03) |
 | Loudness (BS.1770-4 / R128: M, S, I, LRA) and true peak | `mite_dsp::loudness` (Limit, 2026-11-03) |
-| Neural amp captures (NAM `.nam` 0.5–0.7: A1, A2, LSTM, containers), allocation-free | `mite_nam::NamModel` (Amp, 2026-11-11) |
-| Running a model at its own rate inside a host of another (sinc bracket, exact latency) | `mite_amp::bracket` (move to `mite-dsp` when a second plugin needs it) |
+| Neural amp captures (NAM `.nam` 0.5–0.7: A1, A2, LSTM, containers), allocation-free | `mite_nam::NamModel` (Rig, 2026-11-11) |
+| Running a model at its own rate inside a host of another (sinc bracket, exact latency) | `mite_rig::bracket` (move to `mite-dsp` when a second plugin needs it) |
 | Dynamics: stages, detectors, Characters, Smart | `mite_dsp::dynamics` (Limit, Multiband, Gate and DeEss can build on it) |
 | Reverb: modulated 32-line FDN with per-line absorption (decay time per frequency from free decay bands: bell, shelves, tilt), a tone EQ of `mite_dsp::eq` bands on its output, its T60 curve for drawing | `mite_dsp::reverb` (`Reverb`, `decay_at`, `decay_curve`; Verb, 2026-11-04; Delay's diffusion can build on it) |
 | Delay: up to four echo lines with feedback, a loop EQ of `mite_dsp::eq` bands, Digital/Tape/BBD machines (saturation, losses, crossfade or glide on a time change), diffusion, ping-pong, width and ducking; each echo's level and the loop's gain for drawing | `mite_dsp::delay` (`DelayLine`, `loop_gain`, `echoes`; Delay, 2026-11-04) |
@@ -164,7 +164,7 @@ re-derived, re-tested in Rust, and improved where Nova was weak.
 | Delta / listen / sidechain-listen everywhere | Comp, Limiter, Shaper, Gate | Required feature on every dynamics plugin. |
 | Latency reported to the host | EQ, Limiter, Gate, Shaper, Amp | Latency changes are **signalled** to the host, not polled. |
 | Test philosophy: 85 DSP tests, NaN/Inf recovery for every effect, parameter-ramp click tests, parameter golden file | `engine/test/NativeDspTest.cpp`, `engine/test/data/native_params.json` | Carry over as the minimum bar for every plugin (§10). |
-| NAM neural amp hosting | `NovaAmp.h`, `dsp/NamSlot.h` | Done (Mite Amp, 2026-11-11): a pure-Rust NAM implementation (`crates/mite-nam`). |
+| NAM neural amp hosting | `NovaAmp.h`, `dsp/NamSlot.h` | Done (Mite Rig, 2026-11-11): a pure-Rust NAM implementation (`crates/mite-nam`). |
 
 ### 4.2 Fix or replace (weak in Nova)
 
@@ -576,18 +576,20 @@ Accent linen.
 **Status (2026-11-09):** first version built. All tests pass, installed, 0.8 % CPU at 48 kHz,
 120 fps. Not yet heard by the user; open questions in the brief §4.
 
-### 15. Mite Amp
+### 15. Mite Rig (was Mite Amp)
 
-- NAM neural amp models (A1 and A2), in pure Rust (`crates/mite-nam`), matched to
-  NeuralAmpModelerCore sample by sample.
-- Pedal → Amp → Cab, tone stack, gate, normalisation, input calibration, A2 Full/Lite.
-- Zero-latency cab IR convolution (direct head + partitioned tail).
-- Resampling bracket for captures of another rate, with its latency reported and the dry path
-  delayed to match.
-- TONE3000 inside the plugin (device sign-in, the user's lists, downloads into a slot).
+A guitar and bass signal chain (brief: `docs/design/rig-brief.md`; the Amp's own brief kept as
+`docs/design/rig-amp-legacy-brief.md`).
 
-**Status (2026-11-11):** built; all tests pass, installed. Not yet heard by the user. TONE3000's
-publishable key is built in (2026-11-11). Brief: `docs/design/amp-brief.md`.
+- A board read IN → OUT; splits fork it into 2–3 parallel lanes (level, pan) that merge in time.
+- Blocks: NAM captures (pedals, amps, full rigs; A1/A2, pure Rust `crates/mite-nam`), cabinets
+  (zero-latency IRs), gate, tone, boost, volume; the suite's own effects next (slice 2), their
+  full editors inside (slice 3), wah/octaver (slice 4), macros and board presets (slice 5).
+- TONE3000 inside the plugin; captures at other rates in a resampling bracket (latency reported,
+  lanes aligned).
+
+**Status (2026-11-11):** slice 1 built (board, graph swaps keeping running units, six blocks,
+board editor, TONE3000 into blocks); all tests pass, installed. Not yet heard by the user.
 
 Shared engines across the suite:
 - **Filter bank:** EQ, Comp sidechain, Verb decay EQ, DeEss.

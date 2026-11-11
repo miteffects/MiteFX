@@ -1576,26 +1576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mite_amp"
-version = "0.1.0"
-dependencies = [
- "assert_no_alloc",
- "baseview",
- "jpeg-decoder",
- "mite-core",
- "mite-dsp",
- "mite-nam",
- "mite-plugin",
- "mite-ui",
- "nih_plug",
- "png",
- "serde",
- "serde_json",
- "symphonia",
- "ureq",
-]
-
-[[package]]
 name = "mite_analyzer"
 version = "0.1.0"
 dependencies = [
@@ -1803,6 +1783,26 @@ dependencies = [
  "png",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mite_rig"
+version = "0.1.0"
+dependencies = [
+ "assert_no_alloc",
+ "baseview",
+ "jpeg-decoder",
+ "mite-core",
+ "mite-dsp",
+ "mite-nam",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
+ "png",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "ureq",
 ]
 
 [[package]]

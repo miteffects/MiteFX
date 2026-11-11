@@ -1,0 +1,5 @@
+input | dB | -24 | 24 | 0 | Linear
+size | choice | Full, Lite | 0
+mix | % | 0 | 100 | 100 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false
