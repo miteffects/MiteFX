@@ -20,6 +20,8 @@ pub enum Look {
     Combo,
     Cabinet,
     Rocker,
+    /// A wah: a rocker with its toe switch and the sweep on its side.
+    Wah,
 }
 
 /// A stompbox's sign.
@@ -50,6 +52,7 @@ impl Look {
             Kind::Tone => Look::Stomp(Sign::Tone),
             Kind::Boost => Look::Stomp(Sign::Boost),
             Kind::Volume => Look::Rocker,
+            Kind::Wah => Look::Wah,
             Kind::Comp => Look::Stomp(Sign::Comp),
             Kind::Eq => Look::Stomp(Sign::Eq),
             Kind::Delay => Look::Stomp(Sign::Delay),
@@ -71,7 +74,7 @@ pub fn led(look: Look, area: Rect) -> Point {
         Look::Head => Point::new(area.x1 - 13.0, area.y0 + 16.0 + 7.0),
         Look::Combo => Point::new(c.x + 36.0, area.y0 + 8.0 + 6.5),
         Look::Cabinet => Point::new(c.x, c.y),
-        Look::Rocker => Point::new(c.x + 26.0, area.y1 - 6.0),
+        Look::Rocker | Look::Wah => Point::new(c.x + 26.0, area.y1 - 6.0),
     }
 }
 
@@ -102,6 +105,7 @@ pub fn accent_key(kind: Kind) -> &'static str {
         Kind::Tone => "filter",
         Kind::Eq => "eq",
         Kind::Volume => "utility",
+        Kind::Wah => "soothe",
         Kind::Mod => "mod",
         Kind::Tremolo => "shape",
         Kind::Double => "double",
@@ -332,7 +336,7 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             }
             out
         }
-        Look::Rocker => {
+        Look::Rocker | Look::Wah => {
             // A volume pedal from the side: a base, and the rocker plate tilted on it.
             let base = Rect::new(c.x - 34.0, area.y1 - 12.0, c.x + 34.0, area.y1);
             let mut out = BezPath::new();
@@ -356,6 +360,18 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
                 tread.line_to((a.x, a.y + 7.0));
             }
             stroke(cx, &tread, 1.0, ink.lit);
+            if look == Look::Wah {
+                // The toe switch under the raised end, and the sweep (a resonant peak) on the base.
+                let toe = Point::new(base.x0 + 7.0, area.y0 + 4.5);
+                fill(cx, &Circle::new(toe, 3.2), ink.detail.multiply_alpha(0.5));
+                stroke(cx, &Circle::new(toe, 3.2), 1.0, ink.detail);
+                let mut peak = BezPath::new();
+                let (y, x0) = (base.y1 - 3.0, c.x - 18.0);
+                peak.move_to((x0, y));
+                peak.curve_to((x0 + 10.0, y), (x0 + 12.0, base.y0 - 3.0), (x0 + 16.0, base.y0 - 3.0));
+                peak.curve_to((x0 + 20.0, base.y0 - 3.0), (x0 + 22.0, y), (x0 + 32.0, y));
+                stroke(cx, &peak, 1.3, ink.lit);
+            }
             out
         }
     }

@@ -50,7 +50,7 @@ fn a_plus_adds_the_block_picked_from_its_menu() {
     let (mut view, host, ui) = setup();
     let gap = view.layout().gaps[0].at;
     click(&mut view, &host, gap);
-    let row = view.menu_row(Kind::ALL.iter().position(|k| *k == Kind::Tone).unwrap()).expect("the menu is open");
+    let row = view.menu_row(view.menu_index(Some(Kind::Tone), 0).expect("the menu is open")).unwrap();
     click(&mut view, &host, row.center());
     let blocks = ui.board.blocks();
     assert_eq!(blocks[0].kind(), Kind::Tone);
@@ -61,10 +61,10 @@ fn a_plus_adds_the_block_picked_from_its_menu() {
 #[test]
 fn a_split_is_added_and_a_block_dragged_into_its_lane() {
     let (mut view, host, ui) = setup();
-    // The + after the cab: "Split · 3 lanes" (after the six kinds and the two-lane split).
+    // The + after the cab: "Split · 3 lanes".
     let last = view.layout().gaps.last().unwrap().at;
     click(&mut view, &host, last);
-    let row = view.menu_row(Kind::ALL.len() + 1).unwrap();
+    let row = view.menu_row(view.menu_index(None, 3).unwrap()).unwrap();
     click(&mut view, &host, row.center());
     assert!(matches!(view.selection(), Some(Selection::Split(_))));
     let layout = view.layout();
@@ -94,5 +94,21 @@ fn a_tiles_light_bypasses_it_and_its_knobs_move_its_values() {
     view.event(&UiEvent::PointerUp { pos: k - (0.0, 60.0), button: MouseButton::Left, mods: MODS }, &host);
     let v = ui.board.block(gate.id).unwrap().live.value(0);
     assert!(v > -70.0, "{v}");
+    draw(&mut view, &host);
+}
+
+#[test]
+fn a_block_dragged_from_the_palette_lands_on_the_plus_it_is_dropped_on() {
+    let (mut view, host, ui) = setup();
+    let wah = RigView::palette_rect(Some(Kind::Wah)).unwrap().center();
+    // The + between the gate and the amp.
+    let gap = view.layout().gaps[1].at;
+    drag(&mut view, &host, wah, gap);
+    let kinds: Vec<Kind> = ui.board.blocks().iter().map(|b| b.kind()).collect();
+    assert_eq!(kinds[..2], [Kind::Gate, Kind::Wah]);
+    // A click adds after the selected block (the new wah).
+    click(&mut view, &host, RigView::palette_rect(Some(Kind::Delay)).unwrap().center());
+    let kinds: Vec<Kind> = ui.board.blocks().iter().map(|b| b.kind()).collect();
+    assert_eq!(kinds[..3], [Kind::Gate, Kind::Wah, Kind::Delay]);
     draw(&mut view, &host);
 }

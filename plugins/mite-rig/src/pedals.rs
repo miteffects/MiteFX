@@ -23,9 +23,6 @@ const fn choice(id: &'static str, name: &'static str, choices: &'static [&'stati
     BlockParam { spec: spec(id, name, "", 0.0, (choices.len() - 1) as f32, default as f32, ParamScale::Linear, 0, (1.0, 1.0), ParamDisplay::Number), toggle: false, choices }
 }
 
-const fn switch(id: &'static str, name: &'static str, default: bool) -> BlockParam {
-    BlockParam { spec: spec(id, name, "", 0.0, 1.0, if default { 1.0 } else { 0.0 }, ParamScale::Linear, 0, (1.0, 1.0), ParamDisplay::Number), toggle: true, choices: &[] }
-}
 
 const LIN: ParamScale = ParamScale::Linear;
 const LOG: ParamScale = ParamScale::Log;
@@ -46,6 +43,21 @@ pub const EQ: [BlockParam; 8] = [
     knob(spec("b3k2", "3.2k", "dB", -15.0, 15.0, 0.0, LIN, 1, DB, NUM)),
     knob(spec("b6k4", "6.4k", "dB", -15.0, 15.0, 0.0, LIN, 1, DB, NUM)),
     knob(spec("level", "Level", "dB", -15.0, 15.0, 0.0, LIN, 1, DB, NUM)),
+];
+
+/// The wah: a resonant band-pass swept between a heel and a toe frequency, by the pedal's
+/// position or (Auto) by the playing's envelope on top of it.
+pub const WAH_MODES: [&str; 2] = ["Pedal", "Auto"];
+pub const WAH: [BlockParam; 9] = [
+    choice("mode", "Mode", &WAH_MODES, 0),
+    knob(spec("position", "Pedal", "%", 0.0, 100.0, 50.0, LIN, 0, PCT, NUM)),
+    knob(spec("sens", "Sensitivity", "%", 0.0, 100.0, 60.0, LIN, 0, PCT, NUM)),
+    knob(spec("speed", "Speed", "ms", 20.0, 1000.0, 120.0, LOG, 0, LOGW, TIME)),
+    knob(spec("q", "Q", "", 1.0, 12.0, 5.0, LOG, 1, LOGW, NUM)),
+    knob(spec("low", "Heel", "Hz", 200.0, 800.0, 400.0, LOG, 0, LOGW, ParamDisplay::Frequency)),
+    knob(spec("high", "Toe", "Hz", 1000.0, 4000.0, 2200.0, LOG, 0, LOGW, ParamDisplay::Frequency)),
+    knob(spec("mix", "Mix", "%", 0.0, 100.0, 100.0, LIN, 0, PCT, NUM)),
+    knob(spec("level", "Level", "dB", -12.0, 12.0, 0.0, LIN, 1, DB, NUM)),
 ];
 
 pub const TREMOLO_NAMES: [&str; 3] = ["Sine", "Square", "Harmonic"];
@@ -108,6 +120,77 @@ impl Unit for EqUnit {
             b.reset(&s);
         }
         self.level.reset(db_to_gain(live.value(7)));
+    }
+}
+
+// ---- Wah ----------------------------------------------------------------------------------------
+
+pub struct WahUnit {
+    fs: f32,
+    position: LinearSmoother,
+    sens: LinearSmoother,
+    q: LinearSmoother,
+    low: LinearSmoother,
+    high: LinearSmoother,
+    mix: LinearSmoother,
+    level: LinearSmoother,
+    /// Auto's envelope (linear peak), and its attack.
+    env: f32,
+    attack: f32,
+    /// The filter's two states per channel (a TPT state-variable filter: stable when swept).
+    s: [[f32; 2]; 2],
+}
+
+impl WahUnit {
+    pub fn new(fs: f32) -> Self {
+        let sm = |ms: f32| smoother(fs, ms);
+        Self { fs, position: sm(20.0), sens: sm(20.0), q: sm(20.0), low: sm(20.0), high: sm(20.0), mix: sm(20.0), level: sm(20.0), env: 0.0, attack: 1.0 - (-1.0 / (0.004 * fs)).exp(), s: [[0.0; 2]; 2] }
+    }
+
+    fn targets(&mut self, live: &Live) -> [f32; 7] {
+        [live.value(1) / 100.0, if index(live, 0) == 1 { live.value(2) / 100.0 } else { 0.0 }, live.value(4), live.value(5), live.value(6), live.value(7) / 100.0, db_to_gain(live.value(8))]
+    }
+}
+
+impl Unit for WahUnit {
+    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
+        let t = self.targets(live);
+        for (sm, v) in [&mut self.position, &mut self.sens, &mut self.q, &mut self.low, &mut self.high, &mut self.mix, &mut self.level].into_iter().zip(t) {
+            sm.set_target(v);
+        }
+        let release = 1.0 - (-1.0 / (live.value(3).max(1.0) * 0.001 * self.fs)).exp();
+        for i in 0..l.len() {
+            let (pos, sens, q, low, high, mix, level) = (self.position.next_value(), self.sens.next_value(), self.q.next_value(), self.low.next_value(), self.high.next_value(), self.mix.next_value(), self.level.next_value());
+            // Auto: the envelope (−48…−6 dBFS → 0…1) pushes the pedal towards the toe.
+            let x = 0.5 * (l[i].abs() + r[i].abs());
+            self.env += (if x > self.env { self.attack } else { release }) * (x - self.env);
+            let e = ((20.0 * self.env.max(1e-6).log10() + 48.0) / 42.0).clamp(0.0, 1.0);
+            let p = (pos + sens * e).clamp(0.0, 1.0);
+            let f = (low * (high / low).powf(p)).min(0.45 * self.fs);
+            let g = (std::f32::consts::PI * f / self.fs).tan();
+            let k = 1.0 / q;
+            let h = 1.0 / (1.0 + k * g + g * g);
+            for (c, v) in [&mut l[i], &mut r[i]].into_iter().enumerate() {
+                let [s1, s2] = &mut self.s[c];
+                let hp = (*v - (k + g) * *s1 - *s2) * h;
+                let bp = g * hp + *s1;
+                *s1 = g * hp + bp;
+                let lp = g * bp + *s2;
+                *s2 = g * bp + lp;
+                // Unity at the peak, with a little of the low end a real wah lets through.
+                let wet = k * bp * 1.6 + 0.12 * lp;
+                *v = (*v + mix * (wet - *v)) * level;
+            }
+        }
+    }
+
+    fn reset(&mut self, live: &Live) {
+        let t = self.targets(live);
+        for (sm, v) in [&mut self.position, &mut self.sens, &mut self.q, &mut self.low, &mut self.high, &mut self.mix, &mut self.level].into_iter().zip(t) {
+            sm.reset(v);
+        }
+        self.env = 0.0;
+        self.s = [[0.0; 2]; 2];
     }
 }
 
@@ -187,4 +270,36 @@ pub fn note_of(hz: f32, reference: f32) -> Option<(String, f32)> {
     let cents = (midi - nearest) * 100.0;
     let n = nearest as i32;
     Some((format!("{}{}", names[n.rem_euclid(12) as usize], n.div_euclid(12) - 1), cents))
+}
+
+#[cfg(test)]
+mod wah_tests {
+    use super::*;
+    use crate::blocks::{build, Kind};
+
+    /// Energy of a block's output for a tone at `hz`, with the pedal at `pos` (0…100).
+    fn level(hz: f32, pos: f32) -> f32 {
+        let fs = 48_000.0;
+        let live = Live::new(1, Kind::Wah);
+        live.set(1, pos);
+        let mut u = build(&live, fs);
+        u.reset(&live);
+        let mut e = 0.0;
+        for k in 0..40 {
+            let x: Vec<f32> = (0..256).map(|i| (std::f32::consts::TAU * hz * (k * 256 + i) as f32 / fs).sin() * 0.3).collect();
+            let (mut l, mut r) = (x.clone(), x);
+            u.process(&mut l, &mut r, &live);
+            if k >= 20 {
+                e += l.iter().map(|v| v * v).sum::<f32>();
+            }
+        }
+        e
+    }
+
+    #[test]
+    fn the_wah_sweeps_from_heel_to_toe() {
+        // Heel down: the lows through, the highs cut; toe down: the other way round.
+        assert!(level(400.0, 0.0) > 4.0 * level(400.0, 100.0));
+        assert!(level(2200.0, 100.0) > 4.0 * level(2200.0, 0.0));
+    }
 }

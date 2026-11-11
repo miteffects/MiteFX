@@ -45,6 +45,7 @@ pub enum Kind {
     Tremolo,
     Double,
     Tuner,
+    Wah,
 }
 
 /// A block's parameter: its spec (the id is frozen), and whether it is a switch.
@@ -91,7 +92,7 @@ const BOOST: [BlockParam; 1] = [knob(spec("gain", "Gain", "dB", 0.0, 24.0, 6.0, 
 const VOLUME: [BlockParam; 1] = [knob(spec("volume", "Volume", "%", 0.0, 100.0, 100.0, LIN, 0, (1.0, 0.1), NUM))];
 
 impl Kind {
-    pub const ALL: [Kind; 15] = [
+    pub const ALL: [Kind; 16] = [
         Kind::Pedal,
         Kind::Amp,
         Kind::Cab,
@@ -107,6 +108,7 @@ impl Kind {
         Kind::Delay,
         Kind::Reverb,
         Kind::Tuner,
+        Kind::Wah,
     ];
 
     /// The frozen id saved with the board.
@@ -119,6 +121,7 @@ impl Kind {
             Kind::Tone => "tone",
             Kind::Boost => "boost",
             Kind::Volume => "volume",
+            Kind::Wah => "wah",
             Kind::Comp => "comp",
             Kind::Eq => "eq",
             Kind::Delay => "delay",
@@ -154,6 +157,7 @@ impl Kind {
             Kind::Tone => "Tone",
             Kind::Boost => "Boost",
             Kind::Volume => "Volume",
+            Kind::Wah => "Wah",
             Kind::Comp => "Comp",
             Kind::Eq => "EQ",
             Kind::Delay => "Delay",
@@ -175,6 +179,7 @@ impl Kind {
             Kind::Tone => "Bass, middle, treble and low and high cuts",
             Kind::Boost => "A clean boost",
             Kind::Volume => "A volume pedal",
+            Kind::Wah => "A wah: rock the pedal, or Auto (it follows the picking)",
             Kind::Comp => "A compressor (Mite Comp's): even out the picking, add sustain",
             Kind::Eq => "A seven-band graphic EQ",
             Kind::Delay => "Echoes (Mite Delay's): digital, tape or bucket brigade",
@@ -196,6 +201,7 @@ impl Kind {
             Kind::Volume => &VOLUME,
             Kind::Eq => &crate::pedals::EQ,
             Kind::Tremolo => &crate::pedals::TREMOLO,
+            Kind::Wah => &crate::pedals::WAH,
             // The suite's plugins: their whole parameter sets.
             _ => crate::embed::params(self).unwrap_or(&[]),
         }
@@ -256,6 +262,7 @@ pub fn build(live: &crate::board::Live, fs: f32) -> Box<dyn Unit> {
         Kind::Boost | Kind::Volume => Box::new(GainUnit::new(fs, live.kind)),
         Kind::Eq => Box::new(crate::pedals::EqUnit::new(fs)),
         Kind::Tremolo => Box::new(crate::pedals::TremoloUnit::new(fs)),
+        Kind::Wah => Box::new(crate::pedals::WahUnit::new(fs)),
         _ => unreachable!("the suite's plugins are embedded"),
     }
 }

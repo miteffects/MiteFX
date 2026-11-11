@@ -12,7 +12,7 @@ use std::sync::Arc;
 use mite_dsp::LinearSmoother;
 
 use crate::blocks::{self, Unit};
-use crate::board::{Item, LaneLive, Live};
+use crate::board::{Item, LaneLive, Live, SplitLive};
 use crate::parts::{Delay, MAX_LATENCY, SUB};
 
 pub struct Node {
@@ -82,7 +82,17 @@ impl Lane {
 
 pub enum Stage {
     Block(Node),
-    Split { lanes: Vec<Lane>, sum: [Vec<f32>; 2] },
+    Split {
+        lanes: Vec<Lane>,
+        sum: [Vec<f32>; 2],
+        live: Arc<SplitLive>,
+        /// The input, delayed as the longest lane, for the mix.
+        dry: [Delay; 2],
+        mix: LinearSmoother,
+        /// A short dip while the routing changes (no click), and the routing in force.
+        dip: LinearSmoother,
+        routing: usize,
+    },
 }
 
 pub struct Graph {
@@ -124,6 +134,19 @@ impl Graph {
                         })
                         .collect(),
                     sum: [vec![0.0; SUB], vec![0.0; SUB]],
+                    dry: [Delay::new(MAX_LATENCY), Delay::new(MAX_LATENCY)],
+                    mix: {
+                        let mut sm = LinearSmoother::new(s.live.mix.load());
+                        sm.set_ramp(fs, 20.0);
+                        sm
+                    },
+                    dip: {
+                        let mut sm = LinearSmoother::new(1.0);
+                        sm.set_ramp(fs, 5.0);
+                        sm
+                    },
+                    routing: s.live.routing(),
+                    live: s.live.clone(),
                 },
             })
             .collect();
@@ -188,11 +211,12 @@ impl Graph {
         for stage in self.stages.iter_mut() {
             match stage {
                 Stage::Block(n) => n.reset(),
-                Stage::Split { lanes, .. } => {
+                Stage::Split { lanes, dry, .. } => {
                     for lane in lanes.iter_mut() {
                         lane.nodes.iter_mut().for_each(Node::reset);
                         lane.comp.iter_mut().for_each(Delay::reset);
                     }
+                    dry.iter_mut().for_each(Delay::reset);
                 }
             }
         }
@@ -209,13 +233,40 @@ impl Graph {
         for stage in self.stages.iter_mut() {
             match stage {
                 Stage::Block(node) => node.process(l, r),
-                Stage::Split { lanes, sum } => {
+                Stage::Split { lanes, sum, live, dry, mix, dip, routing } => {
                     let longest = lanes.iter().map(Lane::latency).max().unwrap_or(0);
+                    // A new routing: down, switch, up again.
+                    let wanted = live.routing();
+                    if wanted != *routing {
+                        if dip.target() > 0.0 {
+                            dip.set_target(0.0);
+                        } else if !dip.is_smoothing() {
+                            *routing = wanted;
+                            dip.set_target(1.0);
+                        }
+                    }
+                    mix.set_target(live.mix.load().clamp(0.0, 1.0));
                     sum[0][..n].fill(0.0);
                     sum[1][..n].fill(0.0);
-                    for lane in lanes.iter_mut() {
-                        lane.l[..n].copy_from_slice(l);
-                        lane.r[..n].copy_from_slice(r);
+                    for (j, lane) in lanes.iter_mut().enumerate() {
+                        // L/R and M/S: the first two lanes take one side each (on both channels);
+                        // a third lane takes everything.
+                        let side = if j < 2 { *routing } else { 0 };
+                        for i in 0..n {
+                            let (a, b) = match side {
+                                1 => {
+                                    let x = if j == 0 { l[i] } else { r[i] };
+                                    (x, x)
+                                }
+                                2 => {
+                                    let x = if j == 0 { 0.5 * (l[i] + r[i]) } else { 0.5 * (l[i] - r[i]) };
+                                    (x, x)
+                                }
+                                _ => (l[i], r[i]),
+                            };
+                            lane.l[i] = a;
+                            lane.r[i] = b;
+                        }
                         let lat = lane.latency();
                         let (ll, lr) = (&mut lane.l[..n], &mut lane.r[..n]);
                         for node in lane.nodes.iter_mut() {
@@ -229,12 +280,32 @@ impl Graph {
                         for i in 0..n {
                             let (gl, gr) = balance(lane.pan.next_value());
                             let g = lane.level.next_value();
-                            sum[0][i] += cl.tick(ll[i]) * g * gl;
-                            sum[1][i] += cr.tick(lr[i]) * g * gr;
+                            let (yl, yr) = (cl.tick(ll[i]) * g, cr.tick(lr[i]) * g);
+                            match side {
+                                // Each side back where it came from (its pan does not apply).
+                                1 => sum[j][i] += 0.5 * (yl + yr),
+                                2 => {
+                                    let m = 0.5 * (yl + yr);
+                                    let sgn = if j == 0 { 1.0 } else { -1.0 };
+                                    sum[0][i] += m;
+                                    sum[1][i] += sgn * m;
+                                }
+                                _ => {
+                                    sum[0][i] += yl * gl;
+                                    sum[1][i] += yr * gr;
+                                }
+                            }
                         }
                     }
-                    l.copy_from_slice(&sum[0][..n]);
-                    r.copy_from_slice(&sum[1][..n]);
+                    let [dl, dr] = dry;
+                    dl.delay = longest;
+                    dr.delay = longest;
+                    for i in 0..n {
+                        let (m, d) = (mix.next_value(), dip.next_value());
+                        let (xl, xr) = (dl.tick(l[i]), dr.tick(r[i]));
+                        l[i] = xl + m * (d * sum[0][i] - xl);
+                        r[i] = xr + m * (d * sum[1][i] - xr);
+                    }
                 }
             }
         }
@@ -301,5 +372,52 @@ mod tests {
         let after: *const dyn Unit = new.find(keep).map(|n| &*n.unit as *const dyn Unit).unwrap();
         assert!(std::ptr::addr_eq(before, after), "the same unit moved over");
         assert!(new.find(boost).is_some());
+    }
+
+    /// L/R and M/S with empty lanes give the input back exactly; a mix of 0 is the dry input.
+    #[test]
+    fn a_split_routes_left_right_and_mid_side_and_mixes() {
+        for (routing, mix) in [(1u32, 1.0f32), (2, 1.0), (0, 0.0), (2, 0.0)] {
+            let board = Board::new();
+            board.insert_split(0, 2);
+            let items = board.items();
+            if let Item::Split(s) = &items[0] {
+                s.live.routing.store(routing, std::sync::atomic::Ordering::Relaxed);
+                s.live.mix.store(mix);
+                // Pans that would spoil a parallel sum (L/R and M/S ignore them).
+                s.lanes[0].live.pan.store(0.7);
+                s.lanes[1].live.pan.store(-0.3);
+            }
+            let mut g = Graph::build(&items, 48_000.0);
+            let xl: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.01).sin() * 0.2).collect();
+            let xr: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.023).cos() * 0.3).collect();
+            let (mut l, mut r) = (xl.clone(), xr.clone());
+            for (a, b) in l.chunks_mut(SUB).zip(r.chunks_mut(SUB)) {
+                g.process(a, b);
+            }
+            let err = |v: &[f32], x: &[f32]| v.iter().zip(x).skip(2000).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            assert!(err(&l, &xl) < 1e-4 && err(&r, &xr) < 1e-4, "routing {routing} mix {mix}: {} {}", err(&l, &xl), err(&r, &xr));
+        }
+    }
+
+    /// Changing the routing while it plays dips and comes back (no step).
+    #[test]
+    fn a_routing_change_is_click_free() {
+        let board = Board::new();
+        board.insert_split(0, 2);
+        let items = board.items();
+        let Item::Split(s) = &items[0] else { panic!() };
+        let live = s.live.clone();
+        let mut g = Graph::build(&items, 48_000.0);
+        let x: Vec<f32> = (0..9600).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
+        let (mut l, mut r) = (x.clone(), x.clone());
+        for (k, (a, b)) in l.chunks_mut(SUB).zip(r.chunks_mut(SUB)).enumerate() {
+            if k == 10 {
+                live.routing.store(2, std::sync::atomic::Ordering::Relaxed);
+            }
+            g.process(a, b);
+        }
+        let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(jump < 0.02, "{jump}");
     }
 }

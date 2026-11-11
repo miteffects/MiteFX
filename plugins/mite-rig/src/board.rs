@@ -132,6 +132,31 @@ impl Live {
     }
 }
 
+/// How a split feeds its lanes.
+pub const ROUTINGS: [&str; 3] = ["Parallel", "L / R", "M / S"];
+
+/// A split's routing (an index into [`ROUTINGS`]) and mix (the lanes against the dry input, 0…1).
+pub struct SplitLive {
+    pub routing: std::sync::atomic::AtomicU32,
+    pub mix: AtomicF32,
+}
+
+impl SplitLive {
+    pub fn new() -> Self {
+        Self { routing: std::sync::atomic::AtomicU32::new(0), mix: AtomicF32::new(1.0) }
+    }
+
+    pub fn routing(&self) -> usize {
+        self.routing.load(Ordering::Relaxed) as usize
+    }
+}
+
+impl Default for SplitLive {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A lane's level and pan at the merge.
 pub struct LaneLive {
     pub level_db: AtomicF32,
@@ -175,6 +200,7 @@ pub struct Lane {
 pub struct Split {
     pub id: u64,
     pub lanes: Vec<Lane>,
+    pub live: Arc<SplitLive>,
 }
 
 #[derive(Clone)]
@@ -226,6 +252,18 @@ struct BlockDoc {
     file: Option<SlotFile>,
 }
 
+fn is_zero(v: &u32) -> bool {
+    *v == 0
+}
+
+fn full() -> f32 {
+    1.0
+}
+
+fn is_full(v: &f32) -> bool {
+    (*v - 1.0).abs() < 1e-6
+}
+
 #[derive(Serialize, Deserialize, Default)]
 struct LaneDoc {
     #[serde(default)]
@@ -240,7 +278,14 @@ struct LaneDoc {
 #[serde(rename_all = "lowercase")]
 enum ItemDoc {
     Block(BlockDoc),
-    Split { id: u64, lanes: Vec<LaneDoc> },
+    Split {
+        id: u64,
+        lanes: Vec<LaneDoc>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        routing: u32,
+        #[serde(default = "full", skip_serializing_if = "is_full")]
+        mix: f32,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -381,7 +426,7 @@ impl Board {
         m.next_id += 1;
         let lanes = (0..lanes.clamp(2, MAX_LANES)).map(|_| Lane { blocks: Vec::new(), live: Arc::new(LaneLive::new()) }).collect();
         let at = at.min(m.items.len());
-        m.items.insert(at, Item::Split(Split { id, lanes }));
+        m.items.insert(at, Item::Split(Split { id, lanes, live: Arc::new(SplitLive::new()) }));
         drop(m);
         self.structure_changed();
         id
@@ -460,7 +505,7 @@ impl Board {
                 .iter()
                 .map(|i| match i {
                     Item::Block(b) => ItemDoc::Block(block_doc(b)),
-                    Item::Split(s) => ItemDoc::Split { id: s.id, lanes: s.lanes.iter().map(|l| LaneDoc { level_db: l.live.level_db.load(), pan: l.live.pan.load(), blocks: l.blocks.iter().map(block_doc).collect() }).collect() },
+                    Item::Split(s) => ItemDoc::Split { id: s.id, lanes: s.lanes.iter().map(|l| LaneDoc { level_db: l.live.level_db.load(), pan: l.live.pan.load(), blocks: l.blocks.iter().map(block_doc).collect() }).collect(), routing: s.live.routing() as u32, mix: s.live.mix.load() },
                 })
                 .collect(),
         };
@@ -498,7 +543,7 @@ impl Board {
         for item in &doc.items {
             match item {
                 ItemDoc::Block(d) => items.extend(make(d).map(Item::Block)),
-                ItemDoc::Split { id, lanes } => {
+                ItemDoc::Split { id, lanes, routing, mix } => {
                     let lanes: Vec<Lane> = lanes
                         .iter()
                         .take(MAX_LANES)
@@ -510,7 +555,10 @@ impl Board {
                         })
                         .collect();
                     if lanes.len() >= 2 {
-                        items.push(Item::Split(Split { id: *id, lanes }));
+                        let live = SplitLive::new();
+                        live.routing.store((*routing).min(ROUTINGS.len() as u32 - 1), Ordering::Relaxed);
+                        live.mix.store(mix.clamp(0.0, 1.0));
+                        items.push(Item::Split(Split { id: *id, lanes, live: Arc::new(live) }));
                     }
                 }
             }

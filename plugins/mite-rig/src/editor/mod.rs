@@ -26,7 +26,7 @@ use mite_ui::widgets::{Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, T
 use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::blocks::Kind;
-use crate::board::{Block, Item, LaneLive, Live, Place};
+use crate::board::{Block, Item, LaneLive, Live, Place, SplitLive, ROUTINGS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::rig::{Gear, SlotFile, Status};
@@ -149,6 +149,31 @@ impl ParamHost for BlockHost<'_> {
 const LANE_LEVEL: ParamSpec = ParamSpec { id: "level", name: "Level", unit: "dB", min: -60.0, max: 12.0, default: 0.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 1, wheel_step: 0.5, wheel_step_fine: 0.1, display: ParamDisplay::Number };
 const LANE_PAN: ParamSpec = ParamSpec { id: "pan", name: "Pan", unit: "", min: -1.0, max: 1.0, default: 0.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 2, wheel_step: 0.05, wheel_step_fine: 0.01, display: ParamDisplay::Number };
 
+const SPLIT_MIX: ParamSpec = ParamSpec { id: "mix", name: "Mix", unit: "%", min: 0.0, max: 100.0, default: 100.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 0, wheel_step: 1.0, wheel_step_fine: 0.1, display: ParamDisplay::Number };
+
+/// A split's mix as a `ParamHost` (stored 0…1, shown in %).
+struct SplitHost<'a>(&'a SplitLive);
+
+impl ParamHost for SplitHost<'_> {
+    fn normalized(&self, _id: &str) -> f32 {
+        self.0.mix.load()
+    }
+    fn plain(&self, _id: &str, normalized: f32) -> f32 {
+        SPLIT_MIX.denormalize(normalized)
+    }
+    fn normalize(&self, _id: &str, plain: f32) -> f32 {
+        SPLIT_MIX.normalize(plain)
+    }
+    fn default_normalized(&self, _id: &str) -> f32 {
+        1.0
+    }
+    fn begin_gesture(&self, _id: &str) {}
+    fn set_normalized(&self, _id: &str, normalized: f32) {
+        self.0.mix.store(normalized.clamp(0.0, 1.0));
+    }
+    fn end_gesture(&self, _id: &str) {}
+}
+
 /// A lane's level and pan as a `ParamHost`.
 struct LaneHost<'a>(&'a LaneLive);
 
@@ -207,6 +232,8 @@ pub enum PanelButton {
     Switch { param: usize, at: usize },
     /// A split's lane count.
     Lanes(usize),
+    /// A split's routing (an index into `ROUTINGS`).
+    Routing(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -220,29 +247,38 @@ enum Hot {
     Palette(usize),
 }
 
-/// The palette, in a guitarist's order (what comes first in a chain first); `None` is a split.
-const PALETTE_ITEMS: [Option<Kind>; 16] = [
-    Some(Kind::Tuner),
-    Some(Kind::Gate),
-    Some(Kind::Comp),
-    Some(Kind::Boost),
-    Some(Kind::Pedal),
-    Some(Kind::Amp),
-    Some(Kind::Cab),
-    Some(Kind::Tone),
-    Some(Kind::Eq),
-    Some(Kind::Volume),
-    Some(Kind::Mod),
-    Some(Kind::Tremolo),
-    Some(Kind::Double),
-    Some(Kind::Delay),
-    Some(Kind::Reverb),
-    None,
+/// The palette, in groups, in a guitarist's order (what comes first in a chain first); `None` is
+/// a split.
+const GROUPS: [(&str, &[Option<Kind>]); 7] = [
+    ("UTILITY", &[Some(Kind::Tuner), Some(Kind::Volume)]),
+    ("DYNAMICS", &[Some(Kind::Gate), Some(Kind::Comp)]),
+    ("DRIVE · AMP", &[Some(Kind::Boost), Some(Kind::Pedal), Some(Kind::Amp), Some(Kind::Cab)]),
+    ("FILTER", &[Some(Kind::Wah), Some(Kind::Tone), Some(Kind::Eq)]),
+    ("MODULATION", &[Some(Kind::Mod), Some(Kind::Tremolo), Some(Kind::Double)]),
+    ("TIME", &[Some(Kind::Delay), Some(Kind::Reverb)]),
+    ("ROUTING", &[None]),
 ];
+const PALETTE_LEN: usize = 17;
+/// Between groups.
+const GROUP_GAP: f64 = 14.0;
+
+/// Item `i` of the palette (counting through the groups): its kind and its group.
+fn palette_entry(i: usize) -> (Option<Kind>, usize) {
+    let mut k = i;
+    for (g, (_, items)) in GROUPS.iter().enumerate() {
+        if k < items.len() {
+            return (items[k], g);
+        }
+        k -= items.len();
+    }
+    (None, GROUPS.len() - 1)
+}
 
 fn palette_item(i: usize) -> Rect {
-    let w = PALETTE.width() / PALETTE_ITEMS.len() as f64;
-    Rect::new(PALETTE.x0 + i as f64 * w, PALETTE.y0, PALETTE.x0 + (i + 1) as f64 * w, PALETTE.y1)
+    let w = (PALETTE.width() - 12.0 - GROUP_GAP * (GROUPS.len() - 1) as f64) / PALETTE_LEN as f64;
+    let (_, g) = palette_entry(i);
+    let x = PALETTE.x0 + 6.0 + i as f64 * w + g as f64 * GROUP_GAP;
+    Rect::new(x, PALETTE.y0, x + w, PALETTE.y1)
 }
 
 /// A palette item being dragged towards the chain.
@@ -253,6 +289,9 @@ struct Adding {
     moving: bool,
 }
 
+const MENU_COLUMNS: usize = 3;
+const MENU_COLUMN: f64 = 280.0;
+
 /// The add menu, open at an insertion point.
 struct Menu {
     place: Place,
@@ -260,23 +299,34 @@ struct Menu {
 }
 
 impl Menu {
+    /// The entries by group; a group's name is an entry with no kind and no lanes (a heading,
+    /// not clickable).
     fn entries(&self) -> Vec<(Option<Kind>, usize, &'static str, &'static str)> {
-        let mut e: Vec<_> = Kind::ALL.iter().map(|k| (Some(*k), 0, k.name(), k.words())).collect();
-        if matches!(self.place, Place::Main(_)) {
-            e.push((None, 2, "Split · 2 lanes", "Fork the chain into two lanes that merge again"));
-            e.push((None, 3, "Split · 3 lanes", "Fork the chain into three lanes that merge again"));
+        let mut e = Vec::new();
+        for (name, items) in GROUPS {
+            if items.iter().all(Option::is_none) {
+                // Splits: only on the main chain.
+                if matches!(self.place, Place::Main(_)) {
+                    e.push((None, 0, name, ""));
+                    e.push((None, 2, "Split · 2 lanes", "Fork the chain into two lanes that merge again"));
+                    e.push((None, 3, "Split · 3 lanes", "Fork the chain into three lanes that merge again"));
+                }
+                continue;
+            }
+            e.push((None, 0, name, ""));
+            e.extend(items.iter().flatten().map(|k| (Some(*k), 0, k.name(), k.words())));
         }
         e
     }
 
-    /// Rows per column (the entries run down the first column, then the second).
+    /// Rows per column (the entries run down the first column, then the next).
     fn rows(&self) -> usize {
-        self.entries().len().div_ceil(2)
+        self.entries().len().div_ceil(MENU_COLUMNS)
     }
 
     fn rect(&self) -> Rect {
         let h = self.rows() as f64 * 32.0 + 12.0;
-        let w = 2.0 * 300.0 + 12.0;
+        let w = MENU_COLUMNS as f64 * MENU_COLUMN + 12.0;
         let x0 = (self.at.x - 20.0).clamp(12.0, VIEW_W - w - 12.0);
         let y0 = if self.at.y + 18.0 + h < HELP_TOP { self.at.y + 18.0 } else { (self.at.y - 18.0 - h).max(DISPLAY_TOP + 4.0) };
         Rect::new(x0, y0, x0 + w, y0 + h)
@@ -285,8 +335,8 @@ impl Menu {
     fn row(&self, i: usize) -> Rect {
         let r = self.rect();
         let (col, k) = (i / self.rows(), i % self.rows());
-        let x = r.x0 + 6.0 + col as f64 * 300.0;
-        Rect::new(x, r.y0 + 6.0 + k as f64 * 32.0, x + 300.0, r.y0 + 6.0 + (k + 1) as f64 * 32.0)
+        let x = r.x0 + 6.0 + col as f64 * MENU_COLUMN;
+        Rect::new(x, r.y0 + 6.0 + k as f64 * 32.0, x + MENU_COLUMN, r.y0 + 6.0 + (k + 1) as f64 * 32.0)
     }
 }
 
@@ -408,6 +458,17 @@ impl RigView {
 
     pub fn knob_at(&self, id: &str) -> Option<Point> {
         self.knobs.iter().find(|k| k.id == id).map(|k| k.center)
+    }
+
+    /// The open menu's row index of a kind (or of a split of `lanes` lanes: `kind` None).
+    pub fn menu_index(&self, kind: Option<Kind>, lanes: usize) -> Option<usize> {
+        let m = self.menu.as_ref()?;
+        m.entries().iter().position(|e| e.0 == kind && (kind.is_some() || e.1 == lanes))
+    }
+
+    /// Where a kind (or the split: None) sits in the palette.
+    pub fn palette_rect(kind: Option<Kind>) -> Option<Rect> {
+        (0..PALETTE_LEN).find(|&i| palette_entry(i).0 == kind).map(palette_item)
     }
 
     pub fn menu_row(&self, i: usize) -> Option<Rect> {
@@ -557,23 +618,35 @@ impl RigView {
         let theme = cx.theme;
         let shape = RoundedRect::from_rect(PALETTE, 12.0);
         panel(cx.scene, shape, theme.panel_control, theme.panel_control_border);
-        for (i, item) in PALETTE_ITEMS.iter().enumerate() {
+        // Each group: its name over its items, a thin line between groups.
+        let mut first = 0;
+        for (g, (name, items)) in GROUPS.iter().enumerate() {
+            let (a, b) = (palette_item(first), palette_item(first + items.len() - 1));
+            cx.text.draw(cx.scene, name, (a.x0 + b.x1) / 2.0, PALETTE.y0 + 6.0, TextStyle::LABEL.sized(8.0), theme.text_lo, Align::Center);
+            if g > 0 {
+                let x = a.x0 - GROUP_GAP / 2.0;
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((x, PALETTE.y0 + 10.0), (x, PALETTE.y1 - 10.0)));
+            }
+            first += items.len();
+        }
+        for i in 0..PALETTE_LEN {
+            let item = &palette_entry(i).0;
             let r = palette_item(i);
             let hot = self.hot == Some(Hot::Palette(i)) || self.adding.as_ref().is_some_and(|a| a.item == i);
             if hot {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.08), None, &RoundedRect::from_rect(r.inset(-3.0), 8.0));
             }
-            self.item_icon(cx, *item, 2, Point::new(r.center().x, r.y0 + 32.0), 0.58, hot);
+            self.item_icon(cx, *item, 2, Point::new(r.center().x, r.y0 + 38.0), 0.5, hot);
             let name = item.map_or("Split", Kind::name);
             let name = Self::fit(cx, name, TextStyle::BODY.sized(10.5).weighted(700.0), r.width() - 4.0);
-            cx.text.draw(cx.scene, &name, r.center().x, r.y0 + 60.0, TextStyle::BODY.sized(10.5).weighted(700.0), if hot { theme.text_strong } else { theme.text_mid }, Align::Center);
+            cx.text.draw(cx.scene, &name, r.center().x, r.y0 + 62.0, TextStyle::BODY.sized(10.5).weighted(700.0), if hot { theme.text_strong } else { theme.text_mid }, Align::Center);
         }
     }
 
     /// The palette item being dragged, under the pointer.
     fn draw_adding(&self, cx: &mut DrawCx<'_>) {
         let Some(a) = self.adding.as_ref().filter(|a| a.moving) else { return };
-        self.item_icon(cx, PALETTE_ITEMS[a.item], 2, a.at, 0.9, true);
+        self.item_icon(cx, palette_entry(a.item).0, 2, a.at, 0.9, true);
     }
 
     /// Where a palette item clicked (not dragged) goes: after the selected block, or at the end.
@@ -593,7 +666,7 @@ impl RigView {
 
     /// Adds palette item `item` at `place` (a split only on the main chain) and selects it.
     fn add_item(&mut self, item: usize, place: Place) {
-        match (PALETTE_ITEMS[item], place) {
+        match (palette_entry(item).0, place) {
             (Some(k), _) => {
                 if let Some(id) = self.ui.board.insert(k, place) {
                     self.selected = Some(Selection::Block(id));
@@ -680,6 +753,13 @@ impl RigView {
         })
     }
 
+    fn split_live(&self, id: u64) -> Option<Arc<SplitLive>> {
+        self.items.iter().find_map(|i| match i {
+            Item::Split(s) if s.id == id => Some(s.live.clone()),
+            _ => None,
+        })
+    }
+
     fn split_lanes(&self, id: u64) -> Option<Vec<Arc<LaneLive>>> {
         self.items.iter().find_map(|i| match i {
             Item::Split(s) if s.id == id => Some(s.lanes.iter().map(|l| l.live.clone()).collect()),
@@ -714,6 +794,7 @@ impl RigView {
                     self.knobs.push(Knob::new(LANE_LEVEL, "LEVEL", KnobKind::Bipolar, Point::new(x, KNOB_Y), KNOB_D).with_id(format!("{j}:level")));
                     self.knobs.push(Knob::new(LANE_PAN, "PAN", KnobKind::Bipolar, Point::new(x + KNOB_STEP, KNOB_Y), KNOB_D).with_id(format!("{j}:pan")));
                 }
+                self.knobs.push(Knob::new(SPLIT_MIX, "MIX", KnobKind::Unipolar, Point::new(KNOB_X0 + n as f64 * 2.0 * KNOB_STEP, KNOB_Y), KNOB_D).with_id("mix".to_owned()));
             }
             None => {}
         }
@@ -803,7 +884,7 @@ impl RigView {
         // Insertion points.
         for g in &layout.gaps {
             let hot = self.hot == Some(Hot::Gap(g.place)) || self.menu.as_ref().is_some_and(|m| m.place == g.place);
-            let dragging = self.drag.as_ref().is_some_and(|d| d.moving) || self.adding.as_ref().is_some_and(|a| a.moving && (PALETTE_ITEMS[a.item].is_some() || matches!(g.place, Place::Main(_))));
+            let dragging = self.drag.as_ref().is_some_and(|d| d.moving) || self.adding.as_ref().is_some_and(|a| a.moving && (palette_entry(a.item).0.is_some() || matches!(g.place, Place::Main(_))));
             let near = dragging && self.pointer.is_some_and(|p| layout.gap_at(p, 60.0).is_some_and(|n| n.place == g.place));
             let r = if hot || near { 11.0 } else { 8.0 };
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot || near { theme.accent } else { theme.display }, None, &Circle::new(g.at, r));
@@ -954,6 +1035,11 @@ impl RigView {
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.glass_border, None, &shape);
         for (i, (kind, lanes, name, words)) in m.entries().iter().enumerate() {
             let row = m.row(i);
+            if kind.is_none() && *lanes == 0 {
+                // A group's heading.
+                cx.text.draw(cx.scene, name, row.x0 + 10.0, row.y1 - 15.0, TextStyle::LABEL.sized(9.0), theme.accent, Align::Left);
+                continue;
+            }
             if self.hot == Some(Hot::Menu(i)) {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.14), None, &RoundedRect::from_rect(row, 6.0));
             }
@@ -986,7 +1072,7 @@ impl RigView {
                 v.extend(Self::simple_params(b.kind()).into_iter().filter(|&i| params[i].toggle || !params[i].choices.is_empty()).enumerate().map(|(k, i)| PanelButton::Switch { param: i, at: start + k }));
                 v
             }
-            Some(Selection::Split(_)) => vec![PanelButton::Lanes(2), PanelButton::Lanes(3), PanelButton::Remove],
+            Some(Selection::Split(_)) => vec![PanelButton::Lanes(2), PanelButton::Lanes(3), PanelButton::Routing(0), PanelButton::Routing(1), PanelButton::Routing(2), PanelButton::Remove],
             None => Vec::new(),
         }
     }
@@ -1008,7 +1094,15 @@ impl RigView {
                 cx.text.draw(cx.scene, "Each lane runs its own blocks; they merge again here, in time.", PANEL.x0 + 22.0, PANEL.y0 + 62.0, TextStyle::BODY.sized(11.5), theme.text_mid, Align::Left);
                 for j in 0..n {
                     let x = KNOB_X0 + j as f64 * 2.0 * KNOB_STEP + KNOB_STEP / 2.0;
-                    cx.text.draw(cx.scene, &format!("LANE {}", j + 1), x, PANEL.y0 + 14.0, label, theme.text_hi, Align::Center);
+                    let routing = self.split_live(id).map_or(0, |l| l.routing());
+                    let side = match (routing, j) {
+                        (1, 0) => " · LEFT",
+                        (1, 1) => " · RIGHT",
+                        (2, 0) => " · MID",
+                        (2, 1) => " · SIDE",
+                        _ => "",
+                    };
+                    cx.text.draw(cx.scene, &format!("LANE {}{side}", j + 1), x, PANEL.y0 + 14.0, label, theme.text_hi, Align::Center);
                 }
             }
             Some(Selection::Block(id)) => {
@@ -1048,6 +1142,7 @@ impl RigView {
                 PanelButton::Size => text(cx, if Self::plain(cx.host, SIZE.id) >= 0.5 { "A2 Lite" } else { "A2 Full" }),
                 PanelButton::Full => text(cx, "Full view"),
                 PanelButton::Lanes(n) => text(cx, &format!("{n} lanes")),
+                PanelButton::Routing(m) => text(cx, ROUTINGS[m]),
                 PanelButton::Switch { param, .. } => {
                     let word = self.selected_block().map(|b| {
                         let p = b.kind().params()[param];
@@ -1069,8 +1164,14 @@ impl RigView {
                 }
             }
             Some(Selection::Split(id)) => {
-                if let Some(lanes) = self.split_lanes(id) {
+                if let (Some(lanes), Some(split)) = (self.split_lanes(id), self.split_live(id)) {
                     for k in &self.knobs {
+                        if k.id == "mix" {
+                            let host = SplitHost(&split);
+                            let mut sub = DrawCx { scene: &mut *cx.scene, theme: cx.theme, text: &mut *cx.text, host: &host, size: cx.size, fx: &mut *cx.fx };
+                            k.draw(&mut sub);
+                            continue;
+                        }
                         let (j, rest) = k.id.split_once(':').unwrap_or(("0", "level"));
                         let Some(lane) = lanes.get(j.parse::<usize>().unwrap_or(0)) else { continue };
                         let host = LaneHost(lane);
@@ -1097,6 +1198,7 @@ impl RigView {
             PanelButton::Size => Self::plain(host, SIZE.id) >= 0.5,
             PanelButton::Switch { param, .. } => self.selected_block().is_some_and(|b| b.kind().params()[param].toggle && b.live.value(param) >= 0.5),
             PanelButton::Lanes(n) => matches!(self.selected, Some(Selection::Split(id)) if self.split_lanes(id).is_some_and(|l| l.len() == n)),
+            PanelButton::Routing(m) => matches!(self.selected, Some(Selection::Split(id)) if self.split_live(id).is_some_and(|l| l.routing() == m)),
             _ => false,
         }
     }
@@ -1187,7 +1289,7 @@ impl RigView {
             Some(Hot::Gap(Place::Main(_))) => return Help::default().text("Add a block here, or a split (two or three parallel lanes)"),
             Some(Hot::Gap(_)) => return Help::default().text("Add a block to this lane"),
             Some(Hot::Palette(i)) => {
-                let words = PALETTE_ITEMS[i].map_or("A split: the chain forks into parallel lanes that merge again", Kind::words);
+                let words = palette_entry(i).0.map_or("A split: the chain forks into parallel lanes that merge again", Kind::words);
                 return Help::default().text(format!("{words} — drag it onto a + in the chain (a click adds it after the selected block)"));
             }
             Some(Hot::Fork(_)) => return Help::default().text("The split: click to set its lanes' levels and pans, or how many"),
@@ -1203,6 +1305,9 @@ impl RigView {
                     PanelButton::Size => "Captures that come in two sizes (A2 Full and Lite) play this one, everywhere on the board: Lite costs a fraction of the CPU",
                     PanelButton::Switch { .. } => "Click to switch it (a type: the next one)",
                     PanelButton::Lanes(_) => "How many lanes the split has (the last one's blocks go when it is removed)",
+                    PanelButton::Routing(0) => "Parallel: every lane gets the whole signal, panned where its pan says",
+                    PanelButton::Routing(1) => "L / R: lane 1 plays the left side, lane 2 the right (a third lane gets both)",
+                    PanelButton::Routing(_) => "M / S: lane 1 plays the middle, lane 2 the sides (a third lane gets both)",
                 });
             }
             None => {}
@@ -1231,7 +1336,8 @@ impl RigView {
 
     fn hot_at(&self, p: Point) -> Option<Hot> {
         if let Some(m) = &self.menu {
-            return (0..m.entries().len()).find(|&i| m.row(i).contains(p)).map(Hot::Menu);
+            let entries = m.entries();
+            return (0..entries.len()).find(|&i| m.row(i).contains(p) && (entries[i].0.is_some() || entries[i].1 > 0)).map(Hot::Menu);
         }
         if AREA.contains(p) {
             let layout = self.layout();
@@ -1252,7 +1358,7 @@ impl RigView {
             return None;
         }
         if PALETTE.contains(p) {
-            return (0..PALETTE_ITEMS.len()).find(|&i| palette_item(i).contains(p)).map(Hot::Palette);
+            return (0..PALETTE_LEN).find(|&i| palette_item(i).contains(p)).map(Hot::Palette);
         }
         self.panel_buttons().into_iter().find(|b| panel_button(*b).contains(p)).map(Hot::Panel)
     }
@@ -1263,6 +1369,12 @@ impl RigView {
             (PanelButton::Remove, Some(Selection::Block(id) | Selection::Split(id))) => {
                 board.remove(id);
                 self.selected = None;
+            }
+            (PanelButton::Routing(m), Some(Selection::Split(id))) => {
+                if let Some(l) = self.split_live(id) {
+                    l.routing.store(m as u32, Ordering::Relaxed);
+                    board.touch();
+                }
             }
             (PanelButton::Lanes(n), Some(Selection::Split(id))) => {
                 board.set_lanes(id, n);
@@ -1384,8 +1496,15 @@ impl RigView {
                     }
                 }
                 Some(Selection::Split(id)) => {
-                    if let Some(lanes) = self.split_lanes(id) {
+                    if let (Some(lanes), Some(split)) = (self.split_lanes(id), self.split_live(id)) {
                         for k in &mut self.knobs {
+                            if k.id == "mix" {
+                                if k.event(event, &SplitHost(&split)) {
+                                    self.ui.board.touch();
+                                    return true;
+                                }
+                                continue;
+                            }
                             let j: usize = k.id.split(':').next().and_then(|s| s.parse().ok()).unwrap_or(0);
                             if let Some(lane) = lanes.get(j) {
                                 if k.event(event, &LaneHost(lane)) {
@@ -1427,7 +1546,7 @@ impl RigView {
                 if let Some(m) = &self.menu {
                     let entries = m.entries();
                     let place = m.place;
-                    let hit = (0..entries.len()).find(|&i| m.row(i).contains(pos));
+                    let hit = (0..entries.len()).find(|&i| m.row(i).contains(pos) && (entries[i].0.is_some() || entries[i].1 > 0));
                     self.menu = None;
                     if let Some(i) = hit {
                         let (kind, lanes, _, _) = entries[i];
@@ -1482,7 +1601,7 @@ impl RigView {
             }
             UiEvent::PointerUp { pos, button: MouseButton::Left, .. } => {
                 if let Some(a) = self.adding.take() {
-                    let item = PALETTE_ITEMS[a.item];
+                    let item = palette_entry(a.item).0;
                     if !a.moving {
                         let place = self.click_place(item);
                         self.add_item(a.item, place);
@@ -1539,6 +1658,7 @@ fn panel_button(b: PanelButton) -> Rect {
         PanelButton::Full => at(PANEL.x0 + 22.0, 104.0, row),
         PanelButton::Switch { at: k, .. } => at(PANEL.x0 + 22.0 + (k % 4) as f64 * 114.0, 104.0, row + if k >= 4 { BUTTON + 8.0 } else { 0.0 }),
         PanelButton::Lanes(n) => at(PANEL.x0 + 22.0 + (n as f64 - 2.0) * 96.0, 86.0, row),
+        PanelButton::Routing(m) => at(PANEL.x0 + 22.0 + m as f64 * 96.0, 86.0, row + BUTTON + 8.0),
     }
 }
 
