@@ -89,9 +89,6 @@ pub enum Stage {
         /// The input, delayed as the longest lane, for the mix.
         dry: [Delay; 2],
         mix: LinearSmoother,
-        /// A short dip while the routing changes (no click), and the routing in force.
-        dip: LinearSmoother,
-        routing: usize,
     },
 }
 
@@ -100,9 +97,14 @@ pub struct Graph {
 }
 
 /// A lane's balance gains (pan −1…1: the far side falls, the near one stays at unity).
-fn balance(p: f32) -> (f32, f32) {
+/// A lane's pan: its middle (L + R) / 2 moves across at constant power (centre: as it is; hard
+/// to a side: all of it there, √2 louder on that side, the same loudness heard), its sides
+/// (L − R) / 2 narrow to nothing at a hard pan. The middle's gains on the left and right, and the
+/// sides' width.
+fn pan_gains(p: f32) -> (f32, f32, f32) {
     let p = p.clamp(-1.0, 1.0);
-    ((1.0 - p).min(1.0), (1.0 + p).min(1.0))
+    let theta = (p + 1.0) * std::f32::consts::FRAC_PI_4;
+    (std::f32::consts::SQRT_2 * theta.cos(), std::f32::consts::SQRT_2 * theta.sin(), 1.0 - p.abs())
 }
 
 impl Graph {
@@ -140,12 +142,6 @@ impl Graph {
                         sm.set_ramp(fs, 20.0);
                         sm
                     },
-                    dip: {
-                        let mut sm = LinearSmoother::new(1.0);
-                        sm.set_ramp(fs, 5.0);
-                        sm
-                    },
-                    routing: s.live.routing(),
                     live: s.live.clone(),
                 },
             })
@@ -233,40 +229,14 @@ impl Graph {
         for stage in self.stages.iter_mut() {
             match stage {
                 Stage::Block(node) => node.process(l, r),
-                Stage::Split { lanes, sum, live, dry, mix, dip, routing } => {
+                Stage::Split { lanes, sum, live, dry, mix } => {
                     let longest = lanes.iter().map(Lane::latency).max().unwrap_or(0);
-                    // A new routing: down, switch, up again.
-                    let wanted = live.routing();
-                    if wanted != *routing {
-                        if dip.target() > 0.0 {
-                            dip.set_target(0.0);
-                        } else if !dip.is_smoothing() {
-                            *routing = wanted;
-                            dip.set_target(1.0);
-                        }
-                    }
                     mix.set_target(live.mix.load().clamp(0.0, 1.0));
                     sum[0][..n].fill(0.0);
                     sum[1][..n].fill(0.0);
-                    for (j, lane) in lanes.iter_mut().enumerate() {
-                        // L/R and M/S: the first two lanes take one side each (on both channels);
-                        // a third lane takes everything.
-                        let side = if j < 2 { *routing } else { 0 };
-                        for i in 0..n {
-                            let (a, b) = match side {
-                                1 => {
-                                    let x = if j == 0 { l[i] } else { r[i] };
-                                    (x, x)
-                                }
-                                2 => {
-                                    let x = if j == 0 { 0.5 * (l[i] + r[i]) } else { 0.5 * (l[i] - r[i]) };
-                                    (x, x)
-                                }
-                                _ => (l[i], r[i]),
-                            };
-                            lane.l[i] = a;
-                            lane.r[i] = b;
-                        }
+                    for lane in lanes.iter_mut() {
+                        lane.l[..n].copy_from_slice(l);
+                        lane.r[..n].copy_from_slice(r);
                         let lat = lane.latency();
                         let (ll, lr) = (&mut lane.l[..n], &mut lane.r[..n]);
                         for node in lane.nodes.iter_mut() {
@@ -278,33 +248,22 @@ impl Graph {
                         lane.level.set_target(mite_dsp::db_to_gain(lane.live.level_db.load()));
                         lane.pan.set_target(lane.live.pan.load());
                         for i in 0..n {
-                            let (gl, gr) = balance(lane.pan.next_value());
+                            let (gl, gr, w) = pan_gains(lane.pan.next_value());
                             let g = lane.level.next_value();
                             let (yl, yr) = (cl.tick(ll[i]) * g, cr.tick(lr[i]) * g);
-                            match side {
-                                // Each side back where it came from (its pan does not apply).
-                                1 => sum[j][i] += 0.5 * (yl + yr),
-                                2 => {
-                                    let m = 0.5 * (yl + yr);
-                                    let sgn = if j == 0 { 1.0 } else { -1.0 };
-                                    sum[0][i] += m;
-                                    sum[1][i] += sgn * m;
-                                }
-                                _ => {
-                                    sum[0][i] += yl * gl;
-                                    sum[1][i] += yr * gr;
-                                }
-                            }
+                            let (m, sd) = (0.5 * (yl + yr), 0.5 * (yl - yr) * w);
+                            sum[0][i] += gl * m + sd;
+                            sum[1][i] += gr * m - sd;
                         }
                     }
                     let [dl, dr] = dry;
                     dl.delay = longest;
                     dr.delay = longest;
                     for i in 0..n {
-                        let (m, d) = (mix.next_value(), dip.next_value());
+                        let m = mix.next_value();
                         let (xl, xr) = (dl.tick(l[i]), dr.tick(r[i]));
-                        l[i] = xl + m * (d * sum[0][i] - xl);
-                        r[i] = xr + m * (d * sum[1][i] - xr);
+                        l[i] = xl + m * (sum[0][i] - xl);
+                        r[i] = xr + m * (sum[1][i] - xr);
                     }
                 }
             }
@@ -355,8 +314,9 @@ mod tests {
         let mut g = Graph::build(&items, 48_000.0);
         let x: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.01).sin() * 0.2).collect();
         let (l, r) = run(&mut g, &x);
-        // Left: lane 0 (full) and lane 1 (panned away: 0); lane 2 silent. Right likewise.
-        let err = |v: &[f32]| v.iter().zip(&x).skip(2000).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+        // Left: lane 0, hard left (√2: its power from both sides on one); lane 1 panned away;
+        // lane 2 silent. Right likewise.
+        let err = |v: &[f32]| v.iter().zip(&x).skip(2000).fold(0.0f32, |m, (a, b)| m.max((a - std::f32::consts::SQRT_2 * b).abs()));
         assert!(err(&l) < 1e-3 && err(&r) < 1e-3, "{} {}", err(&l), err(&r));
     }
 
@@ -375,50 +335,36 @@ mod tests {
         assert!(new.find(boost).is_some());
     }
 
-    /// L/R and M/S with empty lanes give the input back exactly; a mix of 0 is the dry input.
+    /// Pan moves a lane across at the same loudness: hard right, a mono lane is all on the right
+    /// (√2: the power it had on both sides); a mix of 0 is the dry input.
     #[test]
-    fn a_split_routes_left_right_and_mid_side_and_mixes() {
-        for (routing, mix) in [(1u32, 1.0f32), (2, 1.0), (0, 0.0), (2, 0.0)] {
+    fn a_lane_pans_across_and_a_split_mixes() {
+        for (pan, mix) in [(1.0f32, 1.0f32), (-1.0, 1.0), (0.5, 1.0), (1.0, 0.0)] {
             let board = Board::new();
             board.insert_split(0, 2);
             let items = board.items();
             if let Item::Split(s) = &items[0] {
-                s.live.routing.store(routing, std::sync::atomic::Ordering::Relaxed);
                 s.live.mix.store(mix);
-                // Pans that would spoil a parallel sum (L/R and M/S ignore them).
-                s.lanes[0].live.pan.store(0.7);
-                s.lanes[1].live.pan.store(-0.3);
+                s.lanes[0].live.pan.store(pan);
+                s.lanes[1].live.level_db.store(-120.0);
             }
             let mut g = Graph::build(&items, 48_000.0);
-            let xl: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.01).sin() * 0.2).collect();
-            let xr: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.023).cos() * 0.3).collect();
-            let (mut l, mut r) = (xl.clone(), xr.clone());
-            for (a, b) in l.chunks_mut(SUB).zip(r.chunks_mut(SUB)) {
-                g.process(a, b);
+            let x: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.01).sin() * 0.2).collect();
+            let (l, r) = run(&mut g, &x);
+            let rms = |v: &[f32]| (v[2000..].iter().map(|a| a * a).sum::<f32>() / (v.len() - 2000) as f32).sqrt();
+            let (pl, pr, px) = (rms(&l), rms(&r), rms(&x));
+            if mix == 0.0 {
+                assert!((pl - px).abs() < 1e-4 && (pr - px).abs() < 1e-4, "dry: {pl} {pr}");
+                continue;
             }
-            let err = |v: &[f32], x: &[f32]| v.iter().zip(x).skip(2000).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
-            assert!(err(&l, &xl) < 1e-4 && err(&r, &xr) < 1e-4, "routing {routing} mix {mix}: {} {}", err(&l, &xl), err(&r, &xr));
-        }
-    }
-
-    /// Changing the routing while it plays dips and comes back (no step).
-    #[test]
-    fn a_routing_change_is_click_free() {
-        let board = Board::new();
-        board.insert_split(0, 2);
-        let items = board.items();
-        let Item::Split(s) = &items[0] else { panic!() };
-        let live = s.live.clone();
-        let mut g = Graph::build(&items, 48_000.0);
-        let x: Vec<f32> = (0..9600).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
-        let (mut l, mut r) = (x.clone(), x.clone());
-        for (k, (a, b)) in l.chunks_mut(SUB).zip(r.chunks_mut(SUB)).enumerate() {
-            if k == 10 {
-                live.routing.store(2, std::sync::atomic::Ordering::Relaxed);
+            // The power is the centre's (both sides at x) wherever it is panned.
+            assert!(((pl * pl + pr * pr) - 2.0 * px * px).abs() < 1e-3 * px * px + 1e-6, "pan {pan}: {pl} {pr} ({px})");
+            if pan.abs() == 1.0 {
+                let (near, far) = if pan > 0.0 { (pr, pl) } else { (pl, pr) };
+                assert!(far < 1e-4 && near > 1.3 * px, "pan {pan}: {near} near, {far} far");
+            } else {
+                assert!(pr > pl, "pan {pan}: right {pr} over left {pl}");
             }
-            g.process(a, b);
         }
-        let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
-        assert!(jump < 0.02, "{jump}");
     }
 }

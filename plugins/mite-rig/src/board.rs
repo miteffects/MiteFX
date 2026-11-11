@@ -133,22 +133,14 @@ impl Live {
     }
 }
 
-/// How a split feeds its lanes.
-pub const ROUTINGS: [&str; 3] = ["Parallel", "L / R", "M / S"];
-
-/// A split's routing (an index into [`ROUTINGS`]) and mix (the lanes against the dry input, 0…1).
+/// A split's mix: the lanes against the dry input, 0…1.
 pub struct SplitLive {
-    pub routing: std::sync::atomic::AtomicU32,
     pub mix: AtomicF32,
 }
 
 impl SplitLive {
     pub fn new() -> Self {
-        Self { routing: std::sync::atomic::AtomicU32::new(0), mix: AtomicF32::new(1.0) }
-    }
-
-    pub fn routing(&self) -> usize {
-        self.routing.load(Ordering::Relaxed) as usize
+        Self { mix: AtomicF32::new(1.0) }
     }
 }
 
@@ -255,10 +247,6 @@ struct BlockDoc {
     file: Option<SlotFile>,
 }
 
-fn is_zero(v: &u32) -> bool {
-    *v == 0
-}
-
 fn full() -> f32 {
     1.0
 }
@@ -284,7 +272,9 @@ enum ItemDoc {
     Split {
         id: u64,
         lanes: Vec<LaneDoc>,
-        #[serde(default, skip_serializing_if = "is_zero")]
+        /// L/R and M/S routings, built and dropped the same day (the user: "doesn't make sense";
+        /// pans place the lanes): read and ignored.
+        #[serde(default, skip_serializing)]
         routing: u32,
         #[serde(default = "full", skip_serializing_if = "is_full")]
         mix: f32,
@@ -523,7 +513,7 @@ impl Board {
                 .iter()
                 .map(|i| match i {
                     Item::Block(b) => ItemDoc::Block(block_doc(b)),
-                    Item::Split(s) => ItemDoc::Split { id: s.id, lanes: s.lanes.iter().map(|l| LaneDoc { level_db: l.live.level_db.load(), pan: l.live.pan.load(), blocks: l.blocks.iter().map(block_doc).collect() }).collect(), routing: s.live.routing() as u32, mix: s.live.mix.load() },
+                    Item::Split(s) => ItemDoc::Split { id: s.id, lanes: s.lanes.iter().map(|l| LaneDoc { level_db: l.live.level_db.load(), pan: l.live.pan.load(), blocks: l.blocks.iter().map(block_doc).collect() }).collect(), routing: 0, mix: s.live.mix.load() },
                 })
                 .collect(),
         };
@@ -591,7 +581,7 @@ impl Board {
         for item in &doc.items {
             match item {
                 ItemDoc::Block(d) => items.extend(make(d).map(Item::Block)),
-                ItemDoc::Split { id, lanes, routing, mix } => {
+                ItemDoc::Split { id, lanes, mix, .. } => {
                     let old = old_splits.get(id);
                     let lanes: Vec<Lane> = lanes
                         .iter()
@@ -606,7 +596,6 @@ impl Board {
                         .collect();
                     if lanes.len() >= 2 {
                         let live = old.map(|o| o.0.clone()).unwrap_or_else(|| Arc::new(SplitLive::new()));
-                        live.routing.store((*routing).min(ROUTINGS.len() as u32 - 1), Ordering::Relaxed);
                         live.mix.store(mix.clamp(0.0, 1.0));
                         items.push(Item::Split(Split { id: *id, lanes, live }));
                     }

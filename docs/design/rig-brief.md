@@ -68,9 +68,11 @@ never waits. Boards saved by slice 2 load with their pedal values renamed to the
 delay's tone and the doubler's width and level had no counterpart and go). Not yet: a plugin's
 snapshots A–D inside a block are not saved with the board; its user presets are the plugin's own.
 
-- **Splits** (2026-11-11, user): a Mix (the lanes against the dry input, in time) and a routing:
-  Parallel, L / R (lane 1 the left, lane 2 the right) or M / S (lane 1 the mid, lane 2 the side);
-  a third lane always gets the whole signal. A routing change dips for 5 ms (no click).
+- **Splits** (2026-11-11, user): a Mix (the lanes against the dry input, in time). Each lane's pan
+  moves its sound across at constant power (its middle panned, its sides narrowing to nothing at a
+  hard pan): the first pan was a balance, which only turned a side down ("it just gets quieter").
+  L/R and M/S routings were built and dropped the same day by the user (pans place the lanes);
+  boards saved with one load as parallel.
 - **Palette** (2026-11-11, user): one row in a guitarist's order, no group headings (the user
   dropped them: they cost the icons room), each icon as large as its slot allows; the + menu in
   the same order, in three columns. Under the simple view, every block (and a split) as an icon,

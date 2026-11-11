@@ -26,7 +26,7 @@ use mite_ui::widgets::{Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, T
 use mite_ui::{Align, DrawCx, Key, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::blocks::Kind;
-use crate::board::{Block, Item, LaneLive, Live, Place, SplitLive, ROUTINGS};
+use crate::board::{Block, Item, LaneLive, Live, Place, SplitLive};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::rig::{Gear, SlotFile, Status};
@@ -237,8 +237,6 @@ pub enum PanelButton {
     Switch { param: usize, at: usize },
     /// A split's lane count.
     Lanes(usize),
-    /// A split's routing (an index into `ROUTINGS`).
-    Routing(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1393,7 +1391,7 @@ impl RigView {
                 v.extend(Self::simple_params(b.kind()).into_iter().filter(|&i| params[i].toggle || !params[i].choices.is_empty()).enumerate().map(|(k, i)| PanelButton::Switch { param: i, at: start + k }));
                 v
             }
-            Some(Selection::Split(_)) => vec![PanelButton::Lanes(2), PanelButton::Lanes(3), PanelButton::Routing(0), PanelButton::Routing(1), PanelButton::Routing(2), PanelButton::Remove],
+            Some(Selection::Split(_)) => vec![PanelButton::Lanes(2), PanelButton::Lanes(3), PanelButton::Remove],
             None => Vec::new(),
         }
     }
@@ -1415,15 +1413,7 @@ impl RigView {
                 cx.text.draw(cx.scene, "Each lane runs its own blocks; they merge again here, in time.", PANEL.x0 + 22.0, PANEL.y0 + 62.0, TextStyle::BODY.sized(11.5), theme.text_mid, Align::Left);
                 for j in 0..n {
                     let x = KNOB_X0 + j as f64 * 2.0 * KNOB_STEP + KNOB_STEP / 2.0;
-                    let routing = self.split_live(id).map_or(0, |l| l.routing());
-                    let side = match (routing, j) {
-                        (1, 0) => " · LEFT",
-                        (1, 1) => " · RIGHT",
-                        (2, 0) => " · MID",
-                        (2, 1) => " · SIDE",
-                        _ => "",
-                    };
-                    cx.text.draw(cx.scene, &format!("LANE {}{side}", j + 1), x, PANEL.y0 + 14.0, label, theme.text_hi, Align::Center);
+                    cx.text.draw(cx.scene, &format!("LANE {}", j + 1), x, PANEL.y0 + 14.0, label, theme.text_hi, Align::Center);
                 }
             }
             Some(Selection::Block(id)) => {
@@ -1463,7 +1453,6 @@ impl RigView {
                 PanelButton::Size => text(cx, if Self::plain(cx.host, SIZE.id) >= 0.5 { "A2 Lite" } else { "A2 Full" }),
                 PanelButton::Full => text(cx, "Full view"),
                 PanelButton::Lanes(n) => text(cx, &format!("{n} lanes")),
-                PanelButton::Routing(m) => text(cx, ROUTINGS[m]),
                 PanelButton::Switch { param, .. } => {
                     let word = self.selected_block().map(|b| {
                         let p = b.kind().params()[param];
@@ -1525,7 +1514,6 @@ impl RigView {
             PanelButton::Size => Self::plain(host, SIZE.id) >= 0.5,
             PanelButton::Switch { param, .. } => self.selected_block().is_some_and(|b| b.kind().params()[param].toggle && b.live.value(param) >= 0.5),
             PanelButton::Lanes(n) => matches!(self.selected, Some(Selection::Split(id)) if self.split_lanes(id).is_some_and(|l| l.len() == n)),
-            PanelButton::Routing(m) => matches!(self.selected, Some(Selection::Split(id)) if self.split_live(id).is_some_and(|l| l.routing() == m)),
             _ => false,
         }
     }
@@ -1634,9 +1622,6 @@ impl RigView {
                     PanelButton::Size => "Captures that come in two sizes (A2 Full and Lite) play this one, everywhere on the board: Lite costs a fraction of the CPU",
                     PanelButton::Switch { .. } => "Click to switch it (a type: the next one)",
                     PanelButton::Lanes(_) => "How many lanes the split has (the last one's blocks go when it is removed)",
-                    PanelButton::Routing(0) => "Parallel: every lane gets the whole signal, panned where its pan says",
-                    PanelButton::Routing(1) => "L / R: lane 1 plays the left side, lane 2 the right (a third lane gets both)",
-                    PanelButton::Routing(_) => "M / S: lane 1 plays the middle, lane 2 the sides (a third lane gets both)",
                 });
             }
             None => {}
@@ -1704,12 +1689,6 @@ impl RigView {
             (PanelButton::Remove, Some(Selection::Block(id) | Selection::Split(id))) => {
                 board.remove(id);
                 self.selected = None;
-            }
-            (PanelButton::Routing(m), Some(Selection::Split(id))) => {
-                if let Some(l) = self.split_live(id) {
-                    l.routing.store(m as u32, Ordering::Relaxed);
-                    board.touch();
-                }
             }
             (PanelButton::Lanes(n), Some(Selection::Split(id))) => {
                 board.set_lanes(id, n);
@@ -1996,7 +1975,6 @@ fn panel_button(b: PanelButton) -> Rect {
         PanelButton::Full => at(PANEL.x0 + 22.0, 104.0, row),
         PanelButton::Switch { at: k, .. } => at(PANEL.x0 + 22.0 + (k % 4) as f64 * 114.0, 104.0, row + if k >= 4 { BUTTON + 8.0 } else { 0.0 }),
         PanelButton::Lanes(n) => at(PANEL.x0 + 22.0 + (n as f64 - 2.0) * 96.0, 86.0, row),
-        PanelButton::Routing(m) => at(PANEL.x0 + 22.0 + m as f64 * 96.0, 86.0, row + BUTTON + 8.0),
     }
 }
 
