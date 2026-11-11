@@ -224,6 +224,8 @@ pub enum CardButton {
     Open,
     Tone3000,
     Clear,
+    /// The Cab card, while the Amp is a full rig: stack the IR on it, or let it rest.
+    Stack,
 }
 
 fn card_rect(slot: Slot) -> Rect {
@@ -235,6 +237,7 @@ fn card_button(slot: Slot, b: CardButton) -> Rect {
     let r = card_rect(slot);
     match b {
         CardButton::Power => Rect::new(r.x1 - 14.0 - BUTTON, r.y0 + 12.0, r.x1 - 14.0, r.y0 + 12.0 + BUTTON),
+        CardButton::Stack => Rect::new(r.x1 - 14.0 - 112.0, r.y1 - 14.0 - BUTTON, r.x1 - 14.0, r.y1 - 14.0),
         _ => {
             let i = match b {
                 CardButton::Open => 0.0,
@@ -563,7 +566,11 @@ impl AmpView {
             let r = card_rect(slot);
             let on = Self::on(cx.host, [PEDAL.id, AMP.id, CAB.id][slot.index()]);
             let loaded = matches!(self.status[slot.index()], Status::Model(_) | Status::Cab(_));
-            let lit = on && loaded;
+            let full_rig = self.amp_is_full_rig();
+            // The Cab under a full rig rests (unless stacked): drawn as resting, not as playing.
+            let stacked = Self::on(cx.host, CAB_ON_RIG.id);
+            let resting = slot == Slot::Cab && full_rig && !stacked;
+            let lit = on && loaded && !resting;
             let selected = slot == self.selected;
             let shape = RoundedRect::from_rect(r, 12.0);
             panel(cx.scene, shape, theme.panel_control, if lit { theme.accent.multiply_alpha(0.55) } else { theme.panel_control_border });
@@ -578,9 +585,23 @@ impl AmpView {
             let label = TextStyle::LABEL.sized(10.0);
             cx.text.draw(cx.scene, &slot.name().to_uppercase(), r.x0 + 18.0, r.y0 + 16.0, label, if lit { theme.accent } else { theme.text_lo }, Align::Left);
             let (title, mut line2, mut line3) = self.slot_words(slot);
-            if slot == Slot::Cab && on && self.amp_is_full_rig() {
-                line2 = "Resting: the Amp is a full rig, with its own cabinet".to_owned();
-                line3 = "It plays again with an amp-only capture".to_owned();
+            if slot == Slot::Cab && full_rig {
+                (line2, line3) = if stacked {
+                    ("Stacked on the full rig's own cabinet".to_owned(), "Two cabinets in a row: darker, narrower".to_owned())
+                } else if loaded {
+                    ("Resting: the Amp is a full rig with its own cabinet".to_owned(), "That cabinet is part of the capture and can't be swapped".to_owned())
+                } else {
+                    ("The Amp is a full rig: its own cabinet plays".to_owned(), "For your own IR, load an amp-only capture".to_owned())
+                };
+            }
+            // A full rig says so on its card.
+            if slot == Slot::Amp && full_rig {
+                let style = TextStyle::LABEL.sized(9.0);
+                let text = "FULL RIG · CAB INCLUDED";
+                let w = f64::from(cx.text.measure(text, style)) + 14.0;
+                let x = r.x0 + 58.0;
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.16), None, &RoundedRect::new(x, r.y0 + 13.0, x + w, r.y0 + 30.0, 8.5));
+                cx.text.draw(cx.scene, text, x + 7.0, r.y0 + 16.5, style, theme.accent, Align::Left);
             }
             let big = TextStyle::BODY.sized(19.0).weighted(700.0);
             let width = r.width() - 36.0 - BUTTON - 10.0;
@@ -598,10 +619,14 @@ impl AmpView {
                 let x = r.x0 + 18.0 + (r.width() - 36.0) * (0.5 + 0.5 * (t * 2.5).sin());
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent, None, &Circle::new((x, r.y0 + 106.0), 2.5));
             }
-            for b in [CardButton::Power, CardButton::Open, CardButton::Tone3000, CardButton::Clear] {
+            let mut buttons = vec![CardButton::Power, CardButton::Open, CardButton::Tone3000, CardButton::Clear];
+            if slot == Slot::Cab && full_rig && loaded {
+                buttons.push(CardButton::Stack);
+            }
+            for b in buttons {
                 let br = card_button(slot, b);
                 let hot = self.hot == Some(Hot::Card(slot, b));
-                let pressed = b == CardButton::Power && on;
+                let pressed = (b == CardButton::Power && on) || (b == CardButton::Stack && stacked);
                 let ink = icon_button(cx.scene, theme, br, theme.control, hot, pressed, theme.accent);
                 match b {
                     CardButton::Power => draw_glyph(cx.scene, POWER_GLYPH, br.center(), 22.0, ink, 1.8),
@@ -610,10 +635,14 @@ impl AmpView {
                     CardButton::Tone3000 => {
                         cx.text.draw(cx.scene, "T3K", br.center().x, br.center().y - 7.0, TextStyle::BODY.sized(12.5).weighted(800.0), ink, Align::Center);
                     }
+                    CardButton::Stack => {
+                        let word = if stacked { "Stacked" } else { "Use anyway" };
+                        cx.text.draw(cx.scene, word, br.center().x, br.center().y - 7.5, TextStyle::BODY.sized(12.0).weighted(700.0), ink, Align::Center);
+                    }
                 }
             }
-            // The signal flows on to the next card.
-            if slot != Slot::Cab {
+            // The signal flows on to the next card (not into a resting Cab).
+            if slot != Slot::Cab && !(slot == Slot::Amp && full_rig && !stacked) {
                 let y = r.center().y;
                 let x = r.x1 + 10.0;
                 let mut a = BezPath::new();
@@ -661,7 +690,8 @@ impl AmpView {
             fill.line_to((p[p.len() - 1].x, PLOT.y1));
             fill.line_to((p[0].x, PLOT.y1));
             fill.close_path();
-            let a = if cab_on { 1.0 } else { 0.4 };
+            let resting = self.amp_is_full_rig() && !Self::on(host, CAB_ON_RIG.id);
+            let a = if cab_on && !resting { 1.0 } else { 0.4 };
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.10 * a), None, &fill);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.5 * a), None, &curve);
         }
@@ -670,7 +700,7 @@ impl AmpView {
         let tc = smooth_path(&pts(&|_, i| tone[i]));
         cx.scene.stroke(&Stroke::new(if hot { 1.8 } else { 1.4 }), Affine::IDENTITY, theme.accent.multiply_alpha(0.85), None, &tc);
         // What is heard: tone and cabinet together, lit.
-        if let (Some(cab), true) = (self.cab_db(), cab_on && !self.amp_is_full_rig()) {
+        if let (Some(cab), true) = (self.cab_db(), cab_on && (!self.amp_is_full_rig() || Self::on(host, CAB_ON_RIG.id))) {
             let both = smooth_path(&pts(&|_, i| post[i] + f64::from(cab[i]) + cab_level));
             glow_stroke(cx, &both, 1.6, theme.curve.multiply_alpha(0.85), theme.curve.multiply_alpha(0.6), 1.6);
         }
@@ -781,6 +811,7 @@ impl AmpView {
                     (_, CardButton::Open) => "Open a NAM capture (.nam: A1 or A2, any size)",
                     (_, CardButton::Tone3000) => "Find one on TONE3000",
                     (_, CardButton::Clear) => "Empty the slot",
+                    (_, CardButton::Stack) => "A full rig's cabinet is part of its capture and can't be taken out. Use anyway puts this IR after it too (two cabinets: darker); off, the IR rests until the Amp is an amp-only capture",
                 });
             }
             Some(Hot::Toggle(t)) => {
@@ -813,8 +844,10 @@ impl AmpView {
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
+        let stack = self.amp_is_full_rig() && matches!(self.status[Slot::Cab.index()], Status::Cab(_));
         for slot in Slot::ALL {
-            for b in [CardButton::Power, CardButton::Open, CardButton::Tone3000, CardButton::Clear] {
+            let extra: &[CardButton] = if slot == Slot::Cab && stack { &[CardButton::Stack] } else { &[] };
+            for &b in [CardButton::Power, CardButton::Open, CardButton::Tone3000, CardButton::Clear].iter().chain(extra) {
                 if card_button(slot, b).contains(p) {
                     return Some(Hot::Card(slot, b));
                 }
@@ -849,6 +882,7 @@ impl AmpView {
             }
             CardButton::Tone3000 => self.open_browser(slot),
             CardButton::Clear => self.ui.rig.set_file(slot, SlotFile::default()),
+            CardButton::Stack => Self::gesture(host, CAB_ON_RIG.id, if Self::on(host, CAB_ON_RIG.id) { 0.0 } else { 1.0 }),
         }
     }
 

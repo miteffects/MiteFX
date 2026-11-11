@@ -532,7 +532,9 @@ impl Browser {
                     Hot::Load(i, slot) => {
                         if let (Some(tone), Some(m)) = (self.view.tone.clone(), self.file_rows().get(i).cloned()) {
                             if self.view.downloading.is_none() {
-                                self.notice = Some((format!("{} → {}", m.name, slot.name()), Instant::now()));
+                                let rests = slot == Slot::Cab && ui.rig_amp_full_rig();
+                                let text = if rests { format!("{} → Cab (resting: the Amp is a full rig with its own cabinet)", m.name) } else { format!("{} → {}", m.name, slot.name()) };
+                                self.notice = Some((text, Instant::now()));
                                 t3k.download(tone, m, slot, ui.rig.clone());
                             }
                         }

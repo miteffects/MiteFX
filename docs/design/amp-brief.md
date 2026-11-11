@@ -40,7 +40,9 @@ output of a pedal … set its eq")
 - The Pedal slot takes pedals (and outboard); the Amp slot amps and full rigs; the Cab slot IRs.
   From TONE3000 by the tone's gear (only the fitting Load buttons show; Explore opens filtered to
   the slot's gear), from files by NAM's `gear_type` (refused with where it goes; files without
-  one are trusted). A full rig in the Amp slot rests the Cab (it has its own cabinet).
+  one are trusted). A full rig in the Amp slot rests the Cab (its cabinet is in the capture and
+  can't be swapped): the Amp card says FULL RIG · CAB INCLUDED, the Cab card dims and says why,
+  and **Use anyway** (`cab_on_rig`, state 3) stacks the IR after the rig's own cabinet.
 - Each capture slot: Gain into it, Level out of it, and its own Bass/Middle/Treble (the pedal's
   after the pedal; the amp's are BASS/MIDDLE/TREBLE). The Cab: Level, Low Cut, High Cut. A slot
   switched off takes its gain, level and tone with it. Click a card: the strip and the curve's

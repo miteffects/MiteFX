@@ -17,7 +17,8 @@ use crate::rig::Rig;
 
 /// The state format version (`mite_plugin::state`).
 /// 2 (2026-11-11): each slot's gain, level and (pedal) tone appended.
-pub const STATE_VERSION: u32 = 2;
+/// 3 (2026-11-11): the cabinet stacked on a full rig, appended.
+pub const STATE_VERSION: u32 = 3;
 
 /// The state field holding the rig (files and their sources).
 pub const RIG_KEY: &str = "rig";
@@ -79,6 +80,9 @@ pub const AMP_LEVEL: ParamSpec = spec("amp_level", "Amp Level", "dB", -24.0, 24.
 /// The cabinet's level (its cuts are LOW_CUT and HIGH_CUT).
 pub const CAB_LEVEL: ParamSpec = spec("cab_level", "Cab Level", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 
+/// A full rig has its own cabinet: the Cab rests, unless this stacks it on top.
+pub const CAB_ON_RIG: BoolSpec = BoolSpec { id: "cab_on_rig", name: "Cab On Full Rig", default: false };
+
 /// The continuous parameters.
 pub const CONTINUOUS: [ParamSpec; 18] = [INPUT, GATE_THRESHOLD, INTERFACE_LEVEL, BASS, MIDDLE, TREBLE, LOW_CUT, HIGH_CUT, MIX, OUT_GAIN, PEDAL_GAIN, PEDAL_LEVEL, PEDAL_BASS, PEDAL_MIDDLE, PEDAL_TREBLE, AMP_GAIN, AMP_LEVEL, CAB_LEVEL];
 
@@ -115,6 +119,7 @@ pub fn manifest() -> String {
         AMP_GAIN.manifest_line(),
         AMP_LEVEL.manifest_line(),
         CAB_LEVEL.manifest_line(),
+        CAB_ON_RIG.manifest_line(),
     ]
     .join("\n")
         + "\n"
@@ -161,6 +166,7 @@ pub struct AmpParams {
     pub amp_gain: FloatParam,
     pub amp_level: FloatParam,
     pub cab_level: FloatParam,
+    pub cab_on_rig: BoolParam,
     pub snapshots: Arc<Snapshots>,
     pub preset: Arc<CurrentPreset>,
     /// The loaded files (saved with the state).
@@ -199,6 +205,7 @@ impl Default for AmpParams {
             amp_gain: float_param(&AMP_GAIN),
             amp_level: float_param(&AMP_LEVEL),
             cab_level: float_param(&CAB_LEVEL),
+            cab_on_rig: flag(&CAB_ON_RIG),
             snapshots: Arc::new(Snapshots::new()),
             preset: Arc::new(CurrentPreset::default()),
             rig: Arc::new(Rig::new()),
@@ -235,6 +242,7 @@ pub fn amp_settings(p: impl Fn(&str) -> f32) -> AmpSettings {
         amp_gain_db: p(AMP_GAIN.id),
         amp_level_db: p(AMP_LEVEL.id),
         cab_level_db: p(CAB_LEVEL.id),
+        cab_on_rig: on(CAB_ON_RIG.id),
     }
 }
 
@@ -267,6 +275,7 @@ impl AmpParams {
             "amp_gain" => self.amp_gain.value(),
             "amp_level" => self.amp_level.value(),
             "cab_level" => self.cab_level.value(),
+            "cab_on_rig" => flag(&self.cab_on_rig),
             _ => 0.0,
         }
     }
@@ -332,6 +341,7 @@ unsafe impl Params for AmpParams {
             p(AMP_GAIN.id, self.amp_gain.as_ptr(), "Amp"),
             p(AMP_LEVEL.id, self.amp_level.as_ptr(), "Amp"),
             p(CAB_LEVEL.id, self.cab_level.as_ptr(), "Cab"),
+            p(CAB_ON_RIG.id, self.cab_on_rig.as_ptr(), "Cab"),
         ]
     }
 }

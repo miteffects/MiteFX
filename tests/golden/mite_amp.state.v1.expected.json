@@ -1,9 +1,9 @@
 {
   "fields": {
-    "mitefx_state": "2",
+    "mitefx_state": "3",
     "preset": "Tight High Gain",
     "rig": "[{\"path\":\"/rig/klon.nam\"},{\"path\":\"/rig/plexi.nam\",\"source\":{\"tone_id\":27156,\"model_id\":41,\"title\":\"Plexi 1959\",\"creator\":\"amp_guy\",\"license\":\"cc-by\",\"url\":\"https://www.tone3000.com/tones/plexi-27156\"}},{\"path\":\"/rig/v30.wav\"}]",
-    "snapshots": "{\"active\":0,\"slots\":[{\"amp\":1.0,\"amp_gain\":0.5,\"amp_level\":0.5,\"bass\":0.375,\"cab\":1.0,\"cab_level\":0.5,\"gate\":1.0,\"gate_threshold\":0.5,\"high_cut\":1.0,\"input\":0.625,\"low_cut\":0.47482726,\"middle\":0.5,\"mix\":1.0,\"normalize\":1.0,\"out_gain\":0.5,\"pedal\":0.0,\"pedal_bass\":0.5,\"pedal_gain\":0.5,\"pedal_level\":0.5,\"pedal_middle\":0.5,\"pedal_treble\":0.5,\"size\":1.0,\"treble\":0.5},{\"bass\":0.25},null,null]}"
+    "snapshots": "{\"active\":0,\"slots\":[{\"amp\":1.0,\"amp_gain\":0.5,\"amp_level\":0.5,\"bass\":0.375,\"cab\":1.0,\"cab_level\":0.5,\"cab_on_rig\":0.0,\"gate\":1.0,\"gate_threshold\":0.5,\"high_cut\":1.0,\"input\":0.625,\"low_cut\":0.47482726,\"middle\":0.5,\"mix\":1.0,\"normalize\":1.0,\"out_gain\":0.5,\"pedal\":0.0,\"pedal_bass\":0.5,\"pedal_gain\":0.5,\"pedal_level\":0.5,\"pedal_middle\":0.5,\"pedal_treble\":0.5,\"size\":1.0,\"treble\":0.5},{\"bass\":0.25},null,null]}"
   },
   "params": {
     "amp": {
@@ -26,6 +26,9 @@
     },
     "cab_level": {
       "f32": 0.0
+    },
+    "cab_on_rig": {
+      "bool": false
     },
     "calibrate": {
       "bool": false

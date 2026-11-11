@@ -238,7 +238,19 @@ fn each_slot_takes_only_its_gear_and_a_full_rig_rests_the_cab() {
     let s = quiet();
     let mut e = AmpEngine::new(48_000.0, &s);
     let _ = run(&mut e, &s, &shared, &noise(4800, 0.1), 256);
-    assert!(!e.cab_engaged(&s));
+    assert!(!e.cab_engaged(&s), "no cabinet loaded: nothing to engage");
+    // With an IR in the Cab, a full rig rests it, unless it is stacked on purpose.
+    let mut h = vec![0.0f32; 100];
+    h[0] = 1.0;
+    let cab = tmp("cab-rig.wav");
+    write_wav(&cab, 48_000, &h);
+    rig.set_file(Slot::Cab, SlotFile { path: Some(cab), source: None });
+    core.step();
+    let _ = run(&mut e, &s, &shared, &noise(4800, 0.1), 256);
+    assert!(e.amp_full_rig(&s));
+    assert!(!e.cab_engaged(&s), "a full rig's own cabinet plays");
+    assert!(e.cab_engaged(&AmpSettings { cab_on_rig: true, ..s }), "stacked");
+    assert!(rig.amp_is_full_rig());
 }
 
 #[test]

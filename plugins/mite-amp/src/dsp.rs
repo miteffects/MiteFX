@@ -67,6 +67,8 @@ pub struct AmpSettings {
     pub amp_gain_db: f32,
     pub amp_level_db: f32,
     pub cab_level_db: f32,
+    /// Stack the cabinet on a full rig (whose own cabinet is in the capture).
+    pub cab_on_rig: bool,
 }
 
 impl Default for AmpSettings {
@@ -97,6 +99,7 @@ impl Default for AmpSettings {
             amp_gain_db: 0.0,
             amp_level_db: 0.0,
             cab_level_db: 0.0,
+            cab_on_rig: false,
         }
     }
 }
@@ -609,7 +612,12 @@ impl AmpEngine {
     /// has its own). Otherwise the stage, its level with it, passes the signal.
     pub fn cab_engaged(&self, s: &AmpSettings) -> bool {
         let loaded = self.cabs[self.cab_active].loaded || self.cab_fade.is_some();
-        s.cab && loaded && !self.slots[1].active(s.amp).is_some_and(|m| m.full_rig)
+        s.cab && loaded && (s.cab_on_rig || !self.amp_full_rig(s))
+    }
+
+    /// Whether the playing amp capture is a full rig (amp and cabinet in one).
+    pub fn amp_full_rig(&self, s: &AmpSettings) -> bool {
+        self.slots[1].active(s.amp).is_some_and(|m| m.full_rig)
     }
 
     fn input_gain(&self, s: &AmpSettings) -> f32 {

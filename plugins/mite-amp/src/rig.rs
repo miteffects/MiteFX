@@ -204,6 +204,19 @@ impl Rig {
         self.status_version.fetch_add(1, Ordering::AcqRel);
     }
 
+    /// Whether the Amp slot plays a full rig (amp and cabinet in one capture).
+    pub fn amp_is_full_rig(&self) -> bool {
+        let g = self.lock();
+        let (file, status) = (&g.files[Slot::Amp.index()], &g.status[Slot::Amp.index()]);
+        match status {
+            Status::Model(info) => match file.source.as_ref().filter(|s| !s.gear.is_empty()) {
+                Some(src) => Gear::of_tone3000(&src.gear, "nam") == Gear::FullRig,
+                None => Gear::of_nam(info.gear_type.as_deref()) == Gear::FullRig,
+            },
+            _ => false,
+        }
+    }
+
     pub fn files_version(&self) -> u64 {
         self.files_version.load(Ordering::Acquire)
     }

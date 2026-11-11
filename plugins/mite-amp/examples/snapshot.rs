@@ -53,6 +53,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !v("empty") {
         let _core = rig::load(&params, &shared, fs, false);
     }
+    if v("fullrig") {
+        // The example A2 capture, marked as a full rig (amp and cabinet in one).
+        let mut j: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(rig::models_dir().join("A2.nam"))?)?;
+        j["metadata"]["gear_type"] = serde_json::json!("amp_cab");
+        let path = std::env::temp_dir().join("mite-amp-full-rig.nam");
+        std::fs::write(&path, j.to_string())?;
+        params.rig.set_file(Slot::Amp, SlotFile { path: Some(path), source: None });
+        let core = mite_amp::loader::LoaderCore::new(params.rig.clone(), shared.clone(), params.clone());
+        core.set_rate(fs);
+        core.step();
+    }
     if v("failed") {
         let bad = std::env::temp_dir().join("mite-amp-broken.nam");
         std::fs::write(&bad, "{ not a model")?;
