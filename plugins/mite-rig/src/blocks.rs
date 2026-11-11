@@ -37,6 +37,14 @@ pub enum Kind {
     Tone,
     Boost,
     Volume,
+    Comp,
+    Eq,
+    Delay,
+    Reverb,
+    Mod,
+    Tremolo,
+    Double,
+    Tuner,
 }
 
 /// A block's parameter: its spec (the id is frozen), and whether it is a switch.
@@ -44,6 +52,8 @@ pub enum Kind {
 pub struct BlockParam {
     pub spec: ParamSpec,
     pub toggle: bool,
+    /// A choice's names (its value is the index); empty for a knob or a switch.
+    pub choices: &'static [&'static str],
 }
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
@@ -52,11 +62,11 @@ const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32
 }
 
 const fn knob(spec: ParamSpec) -> BlockParam {
-    BlockParam { spec, toggle: false }
+    BlockParam { spec, toggle: false, choices: &[] }
 }
 
 const fn switch(id: &'static str, name: &'static str, default: bool) -> BlockParam {
-    BlockParam { spec: spec(id, name, "", 0.0, 1.0, if default { 1.0 } else { 0.0 }, ParamScale::Linear, 0, (1.0, 1.0), ParamDisplay::Number), toggle: true }
+    BlockParam { spec: spec(id, name, "", 0.0, 1.0, if default { 1.0 } else { 0.0 }, ParamScale::Linear, 0, (1.0, 1.0), ParamDisplay::Number), toggle: true, choices: &[] }
 }
 
 const DB: (f32, f32) = (0.5, 0.1);
@@ -81,7 +91,23 @@ const BOOST: [BlockParam; 1] = [knob(spec("gain", "Gain", "dB", 0.0, 24.0, 6.0, 
 const VOLUME: [BlockParam; 1] = [knob(spec("volume", "Volume", "%", 0.0, 100.0, 100.0, LIN, 0, (1.0, 0.1), NUM))];
 
 impl Kind {
-    pub const ALL: [Kind; 7] = [Kind::Pedal, Kind::Amp, Kind::Cab, Kind::Gate, Kind::Tone, Kind::Boost, Kind::Volume];
+    pub const ALL: [Kind; 15] = [
+        Kind::Pedal,
+        Kind::Amp,
+        Kind::Cab,
+        Kind::Gate,
+        Kind::Comp,
+        Kind::Boost,
+        Kind::Tone,
+        Kind::Eq,
+        Kind::Volume,
+        Kind::Mod,
+        Kind::Tremolo,
+        Kind::Double,
+        Kind::Delay,
+        Kind::Reverb,
+        Kind::Tuner,
+    ];
 
     /// The frozen id saved with the board.
     pub fn id(self) -> &'static str {
@@ -93,6 +119,14 @@ impl Kind {
             Kind::Tone => "tone",
             Kind::Boost => "boost",
             Kind::Volume => "volume",
+            Kind::Comp => "comp",
+            Kind::Eq => "eq",
+            Kind::Delay => "delay",
+            Kind::Reverb => "reverb",
+            Kind::Mod => "mod",
+            Kind::Tremolo => "tremolo",
+            Kind::Double => "double",
+            Kind::Tuner => "tuner",
         }
     }
 
@@ -108,12 +142,7 @@ impl Kind {
     /// Whether a capture of `gear` belongs in this block (unknown gear: trusted).
     pub fn accepts(self, gear: crate::rig::Gear) -> bool {
         use crate::rig::Gear;
-        match (self, gear) {
-            (Kind::Pedal, Gear::Pedal | Gear::Unknown) => true,
-            (Kind::Amp, Gear::Amp | Gear::FullRig | Gear::Unknown) => true,
-            (Kind::Cab, Gear::Cab) => true,
-            _ => false,
-        }
+        matches!((self, gear), (Kind::Pedal, Gear::Pedal | Gear::Unknown) | (Kind::Amp, Gear::Amp | Gear::FullRig | Gear::Unknown) | (Kind::Cab, Gear::Cab))
     }
 
     pub fn name(self) -> &'static str {
@@ -125,6 +154,14 @@ impl Kind {
             Kind::Tone => "Tone",
             Kind::Boost => "Boost",
             Kind::Volume => "Volume",
+            Kind::Comp => "Comp",
+            Kind::Eq => "EQ",
+            Kind::Delay => "Delay",
+            Kind::Reverb => "Reverb",
+            Kind::Mod => "Mod",
+            Kind::Tremolo => "Tremolo",
+            Kind::Double => "Double",
+            Kind::Tuner => "Tuner",
         }
     }
 
@@ -138,6 +175,14 @@ impl Kind {
             Kind::Tone => "Bass, middle, treble and low and high cuts",
             Kind::Boost => "A clean boost",
             Kind::Volume => "A volume pedal",
+            Kind::Comp => "A compressor (Mite Comp's): even out the picking, add sustain",
+            Kind::Eq => "A seven-band graphic EQ",
+            Kind::Delay => "Echoes (Mite Delay's): digital, tape or bucket brigade",
+            Kind::Reverb => "A room, hall, plate, chamber, spring or shimmer (Mite Verb's)",
+            Kind::Mod => "Chorus, ensemble, flanger, phaser, vibrato, rotary (Mite Mod's)",
+            Kind::Tremolo => "Tremolo: sine, square or harmonic",
+            Kind::Double => "A doubled part from one take (Mite Double's)",
+            Kind::Tuner => "A tuner (Mite Tuner's): the note on the block, muted while tuning if asked",
         }
     }
 
@@ -149,6 +194,14 @@ impl Kind {
             Kind::Tone => &TONE,
             Kind::Boost => &BOOST,
             Kind::Volume => &VOLUME,
+            Kind::Comp => &crate::pedals::COMP,
+            Kind::Eq => &crate::pedals::EQ,
+            Kind::Delay => &crate::pedals::DELAY,
+            Kind::Reverb => &crate::pedals::REVERB,
+            Kind::Mod => &crate::pedals::MOD,
+            Kind::Tremolo => &crate::pedals::TREMOLO,
+            Kind::Double => &crate::pedals::DOUBLE,
+            Kind::Tuner => &crate::pedals::TUNER,
         }
     }
 
@@ -202,6 +255,14 @@ pub fn build(kind: Kind, fs: f32) -> Box<dyn Unit> {
         Kind::Gate => Box::new(GateUnit { gate: Gate::new(fs), gain: LinearSmoother::new(1.0) }),
         Kind::Tone => Box::new(ToneUnit::new(fs)),
         Kind::Boost | Kind::Volume => Box::new(GainUnit::new(fs, kind)),
+        Kind::Comp => Box::new(crate::pedals::CompUnit::new(fs)),
+        Kind::Eq => Box::new(crate::pedals::EqUnit::new(fs)),
+        Kind::Delay => Box::new(crate::pedals::DelayUnit::new(fs)),
+        Kind::Reverb => Box::new(crate::pedals::ReverbUnit::new(fs)),
+        Kind::Mod => Box::new(crate::pedals::ModUnit::new(fs)),
+        Kind::Tremolo => Box::new(crate::pedals::TremoloUnit::new(fs)),
+        Kind::Double => Box::new(crate::pedals::DoubleUnit::new(fs)),
+        Kind::Tuner => Box::new(crate::pedals::TunerUnit::new(fs)),
     }
 }
 
@@ -519,7 +580,7 @@ mod tests {
     #[test]
     fn neutral_blocks_pass_the_signal() {
         let fs = 48_000.0;
-        for kind in [Kind::Tone, Kind::Volume, Kind::Amp, Kind::Cab] {
+        for kind in [Kind::Tone, Kind::Volume, Kind::Amp, Kind::Cab, Kind::Eq, Kind::Tuner] {
             let live = Live::new(1, kind);
             let mut u = build(kind, fs);
             u.reset(&live);
@@ -535,6 +596,40 @@ mod tests {
             }
             let err = l.iter().zip(&x).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
             assert!(err < 1e-5, "{}: {err}", kind.id());
+        }
+    }
+}
+
+#[cfg(test)]
+mod pedal_tests {
+    use super::*;
+
+    /// Every pedal runs on noise, stereo, in odd blocks, and stays finite and sane in level.
+    #[test]
+    fn every_kind_runs_and_stays_finite() {
+        let fs = 48_000.0;
+        for kind in Kind::ALL {
+            let live = Live::new(1, kind);
+            let mut u = build(kind, fs);
+            u.reset(&live);
+            let mut seed = 5u32;
+            let mut peak = 0.0f32;
+            for k in 0..200 {
+                let n = [SUB, 37, 128][k % 3];
+                let (mut l, mut r): (Vec<f32>, Vec<f32>) = (0..n)
+                    .map(|_| {
+                        seed ^= seed << 13;
+                        seed ^= seed >> 17;
+                        seed ^= seed << 5;
+                        let v = (seed as f32 / u32::MAX as f32 - 0.5) * 0.4;
+                        (v, v * 0.8)
+                    })
+                    .unzip();
+                u.process(&mut l, &mut r, &live);
+                assert!(l.iter().chain(&r).all(|x| x.is_finite()), "{}", kind.id());
+                peak = l.iter().chain(&r).fold(peak, |m, x| m.max(x.abs()));
+            }
+            assert!(peak < 8.0, "{}: {peak}", kind.id());
         }
     }
 }

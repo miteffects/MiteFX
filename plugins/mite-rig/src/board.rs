@@ -41,6 +41,8 @@ pub struct Live {
     pub reload: AtomicBool,
     /// Whether it has a file (read on the audio thread: no lock, no copy).
     has_path: AtomicBool,
+    /// What the block shows of itself (the tuner's pitch and clarity, the comp's reduction).
+    pub readout: [AtomicF32; 3],
 }
 
 impl Live {
@@ -56,6 +58,7 @@ impl Live {
             status: Mutex::new(Status::Empty),
             reload: AtomicBool::new(false),
             has_path: AtomicBool::new(false),
+            readout: [AtomicF32::new(0.0), AtomicF32::new(0.0), AtomicF32::new(0.0)],
         }
     }
 

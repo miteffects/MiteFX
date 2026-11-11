@@ -28,6 +28,14 @@ pub enum Sign {
     Gate,
     Tone,
     Boost,
+    Comp,
+    Eq,
+    Delay,
+    Reverb,
+    Mod,
+    Tremolo,
+    Double,
+    Tuner,
 }
 
 impl Look {
@@ -41,6 +49,14 @@ impl Look {
             Kind::Tone => Look::Stomp(Sign::Tone),
             Kind::Boost => Look::Stomp(Sign::Boost),
             Kind::Volume => Look::Rocker,
+            Kind::Comp => Look::Stomp(Sign::Comp),
+            Kind::Eq => Look::Stomp(Sign::Eq),
+            Kind::Delay => Look::Stomp(Sign::Delay),
+            Kind::Reverb => Look::Stomp(Sign::Reverb),
+            Kind::Mod => Look::Stomp(Sign::Mod),
+            Kind::Tremolo => Look::Stomp(Sign::Tremolo),
+            Kind::Double => Look::Stomp(Sign::Double),
+            Kind::Tuner => Look::Stomp(Sign::Tuner),
         }
     }
 }
@@ -133,6 +149,61 @@ fn sign(cx: &mut DrawCx<'_>, s: Sign, c: Point, ink: &Ink) {
             p.move_to((c.x - 5.0, c.y - 1.0));
             p.line_to((c.x, c.y - 6.0));
             p.line_to((c.x + 5.0, c.y - 1.0));
+        }
+        // A curve bending over a knee.
+        Sign::Comp => {
+            p.move_to((c.x - 10.0, c.y + 6.0));
+            p.line_to((c.x - 1.0, c.y - 2.0));
+            p.line_to((c.x + 10.0, c.y - 5.0));
+        }
+        // Seven slider caps at different heights.
+        Sign::Eq => {
+            for (k, h) in [2.0, -1.0, -4.0, 0.0, 3.0, -2.0, 1.0].into_iter().enumerate() {
+                let x = c.x - 9.0 + k as f64 * 3.0;
+                p.move_to((x, c.y + 6.0));
+                p.line_to((x, c.y + h));
+            }
+        }
+        // Echoes, each fainter: dots in a row.
+        Sign::Delay => {
+            for (k, r) in [2.6, 2.0, 1.5, 1.0].into_iter().enumerate() {
+                let x = c.x - 9.0 + k as f64 * 6.0;
+                p.extend(mite_ui::kurbo::Shape::path_elements(&Circle::new((x, c.y), r), 0.1));
+            }
+        }
+        // A decaying tail.
+        Sign::Reverb => {
+            p.move_to((c.x - 10.0, c.y - 6.0));
+            p.line_to((c.x - 10.0, c.y + 6.0));
+            p.quad_to((c.x - 4.0, c.y - 2.0), (c.x + 10.0, c.y + 5.0));
+        }
+        // A sine.
+        Sign::Mod => {
+            p.move_to((c.x - 10.0, c.y));
+            p.curve_to((c.x - 6.0, c.y - 9.0), (c.x - 2.0, c.y - 9.0), (c.x, c.y));
+            p.curve_to((c.x + 2.0, c.y + 9.0), (c.x + 6.0, c.y + 9.0), (c.x + 10.0, c.y));
+        }
+        // A wave in a swelling envelope.
+        Sign::Tremolo => {
+            p.move_to((c.x - 10.0, c.y + 5.0));
+            p.line_to((c.x - 5.0, c.y - 5.0));
+            p.line_to((c.x, c.y + 5.0));
+            p.line_to((c.x + 5.0, c.y - 5.0));
+            p.line_to((c.x + 10.0, c.y + 5.0));
+        }
+        // Two lines, side by side.
+        Sign::Double => {
+            p.move_to((c.x - 10.0, c.y - 2.0));
+            p.quad_to((c.x, c.y - 8.0), (c.x + 10.0, c.y - 2.0));
+            p.move_to((c.x - 10.0, c.y + 3.0));
+            p.quad_to((c.x, c.y - 3.0), (c.x + 10.0, c.y + 3.0));
+        }
+        // A needle over a scale.
+        Sign::Tuner => {
+            p.move_to((c.x - 9.0, c.y + 4.0));
+            p.quad_to((c.x, c.y - 4.0), (c.x + 9.0, c.y + 4.0));
+            p.move_to((c.x, c.y + 6.0));
+            p.line_to((c.x + 3.0, c.y - 6.0));
         }
     }
     stroke(cx, &p, 1.6, ink.lit);

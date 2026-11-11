@@ -4,7 +4,7 @@
 //!
 //!     cargo run -p mite_rig --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, split, menu, browser. SNAPSHOT_CLICK=x,y clicks a point first.
+//! SNAPSHOT_VARIANT: default, split, pedals, menu, browser. SNAPSHOT_CLICK=x,y clicks a point first.
 
 #[path = "common/rig.rs"]
 mod rig;
@@ -46,6 +46,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         board.insert(Kind::Tone, Place::Lane { split: at, lane: 1, index: 0 });
         board.insert(Kind::Volume, Place::Lane { split: at, lane: 1, index: 1 });
         board.block(boost).unwrap().live.set(0, 9.0);
+    }
+    if v("pedals") {
+        // A whole pedalboard: tuner, comp, the amp, then mod, tremolo, delay, reverb in a lane
+        // beside an EQ'd double.
+        for (k, kind) in [Kind::Tuner, Kind::Comp].into_iter().enumerate() {
+            board.insert(kind, Place::Main(k));
+        }
+        let at = board.items().len();
+        let split = board.insert_split(at, 2);
+        let _ = split;
+        for (k, kind) in [Kind::Mod, Kind::Tremolo, Kind::Delay].into_iter().enumerate() {
+            board.insert(kind, Place::Lane { split: at, lane: 0, index: k });
+        }
+        for (k, kind) in [Kind::Eq, Kind::Double].into_iter().enumerate() {
+            board.insert(kind, Place::Lane { split: at, lane: 1, index: k });
+        }
+        board.insert(Kind::Reverb, Place::Main(at + 1));
     }
     let shared = Arc::new(RigShared::new());
     let core = LoaderCore::new(board.clone(), shared.clone(), params.clone());

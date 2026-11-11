@@ -197,8 +197,9 @@ pub enum PanelButton {
     Clear,
     Remove,
     Size,
-    /// A block's switch parameter (its index).
-    Switch(usize),
+    /// A block's switch or choice parameter (its index), at a place in the button grid (0…3
+    /// the first row, 4… the second).
+    Switch { param: usize, at: usize },
     /// A split's lane count.
     Lanes(usize),
 }
@@ -229,16 +230,24 @@ impl Menu {
         e
     }
 
+    /// Rows per column (the entries run down the first column, then the second).
+    fn rows(&self) -> usize {
+        self.entries().len().div_ceil(2)
+    }
+
     fn rect(&self) -> Rect {
-        let h = self.entries().len() as f64 * 30.0 + 12.0;
-        let x0 = (self.at.x - 20.0).clamp(12.0, VIEW_W - 340.0);
+        let h = self.rows() as f64 * 32.0 + 12.0;
+        let w = 2.0 * 300.0 + 12.0;
+        let x0 = (self.at.x - 20.0).clamp(12.0, VIEW_W - w - 12.0);
         let y0 = if self.at.y + 18.0 + h < HELP_TOP { self.at.y + 18.0 } else { (self.at.y - 18.0 - h).max(DISPLAY_TOP + 4.0) };
-        Rect::new(x0, y0, x0 + 320.0, y0 + h)
+        Rect::new(x0, y0, x0 + w, y0 + h)
     }
 
     fn row(&self, i: usize) -> Rect {
         let r = self.rect();
-        Rect::new(r.x0 + 6.0, r.y0 + 6.0 + i as f64 * 30.0, r.x1 - 6.0, r.y0 + 6.0 + (i + 1) as f64 * 30.0)
+        let (col, k) = (i / self.rows(), i % self.rows());
+        let x = r.x0 + 6.0 + col as f64 * 300.0;
+        Rect::new(x, r.y0 + 6.0 + k as f64 * 32.0, x + 300.0, r.y0 + 6.0 + (k + 1) as f64 * 32.0)
     }
 }
 
@@ -399,12 +408,14 @@ impl RigView {
         match self.selected {
             Some(Selection::Block(id)) => {
                 let Some(b) = self.block(id) else { return };
+                let dials: Vec<_> = b.kind().params().iter().filter(|p| !p.toggle && p.choices.is_empty()).collect();
+                let (step, d) = if dials.len() > 6 { (92.0, 54.0) } else { (KNOB_STEP, KNOB_D) };
                 let mut x = KNOB_X0;
-                for p in b.kind().params().iter().filter(|p| !p.toggle) {
+                for p in dials {
                     let kind = if p.spec.min < 0.0 && p.spec.max > 0.0 { KnobKind::Bipolar } else { KnobKind::Unipolar };
                     let label: &'static str = Box::leak(p.spec.name.to_uppercase().into_boxed_str());
-                    self.knobs.push(Knob::new(p.spec, label, kind, Point::new(x, KNOB_Y), KNOB_D));
-                    x += KNOB_STEP;
+                    self.knobs.push(Knob::new(p.spec, label, kind, Point::new(x, KNOB_Y), d));
+                    x += step;
                 }
             }
             Some(Selection::Split(id)) => {
@@ -529,6 +540,15 @@ impl RigView {
             }
         }
         cx.end_clip();
+        // More board than fits: a scroll bar under it (the wheel scrolls).
+        if layout.width > VIEW_W {
+            let track = Rect::new(24.0, AREA.y1 - 10.0, VIEW_W - 24.0, AREA.y1 - 6.0);
+            let frac = VIEW_W / layout.width;
+            let x0 = track.x0 + (self.scroll / layout.width) * track.width();
+            let thumb = Rect::new(x0, track.y0, (x0 + frac * track.width()).min(track.x1), track.y1);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &RoundedRect::from_rect(track, 2.0));
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.text_lo, None, &RoundedRect::from_rect(thumb, 2.0));
+        }
     }
 
     fn draw_tile(&self, cx: &mut DrawCx<'_>, t: &Tile, alpha: f32) {
@@ -611,6 +631,15 @@ impl RigView {
                 let v: Vec<String> = (0..3).map(|i| format!("{:+.0}", b.live.value(i))).collect();
                 format!("B {} M {} T {}", v[0], v[1], v[2])
             }
+            Kind::Tuner => match crate::pedals::note_of(b.live.readout[0].load(), b.live.value(1)) {
+                Some((note, cents)) => format!("{note}  {cents:+.0} ¢"),
+                None => "—".to_owned(),
+            },
+            Kind::Comp => format!("{:.1} dB", b.live.readout[0].load().min(0.0)),
+            Kind::Delay | Kind::Mod | Kind::Reverb | Kind::Tremolo => {
+                let p = params.iter().position(|p| !p.choices.is_empty()).unwrap_or(0);
+                params[p].choices.get(b.live.value(p).round().max(0.0) as usize).copied().unwrap_or("").to_owned()
+            }
             _ => params.first().map(|p| p.spec.format(b.live.value(0))).unwrap_or_default(),
         }
     }
@@ -630,7 +659,7 @@ impl RigView {
             }
             cx.text.draw(cx.scene, name, row.x0 + 10.0, row.y0 + 3.0, TextStyle::BODY.sized(12.5).weighted(700.0), theme.text_strong, Align::Left);
             let w = Self::fit(cx, words, TextStyle::BODY.sized(9.5), row.width() - 20.0);
-            cx.text.draw(cx.scene, &w, row.x0 + 10.0, row.y0 + 17.0, TextStyle::BODY.sized(9.5), theme.text_lo, Align::Left);
+            cx.text.draw(cx.scene, &w, row.x0 + 10.0, row.y0 + 18.0, TextStyle::BODY.sized(9.5), theme.text_lo, Align::Left);
         }
     }
 
@@ -645,7 +674,9 @@ impl RigView {
                 if b.kind().is_capture() {
                     v.push(PanelButton::Size);
                 }
-                v.extend(b.kind().params().iter().enumerate().filter(|(_, p)| p.toggle).map(|(i, _)| PanelButton::Switch(i)));
+                // Switches and choices: after the file's buttons (and the size), or on the first row.
+                let start = if b.kind().has_file() { 5 } else { 0 };
+                v.extend(b.kind().params().iter().enumerate().filter(|(_, p)| p.toggle || !p.choices.is_empty()).enumerate().map(|(k, (i, _))| PanelButton::Switch { param: i, at: start + k }));
                 v
             }
             Some(Selection::Split(_)) => vec![PanelButton::Lanes(2), PanelButton::Lanes(3), PanelButton::Remove],
@@ -676,7 +707,7 @@ impl RigView {
             Some(Selection::Block(id)) => {
                 let Some(b) = self.block(id) else { return };
                 let (name, kind) = self.label_of(&b);
-                let top = if kind.is_empty() { b.kind().name().to_uppercase() } else { format!("{} · {}", b.kind().name().to_uppercase(), kind.to_uppercase()) };
+                let top = if kind.is_empty() || kind == b.kind().name() { b.kind().name().to_uppercase() } else { format!("{} · {}", b.kind().name().to_uppercase(), kind.to_uppercase()) };
                 cx.text.draw(cx.scene, &top, PANEL.x0 + 22.0, PANEL.y0 + 18.0, label, theme.accent, Align::Left);
                 let title = Self::fit(cx, &name, TextStyle::BODY.sized(20.0).weighted(800.0), 360.0);
                 cx.text.draw(cx.scene, &title, PANEL.x0 + 22.0, PANEL.y0 + 36.0, TextStyle::BODY.sized(20.0).weighted(800.0), theme.text_strong, Align::Left);
@@ -709,9 +740,12 @@ impl RigView {
                 PanelButton::Tone3000 => text(cx, "TONE3000"),
                 PanelButton::Size => text(cx, if Self::plain(cx.host, SIZE.id) >= 0.5 { "A2 Lite" } else { "A2 Full" }),
                 PanelButton::Lanes(n) => text(cx, &format!("{n} lanes")),
-                PanelButton::Switch(i) => {
-                    let name = self.selected_block().map(|b| b.kind().params()[i].spec.name).unwrap_or("");
-                    text(cx, name);
+                PanelButton::Switch { param, .. } => {
+                    let word = self.selected_block().map(|b| {
+                        let p = b.kind().params()[param];
+                        if p.choices.is_empty() { p.spec.name.to_owned() } else { p.choices.get(b.live.value(param).round().max(0.0) as usize).copied().unwrap_or("").to_owned() }
+                    });
+                    text(cx, &word.unwrap_or_default());
                 }
             }
         }
@@ -753,7 +787,7 @@ impl RigView {
         match pb {
             PanelButton::Bypass => self.selected_block().is_some_and(|b| !b.live.bypassed()),
             PanelButton::Size => Self::plain(host, SIZE.id) >= 0.5,
-            PanelButton::Switch(i) => self.selected_block().is_some_and(|b| b.live.value(i) >= 0.5),
+            PanelButton::Switch { param, .. } => self.selected_block().is_some_and(|b| b.kind().params()[param].toggle && b.live.value(param) >= 0.5),
             PanelButton::Lanes(n) => matches!(self.selected, Some(Selection::Split(id)) if self.split_lanes(id).is_some_and(|l| l.len() == n)),
             _ => false,
         }
@@ -796,6 +830,12 @@ impl RigView {
         }
         if let Some(s) = &file.source {
             out.push((format!("TONE3000 · {} · {}", s.creator, if s.license.is_empty() { "license on the site".to_owned() } else { s.license.to_uppercase() }), 2));
+        }
+        // What the block hears now.
+        match b.kind() {
+            Kind::Tuner => out.push((format!("Hearing: {}", Self::summary(b)), 0)),
+            Kind::Comp => out.push((format!("Reduction now: {}", Self::summary(b)), 2)),
+            _ => {}
         }
         out
     }
@@ -845,7 +885,7 @@ impl RigView {
                     PanelButton::Clear => "Empty the block",
                     PanelButton::Remove => "Remove it from the board",
                     PanelButton::Size => "Captures that come in two sizes (A2 Full and Lite) play this one, everywhere on the board: Lite costs a fraction of the CPU",
-                    PanelButton::Switch(_) => "Normalize: the capture plays at −18 dB loudness, so swapping captures does not jump in level",
+                    PanelButton::Switch { .. } => "Click to switch it (a type: the next one)",
                     PanelButton::Lanes(_) => "How many lanes the split has (the last one's blocks go when it is removed)",
                 });
             }
@@ -923,8 +963,12 @@ impl RigView {
                         b.live.bypass.store(!b.live.bypassed(), Ordering::Relaxed);
                         board.touch();
                     }
-                    PanelButton::Switch(i) => {
-                        b.live.set(i, if b.live.value(i) >= 0.5 { 0.0 } else { 1.0 });
+                    PanelButton::Switch { param, .. } => {
+                        let p = b.kind().params()[param];
+                        let v = b.live.value(param);
+                        // A switch flips; a choice steps to the next (round).
+                        let next = if p.choices.is_empty() { if v >= 0.5 { 0.0 } else { 1.0 } } else { ((v.round() as usize + 1) % p.choices.len()) as f32 };
+                        b.live.set(param, next);
                         board.touch();
                     }
                     PanelButton::Clear => board.set_file(id, SlotFile::default()),
@@ -1134,7 +1178,7 @@ fn panel_button(b: PanelButton) -> Rect {
         PanelButton::Tone3000 => at(PANEL.x0 + 22.0 + BUTTON + 10.0, 104.0, row),
         PanelButton::Clear => at(PANEL.x0 + 22.0 + BUTTON + 124.0, BUTTON, row),
         PanelButton::Size => at(PANEL.x0 + 22.0, 104.0, row + BUTTON + 12.0),
-        PanelButton::Switch(i) => at(PANEL.x0 + 136.0 + i as f64 * 0.0, 104.0, row + BUTTON + 12.0),
+        PanelButton::Switch { at: k, .. } => at(PANEL.x0 + 22.0 + (k % 4) as f64 * 114.0, 104.0, row + if k >= 4 { BUTTON + 12.0 } else { 0.0 }),
         PanelButton::Lanes(n) => at(PANEL.x0 + 22.0 + (n as f64 - 2.0) * 96.0, 86.0, row),
     }
 }

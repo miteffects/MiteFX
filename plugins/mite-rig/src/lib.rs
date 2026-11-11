@@ -21,6 +21,7 @@ pub mod ir;
 pub mod loader;
 pub mod params;
 pub mod parts;
+pub mod pedals;
 pub mod presets;
 pub mod rig;
 pub mod tone3000;

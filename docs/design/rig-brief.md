@@ -26,14 +26,15 @@ come from TONE3000 captures); Mite Amp is replaced.
 
 | Kind | Source | Slice |
 |---|---|---|
-| Capture (pedal) | NAM, files or TONE3000 (pedal/outboard gear only) | 1 |
-| Capture (amp / full rig) | NAM, files or TONE3000 (amp, full rig) | 1 |
+| Pedal | NAM, files or TONE3000 (pedals only) | 1 |
+| Amp (amp, or combo / full rig) | NAM, files or TONE3000 (amps and combos only) | 1 |
 | Cab | IR, files or TONE3000 | 1 |
 | Gate | NAM-style gate (Mite Amp's) | 1 |
 | Tone | bass/middle/treble + low/high cut (Mite Amp's) | 1 |
 | Boost / Volume | clean gain, volume with taper | 1 |
 | Comp | `mite_dsp::dynamics` (Mite Comp) | 2 |
-| EQ | `mite_dsp::eq` (Mite EQ) | 2 |
+| EQ | a seven-band graphic EQ (`mite_dsp::eq` bells) | 2 |
+| Tremolo | new: sine, square, harmonic, stereo spread (a block of its own: Mite Mod's state stays) | 2 |
 | Delay | `mite_dsp::delay` (Mite Delay) | 2 |
 | Reverb | `mite_dsp::reverb` (Mite Verb) | 2 |
 | Mod | `mite_dsp::modulation` (Mite Mod) + a new tremolo mode | 2 |
@@ -41,6 +42,11 @@ come from TONE3000 captures); Mite Amp is replaced.
 | Tuner | `mite_dsp::pitch` (Mite Tuner), mutes while tuning | 2 |
 | Wah / auto-wah | new | 4 |
 | Octaver / pitch | new (`mite_dsp::modulation` micro pitch as a start) | 4 |
+
+**Built (2026-11-11):** slice 1 and slice 2 (every block of the table but wah and octaver; the
+Mod pedal offers Chorus/Ensemble/Flanger/Phaser/Vibrato/Rotary). Each block is drawn as what it
+is (stompboxes with their sign, an amp head, a combo for full rigs, a 2×2 cabinet, a volume
+rocker); the add menu has two columns.
 
 ## 3. Views
 

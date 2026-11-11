@@ -38,6 +38,10 @@ fn engine_process_never_allocates() {
                 60 => board.set_file(cap, SlotFile { path: Some(models.join("lstm.nam")), source: None }),
                 100 => {
                     board.insert(Kind::Boost, Place::Main(0));
+                    // Every pedal of the suite, after the amp.
+                    for kind in [Kind::Comp, Kind::Eq, Kind::Mod, Kind::Tremolo, Kind::Double, Kind::Delay, Kind::Reverb, Kind::Tuner] {
+                        board.insert(kind, Place::Main(usize::MAX));
+                    }
                 }
                 140 => {
                     let tone = board.blocks().into_iter().find(|b| b.kind() == Kind::Tone).unwrap().id();

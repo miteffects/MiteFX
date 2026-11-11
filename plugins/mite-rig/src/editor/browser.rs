@@ -548,7 +548,7 @@ impl Browser {
                     Hot::Load(i, action) => {
                         if let (Some(tone), Some(m)) = (self.view.tone.clone(), self.file_rows().get(i).cloned()) {
                             if self.view.downloading.is_none() {
-                                let block = Some(self.target).filter(|_| action == Action::Load);
+                                let block = (action == Action::Load).then_some(self.target);
                                 if let Some(block) = block {
                                     self.notice = Some((format!("{} into the {}", m.name, self.kind.name()), Instant::now()));
                                     t3k.download(tone, m, ui.board.clone(), block);
