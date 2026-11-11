@@ -49,3 +49,6 @@ name = "Mite DeNoise"
 
 [mite_analyzer]
 name = "Mite Analyzer"
+
+[mite_amp]
+name = "Mite Amp"

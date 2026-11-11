@@ -1,0 +1,32 @@
+[package]
+name = "mite_amp"
+description = "Mite Amp: neural amp captures (NAM A1 and A2), tone stack and cabinet, with TONE3000"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+mite-core.workspace = true
+mite-dsp.workspace = true
+mite-nam = { path = "../../crates/mite-nam" }
+mite-plugin.workspace = true
+mite-ui.workspace = true
+nih_plug.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+symphonia.workspace = true
+# TONE3000's API (HTTPS with rustls, no system OpenSSL), on worker threads only.
+ureq = "2.12"
+
+[dev-dependencies]
+# The allocation guard nih-plug wraps `process()` in (same source as nih-plug's, so it is the same
+# crate and the same global allocator): tests run engine blocks inside it.
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
+baseview.workspace = true
+png = "0.18"

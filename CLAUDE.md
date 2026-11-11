@@ -25,6 +25,7 @@ cargo run -p mite_gain --example snapshot -- out.png 2   # editor → PNG (GPU, 
 ## Layout
 
 - `crates/mite-dsp`: DSP primitives (smoother, meter, dB).
+- `crates/mite-nam`: Neural Amp Modeler captures (`.nam` A1/A2) in pure Rust, matched to NeuralAmpModelerCore.
 - `crates/mite-core`: `ParamSpec`, telemetry atomics, golden manifest, presets, snapshots A–D, undo history.
 - `crates/mite-ui`: tokens (from `docs/design/tokens.json`), text (embedded Manrope), widgets, the header `Session`, effects (bloom, glass), window, offscreen render.
 - `crates/mite-ara`: ARA 2's C API (bindgen output, regenerate with `crates/mite-ara/gen`), the plug-in side of an ARA document, a test host.

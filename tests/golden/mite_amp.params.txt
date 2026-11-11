@@ -1,0 +1,18 @@
+input | dB | -24 | 24 | 0 | Linear
+gate | bool | true
+gate_threshold | dB | -100 | -20 | -80 | Linear
+calibrate | bool | false
+interface_level | dBu | -10 | 30 | 12 | Linear
+pedal | bool | true
+amp | bool | true
+cab | bool | true
+size | choice | Full, Lite | 0
+normalize | bool | true
+bass | dB | -12 | 12 | 0 | Linear
+middle | dB | -12 | 12 | 0 | Linear
+treble | dB | -12 | 12 | 0 | Linear
+low_cut | Hz | 20 | 500 | 20 | Log
+high_cut | Hz | 2000 | 20000 | 20000 | Log
+mix | % | 0 | 100 | 100 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false

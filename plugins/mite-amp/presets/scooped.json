@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Amp",
+  "version": 1,
+  "name": "Scooped",
+  "params": {
+    "bass": 3.0,
+    "middle": -5.0,
+    "treble": 3.0,
+    "low_cut": 70.0
+  }
+}

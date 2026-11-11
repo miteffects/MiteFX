@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Amp",
+  "version": 1,
+  "name": "Warm Clean",
+  "params": {
+    "gate": 0.0,
+    "bass": 2.0,
+    "treble": -2.5,
+    "high_cut": 9000.0
+  }
+}
