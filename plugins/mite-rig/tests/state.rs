@@ -12,7 +12,7 @@ fn instance() -> ClapInstance {
     ClapInstance::new(&mite_rig::clap_entry, mite_rig::MiteRig::CLAP_ID)
 }
 
-const BOARD: &str = r#"{"items":[{"block":{"id":1,"kind":"gate","values":{"threshold":-60.0}}},{"block":{"id":2,"kind":"capture","values":{"gain":3.0},"file":{"path":"/rig/klon.nam","source":{"tone_id":9,"model_id":4,"title":"Klon","creator":"pedal_guy","license":"cc-by","url":"https://www.tone3000.com/tones/klon-9","gear":"pedal"}}}},{"split":{"id":3,"lanes":[{"level_db":-3.0,"pan":-0.5,"blocks":[{"id":4,"kind":"capture","file":{"path":"/rig/plexi.nam"}}]},{"level_db":0.0,"pan":0.5,"blocks":[{"id":5,"kind":"capture","bypass":true,"file":{"path":"/rig/ac30.nam"}},{"id":6,"kind":"tone","values":{"treble":-4.0}}]}]}},{"block":{"id":7,"kind":"cab","file":{"path":"/rig/v30.wav"}}}]}"#;
+const BOARD: &str = r#"{"items":[{"block":{"id":1,"kind":"gate","values":{"threshold":-60.0}}},{"block":{"id":2,"kind":"pedal","values":{"gain":3.0},"file":{"path":"/rig/klon.nam","source":{"tone_id":9,"model_id":4,"title":"Klon","creator":"pedal_guy","license":"cc-by","url":"https://www.tone3000.com/tones/klon-9","gear":"pedal"}}}},{"split":{"id":3,"lanes":[{"level_db":-3.0,"pan":-0.5,"blocks":[{"id":4,"kind":"amp","file":{"path":"/rig/plexi.nam"}}]},{"level_db":0.0,"pan":0.5,"blocks":[{"id":5,"kind":"amp","bypass":true,"file":{"path":"/rig/ac30.nam"}},{"id":6,"kind":"tone","values":{"treble":-4.0}}]}]}},{"block":{"id":7,"kind":"cab","file":{"path":"/rig/v30.wav"}}}]}"#;
 
 /// A two-amp board with a pedal, a snapshot and a preset name.
 fn configured_state() -> Vec<u8> {

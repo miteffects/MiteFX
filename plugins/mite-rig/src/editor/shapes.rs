@@ -1,0 +1,262 @@
+//! What each block looks like on the board: abstract, but itself. Pedals are stompboxes (knobs,
+//! a footswitch, the effect's sign on the face), an amp is a head with its handle, controls and
+//! grille, a combo or full rig has its speaker under the controls, a cabinet shows its four
+//! speakers, a volume pedal is a rocker seen from the side. Straight edges and cut corners, never
+//! a rounded box.
+
+use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, Stroke};
+use mite_ui::peniko::{Color, Fill};
+use mite_ui::DrawCx;
+
+use crate::blocks::Kind;
+use crate::rig::Gear;
+
+/// How a block is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    Stomp(Sign),
+    Head,
+    Combo,
+    Cabinet,
+    Rocker,
+}
+
+/// A stompbox's sign.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sign {
+    Drive,
+    Gate,
+    Tone,
+    Boost,
+}
+
+impl Look {
+    pub fn of(kind: Kind, gear: Gear) -> Self {
+        match kind {
+            Kind::Pedal => Look::Stomp(Sign::Drive),
+            Kind::Amp if gear == Gear::FullRig => Look::Combo,
+            Kind::Amp => Look::Head,
+            Kind::Cab => Look::Cabinet,
+            Kind::Gate => Look::Stomp(Sign::Gate),
+            Kind::Tone => Look::Stomp(Sign::Tone),
+            Kind::Boost => Look::Stomp(Sign::Boost),
+            Kind::Volume => Look::Rocker,
+        }
+    }
+}
+
+/// Where a look carries its on/off light: on a stompbox's face by its footswitch, on an amp's
+/// control strip, on a cabinet's frame, on a rocker's base.
+pub fn led(look: Look, area: Rect) -> Point {
+    let c = area.center();
+    match look {
+        Look::Stomp(_) => Point::new(c.x + 18.0, area.y1 - 11.0),
+        Look::Head => Point::new(area.x1 - 13.0, area.y0 + 16.0 + 7.0),
+        Look::Combo => Point::new(c.x + 36.0, area.y0 + 8.0 + 6.5),
+        Look::Cabinet => Point::new(c.x, c.y),
+        Look::Rocker => Point::new(c.x + 26.0, area.y1 - 6.0),
+    }
+}
+
+/// A rectangle with its corners cut (a chamfer of `c`).
+pub fn chamfer(r: Rect, c: f64) -> BezPath {
+    let mut p = BezPath::new();
+    p.move_to((r.x0 + c, r.y0));
+    p.line_to((r.x1 - c, r.y0));
+    p.line_to((r.x1, r.y0 + c));
+    p.line_to((r.x1, r.y1 - c));
+    p.line_to((r.x1 - c, r.y1));
+    p.line_to((r.x0 + c, r.y1));
+    p.line_to((r.x0, r.y1 - c));
+    p.line_to((r.x0, r.y0 + c));
+    p.close_path();
+    p
+}
+
+/// Colours for one drawing.
+pub struct Ink {
+    pub body: Color,
+    pub edge: Color,
+    pub detail: Color,
+    pub lit: Color,
+}
+
+fn stroke(cx: &mut DrawCx<'_>, path: &impl mite_ui::kurbo::Shape, w: f64, c: Color) {
+    cx.scene.stroke(&Stroke::new(w).with_caps(Cap::Round).with_join(Join::Round), Affine::IDENTITY, c, None, path);
+}
+
+fn fill(cx: &mut DrawCx<'_>, path: &impl mite_ui::kurbo::Shape, c: Color) {
+    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, c, None, path);
+}
+
+fn knob(cx: &mut DrawCx<'_>, at: Point, r: f64, ink: &Ink) {
+    fill(cx, &Circle::new(at, r), ink.detail.multiply_alpha(0.35));
+    stroke(cx, &Circle::new(at, r), 1.0, ink.detail);
+    stroke(cx, &Line::new(at, (at.x, at.y - r * 0.8)), 1.2, ink.lit);
+}
+
+fn sign(cx: &mut DrawCx<'_>, s: Sign, c: Point, ink: &Ink) {
+    let k = 1.0;
+    let mut p = BezPath::new();
+    match s {
+        // A clipped wave.
+        Sign::Drive => {
+            p.move_to((c.x - 11.0 * k, c.y + 4.0));
+            p.line_to((c.x - 7.0, c.y - 4.0));
+            p.line_to((c.x - 2.0, c.y - 4.0));
+            p.line_to((c.x + 2.0, c.y + 4.0));
+            p.line_to((c.x + 7.0, c.y + 4.0));
+            p.line_to((c.x + 11.0, c.y - 4.0));
+        }
+        // A gate: two posts and a bar.
+        Sign::Gate => {
+            p.move_to((c.x - 11.0, c.y + 5.0));
+            p.line_to((c.x - 6.0, c.y + 5.0));
+            p.line_to((c.x - 6.0, c.y - 5.0));
+            p.line_to((c.x + 6.0, c.y - 5.0));
+            p.line_to((c.x + 6.0, c.y + 5.0));
+            p.line_to((c.x + 11.0, c.y + 5.0));
+        }
+        // Three sliders.
+        Sign::Tone => {
+            for (dx, h) in [(-7.0, 3.0), (0.0, -3.0), (7.0, 1.0)] {
+                p.move_to((c.x + dx, c.y - 6.0));
+                p.line_to((c.x + dx, c.y + 6.0));
+                p.move_to((c.x + dx - 2.5, c.y + h));
+                p.line_to((c.x + dx + 2.5, c.y + h));
+            }
+        }
+        // An arrow up.
+        Sign::Boost => {
+            p.move_to((c.x, c.y + 6.0));
+            p.line_to((c.x, c.y - 6.0));
+            p.move_to((c.x - 5.0, c.y - 1.0));
+            p.line_to((c.x, c.y - 6.0));
+            p.line_to((c.x + 5.0, c.y - 1.0));
+        }
+    }
+    stroke(cx, &p, 1.6, ink.lit);
+}
+
+/// Draws a block's look inside `area` (its top part on the tile). Returns its outline (for the
+/// selection's outline).
+pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
+    let c = area.center();
+    match look {
+        Look::Stomp(s) => {
+            let body = Rect::new(c.x - 30.0, area.y0, c.x + 30.0, area.y1);
+            // A stompbox: slightly narrower at the top, as the classics are.
+            let mut out = BezPath::new();
+            out.move_to((body.x0 + 4.0, body.y0));
+            out.line_to((body.x1 - 4.0, body.y0));
+            out.line_to((body.x1, body.y0 + 6.0));
+            out.line_to((body.x1, body.y1 - 4.0));
+            out.line_to((body.x1 - 4.0, body.y1));
+            out.line_to((body.x0 + 4.0, body.y1));
+            out.line_to((body.x0, body.y1 - 4.0));
+            out.line_to((body.x0, body.y0 + 6.0));
+            out.close_path();
+            fill(cx, &out, ink.body);
+            stroke(cx, &out, 1.2, ink.edge);
+            for dx in [-15.0, 0.0, 15.0] {
+                knob(cx, Point::new(c.x + dx, body.y0 + 11.0), 4.2, ink);
+            }
+            sign(cx, s, Point::new(c.x, body.y0 + 31.0), ink);
+            // The footswitch.
+            fill(cx, &Circle::new((c.x, body.y1 - 11.0), 6.0), ink.detail.multiply_alpha(0.4));
+            stroke(cx, &Circle::new((c.x, body.y1 - 11.0), 6.0), 1.2, ink.detail);
+            out
+        }
+        Look::Head => {
+            let body = Rect::new(area.x0 + 4.0, area.y0 + 16.0, area.x1 - 4.0, area.y1);
+            let out = chamfer(body, 5.0);
+            // The handle.
+            let mut h = BezPath::new();
+            h.move_to((c.x - 18.0, body.y0));
+            h.line_to((c.x - 14.0, area.y0 + 7.0));
+            h.line_to((c.x + 14.0, area.y0 + 7.0));
+            h.line_to((c.x + 18.0, body.y0));
+            stroke(cx, &h, 2.0, ink.edge);
+            fill(cx, &out, ink.body);
+            stroke(cx, &out, 1.2, ink.edge);
+            // The control strip, then the grille.
+            let strip = body.y0 + 13.0;
+            stroke(cx, &Line::new((body.x0 + 4.0, strip), (body.x1 - 4.0, strip)), 1.0, ink.detail.multiply_alpha(0.6));
+            for i in 0..6 {
+                knob(cx, Point::new(body.x0 + 14.0 + i as f64 * 15.0, body.y0 + 7.0), 3.4, ink);
+            }
+            let g = Rect::new(body.x0 + 6.0, strip + 4.0, body.x1 - 6.0, body.y1 - 5.0);
+            let mut grille = BezPath::new();
+            let mut x = g.x0 - g.height();
+            while x < g.x1 {
+                grille.move_to((x, g.y1));
+                grille.line_to((x + g.height(), g.y0));
+                x += 7.0;
+            }
+            cx.begin_clip(&g);
+            stroke(cx, &grille, 0.8, ink.detail.multiply_alpha(0.35));
+            cx.end_clip();
+            out
+        }
+        Look::Combo => {
+            let body = Rect::new(c.x - 44.0, area.y0 + 8.0, c.x + 44.0, area.y1);
+            let out = chamfer(body, 5.0);
+            let mut h = BezPath::new();
+            h.move_to((c.x - 14.0, body.y0));
+            h.line_to((c.x - 11.0, area.y0 + 1.0));
+            h.line_to((c.x + 11.0, area.y0 + 1.0));
+            h.line_to((c.x + 14.0, body.y0));
+            stroke(cx, &h, 2.0, ink.edge);
+            fill(cx, &out, ink.body);
+            stroke(cx, &out, 1.2, ink.edge);
+            let strip = body.y0 + 12.0;
+            stroke(cx, &Line::new((body.x0 + 4.0, strip), (body.x1 - 4.0, strip)), 1.0, ink.detail.multiply_alpha(0.6));
+            for i in 0..5 {
+                knob(cx, Point::new(body.x0 + 14.0 + i as f64 * 15.0, body.y0 + 6.5), 3.2, ink);
+            }
+            let sp = Point::new(c.x, (strip + body.y1) / 2.0);
+            let r = ((body.y1 - strip) / 2.0 - 3.0).min(20.0);
+            stroke(cx, &Circle::new(sp, r), 1.2, ink.detail);
+            stroke(cx, &Circle::new(sp, r * 0.45), 1.0, ink.detail.multiply_alpha(0.7));
+            fill(cx, &Circle::new(sp, r * 0.18), ink.detail.multiply_alpha(0.6));
+            out
+        }
+        Look::Cabinet => {
+            let body = Rect::new(c.x - 32.0, area.y0, c.x + 32.0, area.y1);
+            let out = chamfer(body, 5.0);
+            fill(cx, &out, ink.body);
+            stroke(cx, &out, 1.2, ink.edge);
+            for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let p = Point::new(c.x + dx * 15.0, c.y + dy * 14.0);
+                stroke(cx, &Circle::new(p, 11.5), 1.1, ink.detail);
+                fill(cx, &Circle::new(p, 3.0), ink.detail.multiply_alpha(0.6));
+            }
+            out
+        }
+        Look::Rocker => {
+            // A volume pedal from the side: a base, and the rocker plate tilted on it.
+            let base = Rect::new(c.x - 34.0, area.y1 - 12.0, c.x + 34.0, area.y1);
+            let mut out = BezPath::new();
+            out.move_to((base.x0, base.y1));
+            out.line_to((base.x1, base.y1));
+            out.line_to((base.x1, base.y0));
+            out.line_to((base.x1 - 4.0, area.y0 + 26.0));
+            out.line_to((base.x0 + 2.0, area.y0 + 10.0));
+            out.line_to((base.x0, area.y0 + 14.0));
+            out.close_path();
+            fill(cx, &out, ink.body);
+            stroke(cx, &out, 1.2, ink.edge);
+            stroke(cx, &Line::new((base.x0 + 4.0, base.y0), (base.x1 - 4.0, base.y0)), 1.0, ink.detail.multiply_alpha(0.6));
+            // The tread on the plate.
+            let mut tread = BezPath::new();
+            for i in 1..6 {
+                let t = i as f64 / 6.0;
+                let a = Point::new(base.x0 + 2.0 + t * (base.x1 - 6.0 - base.x0), area.y0 + 10.0 + t * 16.0);
+                tread.move_to((a.x, a.y + 2.0));
+                tread.line_to((a.x, a.y + 7.0));
+            }
+            stroke(cx, &tread, 1.0, ink.lit);
+            out
+        }
+    }
+}

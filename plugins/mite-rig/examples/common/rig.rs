@@ -53,7 +53,7 @@ pub fn fill(board: &Board) {
     let source = Source { tone_id: 27156, model_id: 1, title: "Example A2 Amp".into(), creator: "Steven Atkinson".into(), license: "mit".into(), url: "https://www.tone3000.com".into(), gear: "amp".into() };
     for b in board.blocks() {
         match b.kind() {
-            Kind::Capture => board.set_file(b.id(), SlotFile { path: Some(models_dir().join("A2.nam")), source: Some(source.clone()) }),
+            Kind::Amp => board.set_file(b.id(), SlotFile { path: Some(models_dir().join("A2.nam")), source: Some(source.clone()) }),
             Kind::Cab => board.set_file(b.id(), SlotFile { path: Some(cab.clone()), source: None }),
             _ => {}
         }

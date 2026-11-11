@@ -8,6 +8,7 @@
 
 mod board_view;
 mod browser;
+mod shapes;
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -284,7 +285,7 @@ impl RigView {
             ],
         );
         let items = ui.board.items();
-        let first = items.iter().find_map(|i| if let Item::Block(b) = i { (b.kind() == Kind::Capture).then(|| b.id()) } else { None });
+        let first = items.iter().find_map(|i| if let Item::Block(b) = i { (b.kind() == Kind::Amp).then(|| b.id()) } else { None });
         Self {
             session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, ui.snapshots.clone(), ui.preset.clone()),
             footer,
@@ -423,14 +424,17 @@ impl RigView {
         let status = b.live.status();
         let stem = file.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned());
         match b.kind() {
-            Kind::Capture | Kind::Cab => {
+            Kind::Pedal | Kind::Amp | Kind::Cab => {
                 let title = file.source.as_ref().map(|s| s.title.clone()).filter(|t| !t.is_empty());
                 let name = match &status {
                     Status::Model(info) => title.or(info.name.clone()).or(stem),
                     _ => title.or(stem),
                 };
                 let gear = file.gear(&status);
-                let kind = if b.kind() == Kind::Cab { "Cab".to_owned() } else if gear == Gear::Unknown { "Capture".to_owned() } else { gear.name().to_owned() };
+                let kind = match (b.kind(), gear) {
+                    (Kind::Amp, Gear::FullRig) => "Combo · full rig".to_owned(),
+                    (k, _) => k.name().to_owned(),
+                };
                 (name.unwrap_or_else(|| "Empty".to_owned()), kind)
             }
             k => (k.name().to_owned(), String::new()),
@@ -533,55 +537,70 @@ impl RigView {
         let bypassed = b.live.bypassed();
         let selected = self.selected == Some(Selection::Block(t.id));
         let hot = self.hot == Some(Hot::Tile(t.id));
-        let shape = RoundedRect::from_rect(t.rect, 10.0);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control.multiply_alpha(alpha), None, &shape);
-        let edge = if selected { theme.accent } else if hot { theme.accent.multiply_alpha(0.5) } else { theme.panel_control_border };
-        cx.scene.stroke(&Stroke::new(if selected { 2.0 } else { 1.0 }), Affine::IDENTITY, edge.multiply_alpha(alpha), None, &shape);
-        let (name, kind) = self.label_of(&b);
-        let failed = matches!(b.live.status(), Status::Failed(_));
-        let loading = matches!(b.live.status(), Status::Loading);
-        let ink = if bypassed { theme.text_lo } else { theme.text_strong };
-        let top = if kind.is_empty() { b.kind().name().to_uppercase() } else { kind.to_uppercase() };
-        cx.text.draw(cx.scene, &top, t.rect.x0 + 10.0, t.rect.y0 + 9.0, TextStyle::LABEL.sized(8.5), (if bypassed { theme.text_lo } else { theme.accent }).multiply_alpha(alpha), Align::Left);
-        let style = TextStyle::BODY.sized(12.5).weighted(700.0);
+        let status = b.live.status();
+        let gear = b.live.file().gear(&status);
+        let look = shapes::Look::of(b.kind(), gear);
+        let area = Rect::new(t.rect.x0, t.rect.y0, t.rect.x1, t.rect.y0 + board_view::LOOK_H);
+        let ink = shapes::Ink {
+            body: theme.panel_control.multiply_alpha(alpha),
+            edge: (if selected { theme.accent } else if hot { theme.accent.multiply_alpha(0.6) } else { theme.text_lo }).multiply_alpha(alpha),
+            detail: (if bypassed { theme.text_lo.multiply_alpha(0.6) } else { theme.text_mid }).multiply_alpha(alpha),
+            lit: (if bypassed { theme.text_lo } else { theme.accent }).multiply_alpha(alpha),
+        };
+        let outline = shapes::draw(cx, look, area, &ink);
+        if selected {
+            glow_stroke(cx, &outline, 1.8, theme.accent, theme.accent.multiply_alpha(0.6), 5.0);
+        }
+        // The name under it (a file's in two lines), or the block's own and its main value.
+        let (name, _) = self.label_of(&b);
+        let failed = matches!(status, Status::Failed(_));
+        let loading = matches!(status, Status::Loading);
+        let ink_text = (if bypassed { theme.text_lo } else { theme.text_strong }).multiply_alpha(alpha);
+        let style = TextStyle::BODY.sized(11.5).weighted(700.0);
+        let y = area.y1 + 4.0;
+        let cxm = t.rect.center().x;
+        let w = t.rect.width() - 4.0;
         if b.kind().has_file() {
-            // Two lines of the file's name.
-            let words: Vec<&str> = name.split_whitespace().collect();
+            let line = if failed { "can't load".to_owned() } else if loading { "loading…".to_owned() } else { name };
+            let color = if failed { theme.danger } else if loading { theme.accent } else { ink_text };
+            let words: Vec<&str> = line.split_whitespace().collect();
             let mut first = String::new();
             let mut i = 0;
             while i < words.len() {
                 let next = if first.is_empty() { words[i].to_owned() } else { format!("{first} {}", words[i]) };
-                if f64::from(cx.text.measure(&next, style)) > t.rect.width() - 20.0 && !first.is_empty() {
+                if f64::from(cx.text.measure(&next, style)) > w && !first.is_empty() {
                     break;
                 }
                 first = next;
                 i += 1;
             }
+            let first = Self::fit(cx, &first, style, w);
+            cx.text.draw(cx.scene, &first, cxm, y, style, color, Align::Center);
             let rest = words[i..].join(" ");
-            let first = Self::fit(cx, &first, style, t.rect.width() - 20.0);
-            cx.text.draw(cx.scene, &first, t.rect.x0 + 10.0, t.rect.y0 + 26.0, style, ink.multiply_alpha(alpha), Align::Left);
             if !rest.is_empty() {
-                let rest = Self::fit(cx, &rest, style, t.rect.width() - 20.0);
-                cx.text.draw(cx.scene, &rest, t.rect.x0 + 10.0, t.rect.y0 + 42.0, style, ink.multiply_alpha(alpha), Align::Left);
-            }
-            let note = if failed { "can't load" } else if loading { "loading…" } else { "" };
-            if !note.is_empty() {
-                cx.text.draw(cx.scene, note, t.rect.x0 + 10.0, t.rect.y1 - 17.0, TextStyle::BODY.sized(10.0), if failed { theme.danger } else { theme.accent }, Align::Left);
+                let rest = Self::fit(cx, &rest, style, w);
+                cx.text.draw(cx.scene, &rest, cxm, y + 15.0, style, color, Align::Center);
             }
         } else {
-            let summary = Self::summary(&b);
-            cx.text.draw(cx.scene, b.kind().name(), t.rect.x0 + 10.0, t.rect.y0 + 26.0, TextStyle::BODY.sized(14.0).weighted(700.0), ink.multiply_alpha(alpha), Align::Left);
-            cx.text.draw(cx.scene, &summary, t.rect.x0 + 10.0, t.rect.y1 - 19.0, TextStyle::BODY.sized(10.5), theme.text_mid.multiply_alpha(alpha), Align::Left);
+            cx.text.draw(cx.scene, b.kind().name(), cxm, y, style, ink_text, Align::Center);
+            cx.text.draw(cx.scene, &Self::summary(&b), cxm, y + 15.0, TextStyle::BODY.sized(10.0), theme.text_mid.multiply_alpha(alpha), Align::Center);
         }
-        // The bypass light.
-        let led = Layout::led(t);
+        // The on/off light, on the block itself.
+        let led = shapes::led(look, area);
         let on = !bypassed;
         let lhot = self.hot == Some(Hot::Led(t.id));
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if on { theme.accent } else { theme.well }, None, &Circle::new(led, 5.5));
-        cx.scene.stroke(&Stroke::new(if lhot { 2.0 } else { 1.0 }), Affine::IDENTITY, if on || lhot { theme.accent } else { theme.text_lo }, None, &Circle::new(led, 5.5));
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if on { theme.accent } else { theme.well }, None, &Circle::new(led, 4.5));
+        cx.scene.stroke(&Stroke::new(if lhot { 2.0 } else { 1.0 }), Affine::IDENTITY, if on || lhot { theme.accent } else { theme.text_lo }, None, &Circle::new(led, 4.5));
         if on && alpha > 0.5 {
-            glow_stroke(cx, &Circle::new(led, 5.5), 1.0, theme.accent, theme.accent, 4.0);
+            glow_stroke(cx, &Circle::new(led, 4.5), 1.0, theme.accent, theme.accent, 4.0);
         }
+    }
+
+    /// Where a tile's on/off light is.
+    pub fn led_of(&self, t: &Tile) -> Option<Point> {
+        let b = self.block(t.id)?;
+        let look = shapes::Look::of(b.kind(), b.live.file().gear(&b.live.status()));
+        Some(shapes::led(look, Rect::new(t.rect.x0, t.rect.y0, t.rect.x1, t.rect.y0 + board_view::LOOK_H)))
     }
 
     /// A tile's line of numbers (its main knob).
@@ -623,7 +642,7 @@ impl RigView {
                 if b.kind().has_file() {
                     v.extend([PanelButton::Open, PanelButton::Tone3000, PanelButton::Clear]);
                 }
-                if b.kind() == Kind::Capture {
+                if b.kind().is_capture() {
                     v.push(PanelButton::Size);
                 }
                 v.extend(b.kind().params().iter().enumerate().filter(|(_, p)| p.toggle).map(|(i, _)| PanelButton::Switch(i)));
@@ -747,7 +766,8 @@ impl RigView {
         let mut out = Vec::new();
         match &status {
             Status::Empty if b.kind() == Kind::Cab => out.push(("Empty: open an IR (WAV, AIFF, FLAC) or find one on TONE3000".to_owned(), 0)),
-            Status::Empty if b.kind() == Kind::Capture => out.push(("Empty: open a .nam capture or find one on TONE3000".to_owned(), 0)),
+            Status::Empty if b.kind() == Kind::Pedal => out.push(("Empty: open a pedal's .nam capture or find one on TONE3000".to_owned(), 0)),
+            Status::Empty if b.kind() == Kind::Amp => out.push(("Empty: open an amp's (or a combo's) .nam capture or find one on TONE3000".to_owned(), 0)),
             Status::Empty => out.push((b.kind().words().to_owned(), 0)),
             Status::Loading => out.push(("Loading…".to_owned(), 0)),
             Status::Failed(e) => out.push((format!("Could not load it: {e}"), 1)),
@@ -860,7 +880,7 @@ impl RigView {
         if AREA.contains(p) {
             let layout = self.layout();
             for t in &layout.tiles {
-                if Layout::led(t).distance(p) <= 10.0 {
+                if self.led_of(t).is_some_and(|l| l.distance(p) <= 9.0) {
                     return Some(Hot::Led(t.id));
                 }
             }

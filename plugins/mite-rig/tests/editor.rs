@@ -82,7 +82,8 @@ fn a_tiles_light_bypasses_it_and_its_knobs_move_its_values() {
     let (mut view, host, ui) = setup();
     let layout = view.layout();
     let gate = layout.tiles[0];
-    click(&mut view, &host, mite_rig::editor::Layout::led(&gate));
+    let led = view.led_of(&gate).unwrap();
+    click(&mut view, &host, led);
     assert!(ui.board.block(gate.id).unwrap().live.bypassed());
     click(&mut view, &host, gate.rect.center());
     assert_eq!(view.selection(), Some(Selection::Block(gate.id)));

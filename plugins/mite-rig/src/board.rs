@@ -223,7 +223,7 @@ impl Board {
         Self { model: Mutex::new(Model { items: Vec::new(), next_id: 1 }), structure: AtomicU64::new(0), changed: AtomicU64::new(0), wake: Condvar::new() }
     }
 
-    /// The board a new Rig starts with: a gate, an amp capture, a cabinet.
+    /// The board a new Rig starts with: a gate, an amp, a cabinet.
     pub fn with_default() -> Self {
         let b = Self::new();
         b.reset_default();
@@ -233,7 +233,7 @@ impl Board {
     pub fn reset_default(&self) {
         let mut m = self.lock();
         m.items.clear();
-        for kind in [Kind::Gate, Kind::Capture, Kind::Cab] {
+        for kind in [Kind::Gate, Kind::Amp, Kind::Cab] {
             let id = m.next_id;
             m.next_id += 1;
             m.items.push(Item::Block(Block { live: Arc::new(Live::new(id, kind)) }));

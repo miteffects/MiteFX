@@ -19,7 +19,6 @@ use mite_ui::peniko::{Blob, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFo
 use mite_ui::{Align, DrawCx, Key, MouseButton, TextStyle, UiEvent};
 
 use crate::blocks::Kind;
-use crate::board::Place;
 use crate::tone3000::{self, Gear, Model, Phase, Query, Sort, Source, Tone, View};
 use crate::RigUi;
 
@@ -45,12 +44,10 @@ const SEARCH_GLYPH: &str = "M10.5 4 A6.5 6.5 0 1 1 10.49 4 M15.2 15.2 L20 20";
 const HEART: &str = "M12 20 C5 14.5 2.5 11.5 2.5 8.2 C2.5 5.6 4.5 3.7 7 3.7 C9 3.7 10.6 4.9 12 6.8 C13.4 4.9 15 3.7 17 3.7 C19.5 3.7 21.5 5.6 21.5 8.2 C21.5 11.5 19 14.5 12 20 Z";
 const DOWN_GLYPH: &str = "M12 4 L12 15 M7 10.5 L12 15.5 L17 10.5 M5 19.5 L19 19.5";
 
-/// What a file's button does: load into the block it was opened from, or add a new block of
-/// the file's kind after it.
+/// What a file's button does: load into the block it was opened from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Load,
-    Add,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -174,9 +171,30 @@ impl Browser {
     fn gear_for(kind: Kind, current: Gear) -> Gear {
         match (kind, current) {
             (Kind::Cab, _) => Gear::Cab,
-            (_, Gear::Cab) => Gear::All,
-            (_, g) => g,
+            (Kind::Pedal, _) => Gear::Pedal,
+            (_, Gear::FullRig) => Gear::FullRig,
+            _ => Gear::Amp,
         }
+    }
+
+    /// The gear filters a block offers: a Pedal only pedals, an Amp amps and combos, a Cab IRs.
+    fn gears(&self) -> &'static [Gear] {
+        match self.kind {
+            Kind::Pedal => &[Gear::Pedal],
+            Kind::Cab => &[Gear::Cab],
+            _ => &[Gear::Amp, Gear::FullRig],
+        }
+    }
+
+    /// Whether a tone holds what this block plays.
+    fn fits(&self, t: &Tone) -> bool {
+        self.kind.accepts(crate::rig::Gear::of_tone3000(&t.gear, &t.format))
+    }
+
+    /// The tones shown: the feed's, those that fit the block (the user's own lists hold every
+    /// kind).
+    fn tones(&self) -> Vec<Tone> {
+        self.view.feed.tones.iter().filter(|t| self.fits(t)).cloned().collect()
     }
 
     /// Something to show once signed in: Explore, filtered to the slot's gear.
@@ -265,7 +283,7 @@ impl Browser {
     }
 
     fn content_height(&self) -> f64 {
-        let rows = self.view.feed.tones.len().div_ceil(self.columns()) as f64;
+        let rows = self.tones().len().div_ceil(self.columns()) as f64;
         rows * (CARD_H + CARD_GAP) + 60.0
     }
 
@@ -286,14 +304,15 @@ impl Browser {
         self.view.models.clone().unwrap_or_default()
     }
 
-    /// A file's button: Load when it is the kind the block plays, Add (a new block after it)
-    /// when not.
+    /// A file's Load button, when the file is what the block plays (an IR for a Cab, a capture
+    /// for a Pedal or an Amp).
     fn load_buttons(&self, i: usize, m: &Model) -> Vec<(Action, Rect)> {
         let d = self.detail();
         let y = self.files_top() + i as f64 * FILE_ROW;
-        let ir = m.kind == "IR";
-        let action = if ir == (self.kind == Kind::Cab) { Action::Load } else { Action::Add };
-        vec![(action, Rect::new(d.x1 - 8.0 - 92.0, y + 6.0, d.x1 - 8.0, y + FILE_ROW - 6.0))]
+        if (m.kind == "IR") != (self.kind == Kind::Cab) {
+            return Vec::new();
+        }
+        vec![(Action::Load, Rect::new(d.x1 - 8.0 - 92.0, y + 6.0, d.x1 - 8.0, y + FILE_ROW - 6.0))]
     }
 
     fn side_rows(&self) -> Vec<(Hot, String, bool)> {
@@ -301,7 +320,7 @@ impl Browser {
         let mut rows: Vec<(Hot, String, bool)> = Source::ALL.iter().map(|s| (Hot::Source(*s), s.name().to_owned(), v.feed.source == *s)).collect();
         if v.feed.source == Source::Search {
             rows.push((Hot::Close, "GEAR".to_owned(), false));
-            rows.extend(Gear::ALL.iter().map(|g| (Hot::Gear(*g), g.name().to_owned(), v.feed.query.gear == *g)));
+            rows.extend(self.gears().iter().map(|g| (Hot::Gear(*g), g.name().to_owned(), v.feed.query.gear == *g)));
         }
         rows
     }
@@ -403,10 +422,11 @@ impl Browser {
             return None;
         }
         if p.x >= GRID_X0 && p.x <= self.grid_x1() && p.y >= TOP {
-            if v.feed.error.is_some() && v.feed.tones.is_empty() {
+            let tones = self.tones();
+            if v.feed.error.is_some() && tones.is_empty() {
                 return Some(Hot::Retry);
             }
-            for i in 0..v.feed.tones.len() {
+            for i in 0..tones.len() {
                 if self.heart_rect(i).contains(p) {
                     return Some(Hot::Heart(i));
                 }
@@ -504,13 +524,13 @@ impl Browser {
                     Hot::Generation(a1) => self.refine(ui, Query { a1, ..self.view.feed.query.clone() }),
                     Hot::Retry => t3k.search(self.view.feed.source, self.view.feed.query.clone()),
                     Hot::Card(i) => {
-                        if let Some(t) = self.view.feed.tones.get(i).cloned() {
+                        if let Some(t) = self.tones().get(i).cloned() {
                             self.detail_scroll = 0.0;
                             t3k.open_tone(t);
                         }
                     }
                     Hot::Heart(i) => {
-                        if let Some(t) = self.view.feed.tones.get(i) {
+                        if let Some(t) = self.tones().get(i) {
                             t3k.set_favorite(t.id, !t.is_favorite);
                         }
                     }
@@ -528,22 +548,9 @@ impl Browser {
                     Hot::Load(i, action) => {
                         if let (Some(tone), Some(m)) = (self.view.tone.clone(), self.file_rows().get(i).cloned()) {
                             if self.view.downloading.is_none() {
-                                let block = match action {
-                                    Action::Load => Some(self.target),
-                                    Action::Add => {
-                                        // A new block of the file's kind, right after the one opened from.
-                                        let kind = if m.kind == "IR" { Kind::Cab } else { Kind::Capture };
-                                        let place = match ui.board.place_of(self.target) {
-                                            Some(Place::Main(i)) => Place::Main(i + 1),
-                                            Some(Place::Lane { split, lane, index }) => Place::Lane { split, lane, index: index + 1 },
-                                            None => Place::Main(usize::MAX),
-                                        };
-                                        ui.board.insert(kind, place)
-                                    }
-                                };
+                                let block = Some(self.target).filter(|_| action == Action::Load);
                                 if let Some(block) = block {
-                                    let what = if action == Action::Add { "a new block" } else { "the block" };
-                                    self.notice = Some((format!("{} into {what}", m.name), Instant::now()));
+                                    self.notice = Some((format!("{} into the {}", m.name, self.kind.name()), Instant::now()));
                                     t3k.download(tone, m, ui.board.clone(), block);
                                 }
                             }
@@ -690,7 +697,12 @@ impl Browser {
         let style = TextStyle::BODY.sized(13.5);
         let x = SEARCH.x0 + 38.0;
         if self.text.is_empty() && !self.focused {
-            cx.text.draw(cx.scene, "Search amps, pedals, cabs, makers…", x, SEARCH.center().y - 8.5, style, theme.text_lo, Align::Left);
+            let prompt = match self.kind {
+                Kind::Pedal => "Search pedals: drives, boosts, fuzzes, makers…",
+                Kind::Cab => "Search cabinets and IRs, speakers, makers…",
+                _ => "Search amps and combos, makers…",
+            };
+            cx.text.draw(cx.scene, prompt, x, SEARCH.center().y - 8.5, style, theme.text_lo, Align::Left);
         } else {
             let w = cx.text.draw(cx.scene, &self.text, x, SEARCH.center().y - 8.5, style, theme.text_strong, Align::Left);
             if self.focused && (self.started.elapsed().as_millis() / 530) % 2 == 0 {
@@ -750,7 +762,8 @@ impl Browser {
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(if on { 0.16 } else if hot { 0.10 } else { 0.06 }), None, &shape);
             cx.text.draw(cx.scene, name, r.center().x, r.y0 + 4.5, TextStyle::BODY.sized(11.5).weighted(if on { 700.0 } else { 600.0 }), color, Align::Center);
         }
-        if f.tones.is_empty() {
+        let shown = self.tones();
+        if shown.is_empty() && !(f.loading || f.more()) || shown.is_empty() && f.error.is_some() {
             let (msg, color) = match (&f.error, f.loading) {
                 (Some(e), _) => (format!("{e} — click to try again"), theme.danger),
                 (None, true) => ("Loading…".to_owned(), theme.text_mid),
@@ -765,7 +778,7 @@ impl Browser {
             return;
         }
         cx.begin_clip(&Rect::new(area.x0, self.grid_top() - 4.0, area.x1, area.y1));
-        let tones = f.tones.clone();
+        let tones = shown;
         for (i, tone) in tones.iter().enumerate() {
             let r = self.card_rect(i);
             if r.y1 < area.y0 || r.y0 > area.y1 {
@@ -822,7 +835,7 @@ impl Browser {
             }
         }
         if f.loading {
-            let y = self.card_rect(f.tones.len()).y0 + 20.0;
+            let y = self.card_rect(self.tones().len()).y0 + 20.0;
             cx.text.draw(cx.scene, "Loading more…", (GRID_X0 + self.grid_x1()) / 2.0, y.min(area.y1 - 24.0), TextStyle::BODY.sized(12.0), theme.text_mid, Align::Center);
         }
         cx.end_clip();
@@ -913,8 +926,8 @@ impl Browser {
                     let sub_color = if downloading || in_use { theme.accent } else { theme.text_lo };
                     cx.text.draw(cx.scene, &sub, d.x0 + 44.0, y + 23.0, TextStyle::BODY.sized(10.5), sub_color, Align::Left);
                     for (action, r) in buttons {
-                        let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Load(i, action)), action == Action::Load, theme.accent);
-                        let word = if action == Action::Load { "Load" } else { "Add block" };
+                        let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Load(i, action)), true, theme.accent);
+                        let word = "Load";
                         cx.text.draw(cx.scene, word, r.center().x, r.center().y - 7.5, TextStyle::BODY.sized(12.0).weighted(700.0), ink, Align::Center);
                     }
                 }
@@ -941,7 +954,6 @@ impl Browser {
             Some(Hot::Card(_)) => "Click to see this tone's files and load one",
             Some(Hot::Heart(_)) | Some(Hot::DetailHeart) => "Favorite: it's kept in your TONE3000 favorites, here and on the site",
             Some(Hot::Load(_, Action::Load)) => "Load it into the block (downloaded once, then kept on this computer); the rig keeps playing so you can compare",
-            Some(Hot::Load(_, Action::Add)) => "It is the other kind: adds a new block for it after this one",
             Some(Hot::DetailSite) => "Opens this tone's page in your browser",
             Some(Hot::Gear(_)) | Some(Hot::Sort(_)) | Some(Hot::Generation(_)) => "Narrow the search",
             Some(Hot::SignOut) => "Sign out of TONE3000 on this computer",

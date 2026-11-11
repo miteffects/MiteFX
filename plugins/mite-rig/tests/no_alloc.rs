@@ -22,7 +22,7 @@ fn engine_process_never_allocates() {
         let core = LoaderCore::new(board.clone(), shared.clone(), params.clone());
         core.set_rate(fs);
         let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mite-nam/tests/models");
-        let cap = board.blocks().into_iter().find(|b| b.kind() == Kind::Capture).unwrap().id();
+        let cap = board.blocks().into_iter().find(|b| b.kind() == Kind::Amp).unwrap().id();
         board.set_file(cap, SlotFile { path: Some(models.join("wavenet.nam")), source: None });
         let mut s = RigSettings::default();
         let mut engine = RigEngine::new(fs, &s);

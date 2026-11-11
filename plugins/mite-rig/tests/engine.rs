@@ -90,7 +90,7 @@ impl Rig {
 fn a_capture_on_the_board_is_the_capture() {
     let mut r = rig(48_000.0);
     let path = models_dir().join("A2.nam");
-    let id = r.board.insert(Kind::Capture, Place::Main(0)).unwrap();
+    let id = r.board.insert(Kind::Amp, Place::Main(0)).unwrap();
     r.board.block(id).unwrap().live.set(2, 0.0); // no normalisation: the raw capture
     r.board.set_file(id, SlotFile { path: Some(path.clone()), source: None });
     r.install();
@@ -110,7 +110,7 @@ fn lanes_stay_in_time_and_the_latency_is_the_longest_path() {
     // delayed to match, so identity capture + dry lane at −6 dB each is the input, in time.
     let mut r = rig(44_100.0);
     r.board.insert_split(0, 2);
-    let id = r.board.insert(Kind::Capture, Place::Lane { split: 0, lane: 0, index: 0 }).unwrap();
+    let id = r.board.insert(Kind::Amp, Place::Lane { split: 0, lane: 0, index: 0 }).unwrap();
     r.board.block(id).unwrap().live.set(2, 0.0);
     r.board.set_file(id, SlotFile { path: Some(identity_model(48_000)), source: None });
     if let Item::Split(s) = &r.board.items()[0] {
@@ -130,7 +130,7 @@ fn lanes_stay_in_time_and_the_latency_is_the_longest_path() {
 #[test]
 fn an_edit_keeps_the_loaded_files_and_the_loader_swaps_it_in() {
     let mut r = rig(48_000.0);
-    let id = r.board.insert(Kind::Capture, Place::Main(0)).unwrap();
+    let id = r.board.insert(Kind::Amp, Place::Main(0)).unwrap();
     r.board.set_file(id, SlotFile { path: Some(models_dir().join("A2.nam")), source: None });
     r.install();
     let x = noise(4800, 0.1);

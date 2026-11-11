@@ -146,7 +146,7 @@ impl Gear {
             Gear::All => "All gear",
             Gear::Amp => "Amps",
             Gear::Pedal => "Pedals",
-            Gear::FullRig => "Full rigs",
+            Gear::FullRig => "Combos & full rigs",
             Gear::Cab => "Cabs (IRs)",
             Gear::Outboard => "Outboard",
         }

@@ -28,7 +28,10 @@ const SWAP_MS: f32 = 30.0;
 /// The kinds of block, in the order the add menu lists them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
-    Capture,
+    /// A NAM capture of a pedal (drive, boost, fuzz…).
+    Pedal,
+    /// A NAM capture of an amp, or a combo / full rig (amp and cabinet in one).
+    Amp,
     Cab,
     Gate,
     Tone,
@@ -78,12 +81,13 @@ const BOOST: [BlockParam; 1] = [knob(spec("gain", "Gain", "dB", 0.0, 24.0, 6.0, 
 const VOLUME: [BlockParam; 1] = [knob(spec("volume", "Volume", "%", 0.0, 100.0, 100.0, LIN, 0, (1.0, 0.1), NUM))];
 
 impl Kind {
-    pub const ALL: [Kind; 6] = [Kind::Capture, Kind::Cab, Kind::Gate, Kind::Tone, Kind::Boost, Kind::Volume];
+    pub const ALL: [Kind; 7] = [Kind::Pedal, Kind::Amp, Kind::Cab, Kind::Gate, Kind::Tone, Kind::Boost, Kind::Volume];
 
     /// The frozen id saved with the board.
     pub fn id(self) -> &'static str {
         match self {
-            Kind::Capture => "capture",
+            Kind::Pedal => "pedal",
+            Kind::Amp => "amp",
             Kind::Cab => "cab",
             Kind::Gate => "gate",
             Kind::Tone => "tone",
@@ -96,9 +100,26 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.id() == id)
     }
 
+    /// The NAM captures (they play `.nam` files).
+    pub fn is_capture(self) -> bool {
+        matches!(self, Kind::Pedal | Kind::Amp)
+    }
+
+    /// Whether a capture of `gear` belongs in this block (unknown gear: trusted).
+    pub fn accepts(self, gear: crate::rig::Gear) -> bool {
+        use crate::rig::Gear;
+        match (self, gear) {
+            (Kind::Pedal, Gear::Pedal | Gear::Unknown) => true,
+            (Kind::Amp, Gear::Amp | Gear::FullRig | Gear::Unknown) => true,
+            (Kind::Cab, Gear::Cab) => true,
+            _ => false,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
-            Kind::Capture => "Capture",
+            Kind::Pedal => "Pedal",
+            Kind::Amp => "Amp",
             Kind::Cab => "Cab",
             Kind::Gate => "Gate",
             Kind::Tone => "Tone",
@@ -110,7 +131,8 @@ impl Kind {
     /// What the add menu says it is.
     pub fn words(self) -> &'static str {
         match self {
-            Kind::Capture => "A NAM capture: a pedal, an amp or a full rig (files or TONE3000)",
+            Kind::Pedal => "A pedal capture: drive, boost, fuzz (NAM files or TONE3000)",
+            Kind::Amp => "An amp capture, or a combo / full rig (NAM files or TONE3000)",
             Kind::Cab => "A cabinet impulse response (files or TONE3000)",
             Kind::Gate => "Noise gate: silence between notes",
             Kind::Tone => "Bass, middle, treble and low and high cuts",
@@ -121,7 +143,7 @@ impl Kind {
 
     pub fn params(self) -> &'static [BlockParam] {
         match self {
-            Kind::Capture => &CAPTURE,
+            Kind::Pedal | Kind::Amp => &CAPTURE,
             Kind::Cab => &CAB,
             Kind::Gate => &GATE,
             Kind::Tone => &TONE,
@@ -136,7 +158,7 @@ impl Kind {
 
     /// Blocks that play a file.
     pub fn has_file(self) -> bool {
-        matches!(self, Kind::Capture | Kind::Cab)
+        matches!(self, Kind::Pedal | Kind::Amp | Kind::Cab)
     }
 }
 
@@ -175,7 +197,7 @@ pub trait Unit: Send {
 /// A new unit of `kind` at `fs`. Allocates; worker thread.
 pub fn build(kind: Kind, fs: f32) -> Box<dyn Unit> {
     match kind {
-        Kind::Capture => Box::new(CaptureUnit::new(fs)),
+        Kind::Pedal | Kind::Amp => Box::new(CaptureUnit::new(fs)),
         Kind::Cab => Box::new(CabUnit::new(fs)),
         Kind::Gate => Box::new(GateUnit { gate: Gate::new(fs), gain: LinearSmoother::new(1.0) }),
         Kind::Tone => Box::new(ToneUnit::new(fs)),
@@ -497,11 +519,11 @@ mod tests {
     #[test]
     fn neutral_blocks_pass_the_signal() {
         let fs = 48_000.0;
-        for kind in [Kind::Tone, Kind::Volume, Kind::Capture, Kind::Cab] {
+        for kind in [Kind::Tone, Kind::Volume, Kind::Amp, Kind::Cab] {
             let live = Live::new(1, kind);
             let mut u = build(kind, fs);
             u.reset(&live);
-            if kind == Kind::Capture {
+            if kind == Kind::Amp {
                 live.set(2, 0.0);
             }
             let x: Vec<f32> = (0..SUB).map(|i| (i as f32 * 0.1).sin() * 0.3).collect();

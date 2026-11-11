@@ -6,13 +6,15 @@ use mite_ui::kurbo::{Point, Rect};
 use crate::board::{Item, Place};
 
 /// The board's area.
-pub const AREA: Rect = Rect::new(0.0, 64.0, 1280.0, 352.0);
+pub const AREA: Rect = Rect::new(0.0, 64.0, 1280.0, 386.0);
 pub const TILE_W: f64 = 116.0;
-pub const TILE_H: f64 = 76.0;
+pub const TILE_H: f64 = 98.0;
+/// The drawing's part of a tile (the name goes under it).
+pub const LOOK_H: f64 = 62.0;
 pub const GAP: f64 = 40.0;
 /// Between lanes' centres.
-pub const PITCH: f64 = 88.0;
-pub const CY: f64 = AREA.y0 + 150.0;
+pub const PITCH: f64 = 106.0;
+pub const CY: f64 = AREA.y0 + 161.0;
 /// IN at the left, OUT at the right of the content.
 pub const IN_X: f64 = 34.0;
 const FORK_LEAD: f64 = 28.0;
@@ -114,8 +116,8 @@ impl Layout {
         self.forks.iter().find(|f| f.fork.distance(p) <= 12.0 || f.merge.distance(p) <= 12.0)
     }
 
-    /// A tile's bypass light.
+    /// A tile's bypass light (its top right corner).
     pub fn led(tile: &Tile) -> Point {
-        Point::new(tile.rect.x1 - 14.0, tile.rect.y0 + 14.0)
+        Point::new(tile.rect.x1 - 7.0, tile.rect.y0 + 7.0)
     }
 }

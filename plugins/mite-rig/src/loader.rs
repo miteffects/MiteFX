@@ -78,6 +78,11 @@ impl LoaderCore {
                 let sized = info.sizes.len() > 1;
                 let file = live.file();
                 let gear = file.gear(&Status::Model(Box::new(info.clone())));
+                if !live.kind.accepts(gear) {
+                    let home = if gear == Gear::Pedal { "a Pedal" } else { "an Amp" };
+                    live.set_status(Status::Failed(format!("This is {} capture: it goes in {home} block", gear.name().to_lowercase())));
+                    return (Box::new(ModelLoad { model: None }), false);
+                }
                 live.set_status(Status::Model(Box::new(info)));
                 let mut loaded = Loaded::new(model, f64::from(key.rate));
                 loaded.full_rig = gear == Gear::FullRig;
@@ -148,7 +153,7 @@ impl LoaderCore {
                 continue;
             }
             match live.kind {
-                Kind::Capture => {
+                Kind::Pedal | Kind::Amp => {
                     let (m, sized) = self.build_model(live, &key);
                     live.model.send(m);
                     built.files.insert(live.id, (key, sized));
