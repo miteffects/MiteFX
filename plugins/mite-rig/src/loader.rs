@@ -70,7 +70,7 @@ impl LoaderCore {
     fn build_model(&self, live: &Live, key: &Key) -> (Box<ModelLoad>, bool) {
         let Some(path) = &key.path else {
             live.set_status(Status::Empty);
-            return (Box::new(ModelLoad { model: None }), false);
+            return (Box::new(ModelLoad { model: None, right: None }), false);
         };
         live.set_status(Status::Loading);
         let opts = LoadOptions { fast_tanh: true, size: key.size, max_block: MODEL_BLOCK };
@@ -85,16 +85,23 @@ impl LoaderCore {
                 if !live.kind.accepts(gear) {
                     let home = if gear == Gear::Pedal { "a Pedal" } else { "an Amp" };
                     live.set_status(Status::Failed(format!("This is {} capture: it goes in {home} block", gear.name().to_lowercase())));
-                    return (Box::new(ModelLoad { model: None }), false);
+                    return (Box::new(ModelLoad { model: None, right: None }), false);
                 }
                 live.set_status(Status::Model(Box::new(info)));
+                let full_rig = gear == Gear::FullRig;
                 let mut loaded = Loaded::new(model, f64::from(key.rate));
-                loaded.full_rig = gear == Gear::FullRig;
-                (Box::new(ModelLoad { model: Some(loaded) }), sized)
+                loaded.full_rig = full_rig;
+                // The right channel's own copy (played only while the block's input is stereo).
+                let right = NamModel::from_file(path, opts).ok().map(|m| {
+                    let mut r = Loaded::new(m, f64::from(key.rate));
+                    r.full_rig = full_rig;
+                    r
+                });
+                (Box::new(ModelLoad { model: Some(loaded), right }), sized)
             }
             Err(e) => {
                 live.set_status(Status::Failed(e));
-                (Box::new(ModelLoad { model: None }), false)
+                (Box::new(ModelLoad { model: None, right: None }), false)
             }
         }
     }
@@ -102,7 +109,7 @@ impl LoaderCore {
     fn build_cab(&self, live: &Live, key: &Key) -> Box<CabLoad> {
         let Some(path) = &key.path else {
             live.set_status(Status::Empty);
-            return Box::new(CabLoad { cab: None });
+            return Box::new(CabLoad { cab: None, right: None });
         };
         live.set_status(Status::Loading);
         let result = ir::load(path, f64::from(key.rate));
@@ -110,11 +117,12 @@ impl LoaderCore {
         match result {
             Ok((cab, info)) => {
                 live.set_status(Status::Cab(Box::new(info)));
-                Box::new(CabLoad { cab: Some(cab) })
+                let right = ir::load(path, f64::from(key.rate)).ok().map(|(c, _)| c);
+                Box::new(CabLoad { cab: Some(cab), right })
             }
             Err(e) => {
                 live.set_status(Status::Failed(e));
-                Box::new(CabLoad { cab: None })
+                Box::new(CabLoad { cab: None, right: None })
             }
         }
     }

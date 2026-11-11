@@ -71,6 +71,10 @@ snapshots A–D inside a block are not saved with the board; its user presets ar
 - **Splits** (2026-11-11, user): a Mix (the lanes against the dry input, in time). Each lane's pan
   moves its sound across at constant power (its middle panned, its sides narrowing to nothing at a
   hard pan): the first pan was a balance, which only turned a side down ("it just gets quieter").
+  Captures and cabinets used to play the sum of both channels, so a split's pans (and partly its
+  levels, into a driven amp) were lost after an amp ("only mix works"): they now run a second copy
+  for the right channel while their input is stereo (`parts::StereoFollow`: faded in over 150 ms,
+  out after 500 ms of mono), so a mono guitar costs what it did.
   L/R and M/S routings were built and dropped the same day by the user (pans place the lanes);
   boards saved with one load as parallel.
 - **Palette** (2026-11-11, user): one row in a guitarist's order, no group headings (the user

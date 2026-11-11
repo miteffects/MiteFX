@@ -10,7 +10,7 @@ use mite_dsp::eq::{BandProcessor, BandSettings, BandType};
 use mite_dsp::{db_to_gain, LinearSmoother};
 
 use crate::board::Live;
-use crate::parts::{fade_curve, CabEngine, Gate, Loaded, ModelLoad, CabLoad, Stash, SUB};
+use crate::parts::{fade_curve, CabEngine, Gate, Loaded, ModelLoad, CabLoad, Stash, StereoFollow, SUB};
 use crate::ir::{self, HEAD};
 
 /// What a capture plays at when normalised (NAM's convention), dB.
@@ -290,29 +290,64 @@ pub struct CaptureUnit {
     stash: Stash<ModelLoad>,
     gain: LinearSmoother,
     level: LinearSmoother,
-    mono: Vec<f32>,
-    out: Vec<f32>,
-    old_out: Vec<f32>,
+    stereo: StereoFollow,
+    /// Each sample's stereo amount, the engines' inputs and outputs (left, right), the old
+    /// capture's outputs while crossfading.
+    w: Vec<f32>,
+    inl: Vec<f32>,
+    inr: Vec<f32>,
+    outl: Vec<f32>,
+    outr: Vec<f32>,
+    oldl: Vec<f32>,
+    oldr: Vec<f32>,
+}
+
+/// Runs a capture (and its right copy when stereo runs); an empty one passes its input.
+fn run_capture(load: &mut ModelLoad, inl: &[f32], inr: &[f32], outl: &mut [f32], outr: &mut [f32], stereo: bool) {
+    match &mut load.model {
+        Some(m) => m.process(inl, outl),
+        None => outl.copy_from_slice(inl),
+    }
+    if !stereo {
+        outr.copy_from_slice(outl);
+        return;
+    }
+    match (&mut load.right, load.model.is_some()) {
+        (Some(m), _) => m.process(inr, outr),
+        (None, false) => outr.copy_from_slice(inr),
+        (None, true) => outr.copy_from_slice(outl),
+    }
 }
 
 impl CaptureUnit {
     fn new(fs: f32) -> Self {
         Self {
-            cur: Box::new(ModelLoad { model: None }),
+            cur: Box::new(ModelLoad { model: None, right: None }),
             old: None,
             fade: 0,
             fade_len: ((SWAP_MS * 0.001 * fs) as usize).max(1),
             stash: Stash::new(),
             gain: smoother(fs, 20.0, 1.0),
             level: smoother(fs, 50.0, 1.0),
-            mono: vec![0.0; SUB],
-            out: vec![0.0; SUB],
-            old_out: vec![0.0; SUB],
+            stereo: StereoFollow::new(fs),
+            w: vec![0.0; SUB],
+            inl: vec![0.0; SUB],
+            inr: vec![0.0; SUB],
+            outl: vec![0.0; SUB],
+            outr: vec![0.0; SUB],
+            oldl: vec![0.0; SUB],
+            oldr: vec![0.0; SUB],
         }
     }
 
     fn model(&self) -> Option<&Loaded> {
         self.cur.model.as_ref()
+    }
+
+    fn reset_right(load: &mut ModelLoad) {
+        if let Some(m) = &mut load.right {
+            m.reset();
+        }
     }
 }
 
@@ -321,7 +356,10 @@ impl Unit for CaptureUnit {
         let n = l.len();
         self.stash.flush(&live.model);
         if self.old.is_none() {
-            if let Some(new) = live.model.take() {
+            if let Some(mut new) = live.model.take() {
+                if self.stereo.running {
+                    Self::reset_right(&mut new);
+                }
                 let old = std::mem::replace(&mut self.cur, new);
                 if old.model.is_some() {
                     // From one capture to another: crossfade.
@@ -340,24 +378,32 @@ impl Unit for CaptureUnit {
         };
         self.gain.set_target(db_to_gain(live.value(0)));
         self.level.set_target(db_to_gain(live.value(1)) * normal);
+        // Mono in, the right copy idle; stereo in (a split's pans, a stereo source): each channel
+        // through its own copy, faded in.
+        if self.stereo.update(&l[..n], &r[..n]) {
+            Self::reset_right(&mut self.cur);
+            if let Some(old) = &mut self.old {
+                Self::reset_right(old);
+            }
+        }
+        let stereo = self.stereo.running;
         for i in 0..n {
-            self.mono[i] = 0.5 * (l[i] + r[i]) * self.gain.next_value();
+            let g = self.gain.next_value();
+            let w = self.stereo.next();
+            let m = 0.5 * (l[i] + r[i]);
+            self.w[i] = w;
+            self.inl[i] = (m + w * (l[i] - m)) * g;
+            self.inr[i] = (m + w * (r[i] - m)) * g;
         }
-        let (x, y) = (&self.mono[..n], &mut self.out[..n]);
-        match &mut self.cur.model {
-            Some(m) => m.process(x, y),
-            None => y.copy_from_slice(x),
-        }
+        run_capture(&mut self.cur, &self.inl[..n], &self.inr[..n], &mut self.outl[..n], &mut self.outr[..n], stereo);
         if let Some(old) = &mut self.old {
-            match &mut old.model {
-                Some(m) => m.process(x, &mut self.old_out[..n]),
-                None => self.old_out[..n].copy_from_slice(x),
+            run_capture(old, &self.inl[..n], &self.inr[..n], &mut self.oldl[..n], &mut self.oldr[..n], stereo);
+            for i in 0..n {
+                let w = fade_curve((self.fade + i) as f32 / self.fade_len as f32);
+                self.outl[i] = self.oldl[i] + w * (self.outl[i] - self.oldl[i]);
+                self.outr[i] = self.oldr[i] + w * (self.outr[i] - self.oldr[i]);
             }
-            for (v, &o) in y.iter_mut().zip(&self.old_out[..n]) {
-                let w = fade_curve(self.fade as f32 / self.fade_len as f32);
-                *v = o + w * (*v - o);
-                self.fade += 1;
-            }
+            self.fade += n;
             if self.fade >= self.fade_len {
                 if let Some(old) = self.old.take() {
                     self.stash.retire(&live.model, old);
@@ -365,9 +411,10 @@ impl Unit for CaptureUnit {
             }
         }
         for i in 0..n {
-            let v = y[i] * self.level.next_value();
-            l[i] = v;
-            r[i] = v;
+            let g = self.level.next_value();
+            let (a, b) = (self.outl[i], self.outr[i]);
+            l[i] = a * g;
+            r[i] = (a + self.w[i] * (b - a)) * g;
         }
     }
 
@@ -379,9 +426,11 @@ impl Unit for CaptureUnit {
         if let Some(m) = &mut self.cur.model {
             m.reset();
         }
+        Self::reset_right(&mut self.cur);
         if let Some(old) = self.old.take() {
             self.stash.retire(&live.model, old);
         }
+        self.stereo.reset();
         self.gain.reset(db_to_gain(live.value(0)));
     }
 
@@ -397,15 +446,22 @@ impl Unit for CaptureUnit {
 // ---- Cab --------------------------------------------------------------------------------------
 
 pub struct CabUnit {
+    /// The cabinet now and the one fading in (index `active` plays), for each channel.
     engines: [CabEngine; 2],
+    right: [CabEngine; 2],
     active: usize,
     fade: Option<usize>,
     fade_len: usize,
     stash: Stash<CabLoad>,
     level: LinearSmoother,
-    mono: Vec<f32>,
+    stereo: StereoFollow,
+    w: Vec<f32>,
+    inl: Vec<f32>,
+    inr: Vec<f32>,
     a: Vec<f32>,
     b: Vec<f32>,
+    ar: Vec<f32>,
+    br: Vec<f32>,
 }
 
 impl CabUnit {
@@ -413,14 +469,20 @@ impl CabUnit {
         let max_len = (ir::MAX_SECONDS * f64::from(fs)) as usize + HEAD;
         Self {
             engines: [CabEngine::new(max_len), CabEngine::new(max_len)],
+            right: [CabEngine::new(max_len), CabEngine::new(max_len)],
             active: 0,
             fade: None,
             fade_len: ((SWAP_MS * 0.001 * fs) as usize).max(1),
             stash: Stash::new(),
             level: smoother(fs, 20.0, 1.0),
-            mono: vec![0.0; SUB],
+            stereo: StereoFollow::new(fs),
+            w: vec![0.0; SUB],
+            inl: vec![0.0; SUB],
+            inr: vec![0.0; SUB],
             a: vec![0.0; SUB],
             b: vec![0.0; SUB],
+            ar: vec![0.0; SUB],
+            br: vec![0.0; SUB],
         }
     }
 }
@@ -431,30 +493,71 @@ impl Unit for CabUnit {
         self.stash.flush(&live.cab);
         if self.fade.is_none() {
             if let Some(mut c) = live.cab.take() {
-                if self.engines[self.active].loaded {
+                let at = if self.engines[self.active].loaded {
                     // From one cabinet to another: crossfade.
-                    let next = 1 - self.active;
-                    self.engines[next].install(&mut c);
                     self.fade = Some(0);
+                    1 - self.active
                 } else {
                     // Into an empty block: at once.
-                    self.engines[self.active].install(&mut c);
+                    self.active
+                };
+                self.engines[at].install(&mut c.cab);
+                if c.right.is_some() {
+                    self.right[at].install(&mut c.right);
+                } else {
+                    // No copy for the right: it plays the left's response off the same cabinet.
+                    self.right[at].loaded = false;
                 }
                 self.stash.retire(&live.cab, c);
             }
         }
         self.level.set_target(db_to_gain(live.value(0)));
-        for i in 0..n {
-            self.mono[i] = 0.5 * (l[i] + r[i]);
+        if self.stereo.update(&l[..n], &r[..n]) {
+            self.right.iter_mut().for_each(CabEngine::reset);
         }
+        let stereo = self.stereo.running;
+        for i in 0..n {
+            let w = self.stereo.next();
+            let m = 0.5 * (l[i] + r[i]);
+            self.w[i] = w;
+            self.inl[i] = m + w * (l[i] - m);
+            self.inr[i] = m + w * (r[i] - m);
+        }
+        let act = self.active;
         let (first, second) = self.engines.split_at_mut(1);
-        let (cur, other) = if self.active == 0 { (&mut first[0], &mut second[0]) } else { (&mut second[0], &mut first[0]) };
-        cur.process(&self.mono[..n], &mut self.a[..n]);
+        let (cur, other) = if act == 0 { (&mut first[0], &mut second[0]) } else { (&mut second[0], &mut first[0]) };
+        cur.process(&self.inl[..n], &mut self.a[..n]);
+        let fading = self.fade.is_some();
+        if fading {
+            other.process(&self.inl[..n], &mut self.b[..n]);
+        }
+        if stereo {
+            let (rf, rs) = self.right.split_at_mut(1);
+            let (rcur, rother) = if act == 0 { (&mut rf[0], &mut rs[0]) } else { (&mut rs[0], &mut rf[0]) };
+            let loaded_left = self.engines[act].loaded;
+            if rcur.loaded || !loaded_left {
+                rcur.process(&self.inr[..n], &mut self.ar[..n]);
+            } else {
+                self.ar[..n].copy_from_slice(&self.a[..n]);
+            }
+            if fading {
+                if rother.loaded {
+                    rother.process(&self.inr[..n], &mut self.br[..n]);
+                } else {
+                    self.br[..n].copy_from_slice(&self.b[..n]);
+                }
+            }
+        } else {
+            self.ar[..n].copy_from_slice(&self.a[..n]);
+            if fading {
+                self.br[..n].copy_from_slice(&self.b[..n]);
+            }
+        }
         if let Some(f) = self.fade {
-            other.process(&self.mono[..n], &mut self.b[..n]);
             for i in 0..n {
                 let w = fade_curve((f + i) as f32 / self.fade_len as f32);
                 self.a[i] += w * (self.b[i] - self.a[i]);
+                self.ar[i] += w * (self.br[i] - self.ar[i]);
             }
             if f + n >= self.fade_len {
                 self.fade = None;
@@ -466,17 +569,18 @@ impl Unit for CabUnit {
         // Empty, a cabinet passes the signal (its level with it).
         let loaded = self.engines[self.active].loaded || self.fade.is_some();
         for i in 0..n {
-            let g = self.level.next_value();
-            let v = if loaded { self.a[i] * g } else { self.a[i] };
-            l[i] = v;
-            r[i] = v;
+            let g = if loaded { self.level.next_value() } else { 1.0 };
+            let (a, b) = (self.a[i], self.ar[i]);
+            l[i] = a * g;
+            r[i] = (a + self.w[i] * (b - a)) * g;
         }
     }
 
     fn reset(&mut self, _live: &Live) {
-        for e in &mut self.engines {
+        for e in self.engines.iter_mut().chain(self.right.iter_mut()) {
             e.reset();
         }
+        self.stereo.reset();
     }
 
     fn holds_file(&self) -> bool {

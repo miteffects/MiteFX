@@ -148,3 +148,54 @@ fn an_edit_keeps_the_loaded_files_and_the_loader_swaps_it_in() {
     assert!(y.iter().any(|v| v.abs() > 0.0));
     let _ = &r.params;
 }
+
+/// The whole way a split's lane knobs take: the editor's knobs (dragged as a user would), the
+/// board, the graph the loader built, an amp after the split (a capture: it used to play the
+/// two channels' sum, so a lane's pan was lost), the engine's output.
+#[test]
+fn a_lanes_level_and_pan_knobs_are_heard_through_an_amp() {
+    use mite_rig::editor::{memory_host, RigView};
+    use mite_ui::kurbo::Point;
+    use mite_ui::{Modifiers, MouseButton, UiEvent, View};
+    const MODS: Modifiers = Modifiers { shift: false, alt: false, ctrl: false, meta: false };
+    let mut r = rig(48_000.0);
+    r.board.insert_split(0, 2);
+    let amp = r.board.insert(Kind::Amp, Place::Main(1)).unwrap();
+    r.board.block(amp).unwrap().live.set(2, 0.0);
+    r.board.set_file(amp, SlotFile { path: Some(identity_model(48_000)), source: None });
+    r.install();
+    let ui = Arc::new(mite_rig::RigUi::with_stores(r.params.snapshots.clone(), r.params.preset.clone(), r.board.clone(), r.shared.clone()));
+    let mut view = RigView::new(ui).with_preset_dir(tmp("presets"));
+    let host = memory_host();
+    view.tick(&host);
+    let fork = view.layout().forks[0].fork;
+    for e in [UiEvent::PointerMove { pos: fork, mods: MODS }, UiEvent::PointerDown { pos: fork, button: MouseButton::Left, mods: MODS }, UiEvent::PointerUp { pos: fork, button: MouseButton::Left, mods: MODS }] {
+        view.event(&e, &host);
+    }
+    view.tick(&host);
+    let drag = |view: &mut RigView, id: &str, dy: f64| {
+        let at = view.knob_at(id).unwrap_or_else(|| panic!("no knob {id}"));
+        view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+        view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+        for k in 1..=10 {
+            view.event(&UiEvent::PointerMove { pos: Point::new(at.x, at.y + dy * f64::from(k) / 10.0), mods: MODS }, &host);
+        }
+        view.event(&UiEvent::PointerUp { pos: Point::new(at.x, at.y + dy), mods: MODS, button: MouseButton::Left }, &host);
+        view.tick(&host);
+    };
+    // Long enough for the amp's stereo copy to fade in (150 ms) before the last 200 ms counted.
+    let x = noise(24_000, 0.2);
+    let rms = |v: &[f32]| (v[14_400..].iter().map(|a| a * a).sum::<f32>() / 9600.0).sqrt();
+    let (l0, r0) = r.run(&x, 256);
+    let (a0, b0) = (rms(&l0), rms(&r0));
+    // Both lanes' levels all the way down: silence.
+    drag(&mut view, "0:level", 400.0);
+    drag(&mut view, "1:level", 400.0);
+    let (l1, r1) = r.run(&x, 256);
+    assert!(rms(&l1) < 0.01 * a0 && rms(&r1) < 0.01 * b0, "levels down: {} {} (from {a0} {b0})", rms(&l1), rms(&r1));
+    // Lane 1 back up and hard right: the right only.
+    drag(&mut view, "0:level", -300.0);
+    drag(&mut view, "0:pan", -400.0);
+    let (l2, r2) = r.run(&x, 256);
+    assert!(rms(&l2) < 0.01 * a0 && rms(&r2) > 0.5 * b0, "lane 1 hard right: {} {}", rms(&l2), rms(&r2));
+}

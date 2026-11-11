@@ -56,11 +56,15 @@ impl Loaded {
 /// What the loader sends a capture block: a capture, or nothing (the block emptied).
 pub struct ModelLoad {
     pub model: Option<Loaded>,
+    /// The same capture again, for the right channel when the block's input is stereo.
+    pub right: Option<Loaded>,
 }
 
 /// What it sends a cabinet block. Also the box a kernel the convolver let go of travels back in.
 pub struct CabLoad {
     pub cab: Option<Cab>,
+    /// The same response again, for the right channel when the block's input is stereo.
+    pub right: Option<Cab>,
 }
 
 pub fn fade_curve(t: f32) -> f32 {
@@ -151,9 +155,9 @@ impl CabEngine {
     }
 
     /// Installs `cab` (taking its tail; the convolver's previous kernel goes back into the box).
-    pub fn install(&mut self, load: &mut CabLoad) {
+    pub fn install(&mut self, cab: &mut Option<Cab>) {
         self.reset();
-        match load.cab.as_mut() {
+        match cab.as_mut() {
             // A tail made for another rate would not fit: refuse it (the loader rebuilds).
             Some(cab) if cab.tail.as_ref().is_some_and(|t| t.block() != HEAD || t.partitions() > self.capacity) => self.loaded = false,
             Some(cab) => {
@@ -241,3 +245,56 @@ impl Gate {
     }
 }
 
+
+/// Whether a mono block's input is stereo now: blocks that play one channel (captures, cabinets)
+/// run a second engine for the right while it is, faded in over `FADE_MS` (longer than a
+/// capture's warm-up, so the new engine's start is never heard) and out again once the input
+/// has been mono for `HOLD_MS`.
+pub struct StereoFollow {
+    w: mite_dsp::LinearSmoother,
+    hold: usize,
+    hold_len: usize,
+    /// The right engine runs (it was reset when it started).
+    pub running: bool,
+}
+
+impl StereoFollow {
+    const FADE_MS: f32 = 150.0;
+    const HOLD_MS: f32 = 500.0;
+
+    pub fn new(fs: f32) -> Self {
+        let mut w = mite_dsp::LinearSmoother::new(0.0);
+        w.set_ramp(fs, Self::FADE_MS);
+        Self { w, hold: 0, hold_len: (Self::HOLD_MS * 0.001 * fs) as usize, running: false }
+    }
+
+    /// Looks at a block of input. Returns true when the right engine starts now (reset it).
+    pub fn update(&mut self, l: &[f32], r: &[f32]) -> bool {
+        let (mut d, mut s) = (0.0f32, 0.0f32);
+        for (a, b) in l.iter().zip(r) {
+            d += (a - b).abs();
+            s += (a + b).abs();
+        }
+        if d > 1e-3 * s + 1e-7 {
+            self.hold = self.hold_len;
+        } else {
+            self.hold = self.hold.saturating_sub(l.len());
+        }
+        self.w.set_target(if self.hold > 0 { 1.0 } else { 0.0 });
+        let need = self.hold > 0 || self.w.current() > 0.0 || self.w.is_smoothing();
+        let started = need && !self.running;
+        self.running = need;
+        started
+    }
+
+    /// The next sample's stereo amount (0: mono, 1: both channels their own).
+    pub fn next(&mut self) -> f32 {
+        self.w.next_value()
+    }
+
+    pub fn reset(&mut self) {
+        self.w.reset(0.0);
+        self.hold = 0;
+        self.running = false;
+    }
+}
