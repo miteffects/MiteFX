@@ -1513,6 +1513,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mite-nam"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "mite-plugin"
 version = "0.1.0"
 dependencies = [
