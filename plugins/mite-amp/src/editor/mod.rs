@@ -18,7 +18,7 @@ use std::time::Instant;
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
 use mite_dsp::eq;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, RoundedRect, Stroke};
-use mite_ui::paint::{glass_panel, glow_stroke, icon_button, panel};
+use mite_ui::paint::{glow_stroke, icon_button, panel};
 use mite_ui::peniko::{Color, Fill};
 use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
@@ -31,11 +31,14 @@ use crate::ir::{response_freq, RESPONSE_POINTS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::rig::{Slot, SlotFile, Status};
-use crate::tone3000::{self, List, Phase};
 use crate::AmpUi;
 
 /// Mite Amp wears its accent (tokens.json `color.accent.amp`, tube glow).
 pub const ACCENT: &str = "amp";
+
+mod browser;
+use browser::Browser;
+pub use browser::PANEL;
 
 const VIEW_W: f64 = 1280.0;
 const VIEW_H: f64 = 760.0;
@@ -74,11 +77,6 @@ const METER_TOP: f64 = PLOT.y0 + 4.0;
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 const METER_RANGE: f64 = 60.0;
 const SILENT: f32 = -150.0;
-
-/// The TONE3000 panel.
-const PANEL: Rect = Rect::new(16.0, DISPLAY_TOP + 8.0, VIEW_W - 16.0, HELP_TOP - 8.0);
-const ROW_H: f64 = 46.0;
-const BODY_TOP: f64 = PANEL.y0 + 104.0;
 
 const POWER_GLYPH: &str = "M12 3.5 V11 M7.2 6.6 A7.4 7.4 0 1 0 16.8 6.6";
 const FOLDER_GLYPH: &str = "M3.5 7 L3.5 18 L20.5 18 L20.5 9 L11.5 9 L9.5 7 Z";
@@ -243,30 +241,11 @@ fn card_button(slot: Slot, b: CardButton) -> Rect {
     }
 }
 
-/// Places in the TONE3000 panel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelHot {
-    Close,
-    Site,
-    SignIn,
-    SignOut,
-    OpenCode,
-    Tab(List),
-    Back,
-    Row(usize),
-}
-
-struct Browser {
-    slot: Slot,
-    scroll: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
     Card(Slot, CardButton),
     Grip(Grip),
     Toggle(Toggle),
-    Panel(PanelHot),
 }
 
 pub struct AmpView {
@@ -286,7 +265,6 @@ pub struct AmpView {
     seen: (u64, u64),
     files: [SlotFile; 3],
     status: [Status; 3],
-    t3k: tone3000::View,
 }
 
 fn knob_words(id: &str) -> &'static str {
@@ -324,7 +302,6 @@ impl AmpView {
         let knobs = dials.into_iter().enumerate().map(|(i, (spec, label, kind))| Knob::new(spec, label, kind, Point::new(DIAL_X0 + i as f64 * DIAL_STEP, DIAL_Y), DIAL_D)).collect();
         let files = ui.rig.files();
         let status = Slot::ALL.map(|s| ui.rig.status(s));
-        let t3k = ui.tone3000.view();
         Self {
             session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, ui.snapshots.clone(), ui.preset.clone()),
             footer,
@@ -340,7 +317,6 @@ impl AmpView {
             seen: (u64::MAX, u64::MAX),
             files,
             status,
-            t3k,
             ui,
         }
     }
@@ -374,11 +350,7 @@ impl AmpView {
     }
 
     pub fn open_browser(&mut self, slot: Slot) {
-        self.browser = Some(Browser { slot, scroll: 0.0 });
-        let v = self.ui.tone3000.view();
-        if v.phase == Phase::SignedIn && v.list.is_none() {
-            self.ui.tone3000.open_list(List::Favorites);
-        }
+        self.browser = Some(Browser::new(slot, &self.ui));
     }
 
     /// Reads the rig and TONE3000 now (tools render a single frame).
@@ -407,14 +379,13 @@ impl AmpView {
     }
 
     fn read_shared(&mut self) -> bool {
-        let v = (self.ui.rig.status_version(), self.ui.tone3000.version());
+        let v = (self.ui.rig.status_version(), 0);
         if v == self.seen {
             return false;
         }
         self.seen = v;
         self.files = self.ui.rig.files();
         self.status = Slot::ALL.map(|s| self.ui.rig.status(s));
-        self.t3k = self.ui.tone3000.view();
         true
     }
 
@@ -710,266 +681,6 @@ impl AmpView {
         }
     }
 
-    // ---- TONE3000 ---------------------------------------------------------------------------
-
-    fn tab_rect(list: List) -> Rect {
-        let i = List::ALL.iter().position(|l| *l == list).unwrap_or(0) as f64;
-        Rect::new(PANEL.x0 + 24.0 + i * 128.0, PANEL.y0 + 58.0, PANEL.x0 + 24.0 + i * 128.0 + 118.0, PANEL.y0 + 88.0)
-    }
-
-    fn panel_button(h: PanelHot) -> Rect {
-        let top = PANEL.y0 + 14.0;
-        match h {
-            PanelHot::Close => Rect::new(PANEL.x1 - 46.0, top, PANEL.x1 - 14.0, top + 32.0),
-            PanelHot::Site => Rect::new(PANEL.x1 - 230.0, top, PANEL.x1 - 58.0, top + 32.0),
-            PanelHot::SignOut => Rect::new(PANEL.x1 - 336.0, top, PANEL.x1 - 242.0, top + 32.0),
-            PanelHot::SignIn | PanelHot::OpenCode => Rect::new(PANEL.center().x - 110.0, BODY_TOP + 150.0, PANEL.center().x + 110.0, BODY_TOP + 192.0),
-            PanelHot::Back => Rect::new(PANEL.x0 + 24.0, BODY_TOP - 2.0, PANEL.x0 + 104.0, BODY_TOP + 28.0),
-            PanelHot::Tab(l) => Self::tab_rect(l),
-            PanelHot::Row(i) => Rect::new(PANEL.x0 + 16.0, 0.0, PANEL.x1 - 16.0, 0.0 + i as f64),
-        }
-    }
-
-    /// The rows shown: tones of the list, or the open tone's files that fit the slot.
-    fn rows(&self, slot: Slot) -> Vec<(String, String, String)> {
-        let v = &self.t3k;
-        if v.tone.is_some() {
-            return self.fitting_models(slot).iter().map(|m| (m.name.clone(), m.kind.clone(), m.size.clone())).collect();
-        }
-        let Some(list) = v.list else { return Vec::new() };
-        let Some((_, lv)) = v.lists.iter().find(|(l, _)| *l == list) else { return Vec::new() };
-        lv.tones
-            .iter()
-            .map(|t| {
-                let counts = if t.format == "ir" { format!("{} IR", t.irs.max(t.models)) } else if t.a2_models > 0 { format!("{} A2 · {} files", t.a2_models, t.models) } else { format!("{} files", t.models) };
-                let mut sub = vec![format!("by {}", t.creator)];
-                if !t.gear.is_empty() {
-                    sub.push(t.gear.clone());
-                }
-                sub.push(t.format.to_uppercase());
-                if !t.license.is_empty() {
-                    sub.push(t.license.to_uppercase());
-                }
-                (t.title.clone(), sub.join(" · "), counts)
-            })
-            .collect()
-    }
-
-    fn fitting_models(&self, slot: Slot) -> Vec<tone3000::Model> {
-        let models = self.t3k.models.clone().unwrap_or_default();
-        models.into_iter().filter(|m| (m.kind == "IR") == (slot == Slot::Cab)).collect()
-    }
-
-    fn row_top(&self, i: usize) -> f64 {
-        let first = if self.t3k.tone.is_some() { BODY_TOP + 40.0 } else { BODY_TOP };
-        first + i as f64 * ROW_H - self.browser.as_ref().map_or(0.0, |b| b.scroll)
-    }
-
-    fn draw_browser(&self, cx: &mut DrawCx<'_>) {
-        let Some(b) = &self.browser else { return };
-        let theme = cx.theme;
-        let shape = RoundedRect::from_rect(PANEL, 14.0);
-        glass_panel(cx, shape, theme.blur_panel);
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.9), None, &shape);
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.glass_border, None, &shape);
-        let v = &self.t3k;
-        // The header: TONE3000's name (its terms ask for it), where this goes, the site, close.
-        cx.text.draw(cx.scene, "TONE3000", PANEL.x0 + 24.0, PANEL.y0 + 18.0, TextStyle::BODY.sized(20.0).weighted(800.0), theme.text_strong, Align::Left);
-        let to = format!("Powered by TONE3000 · into the {}", b.slot.name());
-        cx.text.draw(cx.scene, &to, PANEL.x0 + 146.0, PANEL.y0 + 24.0, TextStyle::BODY.sized(12.0), theme.text_mid, Align::Left);
-        let mut buttons = vec![(PanelHot::Close, "×"), (PanelHot::Site, "Browse TONE3000")];
-        if v.phase == Phase::SignedIn {
-            buttons.push((PanelHot::SignOut, "Sign out"));
-        }
-        for (h, t) in buttons {
-            let r = Self::panel_button(h);
-            let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Panel(h)), false, theme.accent);
-            let size = if h == PanelHot::Close { 18.0 } else { 12.0 };
-            cx.text.draw(cx.scene, t, r.center().x, r.center().y - size * 0.6, TextStyle::BODY.sized(size as f32).weighted(700.0), ink, Align::Center);
-        }
-        if let Some(user) = &v.user {
-            cx.text.draw(cx.scene, user, Self::panel_button(PanelHot::SignOut).x0 - 12.0, PANEL.y0 + 24.0, TextStyle::BODY.sized(12.0).weighted(700.0), theme.text_hi, Align::Right);
-        }
-        let body = TextStyle::BODY.sized(13.0);
-        let center = PANEL.center().x;
-        match &v.phase {
-            Phase::NoKey => {
-                let lines = [
-                    "TONE3000 asks every app for its own key.".to_owned(),
-                    "Make a publishable key in your TONE3000 settings (Settings → API), then save it as".to_owned(),
-                    format!("{}/tone3000.json  as  {{\"client_id\": \"your key\"}}", tone3000::settings_dir().map_or("the Mite Amp settings folder".to_owned(), |d| d.display().to_string())),
-                    "and open the editor again.".to_owned(),
-                ];
-                for (i, l) in lines.iter().enumerate() {
-                    cx.text.draw(cx.scene, l, center, BODY_TOP + 30.0 + i as f64 * 24.0, body, if i == 2 { theme.text_strong } else { theme.text_mid }, Align::Center);
-                }
-                return;
-            }
-            Phase::SignedOut | Phase::Failed(_) | Phase::Starting => {
-                let msg = match &v.phase {
-                    Phase::Failed(e) => e.clone(),
-                    Phase::Starting => "Asking TONE3000 for a code…".to_owned(),
-                    _ => "Sign in to reach your favourites, downloads and tones.".to_owned(),
-                };
-                cx.text.draw(cx.scene, &msg, center, BODY_TOP + 80.0, body, if matches!(v.phase, Phase::Failed(_)) { theme.danger } else { theme.text_mid }, Align::Center);
-                if v.phase != Phase::Starting {
-                    let r = Self::panel_button(PanelHot::SignIn);
-                    let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Panel(PanelHot::SignIn)), true, theme.accent);
-                    cx.text.draw(cx.scene, "Sign in to TONE3000", r.center().x, r.center().y - 8.0, TextStyle::BODY.sized(13.5).weighted(700.0), ink, Align::Center);
-                }
-                return;
-            }
-            Phase::Code { code, .. } => {
-                cx.text.draw(cx.scene, "Enter this code at tone3000.com/activate (the page opened in your browser):", center, BODY_TOP + 30.0, body, theme.text_mid, Align::Center);
-                cx.text.draw(cx.scene, code, center, BODY_TOP + 66.0, TextStyle { tabular: true, ..TextStyle::BODY.sized(40.0).weighted(800.0) }, theme.accent, Align::Center);
-                let r = Self::panel_button(PanelHot::OpenCode);
-                let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Panel(PanelHot::OpenCode)), false, theme.accent);
-                cx.text.draw(cx.scene, "Open the page again", r.center().x, r.center().y - 8.0, TextStyle::BODY.sized(13.0).weighted(700.0), ink, Align::Center);
-                return;
-            }
-            Phase::SignedIn => {}
-        }
-        for l in List::ALL {
-            let r = Self::tab_rect(l);
-            let on = v.list == Some(l);
-            let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Panel(PanelHot::Tab(l))), on, theme.accent);
-            cx.text.draw(cx.scene, l.name(), r.center().x, r.center().y - 7.5, TextStyle::BODY.sized(12.0).weighted(700.0), ink, Align::Center);
-        }
-        let clip = Rect::new(PANEL.x0, BODY_TOP - 6.0, PANEL.x1, PANEL.y1 - 10.0);
-        if let Some(tone) = &v.tone {
-            let r = Self::panel_button(PanelHot::Back);
-            let ink = icon_button(cx.scene, theme, r, theme.control, self.hot == Some(Hot::Panel(PanelHot::Back)), false, theme.accent);
-            cx.text.draw(cx.scene, "‹ Back", r.center().x, r.center().y - 7.5, TextStyle::BODY.sized(12.0).weighted(700.0), ink, Align::Center);
-            let head = format!("{} — by {}{}", tone.title, tone.creator, if tone.license.is_empty() { String::new() } else { format!(" · {}", tone.license.to_uppercase()) });
-            let head = Self::fit(cx, &head, TextStyle::BODY.sized(14.0).weighted(700.0), PANEL.width() - 160.0);
-            cx.text.draw(cx.scene, &head, PANEL.x0 + 120.0, BODY_TOP + 4.0, TextStyle::BODY.sized(14.0).weighted(700.0), theme.text_strong, Align::Left);
-        }
-        let rows = self.rows(b.slot);
-        let loading = match (&v.tone, v.list) {
-            (Some(_), _) => v.models.is_none(),
-            (None, Some(list)) => v.lists.iter().find(|(l, _)| *l == list).is_some_and(|(_, lv)| lv.loading),
-            _ => false,
-        };
-        let error = match (&v.tone, v.list) {
-            (Some(_), _) => v.models_error.clone().or_else(|| v.download_error.clone()),
-            (None, Some(list)) => v.lists.iter().find(|(l, _)| *l == list).and_then(|(_, lv)| lv.error.clone()),
-            _ => None,
-        };
-        let empty_word = if v.tone.is_some() {
-            if b.slot == Slot::Cab { "This tone has no IRs for the Cab." } else { "This tone has no captures for this slot." }
-        } else {
-            "Nothing here yet."
-        };
-        if let Some(e) = &error {
-            cx.text.draw(cx.scene, e, center, PANEL.y1 - 40.0, body, theme.danger, Align::Center);
-        }
-        if loading {
-            cx.text.draw(cx.scene, "Loading…", center, BODY_TOP + 60.0, body, theme.text_mid, Align::Center);
-            return;
-        }
-        if rows.is_empty() {
-            cx.text.draw(cx.scene, empty_word, center, BODY_TOP + 60.0, body, theme.text_lo, Align::Center);
-            return;
-        }
-        cx.begin_clip(&clip);
-        let models = self.fitting_models(b.slot);
-        for (i, (title, sub, right)) in rows.iter().enumerate() {
-            let y = self.row_top(i);
-            if y + ROW_H < clip.y0 || y > clip.y1 {
-                continue;
-            }
-            let r = Rect::new(PANEL.x0 + 16.0, y, PANEL.x1 - 16.0, y + ROW_H - 4.0);
-            let hot = self.hot == Some(Hot::Panel(PanelHot::Row(i)));
-            let downloading = v.tone.is_some() && models.get(i).is_some_and(|m| v.downloading == Some(m.id));
-            if hot || downloading {
-                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(if downloading { 0.18 } else { 0.10 }), None, &RoundedRect::from_rect(r, 8.0));
-            }
-            let t = Self::fit(cx, title, TextStyle::BODY.sized(13.5).weighted(700.0), r.width() * 0.62);
-            cx.text.draw(cx.scene, &t, r.x0 + 14.0, r.y0 + 6.0, TextStyle::BODY.sized(13.5).weighted(700.0), theme.text_strong, Align::Left);
-            let s = Self::fit(cx, sub, TextStyle::BODY.sized(11.0), r.width() * 0.62);
-            cx.text.draw(cx.scene, &s, r.x0 + 14.0, r.y0 + 24.0, TextStyle::BODY.sized(11.0), theme.text_lo, Align::Left);
-            let right = if downloading { "Downloading…".to_owned() } else { right.clone() };
-            cx.text.draw(cx.scene, &right, r.x1 - 14.0, r.y0 + 13.0, TextStyle::BODY.sized(12.0).weighted(600.0), if downloading { theme.accent } else { theme.text_mid }, Align::Right);
-        }
-        cx.end_clip();
-    }
-
-    fn panel_hot(&self, p: Point) -> Option<PanelHot> {
-        let b = self.browser.as_ref()?;
-        let v = &self.t3k;
-        let mut fixed = vec![PanelHot::Close, PanelHot::Site];
-        match v.phase {
-            Phase::SignedIn => {
-                fixed.push(PanelHot::SignOut);
-                fixed.extend(List::ALL.map(PanelHot::Tab));
-                if v.tone.is_some() {
-                    fixed.push(PanelHot::Back);
-                }
-            }
-            Phase::SignedOut | Phase::Failed(_) => fixed.push(PanelHot::SignIn),
-            Phase::Code { .. } => fixed.push(PanelHot::OpenCode),
-            _ => {}
-        }
-        if let Some(h) = fixed.into_iter().find(|h| Self::panel_button(*h).contains(p)) {
-            return Some(h);
-        }
-        if v.phase == Phase::SignedIn && p.y >= BODY_TOP - 6.0 && p.y <= PANEL.y1 - 10.0 && p.x > PANEL.x0 + 16.0 && p.x < PANEL.x1 - 16.0 {
-            let n = self.rows(b.slot).len();
-            for i in 0..n {
-                let y = self.row_top(i);
-                if p.y >= y && p.y < y + ROW_H - 4.0 {
-                    return Some(PanelHot::Row(i));
-                }
-            }
-        }
-        None
-    }
-
-    fn panel_click(&mut self, h: PanelHot) {
-        let Some(slot) = self.browser.as_ref().map(|b| b.slot) else { return };
-        let t3k = self.ui.tone3000.clone();
-        match h {
-            PanelHot::Close => self.browser = None,
-            PanelHot::Site => tone3000::open_in_browser(&format!("{}/search", tone3000::SITE)),
-            PanelHot::SignIn => t3k.sign_in(),
-            PanelHot::SignOut => t3k.sign_out(),
-            PanelHot::OpenCode => {
-                if let Phase::Code { uri, .. } = &self.t3k.phase {
-                    tone3000::open_in_browser(uri);
-                }
-            }
-            PanelHot::Tab(l) => {
-                if let Some(b) = &mut self.browser {
-                    b.scroll = 0.0;
-                }
-                t3k.open_list(l);
-            }
-            PanelHot::Back => {
-                if let Some(b) = &mut self.browser {
-                    b.scroll = 0.0;
-                }
-                t3k.close_tone();
-            }
-            PanelHot::Row(i) => {
-                if self.t3k.tone.is_some() {
-                    let models = self.fitting_models(slot);
-                    if let (Some(tone), Some(m)) = (self.t3k.tone.clone(), models.get(i).cloned()) {
-                        if self.t3k.downloading.is_none() {
-                            t3k.download(tone, m, slot, self.ui.rig.clone());
-                        }
-                    }
-                } else if let Some(list) = self.t3k.list {
-                    if let Some(tone) = self.t3k.lists.iter().find(|(l, _)| *l == list).and_then(|(_, lv)| lv.tones.get(i).cloned()) {
-                        if let Some(b) = &mut self.browser {
-                            b.scroll = 0.0;
-                        }
-                        t3k.open_tone(tone);
-                    }
-                }
-            }
-        }
-    }
-
     // ---- help -------------------------------------------------------------------------------
 
     fn help_text(&self, host: &dyn ParamHost) -> Help {
@@ -977,14 +688,8 @@ impl AmpView {
             let v = Self::plain(host, spec.id);
             Help::default().text(format!("{} ", spec.name)).slot(spec.format(v), spec.format(spec.max))
         };
-        if self.browser.is_some() {
-            return Help::default().text(match self.hot {
-                Some(Hot::Panel(PanelHot::Row(_))) if self.t3k.tone.is_some() => "Click to download it into the slot (it stays in the settings folder's TONE3000 folder, with its creator and license)",
-                Some(Hot::Panel(PanelHot::Row(_))) => "Click to see the tone's files",
-                Some(Hot::Panel(PanelHot::Site)) => "Opens TONE3000 in your browser: favourite a tone there and it shows here under Favorites",
-                Some(Hot::Panel(PanelHot::SignOut)) => "Signs out (the session is forgotten on this computer)",
-                _ => "TONE3000: your favourites, downloads and tones, and what is trending. Esc or × closes.",
-            });
+        if let Some(b) = &self.browser {
+            return Help::default().text(b.help());
         }
         if let Some((g, _, _)) = self.drag {
             return slot_help(&g.spec()).text(if g.is_cut() { " — drag left and right. Shift is fine." } else { " — drag up and down. Shift is fine." });
@@ -1031,9 +736,6 @@ impl AmpView {
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
-        if self.browser.is_some() {
-            return self.panel_hot(p).map(Hot::Panel);
-        }
         for slot in Slot::ALL {
             for b in [CardButton::Power, CardButton::Open, CardButton::Tone3000, CardButton::Clear] {
                 if card_button(slot, b).contains(p) {
@@ -1071,20 +773,31 @@ impl AmpView {
     }
 
     fn handle_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
-        if let UiEvent::KeyDown { key, mods } = *event {
-            if self.browser.is_some() && key == mite_ui::Key::Escape {
-                self.browser = None;
-                return true;
+        // TONE3000 open: it has every event over the display (the header and footer still work).
+        if let Some(b) = &mut self.browser {
+            let over = match *event {
+                UiEvent::PointerMove { pos, .. } | UiEvent::PointerDown { pos, .. } | UiEvent::PointerUp { pos, .. } | UiEvent::Wheel { pos, .. } | UiEvent::DoubleClick { pos, .. } => pos.y > DISPLAY_TOP && pos.y < HELP_TOP,
+                _ => true,
+            };
+            if over {
+                let (redraw, close) = b.event(event, &self.ui);
+                if close {
+                    self.browser = None;
+                    self.ui.tone3000.close_tone();
+                }
+                return redraw || close;
             }
+        }
+        if let UiEvent::KeyDown { key, mods } = *event {
             return self.session.key(key, mods, host).unwrap_or(false);
         }
+        if let Some(answer) = self.session.event(event, host) {
+            return answer;
+        }
+        if self.footer.event(event, host) {
+            return true;
+        }
         if self.browser.is_none() {
-            if let Some(answer) = self.session.event(event, host) {
-                return answer;
-            }
-            if self.footer.event(event, host) {
-                return true;
-            }
             for k in &mut self.knobs {
                 if k.event(event, host) {
                     return true;
@@ -1116,10 +829,6 @@ impl AmpView {
                 true
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => match self.hot_at(host, pos) {
-                Some(Hot::Panel(h)) => {
-                    self.panel_click(h);
-                    true
-                }
                 Some(Hot::Card(slot, b)) => {
                     self.click_card(slot, b, host);
                     true
@@ -1135,14 +844,7 @@ impl AmpView {
                     Self::gesture(host, id, if Self::plain(host, id) >= 0.5 { 0.0 } else { 1.0 });
                     true
                 }
-                None => {
-                    // A click outside the panel closes it.
-                    if self.browser.is_some() && !PANEL.contains(pos) {
-                        self.browser = None;
-                        return true;
-                    }
-                    false
-                }
+                None => false,
             },
             UiEvent::PointerUp { button: MouseButton::Left, .. } => {
                 if let Some((g, _, _)) = self.drag.take() {
@@ -1161,14 +863,6 @@ impl AmpView {
                 _ => false,
             },
             UiEvent::Wheel { pos, lines, mods } => {
-                if let Some(slot) = self.browser.as_ref().map(|b| b.slot) {
-                    let n = self.rows(slot).len() as f64;
-                    let max = (n * ROW_H - (PANEL.y1 - BODY_TOP - 60.0)).max(0.0);
-                    if let Some(b) = &mut self.browser {
-                        b.scroll = (b.scroll - f64::from(lines) * ROW_H).clamp(0.0, max);
-                    }
-                    return true;
-                }
                 match self.hot_at(host, pos) {
                     Some(Hot::Grip(g)) => {
                         let spec = g.spec();
@@ -1197,7 +891,9 @@ impl View for AmpView {
         self.draw_plot(cx);
         self.draw_strip(cx);
         self.draw_meters(cx);
-        self.draw_browser(cx);
+        if let Some(b) = &mut self.browser {
+            b.draw(cx, &self.ui);
+        }
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
         self.footer.draw_frame(cx);
         let fs = self.fs();
@@ -1236,21 +932,15 @@ impl View for AmpView {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
         }
-        // A download landed in the browser's slot: close it.
-        if let Some(b) = &self.browser {
-            let f = &self.files[b.slot.index()];
-            if self.t3k.downloading.is_none() && f.source.as_ref().is_some_and(|s| self.t3k.models.as_ref().is_some_and(|m| m.iter().any(|x| x.id == s.model_id))) && matches!(self.status[b.slot.index()], Status::Loading | Status::Model(_) | Status::Cab(_)) && self.t3k.tone.as_ref().is_some_and(|t| f.source.as_ref().is_some_and(|s| s.tone_id == t.id)) {
-                self.browser = None;
-                self.ui.tone3000.close_tone();
-                fresh = true;
-            }
+        if let Some(b) = &mut self.browser {
+            fresh |= b.tick(&self.ui);
         }
         let (pin, pout) = self.ui.engine.take_peaks();
         let fall_db = (20.0 * dt) as f32;
         for (m, t) in self.meters.iter_mut().zip([pin, pout]) {
             *m = if t > *m { t } else { (*m - fall_db).max(t).max(SILENT) };
         }
-        let loading = self.status.iter().any(|s| matches!(s, Status::Loading)) || self.t3k.downloading.is_some();
+        let loading = self.status.iter().any(|s| matches!(s, Status::Loading));
         fresh || busy || loading || self.picking.is_some() || self.meters.iter().any(|&m| m > SILENT + 1.0)
     }
 }

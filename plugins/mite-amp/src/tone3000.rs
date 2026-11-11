@@ -10,6 +10,7 @@
 //! `tone3000.json` (`{"client_id": "…"}`) can override it. Downloads land in the settings
 //! folder's `TONE3000/<tone>/` with the tone's creator and license kept for attribution.
 
+use std::collections::{HashMap, VecDeque};
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::rig::{Rig, Slot, SlotFile, Source};
+use crate::rig::{Rig, Slot, SlotFile, Source as Source3k};
 
 pub const SITE: &str = "https://www.tone3000.com";
 const API: &str = "https://www.tone3000.com/api/v1";
@@ -85,36 +86,129 @@ fn save_token(t: Option<&Token>) {
     }
 }
 
-/// The lists the plugin can show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum List {
+/// Where the tones shown come from: the search (with its filters) or one of the user's lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Source {
+    #[default]
+    Search,
     Favorites,
     Downloaded,
     Created,
-    Trending,
-    Latest,
 }
 
-impl List {
-    pub const ALL: [List; 5] = [List::Favorites, List::Downloaded, List::Created, List::Trending, List::Latest];
+impl Source {
+    pub const ALL: [Source; 4] = [Source::Search, Source::Favorites, Source::Downloaded, Source::Created];
 
     pub fn name(self) -> &'static str {
         match self {
-            List::Favorites => "Favorites",
-            List::Downloaded => "Downloaded",
-            List::Created => "My Tones",
-            List::Trending => "Trending",
-            List::Latest => "Latest",
+            Source::Search => "Explore",
+            Source::Favorites => "Favorites",
+            Source::Downloaded => "Downloaded",
+            Source::Created => "My Tones",
+        }
+    }
+}
+
+/// The search's gear filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Gear {
+    #[default]
+    All,
+    Amp,
+    Pedal,
+    FullRig,
+    Cab,
+    Outboard,
+}
+
+impl Gear {
+    pub const ALL: [Gear; 6] = [Gear::All, Gear::Amp, Gear::Pedal, Gear::FullRig, Gear::Cab, Gear::Outboard];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Gear::All => "All gear",
+            Gear::Amp => "Amps",
+            Gear::Pedal => "Pedals",
+            Gear::FullRig => "Full rigs",
+            Gear::Cab => "Cabs (IRs)",
+            Gear::Outboard => "Outboard",
         }
     }
 
-    fn path(self) -> &'static str {
+    fn query(self) -> &'static str {
         match self {
-            List::Favorites => "/tones/favorited?page=1&page_size=100",
-            List::Downloaded => "/tones/downloaded?page=1&page_size=100",
-            List::Created => "/tones/created?page=1&page_size=100",
-            List::Trending => "/tones/trending",
-            List::Latest => "/tones/latest",
+            Gear::All => "",
+            Gear::Amp => "&gears=amp",
+            Gear::Pedal => "&gears=pedal",
+            Gear::FullRig => "&gears=amp-cab",
+            Gear::Cab => "&format=ir",
+            Gear::Outboard => "&gears=outboard",
+        }
+    }
+}
+
+/// The search's order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sort {
+    #[default]
+    Trending,
+    Downloads,
+    Newest,
+    BestMatch,
+}
+
+impl Sort {
+    pub const ALL: [Sort; 4] = [Sort::Trending, Sort::Downloads, Sort::Newest, Sort::BestMatch];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Sort::Trending => "Trending",
+            Sort::Downloads => "Most downloaded",
+            Sort::Newest => "Newest",
+            Sort::BestMatch => "Best match",
+        }
+    }
+
+    fn query(self) -> &'static str {
+        match self {
+            Sort::Trending => "trending",
+            Sort::Downloads => "downloads-all-time",
+            Sort::Newest => "newest",
+            Sort::BestMatch => "best-match",
+        }
+    }
+}
+
+/// What the search asks for.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Query {
+    pub text: String,
+    pub gear: Gear,
+    pub sort: Sort,
+    /// A1 captures instead of A2 (the site lists one generation at a time).
+    pub a1: bool,
+}
+
+/// Tones per page.
+const PAGE: u64 = 24;
+
+fn url_encode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+impl Query {
+    fn path(&self, source: Source, page: u64) -> String {
+        match source {
+            Source::Search => {
+                let text = self.text.trim();
+                let sort = if text.is_empty() && self.sort == Sort::BestMatch { Sort::Trending } else { self.sort };
+                let q = if text.is_empty() { String::new() } else { format!("&query={}", url_encode(text)) };
+                let arch = if self.gear == Gear::Cab { "" } else if self.a1 { "&architecture=1" } else { "&architecture=2" };
+                format!("/tones/search?page={page}&page_size={PAGE}&sort={}{q}{}{arch}", sort.query(), self.gear.query())
+            }
+            Source::Favorites => format!("/tones/favorited?page={page}&page_size={PAGE}"),
+            Source::Downloaded => format!("/tones/downloaded?page={page}&page_size={PAGE}"),
+            Source::Created => format!("/tones/created?page={page}&page_size={PAGE}"),
         }
     }
 }
@@ -125,13 +219,39 @@ pub struct Tone {
     pub id: u64,
     pub title: String,
     pub creator: String,
+    pub description: String,
     pub gear: String,
+    pub makes: Vec<String>,
+    pub tags: Vec<String>,
     pub format: String,
     pub license: String,
     pub url: String,
+    pub image: Option<String>,
     pub models: u64,
+    pub a1_models: u64,
     pub a2_models: u64,
     pub irs: u64,
+    pub downloads: u64,
+    pub favorites: u64,
+    pub is_favorite: bool,
+}
+
+impl Tone {
+    /// "Amp", "Pedal", "Full rig", "Cab"…: what it is, in words.
+    pub fn gear_name(&self) -> String {
+        match self.gear.as_str() {
+            "amp" => "Amp".to_owned(),
+            "pedal" => "Pedal".to_owned(),
+            "amp-cab" | "full-rig" => "Full rig".to_owned(),
+            "cab" | "ir" => "Cab".to_owned(),
+            "outboard" => "Outboard".to_owned(),
+            "" if self.format == "ir" => "Cab".to_owned(),
+            other => {
+                let mut c = other.chars();
+                c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+            }
+        }
+    }
 }
 
 /// One of a tone's files.
@@ -158,11 +278,25 @@ pub enum Phase {
     Failed(String),
 }
 
+/// The tones shown, page by page.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct ListView {
-    pub loading: bool,
+pub struct Feed {
+    pub source: Source,
+    pub query: Query,
     pub tones: Vec<Tone>,
+    pub page: u64,
+    pub total: u64,
+    pub total_pages: u64,
+    pub loading: bool,
     pub error: Option<String>,
+    /// Moves with every new search (late answers to an old one are dropped).
+    generation: u64,
+}
+
+impl Feed {
+    pub fn more(&self) -> bool {
+        !self.loading && self.error.is_none() && self.page < self.total_pages
+    }
 }
 
 /// Everything the editor draws, cloned out under the lock.
@@ -170,15 +304,111 @@ pub struct ListView {
 pub struct View {
     pub phase: Phase,
     pub user: Option<String>,
-    pub list: Option<List>,
-    pub lists: Vec<(List, ListView)>,
-    /// The tone open, its models (none yet: loading), and an error.
+    pub feed: Feed,
+    /// The tone open, its files (none yet: loading), and an error.
     pub tone: Option<Tone>,
     pub models: Option<Vec<Model>>,
     pub models_error: Option<String>,
     /// A download under way (the model id) and the last one's error.
     pub downloading: Option<u64>,
     pub download_error: Option<String>,
+}
+
+/// A decoded cover image, scaled down for cards.
+#[derive(Debug)]
+pub struct Thumb {
+    pub width: u32,
+    pub height: u32,
+    /// RGBA8.
+    pub rgba: Arc<Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+enum ImageState {
+    Queued,
+    Ready(Arc<Thumb>),
+    Failed,
+}
+
+/// Cover images: fetched by a few workers, decoded (JPEG, PNG), scaled to at most 480 px wide.
+#[derive(Default)]
+struct Images {
+    states: HashMap<String, ImageState>,
+    queue: VecDeque<String>,
+    workers: usize,
+}
+
+const IMAGE_WORKERS: usize = 4;
+const THUMB_WIDTH: u32 = 480;
+
+fn decode_image(bytes: &[u8]) -> Option<Thumb> {
+    let (w, h, rgba) = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+        let mut reader = decoder.read_info().ok()?;
+        let mut buf = vec![0; reader.output_buffer_size()?];
+        let info = reader.next_frame(&mut buf).ok()?;
+        let px = &buf[..info.buffer_size()];
+        let rgba: Vec<u8> = match info.color_type {
+            png::ColorType::Rgba => px.to_vec(),
+            png::ColorType::Rgb => px.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+            png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+            png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+            png::ColorType::Indexed => return None,
+        };
+        (info.width, info.height, rgba)
+    } else if bytes.starts_with(&[0xFF, 0xD8]) {
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(bytes));
+        let px = decoder.decode().ok()?;
+        let info = decoder.info()?;
+        let rgba: Vec<u8> = match info.pixel_format {
+            jpeg_decoder::PixelFormat::RGB24 => px.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+            jpeg_decoder::PixelFormat::L8 => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+            jpeg_decoder::PixelFormat::CMYK32 => px.chunks_exact(4).flat_map(|p| {
+                let k = 255 - u16::from(p[3]);
+                let c = |v: u8| ((255 - u16::from(v)) * k / 255) as u8;
+                [c(p[0]), c(p[1]), c(p[2]), 255]
+            }).collect(),
+            _ => return None,
+        };
+        (u32::from(info.width), u32::from(info.height), rgba)
+    } else {
+        return None;
+    };
+    if w == 0 || h == 0 || rgba.len() < (w * h * 4) as usize {
+        return None;
+    }
+    // Box-filter down to the card size.
+    let step = w.div_ceil(THUMB_WIDTH).max(1);
+    let (tw, th) = (w / step, h / step);
+    let mut out = vec![0u8; (tw * th * 4) as usize];
+    for y in 0..th {
+        for x in 0..tw {
+            let mut acc = [0u32; 4];
+            for dy in 0..step {
+                for dx in 0..step {
+                    let i = (((y * step + dy) * w + x * step + dx) * 4) as usize;
+                    for c in 0..4 {
+                        acc[c] += u32::from(rgba[i + c]);
+                    }
+                }
+            }
+            let o = ((y * tw + x) * 4) as usize;
+            for c in 0..4 {
+                out[o + c] = (acc[c] / (step * step)) as u8;
+            }
+        }
+    }
+    Some(Thumb { width: tw, height: th, rgba: Arc::new(out) })
+}
+
+/// Where a tone's file is (or would be) kept.
+pub fn local_path(tone: &Tone, model: &Model) -> Option<PathBuf> {
+    let dir = settings_dir()?.join("TONE3000").join(format!("{}-{}", tone.id, safe_name(&tone.title)));
+    let ext = if model.kind == "IR" { "wav" } else { "nam" };
+    let url_name = model.url.split('?').next().unwrap_or_default().rsplit('/').next().unwrap_or_default();
+    let name = if url_name.contains('.') { safe_name(url_name) } else { format!("{}.{ext}", safe_name(&model.name)) };
+    Some(dir.join(name))
 }
 
 #[derive(Default)]
@@ -192,6 +422,7 @@ struct State {
 
 pub struct Session {
     state: Mutex<State>,
+    images: Mutex<Images>,
     version: AtomicU64,
 }
 
@@ -254,17 +485,27 @@ fn parse_tone(v: &Value) -> Tone {
         Some(Value::String(s)) => s.clone(),
         _ => String::new(),
     };
+    let names = |k: &str| -> Vec<String> { v.get(k).and_then(Value::as_array).map(|a| a.iter().map(|m| text_of(m, "name")).filter(|n| !n.is_empty()).collect()).unwrap_or_default() };
+    let image = v.get("images").and_then(Value::as_array).and_then(|a| a.iter().filter_map(Value::as_str).find(|u| u.starts_with("https://"))).map(str::to_owned);
     Tone {
         id: uint_of(v, "id"),
         title: text_of(v, "title"),
         creator,
+        description: text_of(v, "description"),
         gear,
+        makes: names("makes"),
+        tags: names("tags"),
         format: text_of(v, "format"),
         license: text_of(v, "license"),
         url: text_of(v, "url"),
+        image,
         models: uint_of(v, "models_count"),
+        a1_models: uint_of(v, "a1_models_count"),
         a2_models: uint_of(v, "a2_models_count"),
         irs: uint_of(v, "irs_count"),
+        downloads: uint_of(v, "downloads_count"),
+        favorites: uint_of(v, "favorites_count"),
+        is_favorite: v.get("is_favorite").and_then(Value::as_bool).unwrap_or(false),
     }
 }
 
@@ -296,7 +537,7 @@ impl Session {
             (Some(_), None) => Phase::SignedOut,
         };
         let state = State { view: View { phase, ..View::default() }, token, client, epoch: 0 };
-        Self { state: Mutex::new(state), version: AtomicU64::new(0) }
+        Self { state: Mutex::new(state), images: Mutex::new(Images::default()), version: AtomicU64::new(0) }
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -439,44 +680,74 @@ impl Session {
         }
     }
 
-    /// Shows `list`, fetching it.
-    pub fn open_list(self: &Arc<Self>, list: List) {
-        self.update(|v| {
-            v.list = Some(list);
-            v.tone = None;
-            v.models = None;
-            match v.lists.iter_mut().find(|(l, _)| *l == list) {
-                Some((_, lv)) => {
-                    lv.loading = true;
-                    lv.error = None;
-                }
-                None => v.lists.push((list, ListView { loading: true, ..ListView::default() })),
+    /// Shows `source` with `query` (a new search: from the first page).
+    pub fn search(self: &Arc<Self>, source: Source, query: Query) {
+        let generation = {
+            let mut st = self.lock();
+            let g = st.view.feed.generation + 1;
+            st.view.feed = Feed { source, query, loading: true, generation: g, ..Feed::default() };
+            g
+        };
+        self.changed();
+        self.fetch_page(generation, 1);
+    }
+
+    /// The next page of what is shown.
+    pub fn more(self: &Arc<Self>) {
+        let (generation, page) = {
+            let mut st = self.lock();
+            if !st.view.feed.more() {
+                return;
             }
-        });
+            st.view.feed.loading = true;
+            (st.view.feed.generation, st.view.feed.page + 1)
+        };
+        self.changed();
+        self.fetch_page(generation, page);
+    }
+
+    fn fetch_page(self: &Arc<Self>, generation: u64, page: u64) {
+        let (source, query) = {
+            let st = self.lock();
+            (st.view.feed.source, st.view.feed.query.clone())
+        };
         let me = self.clone();
         std::thread::spawn(move || {
-            let result = me.get(list.path()).map(|v| v.get("data").and_then(Value::as_array).map(|a| a.iter().map(parse_tone).collect::<Vec<_>>()).unwrap_or_default());
+            let result = me.get(&query.path(source, page));
             if me.lock().view.user.is_none() {
                 me.fetch_user();
             }
             me.update(|v| {
-                if let Some((_, lv)) = v.lists.iter_mut().find(|(l, _)| *l == list) {
-                    lv.loading = false;
-                    match result {
-                        Ok(t) => lv.tones = t,
-                        Err(e) => lv.error = Some(e),
+                let feed = &mut v.feed;
+                if feed.generation != generation {
+                    return;
+                }
+                feed.loading = false;
+                match result {
+                    Ok(body) => {
+                        let tones: Vec<Tone> = body.get("data").and_then(Value::as_array).map(|a| a.iter().map(parse_tone).collect()).unwrap_or_default();
+                        for t in tones {
+                            if !feed.tones.iter().any(|x| x.id == t.id) {
+                                feed.tones.push(t);
+                            }
+                        }
+                        feed.page = page;
+                        feed.total = uint_of(&body, "total").max(feed.tones.len() as u64);
+                        feed.total_pages = uint_of(&body, "total_pages").max(page);
                     }
+                    Err(e) => feed.error = Some(e),
                 }
             });
         });
     }
 
-    /// Opens a tone: fetches its models (A2 first, then A1; or its IRs).
+    /// Opens a tone: fetches its files (A2 first, then A1; or its IRs).
     pub fn open_tone(self: &Arc<Self>, tone: Tone) {
         self.update(|v| {
             v.tone = Some(tone.clone());
             v.models = None;
             v.models_error = None;
+            v.download_error = None;
         });
         let me = self.clone();
         std::thread::spawn(move || {
@@ -512,7 +783,7 @@ impl Session {
         });
     }
 
-    /// Back from a tone to its list.
+    /// Back from a tone to the cards.
     pub fn close_tone(&self) {
         self.update(|v| {
             v.tone = None;
@@ -520,7 +791,79 @@ impl Session {
         });
     }
 
-    /// Downloads `model` of `tone` and puts it in `slot`.
+    /// Favourites a tone on the site, or takes it back.
+    pub fn set_favorite(self: &Arc<Self>, tone_id: u64, on: bool) {
+        let flip = move |v: &mut View, on: bool| {
+            let delta = move |t: &mut Tone| {
+                if t.id == tone_id && t.is_favorite != on {
+                    t.is_favorite = on;
+                    t.favorites = if on { t.favorites + 1 } else { t.favorites.saturating_sub(1) };
+                }
+            };
+            v.feed.tones.iter_mut().for_each(delta);
+            if let Some(t) = &mut v.tone {
+                delta(t);
+            }
+        };
+        self.update(|v| flip(v, on));
+        let me = self.clone();
+        std::thread::spawn(move || {
+            let result = me.access().and_then(|token| {
+                let url = format!("{API}/tones/{tone_id}/favorite");
+                let req = if on { agent().put(&url) } else { agent().delete(&url) };
+                answer(req.set("Authorization", &format!("Bearer {token}")).call()).map(|_| ()).map_err(|e| e.to_string())
+            });
+            if result.is_err() {
+                me.update(|v| flip(v, !on));
+            }
+        });
+    }
+
+    /// The cover image at `url`, once fetched (asks for it the first time).
+    pub fn image(self: &Arc<Self>, url: &str) -> Option<Arc<Thumb>> {
+        let mut im = self.images.lock().unwrap_or_else(|e| e.into_inner());
+        match im.states.get(url) {
+            Some(ImageState::Ready(t)) => return Some(t.clone()),
+            Some(_) => return None,
+            None => {}
+        }
+        im.states.insert(url.to_owned(), ImageState::Queued);
+        im.queue.push_back(url.to_owned());
+        if im.workers < IMAGE_WORKERS {
+            im.workers += 1;
+            let me = self.clone();
+            std::thread::spawn(move || me.image_worker());
+        }
+        None
+    }
+
+    fn image_worker(&self) {
+        loop {
+            let next = {
+                let mut im = self.images.lock().unwrap_or_else(|e| e.into_inner());
+                match im.queue.pop_back() {
+                    Some(u) => u,
+                    None => {
+                        im.workers -= 1;
+                        return;
+                    }
+                }
+            };
+            let thumb = answer(agent().get(&next).call()).ok().and_then(|resp| {
+                let mut bytes = Vec::new();
+                resp.into_reader().take(16 << 20).read_to_end(&mut bytes).ok()?;
+                decode_image(&bytes)
+            });
+            let state = match thumb {
+                Some(t) => ImageState::Ready(Arc::new(t)),
+                None => ImageState::Failed,
+            };
+            self.images.lock().unwrap_or_else(|e| e.into_inner()).states.insert(next, state);
+            self.changed();
+        }
+    }
+
+    /// Downloads `model` of `tone` (or takes the copy on disk) and puts it in `slot`.
     pub fn download(self: &Arc<Self>, tone: Tone, model: Model, slot: Slot, rig: Arc<Rig>) {
         self.update(|v| {
             v.downloading = Some(model.id);
@@ -531,7 +874,7 @@ impl Session {
             let result = me.fetch_file(&tone, &model);
             match result {
                 Ok(path) => {
-                    let source = Source { tone_id: tone.id, model_id: model.id, title: tone.title.clone(), creator: tone.creator.clone(), license: tone.license.clone(), url: tone.url.clone() };
+                    let source = Source3k { tone_id: tone.id, model_id: model.id, title: tone.title.clone(), creator: tone.creator.clone(), license: tone.license.clone(), url: tone.url.clone() };
                     rig.set_file(slot, SlotFile { path: Some(path), source: Some(source) });
                     me.update(|v| v.downloading = None);
                 }
@@ -547,11 +890,8 @@ impl Session {
         if model.url.is_empty() {
             return Err("this file has no download address".to_owned());
         }
-        let dir = settings_dir().ok_or("no settings folder")?.join("TONE3000").join(format!("{}-{}", tone.id, safe_name(&tone.title)));
-        let ext = if model.kind == "IR" { "wav" } else { "nam" };
-        let url_name = model.url.split('?').next().unwrap_or_default().rsplit('/').next().unwrap_or_default();
-        let name = if url_name.contains('.') { safe_name(url_name) } else { format!("{}.{ext}", safe_name(&model.name)) };
-        let path = dir.join(name);
+        let path = local_path(tone, model).ok_or("no settings folder")?;
+        let dir = path.parent().map(PathBuf::from).ok_or("no settings folder")?;
         if path.is_file() {
             return Ok(path);
         }
@@ -594,6 +934,20 @@ pub fn open_in_browser(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn searches_and_lists_ask_for_the_right_page() {
+        let q = Query { text: "plexi 1959".into(), gear: Gear::Amp, sort: Sort::BestMatch, a1: false };
+        assert_eq!(q.path(Source::Search, 3), "/tones/search?page=3&page_size=24&sort=best-match&query=plexi%201959&gears=amp&architecture=2");
+        // No words: "best match" means nothing, trending instead; cabs are IRs, any generation.
+        let q = Query { gear: Gear::Cab, sort: Sort::BestMatch, ..Query::default() };
+        assert_eq!(q.path(Source::Search, 1), "/tones/search?page=1&page_size=24&sort=trending&format=ir");
+        assert_eq!(Query::default().path(Source::Favorites, 2), "/tones/favorited?page=2&page_size=24");
+        let feed = Feed { page: 1, total_pages: 3, ..Feed::default() };
+        assert!(feed.more());
+        assert!(!Feed { loading: true, ..feed.clone() }.more());
+        assert!(!Feed { page: 3, ..feed }.more());
+    }
 
     #[test]
     fn tones_and_models_read_from_the_apis_shapes() {

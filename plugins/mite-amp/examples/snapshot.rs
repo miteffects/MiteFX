@@ -76,10 +76,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rms = |v: &[f32]| 10.0 * (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).log10();
         println!("in peak {:.1} rms {:.1} | out peak {:.1} rms {:.1}", peak(&rig::guitar(3.0, fs)), rms(&rig::guitar(3.0, fs)), peak(&l), rms(&l));
     }
+    let ui_t3k = ui.tone3000.clone();
     let mut view = AmpView::new(ui).with_preset_dir(std::env::temp_dir().join("mite-amp-snapshot-presets"));
     view.settle();
-    if v("browser") {
+    if v("browser") || v("detail") {
         view.open_browser(Slot::Amp);
+        // Live TONE3000 (the signed-in session on this computer): wait for the cards, their
+        // covers and, for "detail", the first tone's files.
+        let t0 = std::time::Instant::now();
+        let mut opened = false;
+        while t0.elapsed() < std::time::Duration::from_secs(25) {
+            view.tick(&host);
+            let tv = ui_t3k.view();
+            if v("detail") && !opened && !tv.feed.tones.is_empty() {
+                ui_t3k.open_tone(tv.feed.tones[0].clone());
+                opened = true;
+            }
+            let covers = tv.feed.tones.iter().take(8).filter_map(|t| t.image.clone()).all(|u| ui_t3k.image(&u).is_some());
+            if !tv.feed.tones.is_empty() && covers && (!v("detail") || tv.models.is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
     view.tick(&host);
     if let Ok(xy) = std::env::var("SNAPSHOT_HOVER") {

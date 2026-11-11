@@ -62,14 +62,26 @@ width, AVX2/FMA chosen at run time: A2 Full 5.4 % of a core at 48 kHz (C++ 5.0 %
 
 ## 6. TONE3000
 
-Device sign-in (the plugin shows a code; the user enters it at tone3000.com/activate), the
-session kept in the settings folder. Lists: Favorites, Downloaded, My Tones, Trending, Latest; a
-tone's files (A2 first, then the rest; IRs for the Cab); a click downloads into the slot, under
-the settings folder's `TONE3000/<tone>/`, with an `about-tone3000.json` of creator and license.
-Branded as their terms ask ("Powered by TONE3000", a way to the full site).
+All inside the plugin (user, 2026-11-11: "make it usable just like ToneX"); only the one-time
+sign-in opens TONE3000's page (its device flow: the plugin shows a code, the user confirms it on
+the site; the session is kept in the settings folder). The panel covers the display:
+
+- Search (as you pause typing; Enter at once), signed-in user, sign out, close.
+- Left: Explore, Favorites, Downloaded, My Tones; Explore's gear filter (amps, pedals, full rigs,
+  cabs/IRs, outboard). Above the cards: order (trending, most downloaded, newest, best match) and
+  A2/A1.
+- Cards: the cover image (JPEG/PNG, fetched by four workers, scaled to 480 px), gear and A2
+  chips, title, maker and creator, file count, favourites, downloads, license, a heart that
+  favourites on the site. Pages of 24 load as you scroll ("Showing N of M").
+- Detail (a card picked): cover, title, maker, creator, license and tags, favourite, a link to
+  the tone's page, its files (A2 first) each with Pedal/Amp buttons (IRs: Cab) that download once
+  (kept under `TONE3000/<tone>/` with `about-tone3000.json`) and load into the slot while the rig
+  keeps playing, and the description.
 
 MiteFX's publishable key is built in (2026-11-11; overridable by `MITEFX_TONE3000_CLIENT_ID` or
-`<settings>/tone3000.json`). Free tier = non-commercial (this is GPL and free).
+`<settings>/tone3000.json`). Free tier = non-commercial (this is GPL and free); the search
+endpoint is outside the free tier's listed endpoints in TONE3000's terms but answers this key —
+ask support@tone3000.com if they object.
 
 ## 7. Open
 
