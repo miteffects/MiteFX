@@ -247,37 +247,37 @@ enum Hot {
     Palette(usize),
 }
 
-/// The palette, in groups, in a guitarist's order (what comes first in a chain first); `None` is
-/// a split.
-const GROUPS: [(&str, &[Option<Kind>]); 7] = [
-    ("UTILITY", &[Some(Kind::Tuner), Some(Kind::Volume)]),
-    ("DYNAMICS", &[Some(Kind::Gate), Some(Kind::Comp)]),
-    ("DRIVE · AMP", &[Some(Kind::Boost), Some(Kind::Pedal), Some(Kind::Amp), Some(Kind::Cab)]),
-    ("FILTER", &[Some(Kind::Wah), Some(Kind::Tone), Some(Kind::Eq)]),
-    ("MODULATION", &[Some(Kind::Mod), Some(Kind::Tremolo), Some(Kind::Double)]),
-    ("TIME", &[Some(Kind::Delay), Some(Kind::Reverb)]),
-    ("ROUTING", &[None]),
+/// The palette (and the + menu), in a guitarist's order (what comes first in a chain first);
+/// `None` is a split.
+const PALETTE_ITEMS: [Option<Kind>; 18] = [
+    Some(Kind::Tuner),
+    Some(Kind::Volume),
+    Some(Kind::Gate),
+    Some(Kind::Comp),
+    Some(Kind::Boost),
+    Some(Kind::Octaver),
+    Some(Kind::Wah),
+    Some(Kind::Pedal),
+    Some(Kind::Amp),
+    Some(Kind::Cab),
+    Some(Kind::Tone),
+    Some(Kind::Eq),
+    Some(Kind::Mod),
+    Some(Kind::Tremolo),
+    Some(Kind::Double),
+    Some(Kind::Delay),
+    Some(Kind::Reverb),
+    None,
 ];
-const PALETTE_LEN: usize = 17;
-/// Between groups.
-const GROUP_GAP: f64 = 14.0;
+const PALETTE_LEN: usize = PALETTE_ITEMS.len();
 
-/// Item `i` of the palette (counting through the groups): its kind and its group.
 fn palette_entry(i: usize) -> (Option<Kind>, usize) {
-    let mut k = i;
-    for (g, (_, items)) in GROUPS.iter().enumerate() {
-        if k < items.len() {
-            return (items[k], g);
-        }
-        k -= items.len();
-    }
-    (None, GROUPS.len() - 1)
+    (PALETTE_ITEMS[i], 0)
 }
 
 fn palette_item(i: usize) -> Rect {
-    let w = (PALETTE.width() - 12.0 - GROUP_GAP * (GROUPS.len() - 1) as f64) / PALETTE_LEN as f64;
-    let (_, g) = palette_entry(i);
-    let x = PALETTE.x0 + 6.0 + i as f64 * w + g as f64 * GROUP_GAP;
+    let w = (PALETTE.width() - 12.0) / PALETTE_LEN as f64;
+    let x = PALETTE.x0 + 6.0 + i as f64 * w;
     Rect::new(x, PALETTE.y0, x + w, PALETTE.y1)
 }
 
@@ -299,22 +299,12 @@ struct Menu {
 }
 
 impl Menu {
-    /// The entries by group; a group's name is an entry with no kind and no lanes (a heading,
-    /// not clickable).
+    /// The entries, in the palette's order (splits only on the main chain).
     fn entries(&self) -> Vec<(Option<Kind>, usize, &'static str, &'static str)> {
-        let mut e = Vec::new();
-        for (name, items) in GROUPS {
-            if items.iter().all(Option::is_none) {
-                // Splits: only on the main chain.
-                if matches!(self.place, Place::Main(_)) {
-                    e.push((None, 0, name, ""));
-                    e.push((None, 2, "Split · 2 lanes", "Fork the chain into two lanes that merge again"));
-                    e.push((None, 3, "Split · 3 lanes", "Fork the chain into three lanes that merge again"));
-                }
-                continue;
-            }
-            e.push((None, 0, name, ""));
-            e.extend(items.iter().flatten().map(|k| (Some(*k), 0, k.name(), k.words())));
+        let mut e: Vec<_> = PALETTE_ITEMS.iter().flatten().map(|k| (Some(*k), 0, k.name(), k.words())).collect();
+        if matches!(self.place, Place::Main(_)) {
+            e.push((None, 2, "Split · 2 lanes", "Fork the chain into two lanes that merge again"));
+            e.push((None, 3, "Split · 3 lanes", "Fork the chain into three lanes that merge again"));
         }
         e
     }
@@ -618,17 +608,6 @@ impl RigView {
         let theme = cx.theme;
         let shape = RoundedRect::from_rect(PALETTE, 12.0);
         panel(cx.scene, shape, theme.panel_control, theme.panel_control_border);
-        // Each group: its name over its items, a thin line between groups.
-        let mut first = 0;
-        for (g, (name, items)) in GROUPS.iter().enumerate() {
-            let (a, b) = (palette_item(first), palette_item(first + items.len() - 1));
-            cx.text.draw(cx.scene, name, (a.x0 + b.x1) / 2.0, PALETTE.y0 + 6.0, TextStyle::LABEL.sized(8.0), theme.text_lo, Align::Center);
-            if g > 0 {
-                let x = a.x0 - GROUP_GAP / 2.0;
-                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((x, PALETTE.y0 + 10.0), (x, PALETTE.y1 - 10.0)));
-            }
-            first += items.len();
-        }
         for i in 0..PALETTE_LEN {
             let item = &palette_entry(i).0;
             let r = palette_item(i);
@@ -636,10 +615,12 @@ impl RigView {
             if hot {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.08), None, &RoundedRect::from_rect(r.inset(-3.0), 8.0));
             }
-            self.item_icon(cx, *item, 2, Point::new(r.center().x, r.y0 + 38.0), 0.5, hot);
+            // As large as the slot allows (a stompbox larger than an amp head).
+            let scale = item.map_or(0.62, |k| ((r.width() - 4.0) / shapes::width(shapes::Look::of(k, Gear::Amp))).min(0.8));
+            self.item_icon(cx, *item, 2, Point::new(r.center().x, r.y0 + 34.0), scale, hot);
             let name = item.map_or("Split", Kind::name);
             let name = Self::fit(cx, name, TextStyle::BODY.sized(10.5).weighted(700.0), r.width() - 4.0);
-            cx.text.draw(cx.scene, &name, r.center().x, r.y0 + 62.0, TextStyle::BODY.sized(10.5).weighted(700.0), if hot { theme.text_strong } else { theme.text_mid }, Align::Center);
+            cx.text.draw(cx.scene, &name, r.center().x, r.y0 + 64.0, TextStyle::BODY.sized(10.5).weighted(700.0), if hot { theme.text_strong } else { theme.text_mid }, Align::Center);
         }
     }
 
@@ -1035,11 +1016,6 @@ impl RigView {
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.glass_border, None, &shape);
         for (i, (kind, lanes, name, words)) in m.entries().iter().enumerate() {
             let row = m.row(i);
-            if kind.is_none() && *lanes == 0 {
-                // A group's heading.
-                cx.text.draw(cx.scene, name, row.x0 + 10.0, row.y1 - 15.0, TextStyle::LABEL.sized(9.0), theme.accent, Align::Left);
-                continue;
-            }
             if self.hot == Some(Hot::Menu(i)) {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.14), None, &RoundedRect::from_rect(row, 6.0));
             }

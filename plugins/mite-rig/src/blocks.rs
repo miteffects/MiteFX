@@ -46,6 +46,7 @@ pub enum Kind {
     Double,
     Tuner,
     Wah,
+    Octaver,
 }
 
 /// A block's parameter: its spec (the id is frozen), and whether it is a switch.
@@ -92,7 +93,7 @@ const BOOST: [BlockParam; 1] = [knob(spec("gain", "Gain", "dB", 0.0, 24.0, 6.0, 
 const VOLUME: [BlockParam; 1] = [knob(spec("volume", "Volume", "%", 0.0, 100.0, 100.0, LIN, 0, (1.0, 0.1), NUM))];
 
 impl Kind {
-    pub const ALL: [Kind; 16] = [
+    pub const ALL: [Kind; 17] = [
         Kind::Pedal,
         Kind::Amp,
         Kind::Cab,
@@ -109,6 +110,7 @@ impl Kind {
         Kind::Reverb,
         Kind::Tuner,
         Kind::Wah,
+        Kind::Octaver,
     ];
 
     /// The frozen id saved with the board.
@@ -122,6 +124,7 @@ impl Kind {
             Kind::Boost => "boost",
             Kind::Volume => "volume",
             Kind::Wah => "wah",
+            Kind::Octaver => "octaver",
             Kind::Comp => "comp",
             Kind::Eq => "eq",
             Kind::Delay => "delay",
@@ -158,6 +161,7 @@ impl Kind {
             Kind::Boost => "Boost",
             Kind::Volume => "Volume",
             Kind::Wah => "Wah",
+            Kind::Octaver => "Octaver",
             Kind::Comp => "Comp",
             Kind::Eq => "EQ",
             Kind::Delay => "Delay",
@@ -180,6 +184,7 @@ impl Kind {
             Kind::Boost => "A clean boost",
             Kind::Volume => "A volume pedal",
             Kind::Wah => "A wah: rock the pedal, or Auto (it follows the picking)",
+            Kind::Octaver => "Octaves down and up and a free interval: Poly (chords) or Mono (the analog way)",
             Kind::Comp => "A compressor (Mite Comp's): even out the picking, add sustain",
             Kind::Eq => "A seven-band graphic EQ",
             Kind::Delay => "Echoes (Mite Delay's): digital, tape or bucket brigade",
@@ -202,6 +207,7 @@ impl Kind {
             Kind::Eq => &crate::pedals::EQ,
             Kind::Tremolo => &crate::pedals::TREMOLO,
             Kind::Wah => &crate::pedals::WAH,
+            Kind::Octaver => &crate::pedals::OCTAVER,
             // The suite's plugins: their whole parameter sets.
             _ => crate::embed::params(self).unwrap_or(&[]),
         }
@@ -263,6 +269,7 @@ pub fn build(live: &crate::board::Live, fs: f32) -> Box<dyn Unit> {
         Kind::Eq => Box::new(crate::pedals::EqUnit::new(fs)),
         Kind::Tremolo => Box::new(crate::pedals::TremoloUnit::new(fs)),
         Kind::Wah => Box::new(crate::pedals::WahUnit::new(fs)),
+        Kind::Octaver => Box::new(crate::pedals::OctaverUnit::new(fs)),
         _ => unreachable!("the suite's plugins are embedded"),
     }
 }

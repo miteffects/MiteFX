@@ -41,7 +41,7 @@ come from TONE3000 captures); Mite Amp is replaced.
 | Doubler | `mite_dsp::doubler` (Mite Double) | 2 |
 | Tuner | `mite_dsp::pitch` (Mite Tuner), mutes while tuning | 2 |
 | Wah / auto-wah | new: a TPT state-variable band-pass swept heel→toe (pedal, or Auto on the envelope); built 2026-11-11 | 4 |
-| Octaver / pitch | new (`mite_dsp::modulation` micro pitch as a start) | 4 |
+| Octaver / pitch | new: −1, −2, +1 octave and a free interval (±24 st), each with its level, over the dry; Poly (a shifter splicing where the signal matches best, `pedals::Splicer`) or Mono (flip-flop sub-octaves and a rectified octave up, zero latency); built 2026-11-11 | 4 |
 
 **Built (2026-11-11):** slice 1 and slice 2 (every block of the table but wah and octaver; the
 Mod pedal offers Chorus/Ensemble/Flanger/Phaser/Vibrato/Rotary). Each block is drawn as what it
@@ -71,8 +71,9 @@ snapshots A–D inside a block are not saved with the board; its user presets ar
 - **Splits** (2026-11-11, user): a Mix (the lanes against the dry input, in time) and a routing:
   Parallel, L / R (lane 1 the left, lane 2 the right) or M / S (lane 1 the mid, lane 2 the side);
   a third lane always gets the whole signal. A routing change dips for 5 ms (no click).
-- **Palette** (2026-11-11, user): grouped (Utility, Dynamics, Drive · Amp, Filter, Modulation,
-  Time, Routing; the + menu too, in three columns). Under the simple view, every block (and a split) as an icon,
+- **Palette** (2026-11-11, user): one row in a guitarist's order, no group headings (the user
+  dropped them: they cost the icons room), each icon as large as its slot allows; the + menu in
+  the same order, in three columns. Under the simple view, every block (and a split) as an icon,
   always there: drag one onto a + in the chain, or click to add it after the selected block. The +
   menu shows the same icons. Each kind wears its plugin's accent (Comp's, Delay's, …; captures and
   cabinets the Rig's), and a capture or cabinet loaded from TONE3000 shows the tone's cover photo

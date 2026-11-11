@@ -39,6 +39,7 @@ pub enum Sign {
     Tremolo,
     Double,
     Tuner,
+    Octave,
 }
 
 impl Look {
@@ -53,6 +54,7 @@ impl Look {
             Kind::Boost => Look::Stomp(Sign::Boost),
             Kind::Volume => Look::Rocker,
             Kind::Wah => Look::Wah,
+            Kind::Octaver => Look::Stomp(Sign::Octave),
             Kind::Comp => Look::Stomp(Sign::Comp),
             Kind::Eq => Look::Stomp(Sign::Eq),
             Kind::Delay => Look::Stomp(Sign::Delay),
@@ -106,6 +108,7 @@ pub fn accent_key(kind: Kind) -> &'static str {
         Kind::Eq => "eq",
         Kind::Volume => "utility",
         Kind::Wah => "soothe",
+        Kind::Octaver => "pitch",
         Kind::Mod => "mod",
         Kind::Tremolo => "shape",
         Kind::Double => "double",
@@ -227,6 +230,17 @@ fn sign(cx: &mut DrawCx<'_>, s: Sign, c: Point, ink: &Ink) {
             p.quad_to((c.x, c.y - 3.0), (c.x + 10.0, c.y + 3.0));
         }
         // A needle over a scale.
+        // A wave and, under it, the same at half the frequency.
+        Sign::Octave => {
+            p.move_to((c.x - 11.0, c.y - 3.0));
+            p.quad_to((c.x - 8.25, c.y - 9.0), (c.x - 5.5, c.y - 3.0));
+            p.quad_to((c.x - 2.75, c.y + 3.0), (c.x, c.y - 3.0));
+            p.quad_to((c.x + 2.75, c.y - 9.0), (c.x + 5.5, c.y - 3.0));
+            p.quad_to((c.x + 8.25, c.y + 3.0), (c.x + 11.0, c.y - 3.0));
+            p.move_to((c.x - 11.0, c.y + 5.0));
+            p.quad_to((c.x - 5.5, c.y - 1.0), (c.x, c.y + 5.0));
+            p.quad_to((c.x + 5.5, c.y + 11.0), (c.x + 11.0, c.y + 5.0));
+        }
         Sign::Tuner => {
             p.move_to((c.x - 9.0, c.y + 4.0));
             p.quad_to((c.x, c.y - 4.0), (c.x + 9.0, c.y + 4.0));
@@ -374,6 +388,17 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             }
             out
         }
+    }
+}
+
+/// How wide a look is drawn (at board size).
+pub fn width(look: Look) -> f64 {
+    match look {
+        Look::Stomp(_) => 60.0,
+        Look::Head => 108.0,
+        Look::Combo => 88.0,
+        Look::Cabinet => 64.0,
+        Look::Rocker | Look::Wah => 68.0,
     }
 }
 

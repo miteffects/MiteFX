@@ -39,7 +39,7 @@ fn engine_process_never_allocates() {
                 100 => {
                     board.insert(Kind::Boost, Place::Main(0));
                     // Every pedal of the suite, after the amp.
-                    for kind in [Kind::Comp, Kind::Eq, Kind::Mod, Kind::Tremolo, Kind::Double, Kind::Delay, Kind::Reverb, Kind::Tuner, Kind::Wah] {
+                    for kind in [Kind::Comp, Kind::Eq, Kind::Mod, Kind::Tremolo, Kind::Double, Kind::Delay, Kind::Reverb, Kind::Tuner, Kind::Wah, Kind::Octaver] {
                         board.insert(kind, Place::Main(usize::MAX));
                     }
                 }
