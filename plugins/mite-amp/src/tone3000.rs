@@ -6,8 +6,8 @@
 //! session (refresh token) is kept in the settings folder. Every request runs on a worker
 //! thread; the editor only reads [`Session::view`].
 //!
-//! The publishable key (`client_id`) comes from the build (`MITEFX_TONE3000_CLIENT_ID`) or the
-//! settings folder's `tone3000.json` (`{"client_id": "…"}`). Downloads land in the settings
+//! The publishable key (`client_id`) is MiteFX's, built in; a build or the settings folder's
+//! `tone3000.json` (`{"client_id": "…"}`) can override it. Downloads land in the settings
 //! folder's `TONE3000/<tone>/` with the tone's creator and license kept for attribution.
 
 use std::io::Read as _;
@@ -30,13 +30,17 @@ pub fn settings_dir() -> Option<PathBuf> {
     mite_core::presets::user_dir(crate::presets::PLUGIN).and_then(|p| p.parent().map(PathBuf::from))
 }
 
+/// MiteFX's publishable key (TONE3000: safe to ship in client code; the secret key never is).
+const MITEFX_CLIENT_ID: &str = "t3k_pub_pcHUFdaR-YOb1pUgOltWCWuTEUD7MZcQ";
+
+/// The key: a build's own (`MITEFX_TONE3000_CLIENT_ID`), the settings folder's `tone3000.json`,
+/// or MiteFX's.
 fn client_id() -> Option<String> {
     if let Some(id) = option_env!("MITEFX_TONE3000_CLIENT_ID").filter(|s| !s.is_empty()) {
         return Some(id.to_owned());
     }
-    let text = std::fs::read_to_string(settings_dir()?.join("tone3000.json")).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    v.get("client_id").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned)
+    let from_file = settings_dir().and_then(|d| std::fs::read_to_string(d.join("tone3000.json")).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("client_id").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned));
+    Some(from_file.unwrap_or_else(|| MITEFX_CLIENT_ID.to_owned()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

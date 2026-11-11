@@ -586,8 +586,8 @@ Accent linen.
   delayed to match.
 - TONE3000 inside the plugin (device sign-in, the user's lists, downloads into a slot).
 
-**Status (2026-11-11):** built; all tests pass, installed. Not yet heard by the user. TONE3000
-waits for the project's publishable key. Brief: `docs/design/amp-brief.md`.
+**Status (2026-11-11):** built; all tests pass, installed. Not yet heard by the user. TONE3000's
+publishable key is built in (2026-11-11). Brief: `docs/design/amp-brief.md`.
 
 Shared engines across the suite:
 - **Filter bank:** EQ, Comp sidechain, Verb decay EQ, DeEss.

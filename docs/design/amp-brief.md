@@ -68,13 +68,12 @@ tone's files (A2 first, then the rest; IRs for the Cab); a click downloads into 
 the settings folder's `TONE3000/<tone>/`, with an `about-tone3000.json` of creator and license.
 Branded as their terms ask ("Powered by TONE3000", a way to the full site).
 
-Needs a publishable key (`client_id`) registered on TONE3000 by the project: from the build
-(`MITEFX_TONE3000_CLIENT_ID`) or `<settings>/tone3000.json`. Free tier = non-commercial (this is
-GPL and free).
+MiteFX's publishable key is built in (2026-11-11; overridable by `MITEFX_TONE3000_CLIENT_ID` or
+`<settings>/tone3000.json`). Free tier = non-commercial (this is GPL and free).
 
 ## 7. Open
 
-- The TONE3000 key (and a check against the live API once there is one).
+- A full sign-in and download against the live API, by the user.
 - Slimmable WaveNets at sizes below full (containers' sizes work).
 - A faster A2 Lite kernel; a mono convolver for long cabinets (the stereo one runs one side idle).
 - Stereo cabinets (two IRs, or a stereo IR kept stereo).
