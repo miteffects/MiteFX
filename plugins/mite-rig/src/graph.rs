@@ -86,9 +86,9 @@ pub enum Stage {
         lanes: Vec<Lane>,
         sum: [Vec<f32>; 2],
         live: Arc<SplitLive>,
-        /// The input, delayed as the longest lane, for the mix.
-        dry: [Delay; 2],
-        mix: LinearSmoother,
+        /// The blend between the lanes, and its values for this block.
+        blend: LinearSmoother,
+        blends: Vec<f32>,
     },
 }
 
@@ -105,6 +105,19 @@ fn pan_gains(p: f32) -> (f32, f32, f32) {
     let p = p.clamp(-1.0, 1.0);
     let theta = (p + 1.0) * std::f32::consts::FRAC_PI_4;
     (std::f32::consts::SQRT_2 * theta.cos(), std::f32::consts::SQRT_2 * theta.sin(), 1.0 - p.abs())
+}
+
+/// Lane `j`'s gain from a split's blend `b` (0…1), `last` its last lane: at the middle every lane
+/// is at unity (the plain sum); towards 0 the last lane fades out, towards 1 the first does
+/// (a crossfader whose centre keeps both); the lanes between stay.
+fn blend_gain(b: f32, j: usize, last: usize) -> f32 {
+    if j == 0 {
+        (2.0 * (1.0 - b)).min(1.0)
+    } else if j == last {
+        (2.0 * b).min(1.0)
+    } else {
+        1.0
+    }
 }
 
 impl Graph {
@@ -136,12 +149,12 @@ impl Graph {
                         })
                         .collect(),
                     sum: [vec![0.0; SUB], vec![0.0; SUB]],
-                    dry: [Delay::new(MAX_LATENCY), Delay::new(MAX_LATENCY)],
-                    mix: {
-                        let mut sm = LinearSmoother::new(s.live.mix.load());
+                    blend: {
+                        let mut sm = LinearSmoother::new(s.live.blend.load());
                         sm.set_ramp(fs, 20.0);
                         sm
                     },
+                    blends: vec![0.0; SUB],
                     live: s.live.clone(),
                 },
             })
@@ -207,12 +220,12 @@ impl Graph {
         for stage in self.stages.iter_mut() {
             match stage {
                 Stage::Block(n) => n.reset(),
-                Stage::Split { lanes, dry, .. } => {
+                Stage::Split { lanes, blend, live, .. } => {
                     for lane in lanes.iter_mut() {
                         lane.nodes.iter_mut().for_each(Node::reset);
                         lane.comp.iter_mut().for_each(Delay::reset);
                     }
-                    dry.iter_mut().for_each(Delay::reset);
+                    blend.reset(live.blend.load().clamp(0.0, 1.0));
                 }
             }
         }
@@ -229,12 +242,16 @@ impl Graph {
         for stage in self.stages.iter_mut() {
             match stage {
                 Stage::Block(node) => node.process(l, r),
-                Stage::Split { lanes, sum, live, dry, mix } => {
+                Stage::Split { lanes, sum, live, blend, blends } => {
                     let longest = lanes.iter().map(Lane::latency).max().unwrap_or(0);
-                    mix.set_target(live.mix.load().clamp(0.0, 1.0));
+                    blend.set_target(live.blend.load().clamp(0.0, 1.0));
+                    for b in blends[..n].iter_mut() {
+                        *b = blend.next_value();
+                    }
+                    let last = lanes.len().saturating_sub(1);
                     sum[0][..n].fill(0.0);
                     sum[1][..n].fill(0.0);
-                    for lane in lanes.iter_mut() {
+                    for (j, lane) in lanes.iter_mut().enumerate() {
                         lane.l[..n].copy_from_slice(l);
                         lane.r[..n].copy_from_slice(r);
                         let lat = lane.latency();
@@ -249,22 +266,15 @@ impl Graph {
                         lane.pan.set_target(lane.live.pan.load());
                         for i in 0..n {
                             let (gl, gr, w) = pan_gains(lane.pan.next_value());
-                            let g = lane.level.next_value();
+                            let g = lane.level.next_value() * blend_gain(blends[i], j, last);
                             let (yl, yr) = (cl.tick(ll[i]) * g, cr.tick(lr[i]) * g);
                             let (m, sd) = (0.5 * (yl + yr), 0.5 * (yl - yr) * w);
                             sum[0][i] += gl * m + sd;
                             sum[1][i] += gr * m - sd;
                         }
                     }
-                    let [dl, dr] = dry;
-                    dl.delay = longest;
-                    dr.delay = longest;
-                    for i in 0..n {
-                        let m = mix.next_value();
-                        let (xl, xr) = (dl.tick(l[i]), dr.tick(r[i]));
-                        l[i] = xl + m * (sum[0][i] - xl);
-                        r[i] = xr + m * (sum[1][i] - xr);
-                    }
+                    l.copy_from_slice(&sum[0][..n]);
+                    r.copy_from_slice(&sum[1][..n]);
                 }
             }
         }
@@ -336,15 +346,15 @@ mod tests {
     }
 
     /// Pan moves a lane across at the same loudness: hard right, a mono lane is all on the right
-    /// (√2: the power it had on both sides); a mix of 0 is the dry input.
+    /// (√2: the power it had on both sides); a blend of 1 leaves only the last lane.
     #[test]
-    fn a_lane_pans_across_and_a_split_mixes() {
-        for (pan, mix) in [(1.0f32, 1.0f32), (-1.0, 1.0), (0.5, 1.0), (1.0, 0.0)] {
+    fn a_lane_pans_across_and_a_split_blends() {
+        for (pan, blend) in [(1.0f32, 0.5f32), (-1.0, 0.5), (0.5, 0.0), (1.0, 1.0)] {
             let board = Board::new();
             board.insert_split(0, 2);
             let items = board.items();
             if let Item::Split(s) = &items[0] {
-                s.live.mix.store(mix);
+                s.live.blend.store(blend);
                 s.lanes[0].live.pan.store(pan);
                 s.lanes[1].live.level_db.store(-120.0);
             }
@@ -353,8 +363,9 @@ mod tests {
             let (l, r) = run(&mut g, &x);
             let rms = |v: &[f32]| (v[2000..].iter().map(|a| a * a).sum::<f32>() / (v.len() - 2000) as f32).sqrt();
             let (pl, pr, px) = (rms(&l), rms(&r), rms(&x));
-            if mix == 0.0 {
-                assert!((pl - px).abs() < 1e-4 && (pr - px).abs() < 1e-4, "dry: {pl} {pr}");
+            if blend == 1.0 {
+                // Only the last lane (silenced here) is left.
+                assert!(pl < 1e-4 && pr < 1e-4, "blend 1: {pl} {pr}");
                 continue;
             }
             // The power is the centre's (both sides at x) wherever it is panned.

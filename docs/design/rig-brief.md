@@ -68,7 +68,10 @@ never waits. Boards saved by slice 2 load with their pedal values renamed to the
 delay's tone and the doubler's width and level had no counterpart and go). Not yet: a plugin's
 snapshots A–D inside a block are not saved with the board; its user presets are the plugin's own.
 
-- **Splits** (2026-11-11, user): a Mix (the lanes against the dry input, in time). Each lane's pan
+- **Splits** (2026-11-11, user): a Blend between the lanes (default 50 %: every lane at its
+  level; towards 0 the last lane fades out, towards 100 % the first, a crossfader whose centre
+  keeps both; lanes between stay). A Mix against the dry input came first and was dropped the same
+  day ("I didn't mean mix with input but blend"); boards saved with it load at 50 %. Each lane's pan
   moves its sound across at constant power (its middle panned, its sides narrowing to nothing at a
   hard pan): the first pan was a balance, which only turned a side down ("it just gets quieter").
   Captures and cabinets used to play the sum of both channels, so a split's pans (and partly its

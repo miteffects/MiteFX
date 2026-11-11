@@ -150,27 +150,27 @@ impl ParamHost for BlockHost<'_> {
 const LANE_LEVEL: ParamSpec = ParamSpec { id: "level", name: "Level", unit: "dB", min: -60.0, max: 12.0, default: 0.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 1, wheel_step: 0.5, wheel_step_fine: 0.1, display: ParamDisplay::Number };
 const LANE_PAN: ParamSpec = ParamSpec { id: "pan", name: "Pan", unit: "", min: -1.0, max: 1.0, default: 0.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 2, wheel_step: 0.05, wheel_step_fine: 0.01, display: ParamDisplay::Number };
 
-const SPLIT_MIX: ParamSpec = ParamSpec { id: "mix", name: "Mix", unit: "%", min: 0.0, max: 100.0, default: 100.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 0, wheel_step: 1.0, wheel_step_fine: 0.1, display: ParamDisplay::Number };
+const SPLIT_BLEND: ParamSpec = ParamSpec { id: "blend", name: "Blend", unit: "%", min: 0.0, max: 100.0, default: 50.0, scale: ParamScale::Linear, smoothing_ms: 20.0, decimals: 0, wheel_step: 1.0, wheel_step_fine: 0.1, display: ParamDisplay::Number };
 
-/// A split's mix as a `ParamHost` (stored 0…1, shown in %).
+/// A split's blend as a `ParamHost` (stored 0…1, shown in %).
 struct SplitHost<'a>(&'a SplitLive);
 
 impl ParamHost for SplitHost<'_> {
     fn normalized(&self, _id: &str) -> f32 {
-        self.0.mix.load()
+        self.0.blend.load()
     }
     fn plain(&self, _id: &str, normalized: f32) -> f32 {
-        SPLIT_MIX.denormalize(normalized)
+        SPLIT_BLEND.denormalize(normalized)
     }
     fn normalize(&self, _id: &str, plain: f32) -> f32 {
-        SPLIT_MIX.normalize(plain)
+        SPLIT_BLEND.normalize(plain)
     }
     fn default_normalized(&self, _id: &str) -> f32 {
-        1.0
+        0.5
     }
     fn begin_gesture(&self, _id: &str) {}
     fn set_normalized(&self, _id: &str, normalized: f32) {
-        self.0.mix.store(normalized.clamp(0.0, 1.0));
+        self.0.blend.store(normalized.clamp(0.0, 1.0));
     }
     fn end_gesture(&self, _id: &str) {}
 }
@@ -827,7 +827,7 @@ impl RigView {
                     self.knobs.push(Knob::new(LANE_LEVEL, "LEVEL", KnobKind::Bipolar, Point::new(x, KNOB_Y), KNOB_D).with_id(format!("{j}:level")));
                     self.knobs.push(Knob::new(LANE_PAN, "PAN", KnobKind::Bipolar, Point::new(x + KNOB_STEP, KNOB_Y), KNOB_D).with_id(format!("{j}:pan")));
                 }
-                self.knobs.push(Knob::new(SPLIT_MIX, "MIX", KnobKind::Unipolar, Point::new(KNOB_X0 + n as f64 * 2.0 * KNOB_STEP, KNOB_Y), KNOB_D).with_id("mix".to_owned()));
+                self.knobs.push(Knob::new(SPLIT_BLEND, "BLEND", KnobKind::Bipolar, Point::new(KNOB_X0 + n as f64 * 2.0 * KNOB_STEP, KNOB_Y), KNOB_D).with_id("blend".to_owned()));
             }
             None => {}
         }
@@ -1482,7 +1482,7 @@ impl RigView {
             Some(Selection::Split(id)) => {
                 if let (Some(lanes), Some(split)) = (self.split_lanes(id), self.split_live(id)) {
                     for k in &self.knobs {
-                        if k.id == "mix" {
+                        if k.id == "blend" {
                             let host = SplitHost(&split);
                             let mut sub = DrawCx { scene: &mut *cx.scene, theme: cx.theme, text: &mut *cx.text, host: &host, size: cx.size, fx: &mut *cx.fx };
                             k.draw(&mut sub);
@@ -1815,7 +1815,7 @@ impl RigView {
                 Some(Selection::Split(id)) => {
                     if let (Some(lanes), Some(split)) = (self.split_lanes(id), self.split_live(id)) {
                         for k in &mut self.knobs {
-                            if k.id == "mix" {
+                            if k.id == "blend" {
                                 if k.event(event, &SplitHost(&split)) {
                                     self.ui.board.touch();
                                     return true;

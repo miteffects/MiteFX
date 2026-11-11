@@ -133,14 +133,15 @@ impl Live {
     }
 }
 
-/// A split's mix: the lanes against the dry input, 0…1.
+/// A split's blend between its lanes, 0…1: at 0.5 every lane at its level; towards 0 the last
+/// lane fades out (only the first is left at 0), towards 1 the first does.
 pub struct SplitLive {
-    pub mix: AtomicF32,
+    pub blend: AtomicF32,
 }
 
 impl SplitLive {
     pub fn new() -> Self {
-        Self { mix: AtomicF32::new(1.0) }
+        Self { blend: AtomicF32::new(0.5) }
     }
 }
 
@@ -247,12 +248,12 @@ struct BlockDoc {
     file: Option<SlotFile>,
 }
 
-fn full() -> f32 {
-    1.0
+fn half() -> f32 {
+    0.5
 }
 
-fn is_full(v: &f32) -> bool {
-    (*v - 1.0).abs() < 1e-6
+fn is_half(v: &f32) -> bool {
+    (*v - 0.5).abs() < 1e-6
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -276,8 +277,12 @@ enum ItemDoc {
         /// pans place the lanes): read and ignored.
         #[serde(default, skip_serializing)]
         routing: u32,
-        #[serde(default = "full", skip_serializing_if = "is_full")]
+        /// A mix against the dry input, built and dropped the same day (the user wanted a blend
+        /// between the lanes): read and ignored.
+        #[serde(default, skip_serializing)]
         mix: f32,
+        #[serde(default = "half", skip_serializing_if = "is_half")]
+        blend: f32,
     },
 }
 
@@ -513,7 +518,7 @@ impl Board {
                 .iter()
                 .map(|i| match i {
                     Item::Block(b) => ItemDoc::Block(block_doc(b)),
-                    Item::Split(s) => ItemDoc::Split { id: s.id, lanes: s.lanes.iter().map(|l| LaneDoc { level_db: l.live.level_db.load(), pan: l.live.pan.load(), blocks: l.blocks.iter().map(block_doc).collect() }).collect(), routing: 0, mix: s.live.mix.load() },
+                    Item::Split(s) => ItemDoc::Split { id: s.id, lanes: s.lanes.iter().map(|l| LaneDoc { level_db: l.live.level_db.load(), pan: l.live.pan.load(), blocks: l.blocks.iter().map(block_doc).collect() }).collect(), routing: 0, mix: 0.0, blend: s.live.blend.load() },
                 })
                 .collect(),
         };
@@ -581,7 +586,7 @@ impl Board {
         for item in &doc.items {
             match item {
                 ItemDoc::Block(d) => items.extend(make(d).map(Item::Block)),
-                ItemDoc::Split { id, lanes, mix, .. } => {
+                ItemDoc::Split { id, lanes, blend, .. } => {
                     let old = old_splits.get(id);
                     let lanes: Vec<Lane> = lanes
                         .iter()
@@ -596,7 +601,7 @@ impl Board {
                         .collect();
                     if lanes.len() >= 2 {
                         let live = old.map(|o| o.0.clone()).unwrap_or_else(|| Arc::new(SplitLive::new()));
-                        live.mix.store(mix.clamp(0.0, 1.0));
+                        live.blend.store(blend.clamp(0.0, 1.0));
                         items.push(Item::Split(Split { id: *id, lanes, live }));
                     }
                 }
