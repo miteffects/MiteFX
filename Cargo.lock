@@ -1555,6 +1555,7 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_limit",
  "nih_plug",
  "png",
  "realfft",

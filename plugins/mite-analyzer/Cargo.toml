@@ -27,3 +27,5 @@ realfft = "3.5"
 assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
 baseview.workspace = true
 png = "0.18"
+# Cross-check: the Analyzer after Mite Limit reads what Limit's column reads.
+mite_limit = { path = "../mite-limit" }
