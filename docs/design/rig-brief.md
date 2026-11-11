@@ -37,7 +37,7 @@ come from TONE3000 captures); Mite Amp is replaced.
 | Tremolo | new: sine, square, harmonic, stereo spread (a block of its own: Mite Mod's state stays) | 2 |
 | Delay | `mite_dsp::delay` (Mite Delay) | 2 |
 | Reverb | `mite_dsp::reverb` (Mite Verb) | 2 |
-| Mod | `mite_dsp::modulation` (Mite Mod) + a new tremolo mode | 2 |
+| Mod | `mite_dsp::modulation` (Mite Mod) | 2 |
 | Doubler | `mite_dsp::doubler` (Mite Double) | 2 |
 | Tuner | `mite_dsp::pitch` (Mite Tuner), mutes while tuning | 2 |
 | Wah / auto-wah | new | 4 |
