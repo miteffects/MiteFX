@@ -50,7 +50,7 @@ pub fn cabinet(path: &Path) {
 pub fn fill(board: &Board) {
     let cab = std::env::temp_dir().join("mite-rig-example-cab.wav");
     cabinet(&cab);
-    let source = Source { tone_id: 27156, model_id: 1, title: "Example A2 Amp".into(), creator: "Steven Atkinson".into(), license: "mit".into(), url: "https://www.tone3000.com".into(), gear: "amp".into() };
+    let source = Source { tone_id: 27156, model_id: 1, title: "Example A2 Amp".into(), creator: "Steven Atkinson".into(), license: "mit".into(), url: "https://www.tone3000.com".into(), gear: "amp".into(), image: String::new() };
     for b in board.blocks() {
         match b.kind() {
             Kind::Amp => board.set_file(b.id(), SlotFile { path: Some(models_dir().join("A2.nam")), source: Some(source.clone()) }),

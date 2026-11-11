@@ -6,6 +6,7 @@
 
 use mite_ui::kurbo::{Affine, BezPath, Cap, Circle, Join, Line, Point, Rect, Stroke};
 use mite_ui::peniko::{Color, Fill};
+use mite_ui::vello::Scene;
 use mite_ui::DrawCx;
 
 use crate::blocks::Kind;
@@ -89,8 +90,31 @@ pub fn chamfer(r: Rect, c: f64) -> BezPath {
     p
 }
 
+/// The colour a kind wears (the suite plugin it comes from, or one near its family): the
+/// `color.accent` key in the tokens.
+pub fn accent_key(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Pedal => "sat",
+        Kind::Amp | Kind::Cab => "rig",
+        Kind::Gate => "gate",
+        Kind::Comp => "comp",
+        Kind::Boost => "limit",
+        Kind::Tone => "filter",
+        Kind::Eq => "eq",
+        Kind::Volume => "utility",
+        Kind::Mod => "mod",
+        Kind::Tremolo => "shape",
+        Kind::Double => "double",
+        Kind::Delay => "delay",
+        Kind::Reverb => "verb",
+        Kind::Tuner => "tuner",
+    }
+}
+
 /// Colours for one drawing.
 pub struct Ink {
+    /// Laid over the body (the kind's colour, faint).
+    pub tint: Color,
     pub body: Color,
     pub edge: Color,
     pub detail: Color,
@@ -228,6 +252,7 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             out.line_to((body.x0, body.y0 + 6.0));
             out.close_path();
             fill(cx, &out, ink.body);
+            fill(cx, &out, ink.tint);
             stroke(cx, &out, 1.2, ink.edge);
             for dx in [-15.0, 0.0, 15.0] {
                 knob(cx, Point::new(c.x + dx, body.y0 + 11.0), 4.2, ink);
@@ -249,6 +274,7 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             h.line_to((c.x + 18.0, body.y0));
             stroke(cx, &h, 2.0, ink.edge);
             fill(cx, &out, ink.body);
+            fill(cx, &out, ink.tint);
             stroke(cx, &out, 1.2, ink.edge);
             // The control strip, then the grille.
             let strip = body.y0 + 13.0;
@@ -279,6 +305,7 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             h.line_to((c.x + 14.0, body.y0));
             stroke(cx, &h, 2.0, ink.edge);
             fill(cx, &out, ink.body);
+            fill(cx, &out, ink.tint);
             stroke(cx, &out, 1.2, ink.edge);
             let strip = body.y0 + 12.0;
             stroke(cx, &Line::new((body.x0 + 4.0, strip), (body.x1 - 4.0, strip)), 1.0, ink.detail.multiply_alpha(0.6));
@@ -296,6 +323,7 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             let body = Rect::new(c.x - 32.0, area.y0, c.x + 32.0, area.y1);
             let out = chamfer(body, 5.0);
             fill(cx, &out, ink.body);
+            fill(cx, &out, ink.tint);
             stroke(cx, &out, 1.2, ink.edge);
             for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
                 let p = Point::new(c.x + dx * 15.0, c.y + dy * 14.0);
@@ -316,6 +344,7 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             out.line_to((base.x0, area.y0 + 14.0));
             out.close_path();
             fill(cx, &out, ink.body);
+            fill(cx, &out, ink.tint);
             stroke(cx, &out, 1.2, ink.edge);
             stroke(cx, &Line::new((base.x0 + 4.0, base.y0), (base.x1 - 4.0, base.y0)), 1.0, ink.detail.multiply_alpha(0.6));
             // The tread on the plate.
@@ -330,4 +359,16 @@ pub fn draw(cx: &mut DrawCx<'_>, look: Look, area: Rect, ink: &Ink) -> BezPath {
             out
         }
     }
+}
+
+/// A look drawn small (or large) around `center`, `scale` times its board size: the palette's and
+/// the add menu's icons.
+pub fn draw_icon(cx: &mut DrawCx<'_>, look: Look, center: Point, scale: f64, ink: &Ink) {
+    let mut tmp = Scene::new();
+    {
+        let area = Rect::from_center_size(Point::ZERO, (crate::editor::TILE_W, crate::editor::LOOK_H));
+        let mut sub = DrawCx { scene: &mut tmp, theme: cx.theme, text: &mut *cx.text, host: cx.host, size: cx.size, fx: &mut *cx.fx };
+        draw(&mut sub, look, area, ink);
+    }
+    cx.scene.append(&tmp, Some(Affine::translate(center.to_vec2()) * Affine::scale(scale)));
 }

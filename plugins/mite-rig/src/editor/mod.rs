@@ -31,7 +31,7 @@ use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::rig::{Gear, SlotFile, Status};
 use crate::RigUi;
-pub use board_view::{Layout, AREA};
+pub use board_view::{Layout, AREA, LOOK_H, TILE_W};
 use board_view::{Gap, Tile, CY, IN_X};
 use browser::Browser;
 pub use browser::PANEL as BROWSER_PANEL;
@@ -47,10 +47,13 @@ const HELP_TOP: f64 = DISPLAY_TOP + 620.0;
 const FOOTER_TOP: f64 = HELP_TOP + 28.0;
 
 /// The selected block's view.
-const PANEL: Rect = Rect::new(16.0, AREA.y1 + 10.0, VIEW_W - 76.0, HELP_TOP - 12.0);
+/// Every block, always there: drag one onto a + in the chain.
+const PALETTE: Rect = Rect::new(16.0, HELP_TOP - 12.0 - 86.0, VIEW_W - 76.0, HELP_TOP - 12.0);
+/// The selected block's simple view.
+const PANEL: Rect = Rect::new(16.0, AREA.y1 + 10.0, VIEW_W - 76.0, PALETTE.y0 - 8.0);
 const KNOB_X0: f64 = PANEL.x0 + 430.0;
 const KNOB_STEP: f64 = 112.0;
-const KNOB_Y: f64 = PANEL.y0 + 150.0;
+const KNOB_Y: f64 = PANEL.y0 + 80.0;
 const KNOB_D: f64 = 64.0;
 const BUTTON: f64 = 34.0;
 
@@ -214,6 +217,40 @@ enum Hot {
     Fork(u64),
     Menu(usize),
     Panel(PanelButton),
+    Palette(usize),
+}
+
+/// The palette, in a guitarist's order (what comes first in a chain first); `None` is a split.
+const PALETTE_ITEMS: [Option<Kind>; 16] = [
+    Some(Kind::Tuner),
+    Some(Kind::Gate),
+    Some(Kind::Comp),
+    Some(Kind::Boost),
+    Some(Kind::Pedal),
+    Some(Kind::Amp),
+    Some(Kind::Cab),
+    Some(Kind::Tone),
+    Some(Kind::Eq),
+    Some(Kind::Volume),
+    Some(Kind::Mod),
+    Some(Kind::Tremolo),
+    Some(Kind::Double),
+    Some(Kind::Delay),
+    Some(Kind::Reverb),
+    None,
+];
+
+fn palette_item(i: usize) -> Rect {
+    let w = PALETTE.width() / PALETTE_ITEMS.len() as f64;
+    Rect::new(PALETTE.x0 + i as f64 * w, PALETTE.y0, PALETTE.x0 + (i + 1) as f64 * w, PALETTE.y1)
+}
+
+/// A palette item being dragged towards the chain.
+struct Adding {
+    item: usize,
+    from: Point,
+    at: Point,
+    moving: bool,
 }
 
 /// The add menu, open at an insertion point.
@@ -283,6 +320,12 @@ pub struct RigView {
     items: Vec<Item>,
     /// A block's plugin editor, open over the whole window.
     full: Option<Full>,
+    adding: Option<Adding>,
+    /// Each kind's colour in the theme in use (by `Kind::ALL` order).
+    colors: Option<(mite_ui::ThemeKind, Vec<Color>)>,
+    /// TONE3000 covers on the blocks, and whether one is still on its way.
+    brushes: std::cell::RefCell<std::collections::HashMap<String, mite_ui::peniko::ImageBrush>>,
+    waiting: std::cell::Cell<bool>,
 }
 
 /// A block's own plugin editor (Comp, Delay, …), bound to the block's values.
@@ -331,6 +374,10 @@ impl RigView {
             seen: u64::MAX,
             items,
             full: None,
+            adding: None,
+            colors: None,
+            brushes: Default::default(),
+            waiting: Default::default(),
             ui,
         }
     }
@@ -455,6 +502,150 @@ impl RigView {
             return Some(true);
         }
         Some(handled)
+    }
+
+    /// A kind's colour (its plugin's accent) in the theme in use.
+    fn kind_color(&self, kind: Kind, theme: &mite_ui::Theme) -> Color {
+        let i = Kind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+        self.colors.as_ref().and_then(|(_, c)| c.get(i).copied()).unwrap_or(theme.accent)
+    }
+
+    fn ensure_colors(&mut self, theme: &mite_ui::Theme) {
+        if self.colors.as_ref().map(|c| c.0) != Some(theme.kind) {
+            let colors = Kind::ALL.iter().map(|k| mite_ui::Theme::load(theme.kind, shapes::accent_key(*k)).accent).collect();
+            self.colors = Some((theme.kind, colors));
+        }
+    }
+
+    /// A kind's ink at rest (the palette, the menu, a dragged one).
+    fn kind_ink(&self, kind: Kind, theme: &mite_ui::Theme, hot: bool) -> shapes::Ink {
+        let kc = self.kind_color(kind, theme);
+        shapes::Ink { tint: kc.multiply_alpha(if hot { 0.2 } else { 0.1 }), body: theme.panel_control, edge: kc.multiply_alpha(if hot { 0.95 } else { 0.55 }), detail: theme.text_mid, lit: kc }
+    }
+
+    /// A split's sign: one line forking into `lanes` and merging again.
+    fn fork_sign(cx: &mut DrawCx<'_>, c: Point, w: f64, lanes: usize, color: Color) {
+        let mut p = BezPath::new();
+        let (x0, x1) = (c.x - w / 2.0, c.x + w / 2.0);
+        let h = w * 0.32;
+        for j in 0..lanes {
+            let y = c.y - h + 2.0 * h * j as f64 / (lanes - 1) as f64;
+            p.move_to((x0, c.y));
+            p.curve_to((x0 + w * 0.2, c.y), (x0 + w * 0.12, y), (x0 + w * 0.32, y));
+            p.line_to((x1 - w * 0.32, y));
+            p.curve_to((x1 - w * 0.12, y), (x1 - w * 0.2, c.y), (x1, c.y));
+        }
+        cx.scene.stroke(&Stroke::new(1.8).with_caps(Cap::Round).with_join(Join::Round), Affine::IDENTITY, color, None, &p);
+        for x in [x0, x1] {
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new((x, c.y), 3.0));
+        }
+    }
+
+    /// A palette item's (or a menu entry's) icon around `c`.
+    fn item_icon(&self, cx: &mut DrawCx<'_>, item: Option<Kind>, lanes: usize, c: Point, scale: f64, hot: bool) {
+        let theme = cx.theme;
+        match item {
+            Some(k) => {
+                let ink = self.kind_ink(k, theme, hot);
+                shapes::draw_icon(cx, shapes::Look::of(k, Gear::Amp), c, scale, &ink);
+            }
+            None => Self::fork_sign(cx, c, 64.0 * scale, lanes, if hot { theme.accent } else { theme.text_mid }),
+        }
+    }
+
+    fn draw_palette(&self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
+        let shape = RoundedRect::from_rect(PALETTE, 12.0);
+        panel(cx.scene, shape, theme.panel_control, theme.panel_control_border);
+        for (i, item) in PALETTE_ITEMS.iter().enumerate() {
+            let r = palette_item(i);
+            let hot = self.hot == Some(Hot::Palette(i)) || self.adding.as_ref().is_some_and(|a| a.item == i);
+            if hot {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.08), None, &RoundedRect::from_rect(r.inset(-3.0), 8.0));
+            }
+            self.item_icon(cx, *item, 2, Point::new(r.center().x, r.y0 + 32.0), 0.58, hot);
+            let name = item.map_or("Split", Kind::name);
+            let name = Self::fit(cx, name, TextStyle::BODY.sized(10.5).weighted(700.0), r.width() - 4.0);
+            cx.text.draw(cx.scene, &name, r.center().x, r.y0 + 60.0, TextStyle::BODY.sized(10.5).weighted(700.0), if hot { theme.text_strong } else { theme.text_mid }, Align::Center);
+        }
+    }
+
+    /// The palette item being dragged, under the pointer.
+    fn draw_adding(&self, cx: &mut DrawCx<'_>) {
+        let Some(a) = self.adding.as_ref().filter(|a| a.moving) else { return };
+        self.item_icon(cx, PALETTE_ITEMS[a.item], 2, a.at, 0.9, true);
+    }
+
+    /// Where a palette item clicked (not dragged) goes: after the selected block, or at the end.
+    fn click_place(&self, item: Option<Kind>) -> Place {
+        let end = Place::Main(self.items.len());
+        let at = match self.selected {
+            Some(Selection::Block(id) | Selection::Split(id)) => self.ui.board.place_of(id).or_else(|| self.items.iter().position(|i| matches!(i, Item::Split(s) if s.id == id)).map(Place::Main)),
+            None => None,
+        };
+        match (at, item) {
+            (Some(Place::Main(i)), _) => Place::Main(i + 1),
+            (Some(Place::Lane { split, lane, index }), Some(_)) => Place::Lane { split, lane, index: index + 1 },
+            (Some(Place::Lane { split, .. }), None) => Place::Main(split + 1),
+            (None, _) => end,
+        }
+    }
+
+    /// Adds palette item `item` at `place` (a split only on the main chain) and selects it.
+    fn add_item(&mut self, item: usize, place: Place) {
+        match (PALETTE_ITEMS[item], place) {
+            (Some(k), _) => {
+                if let Some(id) = self.ui.board.insert(k, place) {
+                    self.selected = Some(Selection::Block(id));
+                }
+            }
+            (None, Place::Main(at)) => {
+                let id = self.ui.board.insert_split(at, 2);
+                self.selected = Some(Selection::Split(id));
+            }
+            _ => {}
+        }
+        self.read_board();
+    }
+
+    /// A TONE3000 cover over a capture's or cabinet's drawing (its body), if it has one.
+    fn draw_photo(&self, cx: &mut DrawCx<'_>, b: &Block, look: shapes::Look, area: Rect, alpha: f32) {
+        let file = b.live.file();
+        let Some(url) = file.source.as_ref().map(|s| s.image.clone()).filter(|u| !u.is_empty()) else { return };
+        let brush = {
+            let mut cache = self.brushes.borrow_mut();
+            match cache.get(&url) {
+                Some(b) => Some(b.clone()),
+                None => match self.ui.tone3000.image(&url) {
+                    Some(t) => {
+                        use mite_ui::peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat, ImageQuality};
+                        let image = ImageData { data: Blob::new(t.rgba.clone()), format: ImageFormat::Rgba8, alpha_type: ImageAlphaType::Alpha, width: t.width, height: t.height };
+                        let brush = ImageBrush::new(image).with_quality(ImageQuality::Medium);
+                        cache.insert(url.clone(), brush.clone());
+                        Some(brush)
+                    }
+                    None => {
+                        self.waiting.set(true);
+                        None
+                    }
+                },
+            }
+        };
+        let Some(brush) = brush else { return };
+        let c = area.center();
+        let r = match look {
+            shapes::Look::Head => Rect::new(area.x0 + 4.0, area.y0 + 16.0, area.x1 - 4.0, area.y1),
+            shapes::Look::Combo => Rect::new(c.x - 44.0, area.y0 + 8.0, c.x + 44.0, area.y1),
+            shapes::Look::Cabinet => Rect::new(c.x - 32.0, area.y0, c.x + 32.0, area.y1),
+            _ => Rect::new(c.x - 30.0, area.y0, c.x + 30.0, area.y1),
+        };
+        let shape = shapes::chamfer(r, 5.0);
+        let (w, h) = (f64::from(brush.image.width), f64::from(brush.image.height));
+        let k = (r.width() / w).max(r.height() / h);
+        let t = Affine::translate((r.center().x - k * w / 2.0, r.center().y - k * h / 2.0)) * Affine::scale(k);
+        let brush = brush.with_alpha(alpha);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &brush, Some(t), &shape);
+        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, cx.theme.text_lo.multiply_alpha(alpha), None, &shape);
     }
 
     /// Reads the board now (tools render a single frame).
@@ -612,7 +803,7 @@ impl RigView {
         // Insertion points.
         for g in &layout.gaps {
             let hot = self.hot == Some(Hot::Gap(g.place)) || self.menu.as_ref().is_some_and(|m| m.place == g.place);
-            let dragging = self.drag.as_ref().is_some_and(|d| d.moving);
+            let dragging = self.drag.as_ref().is_some_and(|d| d.moving) || self.adding.as_ref().is_some_and(|a| a.moving && (PALETTE_ITEMS[a.item].is_some() || matches!(g.place, Place::Main(_))));
             let near = dragging && self.pointer.is_some_and(|p| layout.gap_at(p, 60.0).is_some_and(|n| n.place == g.place));
             let r = if hot || near { 11.0 } else { 8.0 };
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot || near { theme.accent } else { theme.display }, None, &Circle::new(g.at, r));
@@ -659,13 +850,16 @@ impl RigView {
         let gear = b.live.file().gear(&status);
         let look = shapes::Look::of(b.kind(), gear);
         let area = Rect::new(t.rect.x0, t.rect.y0, t.rect.x1, t.rect.y0 + board_view::LOOK_H);
+        let kc = self.kind_color(b.kind(), theme);
         let ink = shapes::Ink {
+            tint: kc.multiply_alpha(if bypassed { 0.03 } else { 0.11 } * alpha),
             body: theme.panel_control.multiply_alpha(alpha),
-            edge: (if selected { theme.accent } else if hot { theme.accent.multiply_alpha(0.6) } else { theme.text_lo }).multiply_alpha(alpha),
+            edge: (if selected { theme.accent } else if hot { kc.multiply_alpha(0.9) } else { kc.multiply_alpha(if bypassed { 0.25 } else { 0.55 }) }).multiply_alpha(alpha),
             detail: (if bypassed { theme.text_lo.multiply_alpha(0.6) } else { theme.text_mid }).multiply_alpha(alpha),
-            lit: (if bypassed { theme.text_lo } else { theme.accent }).multiply_alpha(alpha),
+            lit: (if bypassed { theme.text_lo } else { kc }).multiply_alpha(alpha),
         };
         let outline = shapes::draw(cx, look, area, &ink);
+        self.draw_photo(cx, &b, look, area, if bypassed { 0.4 * alpha } else { alpha });
         if selected {
             glow_stroke(cx, &outline, 1.8, theme.accent, theme.accent.multiply_alpha(0.6), 5.0);
         }
@@ -758,14 +952,16 @@ impl RigView {
         mite_ui::paint::glass_panel(cx, shape, theme.blur_menu);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.94), None, &shape);
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.glass_border, None, &shape);
-        for (i, (_, _, name, words)) in m.entries().iter().enumerate() {
+        for (i, (kind, lanes, name, words)) in m.entries().iter().enumerate() {
             let row = m.row(i);
             if self.hot == Some(Hot::Menu(i)) {
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.14), None, &RoundedRect::from_rect(row, 6.0));
             }
-            cx.text.draw(cx.scene, name, row.x0 + 10.0, row.y0 + 3.0, TextStyle::BODY.sized(12.5).weighted(700.0), theme.text_strong, Align::Left);
-            let w = Self::fit(cx, words, TextStyle::BODY.sized(9.5), row.width() - 20.0);
-            cx.text.draw(cx.scene, &w, row.x0 + 10.0, row.y0 + 18.0, TextStyle::BODY.sized(9.5), theme.text_lo, Align::Left);
+            let hot = self.hot == Some(Hot::Menu(i));
+            self.item_icon(cx, *kind, *lanes, Point::new(row.x0 + 26.0, row.center().y), 0.4, hot);
+            cx.text.draw(cx.scene, name, row.x0 + 54.0, row.y0 + 3.0, TextStyle::BODY.sized(12.5).weighted(700.0), theme.text_strong, Align::Left);
+            let w = Self::fit(cx, words, TextStyle::BODY.sized(9.5), row.width() - 64.0);
+            cx.text.draw(cx.scene, &w, row.x0 + 54.0, row.y0 + 18.0, TextStyle::BODY.sized(9.5), theme.text_lo, Align::Left);
         }
     }
 
@@ -809,10 +1005,10 @@ impl RigView {
                 let n = self.split_lanes(id).map_or(0, |l| l.len());
                 cx.text.draw(cx.scene, "SPLIT", PANEL.x0 + 22.0, PANEL.y0 + 18.0, label, theme.accent, Align::Left);
                 cx.text.draw(cx.scene, &format!("{n} lanes"), PANEL.x0 + 22.0, PANEL.y0 + 36.0, TextStyle::BODY.sized(20.0).weighted(800.0), theme.text_strong, Align::Left);
-                cx.text.draw(cx.scene, "Each lane runs its own blocks; they merge again here, in time.", PANEL.x0 + 22.0, PANEL.y0 + 68.0, TextStyle::BODY.sized(11.5), theme.text_mid, Align::Left);
+                cx.text.draw(cx.scene, "Each lane runs its own blocks; they merge again here, in time.", PANEL.x0 + 22.0, PANEL.y0 + 62.0, TextStyle::BODY.sized(11.5), theme.text_mid, Align::Left);
                 for j in 0..n {
                     let x = KNOB_X0 + j as f64 * 2.0 * KNOB_STEP + KNOB_STEP / 2.0;
-                    cx.text.draw(cx.scene, &format!("LANE {}", j + 1), x, PANEL.y0 + 70.0, label, theme.text_hi, Align::Center);
+                    cx.text.draw(cx.scene, &format!("LANE {}", j + 1), x, PANEL.y0 + 14.0, label, theme.text_hi, Align::Center);
                 }
             }
             Some(Selection::Block(id)) => {
@@ -823,14 +1019,14 @@ impl RigView {
                 let title = Self::fit(cx, &name, TextStyle::BODY.sized(20.0).weighted(800.0), 360.0);
                 cx.text.draw(cx.scene, &title, PANEL.x0 + 22.0, PANEL.y0 + 36.0, TextStyle::BODY.sized(20.0).weighted(800.0), theme.text_strong, Align::Left);
                 let lines = self.block_words(&b);
-                for (k, (l, c)) in lines.iter().enumerate() {
+                for (k, (l, c)) in lines.iter().take(2).enumerate() {
                     let l = Self::fit(cx, l, TextStyle::BODY.sized(11.5), 380.0);
                     let color = match c {
                         1 => theme.danger,
                         2 => theme.text_lo,
                         _ => theme.text_mid,
                     };
-                    cx.text.draw(cx.scene, &l, PANEL.x0 + 22.0, PANEL.y0 + 68.0 + k as f64 * 18.0, TextStyle::BODY.sized(11.5), color, Align::Left);
+                    cx.text.draw(cx.scene, &l, PANEL.x0 + 22.0, PANEL.y0 + 62.0 + k as f64 * 15.0, TextStyle::BODY.sized(11.0), color, Align::Left);
                 }
             }
         }
@@ -982,11 +1178,18 @@ impl RigView {
         if self.drag.as_ref().is_some_and(|d| d.moving) {
             return Help::default().text("Drop it on a + to move it there (into a lane, too)");
         }
+        if self.adding.as_ref().is_some_and(|a| a.moving) {
+            return Help::default().text("Drop it on a + in the chain to add it there");
+        }
         match self.hot {
             Some(Hot::Tile(_)) => return Help::default().text("Click to set it up; drag it to another + to move it"),
             Some(Hot::Led(_)) => return Help::default().text("On and off (off: the signal passes it untouched, in time)"),
             Some(Hot::Gap(Place::Main(_))) => return Help::default().text("Add a block here, or a split (two or three parallel lanes)"),
             Some(Hot::Gap(_)) => return Help::default().text("Add a block to this lane"),
+            Some(Hot::Palette(i)) => {
+                let words = PALETTE_ITEMS[i].map_or("A split: the chain forks into parallel lanes that merge again", Kind::words);
+                return Help::default().text(format!("{words} — drag it onto a + in the chain (a click adds it after the selected block)"));
+            }
             Some(Hot::Fork(_)) => return Help::default().text("The split: click to set its lanes' levels and pans, or how many"),
             Some(Hot::Menu(_)) => return Help::default().text("Click to add it; Esc closes"),
             Some(Hot::Panel(pb)) => {
@@ -1047,6 +1250,9 @@ impl RigView {
                 return Some(Hot::Gap(g.place));
             }
             return None;
+        }
+        if PALETTE.contains(p) {
+            return (0..PALETTE_ITEMS.len()).find(|&i| palette_item(i).contains(p)).map(Hot::Palette);
         }
         self.panel_buttons().into_iter().find(|b| panel_button(*b).contains(p)).map(Hot::Panel)
     }
@@ -1202,6 +1408,13 @@ impl RigView {
                     }
                     return true;
                 }
+                if let Some(a) = &mut self.adding {
+                    a.at = pos;
+                    if !a.moving && a.at.distance(a.from) > 6.0 {
+                        a.moving = true;
+                    }
+                    return true;
+                }
                 self.hot = self.hot_at(pos);
                 true
             }
@@ -1260,10 +1473,29 @@ impl RigView {
                         self.click_panel(pb, host);
                         true
                     }
+                    Some(Hot::Palette(item)) => {
+                        self.adding = Some(Adding { item, from: pos, at: pos, moving: false });
+                        true
+                    }
                     _ => false,
                 }
             }
             UiEvent::PointerUp { pos, button: MouseButton::Left, .. } => {
+                if let Some(a) = self.adding.take() {
+                    let item = PALETTE_ITEMS[a.item];
+                    if !a.moving {
+                        let place = self.click_place(item);
+                        self.add_item(a.item, place);
+                    } else if AREA.contains(pos) {
+                        let layout = self.layout();
+                        let gap = layout.gaps.iter().filter(|g| item.is_some() || matches!(g.place, Place::Main(_))).min_by(|x, y| x.at.distance(pos).total_cmp(&y.at.distance(pos))).filter(|g| g.at.distance(pos) <= 60.0).map(|g| g.place);
+                        if let Some(place) = gap {
+                            self.add_item(a.item, place);
+                        }
+                    }
+                    self.hot = self.hot_at(pos);
+                    return true;
+                }
                 if let Some(d) = self.drag.take() {
                     if d.moving {
                         let layout = self.layout();
@@ -1295,7 +1527,7 @@ impl RigView {
 /// The selected block's buttons: bypass, remove (top right); file (under the name); size and
 /// switches (under the file buttons); a split's lane counts.
 fn panel_button(b: PanelButton) -> Rect {
-    let row = PANEL.y0 + 150.0;
+    let row = PANEL.y0 + 94.0;
     let at = |x: f64, w: f64, y: f64| Rect::new(x, y, x + w, y + BUTTON);
     match b {
         PanelButton::Bypass => at(PANEL.x1 - 2.0 * (BUTTON + 10.0) - 6.0, BUTTON, PANEL.y0 + 14.0),
@@ -1303,9 +1535,9 @@ fn panel_button(b: PanelButton) -> Rect {
         PanelButton::Open => at(PANEL.x0 + 22.0, BUTTON, row),
         PanelButton::Tone3000 => at(PANEL.x0 + 22.0 + BUTTON + 10.0, 104.0, row),
         PanelButton::Clear => at(PANEL.x0 + 22.0 + BUTTON + 124.0, BUTTON, row),
-        PanelButton::Size => at(PANEL.x0 + 22.0, 104.0, row + BUTTON + 12.0),
+        PanelButton::Size => at(PANEL.x0 + 22.0, 104.0, row + BUTTON + 8.0),
         PanelButton::Full => at(PANEL.x0 + 22.0, 104.0, row),
-        PanelButton::Switch { at: k, .. } => at(PANEL.x0 + 22.0 + (k % 4) as f64 * 114.0, 104.0, row + if k >= 4 { BUTTON + 12.0 } else { 0.0 }),
+        PanelButton::Switch { at: k, .. } => at(PANEL.x0 + 22.0 + (k % 4) as f64 * 114.0, 104.0, row + if k >= 4 { BUTTON + 8.0 } else { 0.0 }),
         PanelButton::Lanes(n) => at(PANEL.x0 + 22.0 + (n as f64 - 2.0) * 96.0, 86.0, row),
     }
 }
@@ -1322,10 +1554,14 @@ impl View for RigView {
         let theme = cx.theme;
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, VIEW_W, HELP_TOP));
+        self.ensure_colors(theme);
+        self.waiting.set(false);
         self.draw_board(cx);
         self.draw_panel(cx);
+        self.draw_palette(cx);
         self.draw_meters(cx);
         self.draw_menu(cx);
+        self.draw_adding(cx);
         if let Some(b) = &mut self.browser {
             b.draw(cx, &self.ui);
         }
@@ -1398,7 +1634,7 @@ impl View for RigView {
             Item::Split(s) => s.lanes.iter().any(|l| l.blocks.iter().any(|b| matches!(b.live.status(), Status::Loading))),
         });
         let _ = self.started;
-        fresh || busy || loading || self.picking.is_some() || self.menu.is_some() || self.meters.iter().any(|&m| m > SILENT + 1.0)
+        fresh || busy || loading || self.waiting.get() || self.adding.is_some() || self.picking.is_some() || self.menu.is_some() || self.meters.iter().any(|&m| m > SILENT + 1.0)
     }
 }
 

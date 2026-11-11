@@ -68,6 +68,12 @@ never waits. Boards saved by slice 2 load with their pedal values renamed to the
 delay's tone and the doubler's width and level had no counterpart and go). Not yet: a plugin's
 snapshots A–D inside a block are not saved with the board; its user presets are the plugin's own.
 
+- **Palette** (2026-11-11, user): under the simple view, every block (and a split) as an icon,
+  always there: drag one onto a + in the chain, or click to add it after the selected block. The +
+  menu shows the same icons. Each kind wears its plugin's accent (Comp's, Delay's, …; captures and
+  cabinets the Rig's), and a capture or cabinet loaded from TONE3000 shows the tone's cover photo
+  on its block (saved with its source; files loaded before this have none until loaded again).
+
 ## 4. Parameters, state, automation
 
 - Pedal settings live in the Rig's state (`board` field: the chain, each block's kind, values,

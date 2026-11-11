@@ -71,6 +71,9 @@ pub struct Source {
     /// TONE3000's gear ("amp", "pedal", "amp-cab", …).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub gear: String,
+    /// The tone's cover image on TONE3000 (shown on the block).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub image: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
