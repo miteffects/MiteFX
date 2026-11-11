@@ -4,18 +4,11 @@
 //! rest at the plugin's defaults. Plus a graphic EQ and a tremolo of their own.
 
 use mite_core::{ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::delay::{DelayLine, DelaySettings, Mode as DelayMode};
-use mite_dsp::doubler::{Doubler, DoublerSettings};
-use mite_dsp::dynamics::{CompSettings, Compressor};
 use mite_dsp::eq::{BandProcessor, BandSettings, BandType};
-use mite_dsp::modulation::{Mod, ModSettings, Mode as ModMode, Transport};
-use mite_dsp::pitch::PitchDetector;
-use mite_dsp::reverb::{Reverb, ReverbKind, ReverbSettings};
 use mite_dsp::{db_to_gain, LinearSmoother};
 
 use crate::blocks::{BlockParam, Unit};
 use crate::board::Live;
-use crate::parts::SUB;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -42,14 +35,6 @@ const DB: (f32, f32) = (0.5, 0.1);
 const PCT: (f32, f32) = (1.0, 0.1);
 const LOGW: (f32, f32) = (1.0 / 24.0, 1.0 / 96.0);
 
-pub const COMP: [BlockParam; 5] = [
-    knob(spec("threshold", "Threshold", "dB", -60.0, 0.0, -24.0, LIN, 1, DB, NUM)),
-    knob(spec("ratio", "Ratio", ":1", 1.0, 20.0, 4.0, LOG, 1, LOGW, NUM)),
-    knob(spec("attack", "Attack", "ms", 0.1, 100.0, 10.0, LOG, 1, LOGW, TIME)),
-    knob(spec("release", "Release", "ms", 10.0, 1000.0, 120.0, LOG, 0, LOGW, TIME)),
-    knob(spec("makeup", "Level", "dB", -12.0, 24.0, 0.0, LIN, 1, DB, NUM)),
-];
-
 /// The graphic EQ's bands (a classic seven-band guitar EQ), Hz.
 pub const EQ_HZ: [f64; 7] = [100.0, 200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0];
 pub const EQ: [BlockParam; 8] = [
@@ -63,33 +48,6 @@ pub const EQ: [BlockParam; 8] = [
     knob(spec("level", "Level", "dB", -15.0, 15.0, 0.0, LIN, 1, DB, NUM)),
 ];
 
-pub const DELAY: [BlockParam; 6] = [
-    choice("mode", "Type", &DelayMode::NAMES, 1),
-    knob(spec("time", "Time", "ms", 20.0, 2000.0, 380.0, LOG, 0, LOGW, TIME)),
-    knob(spec("feedback", "Feedback", "%", 0.0, 100.0, 35.0, LIN, 0, PCT, NUM)),
-    knob(spec("mix", "Mix", "%", 0.0, 100.0, 30.0, LIN, 0, PCT, NUM)),
-    knob(spec("tone", "Tone", "Hz", 1000.0, 20_000.0, 6000.0, LOG, 0, LOGW, ParamDisplay::Frequency)),
-    switch("pingpong", "Ping-Pong", false),
-];
-
-pub const REVERB: [BlockParam; 5] = [
-    choice("type", "Type", &ReverbKind::NAMES, 0),
-    knob(spec("decay", "Decay", "s", 0.2, 12.0, 1.6, LOG, 2, LOGW, NUM)),
-    knob(spec("size", "Size", "%", 0.0, 100.0, 50.0, LIN, 0, PCT, NUM)),
-    knob(spec("predelay", "Pre-Delay", "ms", 0.0, 200.0, 10.0, LIN, 0, PCT, TIME)),
-    knob(spec("mix", "Mix", "%", 0.0, 100.0, 25.0, LIN, 0, PCT, NUM)),
-];
-
-/// The modulations a Mod pedal offers (Mite Mod's, without Micro).
-pub const MOD_NAMES: [&str; 6] = ["Chorus", "Ensemble", "Flanger", "Phaser", "Vibrato", "Rotary"];
-pub const MOD: [BlockParam; 5] = [
-    choice("mode", "Type", &MOD_NAMES, 0),
-    knob(spec("rate", "Rate", "Hz", 0.05, 10.0, 0.8, LOG, 2, LOGW, NUM)),
-    knob(spec("depth", "Depth", "%", 0.0, 100.0, 50.0, LIN, 0, PCT, NUM)),
-    knob(spec("feedback", "Feedback", "%", -95.0, 95.0, 0.0, LIN, 0, PCT, NUM)),
-    knob(spec("mix", "Mix", "%", 0.0, 100.0, 50.0, LIN, 0, PCT, NUM)),
-];
-
 pub const TREMOLO_NAMES: [&str; 3] = ["Sine", "Square", "Harmonic"];
 pub const TREMOLO: [BlockParam; 4] = [
     choice("shape", "Shape", &TREMOLO_NAMES, 0),
@@ -98,14 +56,6 @@ pub const TREMOLO: [BlockParam; 4] = [
     knob(spec("spread", "Stereo", "%", 0.0, 100.0, 0.0, LIN, 0, PCT, NUM)),
 ];
 
-pub const DOUBLE: [BlockParam; 4] = [
-    knob(spec("amount", "Looseness", "%", 0.0, 100.0, 40.0, LIN, 0, PCT, NUM)),
-    knob(spec("delay", "Delay", "ms", 5.0, 40.0, 14.0, LIN, 0, PCT, TIME)),
-    knob(spec("width", "Width", "%", 0.0, 100.0, 100.0, LIN, 0, PCT, NUM)),
-    knob(spec("level", "Doubles", "dB", -24.0, 6.0, -3.0, LIN, 1, DB, NUM)),
-];
-
-pub const TUNER: [BlockParam; 2] = [switch("mute", "Mute", false), knob(spec("reference", "A4", "Hz", 430.0, 450.0, 440.0, LIN, 1, (0.5, 0.1), NUM))];
 
 fn smoother(fs: f32, v: f32) -> LinearSmoother {
     let mut s = LinearSmoother::new(v);
@@ -115,47 +65,6 @@ fn smoother(fs: f32, v: f32) -> LinearSmoother {
 
 fn index(live: &Live, i: usize) -> usize {
     live.value(i).round().max(0.0) as usize
-}
-
-// ---- Comp ---------------------------------------------------------------------------------------
-
-pub struct CompUnit {
-    comp: Compressor,
-}
-
-impl CompUnit {
-    pub fn new(fs: f32) -> Self {
-        let mut comp = Compressor::new(fs);
-        comp.prepare(fs, &Self::settings_of(&[-24.0, 4.0, 10.0, 120.0, 0.0]));
-        Self { comp }
-    }
-
-    fn settings_of(v: &[f32; 5]) -> CompSettings {
-        let mut s = CompSettings::default();
-        s.stages[0].on = true;
-        s.stages[0].threshold_db = v[0];
-        s.stages[0].ratio = v[1];
-        s.stages[0].attack_ms = v[2];
-        s.stages[0].release_ms = v[3];
-        s.makeup_db = v[4];
-        s
-    }
-
-    fn settings(live: &Live) -> CompSettings {
-        Self::settings_of(&std::array::from_fn(|i| live.value(i)))
-    }
-}
-
-impl Unit for CompUnit {
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
-        let s = Self::settings(live);
-        let t = self.comp.process(&mut [l, r], None, &s);
-        live.readout[0].store(t.cut_db[0].min(t.cut_db[1]));
-    }
-
-    fn reset(&mut self, live: &Live) {
-        self.comp.reset(&Self::settings(live));
-    }
 }
 
 // ---- EQ -----------------------------------------------------------------------------------------
@@ -199,159 +108,6 @@ impl Unit for EqUnit {
             b.reset(&s);
         }
         self.level.reset(db_to_gain(live.value(7)));
-    }
-}
-
-// ---- Delay, Reverb: wet engines, mixed here --------------------------------------------------
-
-fn mix_in(l: &mut [f32], r: &mut [f32], wet: &[Vec<f32>; 2], mix: &mut LinearSmoother) {
-    for i in 0..l.len() {
-        let m = mix.next_value();
-        // Equal-power-ish: the dry stays whole up to half, then gives way.
-        let dry = (2.0 * (1.0 - m)).min(1.0);
-        let w = (2.0 * m).min(1.0);
-        l[i] = l[i] * dry + wet[0][i] * w;
-        r[i] = r[i] * dry + wet[1][i] * w;
-    }
-}
-
-pub struct DelayUnit {
-    line: DelayLine,
-    wet: [Vec<f32>; 2],
-    mix: LinearSmoother,
-}
-
-impl DelayUnit {
-    pub fn new(fs: f32) -> Self {
-        Self { line: DelayLine::new(fs, &DelaySettings::default()), wet: [vec![0.0; SUB], vec![0.0; SUB]], mix: smoother(fs, 0.3) }
-    }
-
-    fn settings(live: &Live) -> DelaySettings {
-        let mut s = DelaySettings { mode: DelayMode::from_index(index(live, 0)), ..DelaySettings::default() };
-        let t = &mut s.taps[0];
-        t.on = true;
-        t.time_ms = live.value(1);
-        t.feedback = live.value(2) / 100.0;
-        t.pingpong = live.value(5) >= 0.5;
-        // The loop's tone: a high cut in the loop (the first loop band).
-        s.eq[0] = BandSettings { enabled: live.value(4) < 19_500.0, kind: BandType::HighCut, freq: f64::from(live.value(4)), slope: 1, ..BandSettings::default() };
-        s
-    }
-}
-
-impl Unit for DelayUnit {
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
-        let n = l.len();
-        let s = Self::settings(live);
-        let [wl, wr] = &mut self.wet;
-        self.line.process([l, r], [&mut wl[..n], &mut wr[..n]], true, &s);
-        self.mix.set_target(live.value(3) / 100.0);
-        mix_in(l, r, &self.wet, &mut self.mix);
-    }
-
-    fn reset(&mut self, live: &Live) {
-        self.line.reset(&Self::settings(live));
-        self.mix.reset(live.value(3) / 100.0);
-    }
-}
-
-pub struct ReverbUnit {
-    verb: Reverb,
-    wet: [Vec<f32>; 2],
-    mix: LinearSmoother,
-}
-
-impl ReverbUnit {
-    pub fn new(fs: f32) -> Self {
-        Self { verb: Reverb::new(fs, &ReverbSettings::default()), wet: [vec![0.0; SUB], vec![0.0; SUB]], mix: smoother(fs, 0.25) }
-    }
-
-    fn settings(live: &Live) -> ReverbSettings {
-        ReverbSettings { kind: ReverbKind::from_index(index(live, 0)), decay_s: live.value(1), size: live.value(2) / 100.0, predelay_ms: live.value(3), ..ReverbSettings::default() }
-    }
-}
-
-impl Unit for ReverbUnit {
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
-        let n = l.len();
-        let s = Self::settings(live);
-        let [wl, wr] = &mut self.wet;
-        self.verb.process([l, r], [&mut wl[..n], &mut wr[..n]], true, &s);
-        self.mix.set_target(live.value(4) / 100.0);
-        mix_in(l, r, &self.wet, &mut self.mix);
-    }
-
-    fn reset(&mut self, live: &Live) {
-        self.verb.reset(&Self::settings(live));
-        self.mix.reset(live.value(4) / 100.0);
-    }
-}
-
-// ---- Mod, Double: engines that mix themselves ---------------------------------------------------
-
-pub struct ModUnit {
-    m: Mod,
-    out: [Vec<f32>; 2],
-}
-
-impl ModUnit {
-    pub fn new(fs: f32) -> Self {
-        Self { m: Mod::new(fs, &ModSettings::default()), out: [vec![0.0; SUB], vec![0.0; SUB]] }
-    }
-
-    fn settings(live: &Live) -> ModSettings {
-        ModSettings { mode: ModMode::from_index(index(live, 0)), rate_hz: live.value(1), depth: live.value(2) / 100.0, feedback: live.value(3) / 100.0, mix: live.value(4) / 100.0, ..ModSettings::default() }
-    }
-}
-
-impl Unit for ModUnit {
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
-        let n = l.len();
-        let transport = Transport { tempo: None, beats: None, playing: false };
-        let [ol, or] = &mut self.out;
-        self.m.process([l, r], [&mut ol[..n], &mut or[..n]], true, &Self::settings(live), &transport);
-        l.copy_from_slice(&ol[..n]);
-        r.copy_from_slice(&or[..n]);
-    }
-
-    fn reset(&mut self, live: &Live) {
-        self.m.reset(&Self::settings(live));
-    }
-}
-
-pub struct DoubleUnit {
-    d: Doubler,
-    out: [Vec<f32>; 2],
-}
-
-impl DoubleUnit {
-    pub fn new(fs: f32) -> Self {
-        Self { d: Doubler::new(fs), out: [vec![0.0; SUB], vec![0.0; SUB]] }
-    }
-
-    fn settings(live: &Live) -> DoublerSettings {
-        let amount = live.value(0) / 100.0;
-        let width = live.value(2) / 100.0;
-        let mut s = DoublerSettings { voices: 2, delay_ms: live.value(1), timing_ms: 2.0 + 18.0 * amount, pitch_cents: 2.0 + 14.0 * amount, ..DoublerSettings::default() };
-        for (i, v) in s.voice.iter_mut().enumerate().take(2) {
-            v.pan = if i == 0 { -width } else { width };
-            v.level_db = live.value(3);
-        }
-        s
-    }
-}
-
-impl Unit for DoubleUnit {
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
-        let n = l.len();
-        let [ol, or] = &mut self.out;
-        self.d.process([l, r], [&mut ol[..n], &mut or[..n]], true, &Self::settings(live));
-        l.copy_from_slice(&ol[..n]);
-        r.copy_from_slice(&or[..n]);
-    }
-
-    fn reset(&mut self, _live: &Live) {
-        self.d.reset();
     }
 }
 
@@ -417,66 +173,6 @@ impl Unit for TremoloUnit {
         self.split = [[0.0; 2]; 2];
         self.rate.reset(live.value(1));
         self.depth.reset(live.value(2) / 100.0);
-    }
-}
-
-// ---- Tuner --------------------------------------------------------------------------------------
-
-/// Samples the tuner listens to (about 85 ms at 48 kHz: low E and below).
-const TUNER_WINDOW: usize = 4096;
-/// It looks again this often.
-const TUNER_HOP: usize = 1024;
-
-pub struct TunerUnit {
-    fs: f64,
-    detector: PitchDetector,
-    ring: Vec<f32>,
-    window: Vec<f32>,
-    pos: usize,
-    since: usize,
-    mute: LinearSmoother,
-}
-
-impl TunerUnit {
-    pub fn new(fs: f32) -> Self {
-        Self { fs: f64::from(fs), detector: PitchDetector::new(TUNER_WINDOW), ring: vec![0.0; TUNER_WINDOW], window: vec![0.0; TUNER_WINDOW], pos: 0, since: 0, mute: smoother(fs, 0.0) }
-    }
-}
-
-impl Unit for TunerUnit {
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], live: &Live) {
-        let n = l.len();
-        for i in 0..n {
-            self.ring[self.pos] = 0.5 * (l[i] + r[i]);
-            self.pos = (self.pos + 1) % TUNER_WINDOW;
-        }
-        self.since += n;
-        if self.since >= TUNER_HOP {
-            self.since = 0;
-            let (a, b) = self.ring.split_at(self.pos);
-            self.window[..b.len()].copy_from_slice(b);
-            self.window[b.len()..].copy_from_slice(a);
-            // Readouts: the pitch heard (Hz, 0: none) and how clearly.
-            match self.detector.detect(&self.window, self.fs) {
-                Some(p) if p.clarity > 0.8 && p.level_db > -60.0 => {
-                    live.readout[0].store(p.hz as f32);
-                    live.readout[1].store(p.clarity as f32);
-                }
-                _ => live.readout[0].store(0.0),
-            }
-        }
-        // Muted while tuning, if asked.
-        self.mute.set_target(if live.value(0) >= 0.5 { 0.0 } else { 1.0 });
-        for i in 0..n {
-            let g = self.mute.next_value();
-            l[i] *= g;
-            r[i] *= g;
-        }
-    }
-
-    fn reset(&mut self, live: &Live) {
-        self.ring.fill(0.0);
-        self.mute.reset(if live.value(0) >= 0.5 { 0.0 } else { 1.0 });
     }
 }
 

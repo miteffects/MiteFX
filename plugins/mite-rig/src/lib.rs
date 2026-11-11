@@ -15,6 +15,7 @@ pub mod blocks;
 pub mod board;
 pub mod bracket;
 pub mod editor;
+pub mod embed;
 pub mod engine;
 pub mod graph;
 pub mod ir;
@@ -130,6 +131,9 @@ impl Plugin for MiteRig {
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
+        if let Some(t) = context.transport().tempo {
+            embed::set_tempo(t as f32);
+        }
         let s = self.params.settings();
         self.engine.process(buffer.as_slice(), &s, &self.ui.engine);
         let latency = self.engine.latency() as u32;

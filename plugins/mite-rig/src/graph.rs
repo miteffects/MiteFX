@@ -29,7 +29,7 @@ impl Node {
     fn new(live: Arc<Live>, fs: f32) -> Self {
         let mut bypass = LinearSmoother::new(if live.bypassed() { 1.0 } else { 0.0 });
         bypass.set_ramp(fs, 15.0);
-        let mut unit = blocks::build(live.kind, fs);
+        let mut unit = blocks::build(&live, fs);
         unit.reset(&live);
         Self { id: live.id, unit, bypass, dry: [Delay::new(MAX_LATENCY), Delay::new(MAX_LATENCY)], tmp: [vec![0.0; SUB], vec![0.0; SUB]], live }
     }

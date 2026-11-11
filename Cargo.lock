@@ -1603,8 +1603,22 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_comp_core",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mite_comp_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
  "serde",
  "serde_json",
 ]
@@ -1635,8 +1649,22 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_delay_core",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mite_delay_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
  "serde",
  "serde_json",
 ]
@@ -1667,8 +1695,22 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_double_core",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mite_double_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
  "serde",
  "serde_json",
 ]
@@ -1746,8 +1788,22 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_mod_core",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mite_mod_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
  "serde",
  "serde_json",
 ]
@@ -1797,6 +1853,12 @@ dependencies = [
  "mite-nam",
  "mite-plugin",
  "mite-ui",
+ "mite_comp_core",
+ "mite_delay_core",
+ "mite_double_core",
+ "mite_mod_core",
+ "mite_tuner_core",
+ "mite_verb_core",
  "nih_plug",
  "png",
  "serde",
@@ -1847,8 +1909,22 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_tuner_core",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mite_tuner_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
  "serde",
  "serde_json",
 ]
@@ -1863,8 +1939,22 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_verb_core",
  "nih_plug",
  "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mite_verb_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
+ "mite-plugin",
+ "mite-ui",
+ "nih_plug",
  "serde",
  "serde_json",
 ]

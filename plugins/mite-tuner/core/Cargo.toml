@@ -1,0 +1,18 @@
+[package]
+name = "mite_tuner_core"
+description = "Mite Tuner: a big, precise chromatic tuner for guitar and bass — engine, parameters and editor (the plugin crate adds the entry points)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mite-core.workspace = true
+mite-dsp.workspace = true
+mite-plugin.workspace = true
+mite-ui.workspace = true
+nih_plug.workspace = true
+serde.workspace = true
+serde_json.workspace = true

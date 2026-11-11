@@ -43,6 +43,10 @@ pub struct Live {
     has_path: AtomicBool,
     /// What the block shows of itself (the tuner's pitch and clarity, the comp's reduction).
     pub readout: [AtomicF32; 3],
+    /// A block that is one of the suite's plugins: its engine's state, telemetry and editor.
+    pub embed: Option<Arc<dyn crate::embed::Embed>>,
+    /// An embedded block's values changed since its settings were computed.
+    dirty: AtomicBool,
 }
 
 impl Live {
@@ -59,6 +63,27 @@ impl Live {
             reload: AtomicBool::new(false),
             has_path: AtomicBool::new(false),
             readout: [AtomicF32::new(0.0), AtomicF32::new(0.0), AtomicF32::new(0.0)],
+            embed: crate::embed::state(kind),
+            dirty: AtomicBool::new(false),
+        }
+    }
+
+    /// An embedded block's settings, computed again if its values changed (allocates: UI or
+    /// loader thread). Returns whether they were.
+    pub fn settle(&self) -> bool {
+        match &self.embed {
+            Some(e) if self.dirty.swap(false, Ordering::AcqRel) => {
+                e.recompute(self);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Asks for the settings to be computed again (the tempo moved).
+    pub fn unsettle(&self) {
+        if self.embed.is_some() {
+            self.dirty.store(true, Ordering::Release);
         }
     }
 
@@ -74,6 +99,9 @@ impl Live {
     pub fn set(&self, i: usize, v: f32) {
         if let Some(a) = self.values.get(i) {
             a.store(v);
+            if self.embed.is_some() {
+                self.dirty.store(true, Ordering::Release);
+            }
         }
     }
 
@@ -450,11 +478,15 @@ impl Board {
             let kind = Kind::from_id(&d.kind)?;
             max_id = max_id.max(d.id);
             let live = Live::new(d.id, kind);
-            for (i, p) in kind.params().iter().enumerate() {
-                if let Some(v) = d.values.get(p.spec.id) {
+            for (id, v) in &d.values {
+                // A slice-2 pedal's ids are the plugin's now.
+                let id = crate::embed::renamed(kind, id).unwrap_or(id);
+                if let Some(i) = kind.param_index(id) {
+                    let p = &kind.params()[i];
                     live.set(i, v.clamp(p.spec.min, p.spec.max));
                 }
             }
+            live.settle();
             live.bypass.store(d.bypass, Ordering::Relaxed);
             if let Some(f) = &d.file {
                 live.set_file_raw(f.clone());

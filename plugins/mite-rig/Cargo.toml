@@ -21,6 +21,13 @@ nih_plug.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 symphonia.workspace = true
+# The suite's plugins a block can be (engines, parameters, editors).
+mite_comp_core = { path = "../mite-comp/core" }
+mite_delay_core = { path = "../mite-delay/core" }
+mite_verb_core = { path = "../mite-verb/core" }
+mite_mod_core = { path = "../mite-mod/core" }
+mite_double_core = { path = "../mite-double/core" }
+mite_tuner_core = { path = "../mite-tuner/core" }
 # TONE3000's API (HTTPS with rustls, no system OpenSSL), on worker threads only.
 ureq = "2.12"
 # TONE3000's cover images.

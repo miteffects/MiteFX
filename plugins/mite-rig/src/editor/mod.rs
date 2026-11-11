@@ -197,6 +197,8 @@ pub enum PanelButton {
     Clear,
     Remove,
     Size,
+    /// One of the suite's plugins: its own editor, full window.
+    Full,
     /// A block's switch or choice parameter (its index), at a place in the button grid (0…3
     /// the first row, 4… the second).
     Switch { param: usize, at: usize },
@@ -279,7 +281,22 @@ pub struct RigView {
     browser: Option<Browser>,
     seen: u64,
     items: Vec<Item>,
+    /// A block's plugin editor, open over the whole window.
+    full: Option<Full>,
 }
+
+/// A block's own plugin editor (Comp, Delay, …), bound to the block's values.
+struct Full {
+    id: u64,
+    view: Box<dyn View>,
+    /// The plugin's colours (built for the theme in use).
+    theme: Option<mite_ui::Theme>,
+    accent: &'static str,
+    hot: bool,
+}
+
+/// Back to the board, over the plugin's own wordmark.
+const BACK: Rect = Rect::new(10.0, 11.0, 150.0, 45.0);
 
 impl RigView {
     pub fn new(ui: Arc<RigUi>) -> Self {
@@ -313,6 +330,7 @@ impl RigView {
             browser: None,
             seen: u64::MAX,
             items,
+            full: None,
             ui,
         }
     }
@@ -358,6 +376,85 @@ impl RigView {
         if let Some(b) = self.ui.board.block(id) {
             self.browser = Some(Browser::new(id, b.kind(), &self.ui));
         }
+    }
+
+    /// Opens block `id`'s plugin editor (blocks that are one of the suite's plugins).
+    pub fn open_full(&mut self, id: u64) {
+        let Some(b) = self.ui.board.block(id) else { return };
+        let Some(e) = &b.live.embed else { return };
+        self.menu = None;
+        self.browser = None;
+        self.full = Some(Full { id, view: e.view(), theme: None, accent: e.accent(), hot: false });
+    }
+
+    pub fn full_open(&self) -> Option<u64> {
+        self.full.as_ref().map(|f| f.id)
+    }
+
+    /// The parameters a block's simple view shows (indices; a plugin's chosen few, in order).
+    fn simple_params(kind: Kind) -> Vec<usize> {
+        match crate::embed::simple(kind) {
+            Some(ids) => ids.iter().filter_map(|id| kind.param_index(id)).collect(),
+            None => (0..kind.params().len()).collect(),
+        }
+    }
+
+    fn draw_full(&mut self, cx: &mut DrawCx<'_>) -> bool {
+        let Some(f) = &mut self.full else { return false };
+        let Some(b) = self.ui.board.block(f.id) else {
+            self.full = None;
+            return false;
+        };
+        if f.theme.as_ref().map(|t| t.kind) != Some(cx.theme.kind) {
+            f.theme = Some(mite_ui::Theme::load(cx.theme.kind, f.accent));
+        }
+        let theme = f.theme.as_ref().unwrap_or(cx.theme);
+        let host = BlockHost(&b.live);
+        let mut sub = DrawCx { scene: &mut *cx.scene, theme, text: &mut *cx.text, host: &host, size: cx.size, fx: &mut *cx.fx };
+        f.view.draw(&mut sub);
+        // Back to the board, over the plugin's wordmark: "‹ RIG" and the block's name.
+        sub.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, 0.0, BACK.x1 + 6.0, HEADER - 1.0));
+        let ink = icon_button(sub.scene, theme, BACK, theme.panel_control, f.hot, false, theme.accent);
+        let c = Point::new(BACK.x0 + 16.0, BACK.center().y);
+        let mut chevron = BezPath::new();
+        chevron.move_to((c.x + 2.5, c.y - 6.0));
+        chevron.line_to((c.x - 3.0, c.y));
+        chevron.line_to((c.x + 2.5, c.y + 6.0));
+        sub.scene.stroke(&Stroke::new(1.8).with_caps(Cap::Round).with_join(Join::Round), Affine::IDENTITY, ink, None, &chevron);
+        sub.text.draw(sub.scene, "RIG", BACK.x0 + 30.0, BACK.y0 + 4.0, TextStyle::LABEL.sized(9.5), theme.text_mid, Align::Left);
+        sub.text.draw(sub.scene, b.kind().name(), BACK.x0 + 30.0, BACK.y0 + 15.0, TextStyle::BODY.sized(13.0).weighted(800.0), ink, Align::Left);
+        true
+    }
+
+    /// Events while a plugin editor is open. `None`: it is not.
+    fn full_event(&mut self, event: &UiEvent) -> Option<bool> {
+        let f = self.full.as_mut()?;
+        let Some(b) = self.ui.board.block(f.id) else {
+            self.full = None;
+            return Some(true);
+        };
+        match *event {
+            UiEvent::PointerMove { pos, .. } => {
+                let hot = BACK.contains(pos);
+                if hot != f.hot {
+                    f.hot = hot;
+                    let _ = f.view.event(event, &BlockHost(&b.live));
+                    return Some(true);
+                }
+            }
+            UiEvent::PointerDown { pos, .. } if BACK.contains(pos) => {
+                self.full = None;
+                self.knobs_for = None;
+                return Some(true);
+            }
+            _ => {}
+        }
+        let handled = f.view.event(event, &BlockHost(&b.live));
+        if !handled && matches!(*event, UiEvent::KeyDown { key: Key::Escape, .. }) {
+            self.full = None;
+            return Some(true);
+        }
+        Some(handled)
     }
 
     /// Reads the board now (tools render a single frame).
@@ -408,7 +505,8 @@ impl RigView {
         match self.selected {
             Some(Selection::Block(id)) => {
                 let Some(b) = self.block(id) else { return };
-                let dials: Vec<_> = b.kind().params().iter().filter(|p| !p.toggle && p.choices.is_empty()).collect();
+                let params = b.kind().params();
+                let dials: Vec<_> = Self::simple_params(b.kind()).into_iter().map(|i| &params[i]).filter(|p| !p.toggle && p.choices.is_empty()).collect();
                 let (step, d) = if dials.len() > 6 { (92.0, 54.0) } else { (KNOB_STEP, KNOB_D) };
                 let mut x = KNOB_X0;
                 for p in dials {
@@ -631,12 +729,20 @@ impl RigView {
                 let v: Vec<String> = (0..3).map(|i| format!("{:+.0}", b.live.value(i))).collect();
                 format!("B {} M {} T {}", v[0], v[1], v[2])
             }
-            Kind::Tuner => match crate::pedals::note_of(b.live.readout[0].load(), b.live.value(1)) {
-                Some((note, cents)) => format!("{note}  {cents:+.0} ¢"),
-                None => "—".to_owned(),
-            },
-            Kind::Comp => format!("{:.1} dB", b.live.readout[0].load().min(0.0)),
-            Kind::Delay | Kind::Mod | Kind::Reverb | Kind::Tremolo => {
+            _ if b.live.embed.is_some() => {
+                if let Some(line) = b.live.embed.as_ref().and_then(|e| e.summary(&b.live)) {
+                    return line;
+                }
+                // The simple view's first parameter (the type).
+                let id = crate::embed::simple(b.kind()).and_then(|s| s.first().copied()).unwrap_or("");
+                let Some(i) = b.kind().param_index(id) else { return String::new() };
+                let p = &params[i];
+                match p.choices.get(b.live.value(i).round().max(0.0) as usize) {
+                    Some(c) => (*c).to_owned(),
+                    None => p.spec.format(b.live.value(i)),
+                }
+            }
+            Kind::Tremolo => {
                 let p = params.iter().position(|p| !p.choices.is_empty()).unwrap_or(0);
                 params[p].choices.get(b.live.value(p).round().max(0.0) as usize).copied().unwrap_or("").to_owned()
             }
@@ -675,8 +781,13 @@ impl RigView {
                     v.push(PanelButton::Size);
                 }
                 // Switches and choices: after the file's buttons (and the size), or on the first row.
-                let start = if b.kind().has_file() { 5 } else { 0 };
-                v.extend(b.kind().params().iter().enumerate().filter(|(_, p)| p.toggle || !p.choices.is_empty()).enumerate().map(|(k, (i, _))| PanelButton::Switch { param: i, at: start + k }));
+                let embedded = b.live.embed.is_some();
+                if embedded {
+                    v.push(PanelButton::Full);
+                }
+                let start = if b.kind().has_file() { 5 } else if embedded { 1 } else { 0 };
+                let params = b.kind().params();
+                v.extend(Self::simple_params(b.kind()).into_iter().filter(|&i| params[i].toggle || !params[i].choices.is_empty()).enumerate().map(|(k, i)| PanelButton::Switch { param: i, at: start + k }));
                 v
             }
             Some(Selection::Split(_)) => vec![PanelButton::Lanes(2), PanelButton::Lanes(3), PanelButton::Remove],
@@ -739,6 +850,7 @@ impl RigView {
                 PanelButton::Remove => draw_glyph(cx.scene, TRASH_GLYPH, r.center(), 20.0, ink, 1.6),
                 PanelButton::Tone3000 => text(cx, "TONE3000"),
                 PanelButton::Size => text(cx, if Self::plain(cx.host, SIZE.id) >= 0.5 { "A2 Lite" } else { "A2 Full" }),
+                PanelButton::Full => text(cx, "Full view"),
                 PanelButton::Lanes(n) => text(cx, &format!("{n} lanes")),
                 PanelButton::Switch { param, .. } => {
                     let word = self.selected_block().map(|b| {
@@ -884,6 +996,7 @@ impl RigView {
                     PanelButton::Tone3000 => "Find one on TONE3000 and load it here",
                     PanelButton::Clear => "Empty the block",
                     PanelButton::Remove => "Remove it from the board",
+                    PanelButton::Full => "Open the plugin's own editor (every control, its presets and snapshots), bound to this block — ‹ Rig or Esc comes back; double-clicking the block opens it too",
                     PanelButton::Size => "Captures that come in two sizes (A2 Full and Lite) play this one, everywhere on the board: Lite costs a fraction of the CPU",
                     PanelButton::Switch { .. } => "Click to switch it (a type: the next one)",
                     PanelButton::Lanes(_) => "How many lanes the split has (the last one's blocks go when it is removed)",
@@ -949,6 +1062,7 @@ impl RigView {
                 board.set_lanes(id, n);
                 self.knobs_for = None;
             }
+            (PanelButton::Full, Some(Selection::Block(id))) => self.open_full(id),
             (PanelButton::Size, _) => {
                 let v = if Self::plain(host, SIZE.id) >= 0.5 { 0.0 } else { 1.0 };
                 host.begin_gesture(SIZE.id);
@@ -1031,6 +1145,18 @@ impl RigView {
                 }
             }
             return self.session.key(key, mods, host).unwrap_or(false);
+        }
+        // Double-clicking one of the suite's plugins opens its own editor.
+        if let UiEvent::DoubleClick { pos, .. } = *event {
+            if self.menu.is_none() {
+                if let Some(Hot::Tile(id)) = self.hot_at(pos) {
+                    if self.block(id).is_some_and(|b| b.live.embed.is_some()) {
+                        self.drag = None;
+                        self.open_full(id);
+                        return true;
+                    }
+                }
+            }
         }
         if self.menu.is_none() {
             if let Some(answer) = self.session.event(event, host) {
@@ -1178,6 +1304,7 @@ fn panel_button(b: PanelButton) -> Rect {
         PanelButton::Tone3000 => at(PANEL.x0 + 22.0 + BUTTON + 10.0, 104.0, row),
         PanelButton::Clear => at(PANEL.x0 + 22.0 + BUTTON + 124.0, BUTTON, row),
         PanelButton::Size => at(PANEL.x0 + 22.0, 104.0, row + BUTTON + 12.0),
+        PanelButton::Full => at(PANEL.x0 + 22.0, 104.0, row),
         PanelButton::Switch { at: k, .. } => at(PANEL.x0 + 22.0 + (k % 4) as f64 * 114.0, 104.0, row + if k >= 4 { BUTTON + 12.0 } else { 0.0 }),
         PanelButton::Lanes(n) => at(PANEL.x0 + 22.0 + (n as f64 - 2.0) * 96.0, 86.0, row),
     }
@@ -1189,6 +1316,9 @@ impl View for RigView {
     }
 
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
+        if self.draw_full(cx) {
+            return;
+        }
         let theme = cx.theme;
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, VIEW_W, HELP_TOP));
@@ -1208,6 +1338,9 @@ impl View for RigView {
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
+        if let Some(r) = self.full_event(event) {
+            return r;
+        }
         self.session.begin(host);
         let recording = RecordingHost::new(host);
         let changed = self.handle_event(event, &recording);
@@ -1224,6 +1357,20 @@ impl View for RigView {
         let dt = self.last_tick.elapsed().as_secs_f64().min(0.1);
         self.last_tick = Instant::now();
         let mut fresh = self.read_board();
+        // The suite's plugins take their new values (their settings are computed here, off the
+        // audio thread).
+        for b in self.ui.board.blocks() {
+            b.live.settle();
+        }
+        if let Some(f) = &mut self.full {
+            match self.ui.board.block(f.id) {
+                Some(b) => {
+                    let _ = f.view.tick(&BlockHost(&b.live));
+                }
+                None => self.full = None,
+            }
+            return true;
+        }
         self.rebuild_knobs();
         if let Some((id, rx)) = &self.picking {
             match rx.try_recv() {

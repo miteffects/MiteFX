@@ -8,12 +8,12 @@ pub use crate::params::sound_ids as preset_ids;
 pub const PLUGIN: &str = "Mite Double";
 
 pub const FACTORY: &[&str] = &[
-    include_str!("../presets/init.json"),
-    include_str!("../presets/tight-rhythm.json"),
-    include_str!("../presets/loose-take.json"),
-    include_str!("../presets/quad-tracked.json"),
-    include_str!("../presets/wide-lead.json"),
-    include_str!("../presets/classic-adt.json"),
+    include_str!("../../presets/init.json"),
+    include_str!("../../presets/tight-rhythm.json"),
+    include_str!("../../presets/loose-take.json"),
+    include_str!("../../presets/quad-tracked.json"),
+    include_str!("../../presets/wide-lead.json"),
+    include_str!("../../presets/classic-adt.json"),
 ];
 
 pub fn factory() -> Vec<Preset> {

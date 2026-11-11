@@ -130,6 +130,8 @@ MiteFX/
 | Accent colours, checked: every accent clears the ramp and the semantics by CIEDE2000 15 except the pairs in `rules.accentExceptions` | `docs/design/tokens.json`, test `accents_clear_the_ramp_and_semantics` in `mite_ui::tokens` |
 | CI bundling and validation | add the package to `PACKAGES` and its bundle name to `BUNDLES` in `.github/workflows/ci.yml` |
 
+| A plugin another plugin embeds (Mite Rig's blocks) | split it: `plugins/mite-<name>/core` (`mite_<name>_core`: engine, params, editor, presets, `*Shared`) and the plugin crate (the nih-plug struct and exports, re-exporting the core); Comp, Delay, Verb, Mod, Double, Tuner are split (2026-11-11) |
+
 `mite-test` does not exist yet; measurement helpers live in the crates' tests and examples.
 
 **Dependency direction (enforced by the crate graph):**
@@ -588,8 +590,9 @@ A guitar and bass signal chain (brief: `docs/design/rig-brief.md`; the Amp's own
 - TONE3000 inside the plugin; captures at other rates in a resampling bracket (latency reported,
   lanes aligned).
 
-**Status (2026-11-11):** slice 1 built (board, graph swaps keeping running units, six blocks,
-board editor, TONE3000 into blocks); all tests pass, installed. Not yet heard by the user.
+**Status (2026-11-11):** slices 1–3 built (board, graph swaps keeping running units, TONE3000
+into blocks; the suite's pedals; Comp, Delay, Reverb, Mod, Double and Tuner blocks are those
+plugins, engine and full editor, through their `core` crates). Not yet heard by the user.
 
 Shared engines across the suite:
 - **Filter bank:** EQ, Comp sidechain, Verb decay EQ, DeEss.

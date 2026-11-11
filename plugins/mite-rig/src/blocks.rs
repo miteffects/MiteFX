@@ -194,14 +194,10 @@ impl Kind {
             Kind::Tone => &TONE,
             Kind::Boost => &BOOST,
             Kind::Volume => &VOLUME,
-            Kind::Comp => &crate::pedals::COMP,
             Kind::Eq => &crate::pedals::EQ,
-            Kind::Delay => &crate::pedals::DELAY,
-            Kind::Reverb => &crate::pedals::REVERB,
-            Kind::Mod => &crate::pedals::MOD,
             Kind::Tremolo => &crate::pedals::TREMOLO,
-            Kind::Double => &crate::pedals::DOUBLE,
-            Kind::Tuner => &crate::pedals::TUNER,
+            // The suite's plugins: their whole parameter sets.
+            _ => crate::embed::params(self).unwrap_or(&[]),
         }
     }
 
@@ -247,22 +243,20 @@ pub trait Unit: Send {
     }
 }
 
-/// A new unit of `kind` at `fs`. Allocates; worker thread.
-pub fn build(kind: Kind, fs: f32) -> Box<dyn Unit> {
-    match kind {
+/// A new unit for a block at `fs`. Allocates; worker thread.
+pub fn build(live: &crate::board::Live, fs: f32) -> Box<dyn Unit> {
+    if let Some(e) = &live.embed {
+        return e.unit(fs);
+    }
+    match live.kind {
         Kind::Pedal | Kind::Amp => Box::new(CaptureUnit::new(fs)),
         Kind::Cab => Box::new(CabUnit::new(fs)),
         Kind::Gate => Box::new(GateUnit { gate: Gate::new(fs), gain: LinearSmoother::new(1.0) }),
         Kind::Tone => Box::new(ToneUnit::new(fs)),
-        Kind::Boost | Kind::Volume => Box::new(GainUnit::new(fs, kind)),
-        Kind::Comp => Box::new(crate::pedals::CompUnit::new(fs)),
+        Kind::Boost | Kind::Volume => Box::new(GainUnit::new(fs, live.kind)),
         Kind::Eq => Box::new(crate::pedals::EqUnit::new(fs)),
-        Kind::Delay => Box::new(crate::pedals::DelayUnit::new(fs)),
-        Kind::Reverb => Box::new(crate::pedals::ReverbUnit::new(fs)),
-        Kind::Mod => Box::new(crate::pedals::ModUnit::new(fs)),
         Kind::Tremolo => Box::new(crate::pedals::TremoloUnit::new(fs)),
-        Kind::Double => Box::new(crate::pedals::DoubleUnit::new(fs)),
-        Kind::Tuner => Box::new(crate::pedals::TunerUnit::new(fs)),
+        _ => unreachable!("the suite's plugins are embedded"),
     }
 }
 
@@ -582,7 +576,7 @@ mod tests {
         let fs = 48_000.0;
         for kind in [Kind::Tone, Kind::Volume, Kind::Amp, Kind::Cab, Kind::Eq, Kind::Tuner] {
             let live = Live::new(1, kind);
-            let mut u = build(kind, fs);
+            let mut u = build(&live, fs);
             u.reset(&live);
             if kind == Kind::Amp {
                 live.set(2, 0.0);
@@ -610,7 +604,7 @@ mod pedal_tests {
         let fs = 48_000.0;
         for kind in Kind::ALL {
             let live = Live::new(1, kind);
-            let mut u = build(kind, fs);
+            let mut u = build(&live, fs);
             u.reset(&live);
             let mut seed = 5u32;
             let mut peak = 0.0f32;

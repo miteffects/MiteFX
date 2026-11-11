@@ -55,6 +55,19 @@ rocker); the add menu has two columns.
 - **Full view** (slice 3): a block from one of our plugins opens that plugin's own editor inside
   the Rig, bound to the block's parameters.
 
+**Built (2026-11-11, slice 3):** Comp, Delay, Reverb, Mod, Double and Tuner blocks *are* those
+plugins. Each plugin crate is split in two: `plugins/mite-<name>/core` (`mite_<name>_core`:
+engine, parameters, editor, presets) and the plugin crate (entry points, nih-plug params), so the
+Rig links the cores without a second set of exports. A block holds the plugin's whole parameter set
+by its frozen ids, runs the plugin's own engine with its own telemetry, and its **Full view**
+(button, or double-click the block) draws the plugin's editor in the plugin's colour, with ‹ Rig
+(or Esc) back to the board. The simple view shows a few of the same parameters. The plugins'
+settings functions allocate, so settings are computed off the audio thread (editor tick, loader
+thread, and again when the host's tempo moves) and the unit copies the newest under a try-lock that
+never waits. Boards saved by slice 2 load with their pedal values renamed to the plugins' ids (the
+delay's tone and the doubler's width and level had no counterpart and go). Not yet: a plugin's
+snapshots A–D inside a block are not saved with the board; its user presets are the plugin's own.
+
 ## 4. Parameters, state, automation
 
 - Pedal settings live in the Rig's state (`board` field: the chain, each block's kind, values,

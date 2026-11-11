@@ -1,24 +1,29 @@
-//! Mite Comp's presets: which parameters are sound, and the factory presets (`presets/*.json`).
-//! Files, folders and the list live in `mite_core::presets`; the header's preset controls in
-//! `mite_ui::session`.
+//! Mite Mod's presets: which parameters are sound, and the factory presets (`presets/*.json`).
 
 use mite_core::presets::{self as core, Preset};
 
 pub use crate::params::sound_ids as preset_ids;
 
 /// The plugin a preset file belongs to (also its folder's name).
-pub const PLUGIN: &str = "Mite Comp";
+pub const PLUGIN: &str = "Mite Mod";
 
-/// The built-in presets, Init (no stages: audio unchanged) first.
 pub const FACTORY: &[&str] = &[
-    include_str!("../presets/init.json"),
-    include_str!("../presets/vocal-leveller.json"),
-    include_str!("../presets/drum-bus-glue.json"),
-    include_str!("../presets/gentle-master.json"),
-    include_str!("../presets/bass-control.json"),
-    include_str!("../presets/snare-snap.json"),
-    include_str!("../presets/gate-and-comp.json"),
-    include_str!("../presets/room-tamer.json"),
+    include_str!("../../presets/init.json"),
+    include_str!("../../presets/lush-chorus.json"),
+    include_str!("../../presets/eighties-chorus.json"),
+    include_str!("../../presets/string-ensemble.json"),
+    include_str!("../../presets/jet-flanger.json"),
+    include_str!("../../presets/tape-flange.json"),
+    include_str!("../../presets/four-stage-swirl.json"),
+    include_str!("../../presets/deep-phaser.json"),
+    include_str!("../../presets/gentle-vibrato.json"),
+    include_str!("../../presets/seasick.json"),
+    include_str!("../../presets/rotary-chorale.json"),
+    include_str!("../../presets/rotary-tremolo.json"),
+    include_str!("../../presets/warm-cabinet.json"),
+    include_str!("../../presets/micro-shift.json"),
+    include_str!("../../presets/thicken.json"),
+    include_str!("../../presets/wide-detune.json"),
 ];
 
 pub fn factory() -> Vec<Preset> {
@@ -36,13 +41,11 @@ mod tests {
         let presets = factory();
         assert_eq!(presets.len(), FACTORY.len(), "a factory preset failed to parse");
         assert_eq!(presets[0].name, "Init");
-        assert!(presets[0].values.is_empty());
         for p in &presets {
             for (id, v) in &p.values {
                 assert!(ids.contains(id), "{}: unknown parameter {id}", p.name);
                 let line = manifest().lines().find(|l| l.starts_with(&format!("{id} |"))).map(str::to_owned).unwrap_or_default();
                 let fields: Vec<&str> = line.split(" | ").collect();
-                // Continuous parameters: `id | unit | min | max | default | scale`.
                 if let [_, _, min, max, _, _] = fields[..] {
                     let (min, max) = (min.parse::<f32>().unwrap_or(f32::MIN), max.parse::<f32>().unwrap_or(f32::MAX));
                     assert!((min..=max).contains(v), "{}: {id} = {v} outside {min}…{max}", p.name);
@@ -54,6 +57,5 @@ mod tests {
     #[test]
     fn presets_leave_monitoring_out() {
         assert!(preset_ids().iter().all(|id| !is_monitoring(id)));
-        assert!(!preset_ids().iter().any(|id| id == "listen" || id == "delta" || id == "bypass" || id.ends_with("_solo")));
     }
 }

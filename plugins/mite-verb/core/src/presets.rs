@@ -1,21 +1,26 @@
-//! Mite Delay's presets: which parameters are sound, and the factory presets (`presets/*.json`).
+//! Mite Verb's presets: which parameters are sound, and the factory presets (`presets/*.json`).
 
 use mite_core::presets::{self as core, Preset};
 
 pub use crate::params::sound_ids as preset_ids;
 
 /// The plugin a preset file belongs to (also its folder's name).
-pub const PLUGIN: &str = "Mite Delay";
+pub const PLUGIN: &str = "Mite Verb";
 
 /// The built-in presets, Init first.
 pub const FACTORY: &[&str] = &[
-    include_str!("../presets/init.json"),
-    include_str!("../presets/dotted-eighth.json"),
-    include_str!("../presets/tape-echo.json"),
-    include_str!("../presets/wide-ping-pong.json"),
-    include_str!("../presets/bbd-slapback.json"),
-    include_str!("../presets/ducked-vocal.json"),
-    include_str!("../presets/rhythm-taps.json"),
+    include_str!("../../presets/init.json"),
+    include_str!("../../presets/vocal-plate.json"),
+    include_str!("../../presets/drum-room.json"),
+    include_str!("../../presets/tight-booth.json"),
+    include_str!("../../presets/large-hall.json"),
+    include_str!("../../presets/ducked-vocal.json"),
+    include_str!("../../presets/endless.json"),
+    include_str!("../../presets/shimmer-hall.json"),
+    include_str!("../../presets/concert-hall.json"),
+    include_str!("../../presets/bright-plate.json"),
+    include_str!("../../presets/studio-chamber.json"),
+    include_str!("../../presets/spring-tank.json"),
 ];
 
 pub fn factory() -> Vec<Preset> {

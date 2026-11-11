@@ -47,11 +47,13 @@ pub struct LoaderCore {
     params: Arc<RigParams>,
     rate: AtomicF32,
     built: Mutex<Built>,
+    /// The tempo the embedded plugins' settings were last computed at.
+    tempo: AtomicF32,
 }
 
 impl LoaderCore {
     pub fn new(board: Arc<Board>, shared: Arc<RigShared>, params: Arc<RigParams>) -> Self {
-        Self { board, shared, params, rate: AtomicF32::new(0.0), built: Mutex::new(Built::default()) }
+        Self { board, shared, params, rate: AtomicF32::new(0.0), built: Mutex::new(Built::default()), tempo: AtomicF32::new(crate::embed::tempo()) }
     }
 
     pub fn set_rate(&self, rate: f32) {
@@ -173,9 +175,23 @@ impl LoaderCore {
         any
     }
 
+    /// The suite's plugins on the board take their values (and the tempo, for synced times).
+    pub fn settle(&self) {
+        let tempo = crate::embed::tempo();
+        let moved = (tempo - self.tempo.load()).abs() > 1e-3;
+        self.tempo.store(tempo);
+        for b in self.board.blocks() {
+            if moved {
+                b.live.unsettle();
+            }
+            b.live.settle();
+        }
+    }
+
     /// One round: the graph (sent), the files, the collection of retired objects.
     pub fn step(&self) -> bool {
         self.shared.graph.collect();
+        self.settle();
         let mut any = false;
         if let Some(g) = self.build_graph(false) {
             self.shared.graph.send(g);

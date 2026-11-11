@@ -350,6 +350,61 @@ impl Default for CompParams {
     }
 }
 
+/// The compressor's settings from plain values by id (what `CompParams::settings(None)` gives
+/// from the same values): for hosts other than the plugin's own (Mite Rig's Comp pedal).
+/// Allocates (the per-stage ids): not for the audio thread.
+pub fn comp_settings(p: impl Fn(&str) -> f32) -> CompSettings {
+    let index = |v: f32| v.round().max(0.0) as usize;
+    let on = |v: f32| v >= 0.5;
+    let stage = |i: usize| {
+        let v = |what: &str| p(&format!("s{}_{what}", i + 1));
+        Stage {
+            on: on(v("on")),
+            quadrant: Quadrant::from_index(index(v("quad"))),
+            threshold_db: v("thresh"),
+            ratio: v("ratio"),
+            knee_db: v("knee"),
+            range_db: v("range"),
+            attack_ms: v("attack"),
+            release_ms: v("release"),
+            auto_release: on(v("auto_rel")),
+            detector: Detector::from_index(index(v("det"))),
+        }
+    };
+    let band = |i: usize| {
+        let v = |what: &str| p(&format!("k{}_{what}", i + 1));
+        BandSettings { enabled: on(v("on")), kind: BandType::from_index(index(v("type"))), freq: f64::from(v("freq")), gain_db: f64::from(v("gain")), q: f64::from(v("q")), ..BandSettings::default() }
+    };
+    let character = index(p(CHARACTER.id)).min(CUSTOM);
+    let style = if character < CUSTOM {
+        STYLES[character]
+    } else {
+        Style { attack: p(C_ATTACK.id), release: p(C_RELEASE.id), drive_db: p(C_DRIVE.id), slow_tail: p(C_TAIL.id) / 100.0, program: p(C_PROGRAM.id) / 100.0, ratio_bend: p(C_BEND.id) / 100.0 }
+    };
+    let stages: [Stage; STAGES] = std::array::from_fn(stage);
+    let solo = (0..STAGES).position(|i| on(p(&format!("s{}_solo", i + 1))) && stages[i].on);
+    CompSettings {
+        stages,
+        style,
+        feedback: index(p(TOPOLOGY.id)) == 1,
+        mid_side: index(p(STEREO.id)) == 1,
+        link: p(LINK.id) / 100.0,
+        lookahead_ms: p(LOOKAHEAD.id),
+        hold_ms: p(HOLD.id),
+        makeup_db: p(MAKEUP.id),
+        auto_makeup: on(p(AUTO_MAKEUP.id)),
+        smart: Smart::from_index(index(p(SMART.id))),
+        smart_amount: p(SMART_AMOUNT.id) / 100.0,
+        target_gr_db: p(TARGET_GR.id),
+        sibilance: p(SIBILANCE.id) / 100.0,
+        external_key: index(p(SC_SOURCE.id)) == 1,
+        key_bands: std::array::from_fn(band),
+        listen: on(p(LISTEN.id)),
+        solo,
+        oversampling: 1 << index(p(OVERSAMPLING.id)).min(2),
+    }
+}
+
 impl CompParams {
     /// The Character in force: a built-in one, or Custom's six values. `audition`, when set, is
     /// a Character being tried from the menu (it never touches the parameter).
@@ -469,5 +524,19 @@ unsafe impl Params for CompParams {
             map.push((stage_id(i, S_AUTO_REL.id), s.auto_rel.as_ptr(), format!("Stage {}", i + 1)));
         }
         map
+    }
+}
+
+#[cfg(test)]
+mod comp_settings_tests {
+    use super::*;
+
+    #[test]
+    fn comp_settings_by_id_is_what_the_plugins_params_give() {
+        // The plugin's own values, plain and exact (a normalised round trip is not, on log scales).
+        let params = CompParams::default();
+        let map: std::collections::HashMap<String, ParamPtr> = params.param_map().into_iter().map(|(id, ptr, _)| (id, ptr)).collect();
+        let p = |id: &str| unsafe { map[id].modulated_plain_value() };
+        assert_eq!(comp_settings(p), params.settings(None));
     }
 }

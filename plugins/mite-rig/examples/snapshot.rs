@@ -4,7 +4,7 @@
 //!
 //!     cargo run -p mite_rig --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, split, pedals, menu, browser. SNAPSHOT_CLICK=x,y clicks a point first.
+//! SNAPSHOT_VARIANT: default, split, pedals, full (the Comp's own editor), menu, browser. SNAPSHOT_CLICK=x,y clicks a point first.
 
 #[path = "common/rig.rs"]
 mod rig;
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         board.insert(Kind::Volume, Place::Lane { split: at, lane: 1, index: 1 });
         board.block(boost).unwrap().live.set(0, 9.0);
     }
-    if v("pedals") {
+    if v("pedals") || v("full") {
         // A whole pedalboard: tuner, comp, the amp, then mod, tremolo, delay, reverb in a lane
         // beside an EQ'd double.
         for (k, kind) in [Kind::Tuner, Kind::Comp].into_iter().enumerate() {
@@ -112,6 +112,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
+        }
+    }
+    if v("full") {
+        // The Comp block's own editor, inside the Rig.
+        let id = board.blocks().into_iter().find(|b| b.kind() == Kind::Comp).map(|b| b.id());
+        if let Some(id) = id {
+            view.open_full(id);
         }
     }
     if let Ok(xy) = std::env::var("SNAPSHOT_CLICK") {

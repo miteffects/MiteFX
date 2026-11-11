@@ -99,6 +99,11 @@ impl MemoryParamHost {
         self.with(spec)
     }
 
+    /// A parameter's spec (its id, range, scale and default).
+    pub fn spec(&self, id: &str) -> Option<ParamSpec> {
+        self.values.borrow().get(id).map(|v| v.0)
+    }
+
     /// Sets a plain value, e.g. to stage a snapshot.
     pub fn set_plain(&self, id: &str, plain: f32) {
         if let Some((spec, v)) = self.values.borrow_mut().get_mut(id) {
