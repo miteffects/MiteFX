@@ -49,11 +49,13 @@ pub struct LoaderCore {
     built: Mutex<Built>,
     /// The tempo the embedded plugins' settings were last computed at.
     tempo: AtomicF32,
+    /// The board and mapping versions the macro table was last compiled at.
+    macros_built: Mutex<Option<(u64, u64)>>,
 }
 
 impl LoaderCore {
     pub fn new(board: Arc<Board>, shared: Arc<RigShared>, params: Arc<RigParams>) -> Self {
-        Self { board, shared, params, rate: AtomicF32::new(0.0), built: Mutex::new(Built::default()), tempo: AtomicF32::new(crate::embed::tempo()) }
+        Self { board, shared, params, rate: AtomicF32::new(0.0), built: Mutex::new(Built::default()), tempo: AtomicF32::new(crate::embed::tempo()), macros_built: Mutex::new(None) }
     }
 
     pub fn set_rate(&self, rate: f32) {
@@ -188,10 +190,40 @@ impl LoaderCore {
         }
     }
 
+    /// The macro table for the mapping and board as they are, if either changed since the last.
+    pub fn build_macros(&self, force: bool) -> Option<Box<crate::macros::MacroTable>> {
+        let key = (self.board.structure_version(), self.board.macros.version());
+        let mut built = self.macros_built.lock().unwrap_or_else(|e| e.into_inner());
+        if !force && *built == Some(key) {
+            return None;
+        }
+        *built = Some(key);
+        Some(Box::new(crate::macros::MacroTable::compile(&self.board)))
+    }
+
+    /// A program change: the board of that preset (factory first, then the user's).
+    fn program_change(&self) {
+        let p = self.board.macros.program.swap(-1, Ordering::AcqRel);
+        if p < 0 {
+            return;
+        }
+        let library = mite_core::presets::PresetLibrary::new(crate::presets::PLUGIN, crate::presets::FACTORY);
+        if let Some(preset) = library.get(p as usize) {
+            self.board.load_json(preset.extra.as_deref());
+            self.params.preset.set(Some(preset.name.clone()));
+        }
+    }
+
     /// One round: the graph (sent), the files, the collection of retired objects.
     pub fn step(&self) -> bool {
         self.shared.graph.collect();
+        self.shared.macros.collect();
+        self.board.macros.take_learned();
+        self.program_change();
         self.settle();
+        if let Some(t) = self.build_macros(false) {
+            self.shared.macros.send(t);
+        }
         let mut any = false;
         if let Some(g) = self.build_graph(false) {
             self.shared.graph.send(g);
@@ -222,7 +254,8 @@ impl Loader {
                     c.step();
                     // A size change only shows in the parameter, a lost file in a flag: look
                     // again now and then.
-                    c.board.wait(seen, Duration::from_millis(100));
+                    // 10 ms: a macro or MIDI moving a plugin block's value is heard that soon.
+                    c.board.wait(seen, Duration::from_millis(10));
                 }
             })
             .ok();

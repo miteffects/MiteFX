@@ -17,6 +17,7 @@ use mite_core::AtomicF32;
 use serde::{Deserialize, Serialize};
 
 use crate::blocks::Kind;
+use crate::macros::MacroDoc;
 use crate::parts::{CabLoad, ModelLoad};
 use crate::rig::{SlotFile, Status};
 
@@ -224,6 +225,8 @@ struct Model {
 
 /// The board, shared by the editor, the state and the loader.
 pub struct Board {
+    /// The macros' mapping and their shared values (saved with the board).
+    pub macros: crate::macros::Macros,
     model: Mutex<Model>,
     /// Moves on every structural change (the loader rebuilds the graph).
     structure: AtomicU64,
@@ -292,11 +295,24 @@ enum ItemDoc {
 struct BoardDoc {
     #[serde(default)]
     items: Vec<ItemDoc>,
+    #[serde(default, skip_serializing_if = "MacroDoc::is_empty")]
+    macros: MacroDoc,
+}
+
+/// A board's shape: its blocks (id and kind) and splits, in order (what the graph is built from).
+fn shape(items: &[Item]) -> Vec<(u64, Kind, Vec<Vec<(u64, Kind)>>)> {
+    items
+        .iter()
+        .map(|i| match i {
+            Item::Block(b) => (b.id(), b.kind(), Vec::new()),
+            Item::Split(s) => (s.id, Kind::Gate, s.lanes.iter().map(|l| l.blocks.iter().map(|b| (b.id(), b.kind())).collect()).collect()),
+        })
+        .collect()
 }
 
 impl Board {
     pub fn new() -> Self {
-        Self { model: Mutex::new(Model { items: Vec::new(), next_id: 1 }), structure: AtomicU64::new(0), changed: AtomicU64::new(0), wake: Condvar::new() }
+        Self { macros: crate::macros::Macros::new(), model: Mutex::new(Model { items: Vec::new(), next_id: 1 }), structure: AtomicU64::new(0), changed: AtomicU64::new(0), wake: Condvar::new() }
     }
 
     /// The board a new Rig starts with: a gate, an amp, a cabinet.
@@ -307,6 +323,7 @@ impl Board {
     }
 
     pub fn reset_default(&self) {
+        self.macros.set_doc(MacroDoc::default());
         let mut m = self.lock();
         m.items.clear();
         for kind in [Kind::Gate, Kind::Amp, Kind::Cab] {
@@ -499,6 +516,7 @@ impl Board {
             }
         };
         let doc = BoardDoc {
+            macros: self.macros.doc(),
             items: self
                 .lock()
                 .items
@@ -513,62 +531,100 @@ impl Board {
     }
 
     /// From the state (none or unreadable: the default board).
+    /// From the state, a preset or an undo step (none or unreadable: the default board).
+    /// Blocks and splits still on the board keep their live values (their running units, plugin
+    /// engines and loaded files go on): only what changed changes, and the graph is rebuilt only
+    /// if the board's shape did.
     pub fn load_json(&self, json: Option<&str>) {
         let Some(doc) = json.and_then(|j| serde_json::from_str::<BoardDoc>(j).ok()) else {
             self.reset_default();
             return;
         };
+        let old_items = self.items();
+        let old_shape = shape(&old_items);
+        let mut old_blocks: std::collections::HashMap<u64, Arc<Live>> = std::collections::HashMap::new();
+        let mut old_splits: std::collections::HashMap<u64, (Arc<SplitLive>, Vec<Arc<LaneLive>>)> = std::collections::HashMap::new();
+        for item in &old_items {
+            match item {
+                Item::Block(b) => {
+                    old_blocks.insert(b.id(), b.live.clone());
+                }
+                Item::Split(sp) => {
+                    old_splits.insert(sp.id, (sp.live.clone(), sp.lanes.iter().map(|l| l.live.clone()).collect()));
+                    for l in &sp.lanes {
+                        for b in &l.blocks {
+                            old_blocks.insert(b.id(), b.live.clone());
+                        }
+                    }
+                }
+            }
+        }
         let mut max_id = 0;
         let mut make = |d: &BlockDoc| -> Option<Block> {
             let kind = Kind::from_id(&d.kind)?;
             max_id = max_id.max(d.id);
-            let live = Live::new(d.id, kind);
+            let reused = old_blocks.get(&d.id).filter(|l| l.kind == kind).cloned();
+            let live = reused.clone().unwrap_or_else(|| Arc::new(Live::new(d.id, kind)));
+            // Every value: the saved one (a slice-2 pedal's ids are the plugin's now), or the default.
+            let mut values: Vec<f32> = kind.params().iter().map(|p| p.spec.default).collect();
             for (id, v) in &d.values {
-                // A slice-2 pedal's ids are the plugin's now.
                 let id = crate::embed::renamed(kind, id).unwrap_or(id);
                 if let Some(i) = kind.param_index(id) {
                     let p = &kind.params()[i];
-                    live.set(i, v.clamp(p.spec.min, p.spec.max));
+                    values[i] = v.clamp(p.spec.min, p.spec.max);
+                }
+            }
+            for (i, v) in values.into_iter().enumerate() {
+                if live.value(i) != v {
+                    live.set(i, v);
                 }
             }
             live.settle();
             live.bypass.store(d.bypass, Ordering::Relaxed);
-            if let Some(f) = &d.file {
-                live.set_file_raw(f.clone());
-                live.set_status(if f.path.is_some() { Status::Loading } else { Status::Empty });
+            let file = d.file.clone().unwrap_or_default();
+            if live.set_file_raw(file.clone()) || reused.is_none() {
+                live.set_status(if file.path.is_some() { Status::Loading } else { Status::Empty });
             }
-            Some(Block { live: Arc::new(live) })
+            Some(Block { live })
         };
         let mut items = Vec::new();
         for item in &doc.items {
             match item {
                 ItemDoc::Block(d) => items.extend(make(d).map(Item::Block)),
                 ItemDoc::Split { id, lanes, routing, mix } => {
+                    let old = old_splits.get(id);
                     let lanes: Vec<Lane> = lanes
                         .iter()
                         .take(MAX_LANES)
-                        .map(|l| {
-                            let live = LaneLive::new();
+                        .enumerate()
+                        .map(|(j, l)| {
+                            let live = old.and_then(|o| o.1.get(j).cloned()).unwrap_or_else(|| Arc::new(LaneLive::new()));
                             live.level_db.store(l.level_db.clamp(-60.0, 12.0));
                             live.pan.store(l.pan.clamp(-1.0, 1.0));
-                            Lane { blocks: l.blocks.iter().filter_map(&mut make).collect(), live: Arc::new(live) }
+                            Lane { blocks: l.blocks.iter().filter_map(&mut make).collect(), live }
                         })
                         .collect();
                     if lanes.len() >= 2 {
-                        let live = SplitLive::new();
+                        let live = old.map(|o| o.0.clone()).unwrap_or_else(|| Arc::new(SplitLive::new()));
                         live.routing.store((*routing).min(ROUTINGS.len() as u32 - 1), Ordering::Relaxed);
                         live.mix.store(mix.clamp(0.0, 1.0));
-                        items.push(Item::Split(Split { id: *id, lanes, live: Arc::new(live) }));
+                        items.push(Item::Split(Split { id: *id, lanes, live }));
                     }
                 }
             }
         }
         let split_max = items.iter().filter_map(|i| if let Item::Split(s) = i { Some(s.id) } else { None }).max().unwrap_or(0);
+        let same = shape(&items) == old_shape;
         let mut m = self.lock();
         m.items = items;
-        m.next_id = max_id.max(split_max) + 1;
+        m.next_id = m.next_id.max(max_id.max(split_max) + 1);
         drop(m);
-        self.structure_changed();
+        self.macros.set_doc(doc.macros);
+        if same {
+            self.poke();
+        } else {
+            self.structure_changed();
+        }
     }
 }
 
@@ -657,5 +713,15 @@ mod tests {
         assert!(b.block(ids[0]).is_none());
         b.load_json(Some("nonsense"));
         assert_eq!(b.blocks().len(), 3, "an unreadable state: the default board");
+    }
+}
+
+impl mite_ui::session::SessionExtra for Board {
+    fn save(&self) -> String {
+        self.to_json()
+    }
+
+    fn load(&self, text: Option<&str>) {
+        self.load_json(text);
     }
 }

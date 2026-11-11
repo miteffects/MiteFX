@@ -314,13 +314,14 @@ impl Graph {
 
 fn adopt_one(n: &mut Node, old: &mut Graph) {
     let found = match old.find(n.id) {
-        Some(o) => {
+        // The same block (not just its id: a preset or undo may put another there).
+        Some(o) if Arc::ptr_eq(&o.live, &n.live) => {
             std::mem::swap(&mut n.unit, &mut o.unit);
             std::mem::swap(&mut n.dry, &mut o.dry);
             std::mem::swap(&mut n.bypass, &mut o.bypass);
             true
         }
-        None => false,
+        _ => false,
     };
     if !found && n.live.kind.has_file() && n.live.has_path() && !n.unit.holds_file() {
         n.live.reload.store(true, std::sync::atomic::Ordering::Release);

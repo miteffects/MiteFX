@@ -50,9 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("pedals") || v("full") {
         // A whole pedalboard: tuner, comp, the amp, then mod, tremolo, delay, reverb in a lane
         // beside an EQ'd double.
-        for (k, kind) in [Kind::Tuner, Kind::Comp].into_iter().enumerate() {
-            board.insert(kind, Place::Main(k));
-        }
+        let ids: Vec<u64> = [Kind::Tuner, Kind::Comp].into_iter().enumerate().filter_map(|(k, kind)| board.insert(kind, Place::Main(k))).collect();
+        // Macro 1 on the comp's threshold (on CC 11), switch 1 on the tuner's on/off.
+        board.macros.toggle(0, mite_rig::macros::Target { block: ids[1], param: "s1_thresh".into() });
+        board.macros.set_cc(0, Some(11));
+        board.macros.toggle(mite_rig::macros::KNOBS, mite_rig::macros::Target { block: ids[0], param: String::new() });
         let at = board.items().len();
         let split = board.insert_split(at, 2);
         let _ = split;

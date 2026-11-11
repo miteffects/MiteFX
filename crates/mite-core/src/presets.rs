@@ -25,6 +25,8 @@ pub struct Preset {
     pub values: PresetValues,
     /// Built in (cannot be overwritten), or the user's file.
     pub factory: bool,
+    /// State beyond the parameters, as the plugin writes it (Mite Rig's board).
+    pub extra: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,18 +35,25 @@ struct File {
     version: u32,
     name: String,
     params: PresetValues,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extra: Option<String>,
 }
 
 /// A preset file of `plugin` (its display name, "Mite EQ").
 pub fn to_json(plugin: &str, name: &str, values: &PresetValues) -> String {
-    let file = File { plugin: plugin.to_owned(), version: VERSION, name: name.to_owned(), params: values.clone() };
+    to_json_with(plugin, name, values, None)
+}
+
+/// A preset file with state beyond the parameters (`Preset::extra`).
+pub fn to_json_with(plugin: &str, name: &str, values: &PresetValues, extra: Option<&str>) -> String {
+    let file = File { plugin: plugin.to_owned(), version: VERSION, name: name.to_owned(), params: values.clone(), extra: extra.map(str::to_owned) };
     serde_json::to_string_pretty(&file).unwrap_or_default()
 }
 
 /// A preset file's contents, if it is one of `plugin`'s that this version can read.
 pub fn from_json(plugin: &str, json: &str, factory: bool) -> Option<Preset> {
     let file: File = serde_json::from_str(json).ok()?;
-    (file.plugin == plugin && file.version <= VERSION).then_some(Preset { name: file.name, values: file.params, factory })
+    (file.plugin == plugin && file.version <= VERSION).then_some(Preset { name: file.name, values: file.params, factory, extra: file.extra })
 }
 
 /// Where `plugin`'s user presets live: the OS's settings folder (`~/.config/MiteFX/<plugin>/Presets`,
@@ -80,9 +89,14 @@ fn file_name(name: &str) -> String {
 
 /// Saves a user preset of `plugin` (replacing one of the same name) in `dir`.
 pub fn save_in(plugin: &str, dir: &Path, name: &str, values: &PresetValues) -> std::io::Result<PathBuf> {
+    save_in_with(plugin, dir, name, values, None)
+}
+
+/// [`save_in`] with state beyond the parameters (`Preset::extra`).
+pub fn save_in_with(plugin: &str, dir: &Path, name: &str, values: &PresetValues, extra: Option<&str>) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(file_name(name));
-    std::fs::write(&path, to_json(plugin, name.trim(), values))?;
+    std::fs::write(&path, to_json_with(plugin, name.trim(), values, extra))?;
     Ok(path)
 }
 
@@ -161,8 +175,13 @@ impl PresetLibrary {
 
     /// Saves a user preset and reads the folder again.
     pub fn save(&mut self, name: &str, values: &PresetValues) -> std::io::Result<PathBuf> {
+        self.save_with(name, values, None)
+    }
+
+    /// [`PresetLibrary::save`] with state beyond the parameters (`Preset::extra`).
+    pub fn save_with(&mut self, name: &str, values: &PresetValues, extra: Option<&str>) -> std::io::Result<PathBuf> {
         let dir = self.dir.clone().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no preset folder"))?;
-        let path = save_in(self.plugin, &dir, name, values)?;
+        let path = save_in_with(self.plugin, &dir, name, values, extra)?;
         self.reload();
         Ok(path)
     }
@@ -200,7 +219,7 @@ mod tests {
         let path = save_in("Test", &dir, "My: bright/vocal", &values).expect("saved");
         assert!(path.file_name().is_some_and(|f| f == "My_ bright_vocal.json"));
         let read = user_in("Test", &dir);
-        assert_eq!(read, vec![Preset { name: "My: bright/vocal".into(), values, factory: false }]);
+        assert_eq!(read, vec![Preset { name: "My: bright/vocal".into(), values, factory: false, extra: None }]);
         // Another plugin's file is not ours.
         assert!(user_in("Other", &dir).is_empty());
         assert!(from_json("Test", r#"{"plugin":"Other","version":1,"name":"x","params":{}}"#, false).is_none());

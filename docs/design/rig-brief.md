@@ -87,6 +87,18 @@ snapshots A–D inside a block are not saved with the board; its user presets ar
 - Host parameters: input, output, mix, bypass, and (slice 5) 8 macro knobs and 4 macro switches,
   each mappable to any block parameter.
 
+**Built (2026-11-11, slice 5):** `macro1`…`macro8` (0–100 %) and `switch1`…`switch4` are host
+parameters. Right-click a control in a block's simple view to map it to a macro knob (its whole
+range), a switch or choice to a macro switch, a block to a switch (its on/off); a slot's first
+mapping takes the control's value first, so mapping never moves the sound. The mapping is part of
+the board (saved, in presets, undone). The loader compiles it into a table the audio thread
+writes from (atomics only). MIDI: right-click a macro → MIDI learn (the next CC binds; a switch
+flips at ≥ 64); a CC also writes the host parameter while the editor is open (the host sees and
+can record it). A program change loads that preset's board (factory first, then the user's).
+Presets and undo carry the board (`mite_ui::session::SessionExtra`, `Preset::extra`); loading a
+board keeps the blocks still there (no rebuild when only values change). Snapshots A–D still hold
+only the host parameters.
+
 ## 5. Engine
 
 - The board compiles (worker thread) into a graph of boxed blocks; it arrives by `Handover` and

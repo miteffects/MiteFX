@@ -19,14 +19,16 @@ fn configured_state() -> Vec<u8> {
     let plugin = instance();
     let mut state: Value = serde_json::from_slice(&plugin.save()).expect("JSON");
     let params = state["params"].as_object_mut().expect("params");
-    for (id, v) in [("input", json!({"f32": 3.0})), ("size", json!({"i32": 1})), ("out_gain", json!({"f32": -2.0}))] {
+    for (id, v) in [("input", json!({"f32": 3.0})), ("size", json!({"i32": 1})), ("out_gain", json!({"f32": -2.0})), ("macro1", json!({"f32": 40.0})), ("switch2", json!({"bool": true}))] {
         assert!(params.contains_key(id), "no parameter {id}");
         params.insert(id.into(), v);
     }
     let fields = state["fields"].as_object_mut().expect("fields");
     fields.insert("preset".into(), json!("Init"));
     fields.insert("snapshots".into(), json!(r#"{"active":0,"slots":[null,{"input":0.25},null,null]}"#));
-    fields.insert(BOARD_KEY.into(), json!(BOARD));
+    // Macro 1 on the tone's treble (CC 11), switch 1 on the pedal's on/off (CC 64).
+    let board = BOARD.strip_suffix('}').unwrap().to_owned() + r#","macros":{"targets":[[{"block":6,"param":"treble"}],[],[],[],[],[],[],[],[{"block":2}],[],[],[]],"cc":[11,null,null,null,null,null,null,null,64,null,null,null]}}"#;
+    fields.insert(BOARD_KEY.into(), json!(board));
     let bytes = serde_json::to_vec(&state).expect("JSON");
     assert!(plugin.load(&bytes));
     plugin.save()
@@ -46,6 +48,8 @@ fn a_saved_state_carries_the_board_as_it_was_given() {
     assert_eq!(default["items"].as_array().unwrap().len(), 3, "gate, capture, cab");
     let saved = normalized_state_json(&configured_state());
     let board: Value = serde_json::from_str(saved["fields"][BOARD_KEY].as_str().unwrap()).unwrap();
-    let given: Value = serde_json::from_str(BOARD).unwrap();
+    let mut given: Value = serde_json::from_str(BOARD).unwrap();
+    given["macros"] = board["macros"].clone();
     assert_eq!(board, given);
+    assert_eq!(board["macros"]["cc"][0], json!(11), "the mapping came back too");
 }

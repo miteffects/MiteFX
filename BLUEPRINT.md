@@ -590,7 +590,8 @@ A guitar and bass signal chain (brief: `docs/design/rig-brief.md`; the Amp's own
 - TONE3000 inside the plugin; captures at other rates in a resampling bracket (latency reported,
   lanes aligned).
 
-**Status (2026-11-11):** slices 1–3 built (board, graph swaps keeping running units, TONE3000
+**Status (2026-11-11):** slices 1–5 built (4: wah, octaver, split routing and mix, the palette;
+5: macros, MIDI learn and program changes, board presets and undo). Earlier: slices 1–3 built (board, graph swaps keeping running units, TONE3000
 into blocks; the suite's pedals; Comp, Delay, Reverb, Mod, Double and Tuner blocks are those
 plugins, engine and full editor, through their `core` crates). Not yet heard by the user.
 

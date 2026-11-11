@@ -99,6 +99,16 @@ struct Step {
     params: Vec<f32>,
     snapshots: snapshots::State,
     preset: Option<String>,
+    /// The plugin's state beyond its parameters (`SessionExtra`).
+    extra: Option<String>,
+}
+
+/// State beyond a plugin's parameters that its presets and undo carry too (Mite Rig's board).
+pub trait SessionExtra: Send + Sync {
+    /// The state now, as text.
+    fn save(&self) -> String;
+    /// Puts `text` back (None: the default, for a preset without any).
+    fn load(&self, text: Option<&str>);
 }
 
 /// A row of the preset list.
@@ -139,6 +149,9 @@ pub struct Session {
     pointer: Option<Point>,
     /// The parameters were replaced wholesale (a preset, a snapshot, undo) since last asked.
     replaced: bool,
+    extra: Option<Arc<dyn SessionExtra>>,
+    /// The extra state of the preset last loaded or saved.
+    loaded_extra: Option<String>,
 }
 
 impl Session {
@@ -160,7 +173,19 @@ impl Session {
             slot_press: None,
             pointer: None,
             replaced: false,
+            extra: None,
+            loaded_extra: None,
         }
+    }
+
+    /// State beyond the parameters that presets and undo carry too.
+    pub fn with_extra(mut self, extra: Arc<dyn SessionExtra>) -> Self {
+        self.extra = Some(extra);
+        self
+    }
+
+    fn extra_now(&self) -> Option<String> {
+        self.extra.as_ref().map(|e| e.save())
     }
 
     /// Keeps the user's presets in `dir` instead of the settings folder (tests, a portable setup).
@@ -204,6 +229,7 @@ impl Session {
             params: self.sound_ids.iter().map(|id| host.normalized(id)).collect(),
             snapshots: self.snapshots.export(),
             preset: self.current.get(),
+            extra: self.extra_now(),
         }
     }
 
@@ -218,6 +244,11 @@ impl Session {
     /// whether a gesture of the view's is still under way (a drag is one step when it ends).
     pub fn end(&mut self, host: &dyn ParamHost, wrote: bool, busy: bool) {
         self.edited |= wrote;
+        // An edit of the extra state (the view's own: it changed during this event).
+        if !self.edited && self.extra.is_some() {
+            let now = self.extra_now();
+            self.edited |= self.committed.as_ref().is_some_and(|c| c.extra != now);
+        }
         if self.edited && !busy && !self.busy() {
             self.commit(host);
         }
@@ -231,6 +262,9 @@ impl Session {
                 Some(c) => {
                     for (v, id) in c.params.iter_mut().zip(&self.sound_ids) {
                         *v = host.normalized(id);
+                    }
+                    if let Some(e) = &self.extra {
+                        c.extra = Some(e.save());
                     }
                 }
                 None => self.committed = Some(self.step(host)),
@@ -261,6 +295,9 @@ impl Session {
             write_if_changed(host, id, v);
         }
         self.snapshots.import(state.snapshots.clone());
+        if let (Some(e), Some(text)) = (&self.extra, &state.extra) {
+            e.load(Some(text));
+        }
         self.current.set(state.preset.clone());
         self.loaded = state.preset.as_deref().and_then(|name| self.preset_values(host, name));
         self.committed = Some(state.clone());
@@ -353,6 +390,11 @@ impl Session {
         for id in &self.sound_ids {
             write_if_changed(host, id, values[id]);
         }
+        if let Some(e) = &self.extra {
+            let text = self.library.get(i).and_then(|p| p.extra.clone());
+            e.load(text.as_deref());
+            self.loaded_extra = Some(e.save());
+        }
         self.current.set(Some(name));
         self.loaded = Some(values);
         self.edited = true;
@@ -381,7 +423,9 @@ impl Session {
             .filter(|id| (host.normalized(id) - host.default_normalized(id)).abs() > 1e-7)
             .map(|id| (id.clone(), host.plain(id, host.normalized(id))))
             .collect();
-        if self.library.save(name, &values).is_ok() {
+        let extra = self.extra_now();
+        if self.library.save_with(name, &values, extra.as_deref()).is_ok() {
+            self.loaded_extra = extra;
             self.current.set(Some(name.to_owned()));
             self.loaded = self.preset_values(host, name);
             self.edited = true;
@@ -391,6 +435,7 @@ impl Session {
     /// Whether the sound has moved on from the preset last loaded or saved.
     pub fn preset_modified(&self, host: &dyn ParamHost) -> bool {
         self.loaded.as_ref().is_some_and(|values| self.sound_ids.iter().any(|id| (host.normalized(id) - values[id]).abs() > 1e-6))
+            || (self.loaded.is_some() && self.loaded_extra.is_some() && self.loaded_extra != self.extra_now())
     }
 
     pub fn preset(&self, i: usize) -> Option<&Preset> {

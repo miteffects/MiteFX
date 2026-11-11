@@ -68,3 +68,37 @@ fn engine_process_never_allocates() {
         process_wrapper(|| engine.reset(&s));
     }
 }
+
+/// The macros' audio side (host values, CCs, a CC learned, a new table) never allocates either.
+#[test]
+fn macros_never_allocate() {
+    use mite_rig::macros::{MacroRunner, MacroTable, Target, KNOBS};
+    let params = Arc::new(RigParams::default());
+    let board = params.board.clone();
+    let shared = Arc::new(RigShared::new());
+    let wah = board.insert(Kind::Wah, Place::Main(0)).unwrap();
+    let comp = board.insert(Kind::Comp, Place::Main(1)).unwrap();
+    board.macros.toggle(0, Target { block: wah, param: "position".into() });
+    board.macros.toggle(1, Target { block: comp, param: "s1_thresh".into() });
+    board.macros.toggle(KNOBS, Target { block: comp, param: String::new() });
+    board.macros.set_cc(1, Some(11));
+    let mut run = MacroRunner::new();
+    for k in 0..50 {
+        if k % 10 == 0 {
+            shared.macros.collect();
+            shared.macros.send(Box::new(MacroTable::compile(&board)));
+        }
+        if k == 25 {
+            board.macros.learning.store(2, std::sync::atomic::Ordering::Release);
+        }
+        process_wrapper(|| {
+            run.take(&shared.macros);
+            run.host(0, k as f32 / 50.0);
+            run.host(KNOBS, (k % 2) as f32);
+            run.cc(&board.macros, 11, 0.3);
+            run.cc(&board.macros, 20, 0.7);
+            run.apply(&board.macros);
+        });
+        board.macros.take_learned();
+    }
+}

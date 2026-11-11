@@ -1,0 +1,61 @@
+{
+  "fields": {
+    "board": "{\"items\":[{\"block\":{\"id\":1,\"kind\":\"gate\",\"values\":{\"threshold\":-60.0}}},{\"block\":{\"id\":2,\"kind\":\"pedal\",\"values\":{\"gain\":3.0},\"file\":{\"path\":\"/rig/klon.nam\",\"source\":{\"tone_id\":9,\"model_id\":4,\"title\":\"Klon\",\"creator\":\"pedal_guy\",\"license\":\"cc-by\",\"url\":\"https://www.tone3000.com/tones/klon-9\",\"gear\":\"pedal\"}}}},{\"split\":{\"id\":3,\"lanes\":[{\"level_db\":-3.0,\"pan\":-0.5,\"blocks\":[{\"id\":4,\"kind\":\"amp\",\"file\":{\"path\":\"/rig/plexi.nam\"}}]},{\"level_db\":0.0,\"pan\":0.5,\"blocks\":[{\"id\":5,\"kind\":\"amp\",\"bypass\":true,\"file\":{\"path\":\"/rig/ac30.nam\"}},{\"id\":6,\"kind\":\"tone\",\"values\":{\"treble\":-4.0}}]}]}},{\"block\":{\"id\":7,\"kind\":\"cab\",\"file\":{\"path\":\"/rig/v30.wav\"}}}]}",
+    "mitefx_state": "2",
+    "preset": "Init",
+    "snapshots": "{\"active\":0,\"slots\":[{\"input\":0.5625,\"macro1\":0.0,\"macro2\":0.0,\"macro3\":0.0,\"macro4\":0.0,\"macro5\":0.0,\"macro6\":0.0,\"macro7\":0.0,\"macro8\":0.0,\"mix\":1.0,\"out_gain\":0.45833334,\"size\":1.0,\"switch1\":0.0,\"switch2\":0.0,\"switch3\":0.0,\"switch4\":0.0},{\"input\":0.25},null,null]}"
+  },
+  "params": {
+    "bypass": {
+      "bool": false
+    },
+    "input": {
+      "f32": 3.0
+    },
+    "mix": {
+      "f32": 100.0
+    },
+    "out_gain": {
+      "f32": -2.0
+    },
+    "size": {
+      "i32": 1
+    },
+    "macro1": {
+      "f32": 0.0
+    },
+    "macro2": {
+      "f32": 0.0
+    },
+    "macro3": {
+      "f32": 0.0
+    },
+    "macro4": {
+      "f32": 0.0
+    },
+    "macro5": {
+      "f32": 0.0
+    },
+    "macro6": {
+      "f32": 0.0
+    },
+    "macro7": {
+      "f32": 0.0
+    },
+    "macro8": {
+      "f32": 0.0
+    },
+    "switch1": {
+      "bool": false
+    },
+    "switch2": {
+      "bool": false
+    },
+    "switch3": {
+      "bool": false
+    },
+    "switch4": {
+      "bool": false
+    }
+  }
+}

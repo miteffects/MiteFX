@@ -112,3 +112,52 @@ fn a_block_dragged_from_the_palette_lands_on_the_plus_it_is_dropped_on() {
     assert_eq!(kinds[..3], [Kind::Gate, Kind::Wah, Kind::Delay]);
     draw(&mut view, &host);
 }
+
+#[test]
+fn ctrl_z_takes_back_a_board_edit_and_ctrl_y_brings_it_again() {
+    let (mut view, host, ui) = setup();
+    let before = ui.board.blocks().len();
+    click(&mut view, &host, RigView::palette_rect(Some(mite_rig::blocks::Kind::Delay)).unwrap().center());
+    assert_eq!(ui.board.blocks().len(), before + 1);
+    let ctrl = Modifiers { ctrl: true, ..MODS };
+    view.event(&UiEvent::KeyDown { key: mite_ui::Key::Character('z'), mods: ctrl }, &host);
+    view.tick(&host);
+    assert_eq!(ui.board.blocks().len(), before, "undone");
+    view.event(&UiEvent::KeyDown { key: mite_ui::Key::Character('y'), mods: ctrl }, &host);
+    view.tick(&host);
+    assert_eq!(ui.board.blocks().len(), before + 1, "redone");
+}
+
+#[test]
+fn right_click_maps_a_blocks_on_off_to_a_switch_without_turning_it_off() {
+    let (mut view, host, ui) = setup();
+    let tile = view.layout().tiles[0];
+    let id = tile.id;
+    let pos = tile.rect.center();
+    view.event(&UiEvent::PointerMove { pos, mods: MODS }, &host);
+    view.event(&UiEvent::PointerDown { pos, button: MouseButton::Right, mods: MODS }, &host);
+    // The menu's first row: Switch 1.
+    let row = Point::new(pos.x.clamp(8.0, 1280.0 - 238.0) + 40.0, pos.y + 5.0 + 13.0);
+    click(&mut view, &host, row);
+    assert_eq!(ui.board.macros.slots_of(&mite_rig::macros::Target { block: id, param: String::new() }), vec![mite_rig::macros::KNOBS]);
+    assert!(mite_ui::ParamHost::normalized(&host, "switch1") >= 0.5, "the switch took the block's state (on)");
+}
+
+/// A lane's pan knob moves its pan, its level knob its level (they were tied: both the level).
+#[test]
+fn a_lanes_pan_and_level_knobs_are_their_own() {
+    let (mut view, host, ui) = setup();
+    let last = view.layout().gaps.last().unwrap().at;
+    click(&mut view, &host, last);
+    let row = view.menu_row(view.menu_index(None, 2).unwrap()).unwrap().center();
+    click(&mut view, &host, row);
+    let lanes = ui.board.items().into_iter().find_map(|i| if let mite_rig::board::Item::Split(s) = i { Some(s.lanes) } else { None }).unwrap();
+    let pan = view.knob_at("0:pan").unwrap();
+    drag(&mut view, &host, pan, Point::new(pan.x, pan.y - 60.0));
+    assert!(lanes[0].live.pan.load() > 0.2, "pan moved: {}", lanes[0].live.pan.load());
+    assert_eq!(lanes[0].live.level_db.load(), 0.0, "level untouched");
+    let level = view.knob_at("1:level").unwrap();
+    drag(&mut view, &host, level, Point::new(level.x, level.y + 60.0));
+    assert!(lanes[1].live.level_db.load() < -1.0);
+    assert_eq!(lanes[1].live.pan.load(), 0.0, "pan untouched");
+}

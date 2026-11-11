@@ -20,6 +20,7 @@ pub mod engine;
 pub mod graph;
 pub mod ir;
 pub mod loader;
+pub mod macros;
 pub mod params;
 pub mod parts;
 pub mod pedals;
@@ -65,6 +66,7 @@ pub struct MiteRig {
     ui: Arc<RigUi>,
     loader: Loader,
     reported_latency: u32,
+    macros: macros::MacroRunner,
 }
 
 impl Default for MiteRig {
@@ -73,7 +75,7 @@ impl Default for MiteRig {
         let shared = Arc::new(RigShared::new());
         let ui = Arc::new(RigUi::with_stores(params.snapshots.clone(), params.preset.clone(), params.board.clone(), shared.clone()));
         let loader = Loader::new(LoaderCore::new(params.board.clone(), shared, params.clone()));
-        Self { engine: RigEngine::new(48_000.0, &params.settings()), params, ui, loader, reported_latency: 0 }
+        Self { engine: RigEngine::new(48_000.0, &params.settings()), params, ui, loader, reported_latency: 0, macros: macros::MacroRunner::new() }
     }
 }
 
@@ -84,6 +86,8 @@ impl Plugin for MiteRig {
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
+    /// MIDI: CCs drive the macros (learned), program changes pick a preset's board.
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
         AudioIOLayout { main_input_channels: NonZeroU32::new(2), main_output_channels: NonZeroU32::new(2), ..AudioIOLayout::const_default() },
         AudioIOLayout { main_input_channels: NonZeroU32::new(1), main_output_channels: NonZeroU32::new(2), ..AudioIOLayout::const_default() },
@@ -95,7 +99,7 @@ impl Plugin for MiteRig {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[params::v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -117,6 +121,9 @@ impl Plugin for MiteRig {
         if let Some(g) = core.build_graph(true) {
             drop(self.engine.install_now(g));
         }
+        if let Some(t) = core.build_macros(true) {
+            self.ui.engine.macros.send(t);
+        }
         self.engine.prime();
         self.engine.reset(&s);
         self.ui.sample_rate.store(config.sample_rate);
@@ -134,6 +141,23 @@ impl Plugin for MiteRig {
         if let Some(t) = context.transport().tempo {
             embed::set_tempo(t as f32);
         }
+        // Macros: the host's values, then MIDI (a CC learned or bound, a program change).
+        let board = &self.params.board;
+        self.macros.take(&self.ui.engine.macros);
+        for (i, m) in self.params.macros.iter().enumerate() {
+            self.macros.host(i, m.value() / 100.0);
+        }
+        for (i, s) in self.params.switches.iter().enumerate() {
+            self.macros.host(macros::KNOBS + i, if s.value() { 1.0 } else { 0.0 });
+        }
+        while let Some(event) = context.next_event() {
+            match event {
+                NoteEvent::MidiCC { cc, value, .. } => self.macros.cc(&board.macros, cc, value),
+                NoteEvent::MidiProgramChange { program, .. } => board.macros.program.store(i32::from(program), std::sync::atomic::Ordering::Release),
+                _ => {}
+            }
+        }
+        self.macros.apply(&board.macros);
         let s = self.params.settings();
         self.engine.process(buffer.as_slice(), &s, &self.ui.engine);
         let latency = self.engine.latency() as u32;

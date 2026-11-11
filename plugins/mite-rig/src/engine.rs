@@ -31,6 +31,8 @@ impl Default for RigSettings {
 /// The loader's handover and the meters.
 pub struct RigShared {
     pub graph: Handover<Graph>,
+    /// The macros' mapping, compiled (`crate::macros`).
+    pub macros: Handover<crate::macros::MacroTable>,
     pub in_peak: AtomicF32,
     pub out_peak: AtomicF32,
     /// Graphs swapped in so far (tests and the loader wait on it).
@@ -45,7 +47,7 @@ impl Default for RigShared {
 
 impl RigShared {
     pub fn new() -> Self {
-        Self { graph: Handover::new(), in_peak: AtomicF32::new(-150.0), out_peak: AtomicF32::new(-150.0), swaps: AtomicU64::new(0) }
+        Self { graph: Handover::new(), macros: Handover::new(), in_peak: AtomicF32::new(-150.0), out_peak: AtomicF32::new(-150.0), swaps: AtomicU64::new(0) }
     }
 
     /// The meters' peaks since the last call, dB (IN, OUT).

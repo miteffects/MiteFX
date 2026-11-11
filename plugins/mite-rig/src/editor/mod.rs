@@ -30,6 +30,7 @@ use crate::board::{Block, Item, LaneLive, Live, Place, SplitLive, ROUTINGS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::rig::{Gear, SlotFile, Status};
+use crate::macros::{Target, KNOBS, SLOTS};
 use crate::RigUi;
 pub use board_view::{Layout, AREA, LOOK_H, TILE_W};
 use board_view::{Gap, Tile, CY, IN_X};
@@ -178,11 +179,15 @@ impl ParamHost for SplitHost<'_> {
 struct LaneHost<'a>(&'a LaneLive);
 
 impl LaneHost<'_> {
+    /// Whether a knob's id ("1:pan", or a bare "pan") names the pan; anything else is the level.
+    fn is_pan(id: &str) -> bool {
+        id.rsplit(':').next() == Some(LANE_PAN.id)
+    }
     fn spec(id: &str) -> ParamSpec {
-        if id == LANE_PAN.id { LANE_PAN } else { LANE_LEVEL }
+        if Self::is_pan(id) { LANE_PAN } else { LANE_LEVEL }
     }
     fn get(&self, id: &str) -> f32 {
-        if id == LANE_PAN.id { self.0.pan.load() } else { self.0.level_db.load() }
+        if Self::is_pan(id) { self.0.pan.load() } else { self.0.level_db.load() }
     }
 }
 
@@ -202,7 +207,7 @@ impl ParamHost for LaneHost<'_> {
     fn begin_gesture(&self, _id: &str) {}
     fn set_normalized(&self, id: &str, normalized: f32) {
         let v = Self::spec(id).denormalize(normalized);
-        if id == LANE_PAN.id { self.0.pan.store(v) } else { self.0.level_db.store(v) }
+        if Self::is_pan(id) { self.0.pan.store(v) } else { self.0.level_db.store(v) }
     }
     fn end_gesture(&self, _id: &str) {}
 }
@@ -245,6 +250,50 @@ enum Hot {
     Menu(usize),
     Panel(PanelButton),
     Palette(usize),
+    /// A macro knob (0…7) or switch (8…11) in the header.
+    Macro(usize),
+    /// A row of the right-click menu.
+    Context(usize),
+}
+
+/// A macro knob's or switch's centre in the header.
+fn macro_at(slot: usize) -> Point {
+    if slot < KNOBS { Point::new(800.0 + slot as f64 * 42.0, HEADER / 2.0) } else { Point::new(1148.0 + (slot - KNOBS) as f64 * 34.0, HEADER / 2.0) }
+}
+
+const MACRO_R: f64 = 14.0;
+
+/// What a right-click menu row does.
+#[derive(Debug, Clone, PartialEq)]
+enum CtxAction {
+    /// Map (or unmap) a control or a block's on/off to a slot.
+    Toggle(usize, Target),
+    Learn(usize),
+    Forget(usize),
+    Clear(usize),
+}
+
+/// The right-click menu: where, and its rows (words, ticked, what it does).
+struct Context {
+    at: Point,
+    rows: Vec<(String, bool, CtxAction)>,
+}
+
+impl Context {
+    const W: f64 = 230.0;
+    const ROW: f64 = 26.0;
+
+    fn rect(&self) -> Rect {
+        let h = self.rows.len() as f64 * Self::ROW + 10.0;
+        let x0 = self.at.x.clamp(8.0, VIEW_W - Self::W - 8.0);
+        let y0 = if self.at.y + h < VIEW_H - 8.0 { self.at.y } else { (self.at.y - h).max(8.0) };
+        Rect::new(x0, y0, x0 + Self::W, y0 + h)
+    }
+
+    fn row(&self, i: usize) -> Rect {
+        let r = self.rect();
+        Rect::new(r.x0 + 5.0, r.y0 + 5.0 + i as f64 * Self::ROW, r.x1 - 5.0, r.y0 + 5.0 + (i + 1) as f64 * Self::ROW)
+    }
 }
 
 /// The palette (and the + menu), in a guitarist's order (what comes first in a chain first);
@@ -361,6 +410,9 @@ pub struct RigView {
     /// A block's plugin editor, open over the whole window.
     full: Option<Full>,
     adding: Option<Adding>,
+    context: Option<Context>,
+    /// A macro knob being turned: which, the pointer's start and the value then.
+    turning: Option<(usize, f64, f32)>,
     /// Each kind's colour in the theme in use (by `Kind::ALL` order).
     colors: Option<(mite_ui::ThemeKind, Vec<Color>)>,
     /// TONE3000 covers on the blocks, and whether one is still on its way.
@@ -396,7 +448,7 @@ impl RigView {
         let items = ui.board.items();
         let first = items.iter().find_map(|i| if let Item::Block(b) = i { (b.kind() == Kind::Amp).then(|| b.id()) } else { None });
         Self {
-            session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, ui.snapshots.clone(), ui.preset.clone()),
+            session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, ui.snapshots.clone(), ui.preset.clone()).with_extra(ui.board.clone()),
             footer,
             selected: first.map(Selection::Block),
             knobs: Vec::new(),
@@ -415,6 +467,8 @@ impl RigView {
             items,
             full: None,
             adding: None,
+            context: None,
+            turning: None,
             colors: None,
             brushes: Default::default(),
             waiting: Default::default(),
@@ -812,6 +866,294 @@ impl RigView {
         draw_mark(cx, 16.0, 15.0, 26.0);
         draw_title(cx, 52.0, 18.0, "Rig");
         self.session.draw(cx);
+        self.draw_macros(cx);
+    }
+
+    // ---- macros -------------------------------------------------------------------------------
+
+    fn macro_id(slot: usize) -> &'static str {
+        if slot < KNOBS { MACRO_KNOBS[slot].id } else { MACRO_SWITCHES[slot - KNOBS].id }
+    }
+
+    /// A slot's value in force (0…1): the host's parameter (a CC writes it there too).
+    fn macro_value(host: &dyn ParamHost, slot: usize) -> f32 {
+        host.normalized(Self::macro_id(slot))
+    }
+
+    /// The header's macro knobs (a ring with its travel) and switches (lit when on); a ring
+    /// around one that follows a CC, pulsing while it learns one.
+    fn draw_macros(&self, cx: &mut DrawCx<'_>) {
+        let theme = cx.theme;
+        let macros = &self.ui.board.macros;
+        let learning = macros.learning.load(Ordering::Acquire);
+        let doc = macros.doc();
+        for slot in 0..SLOTS {
+            let c = macro_at(slot);
+            let v = Self::macro_value(cx.host, slot);
+            let hot = self.hot == Some(Hot::Macro(slot)) || self.turning.is_some_and(|t| t.0 == slot);
+            let mapped = !doc.targets[slot].is_empty();
+            let ink = if mapped { theme.accent } else { theme.text_lo };
+            if slot < KNOBS {
+                let r = MACRO_R;
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &Circle::new(c, r - 3.0));
+                let track = mite_ui::kurbo::Arc::new(c, (r, r), std::f64::consts::PI * 0.75, std::f64::consts::PI * 1.5, 0.0);
+                cx.scene.stroke(&Stroke::new(2.5).with_caps(Cap::Round), Affine::IDENTITY, theme.control_border, None, &track);
+                if v > 0.001 {
+                    let lit = mite_ui::kurbo::Arc::new(c, (r, r), std::f64::consts::PI * 0.75, std::f64::consts::PI * 1.5 * f64::from(v), 0.0);
+                    cx.scene.stroke(&Stroke::new(2.5).with_caps(Cap::Round), Affine::IDENTITY, ink, None, &lit);
+                }
+                cx.text.draw(cx.scene, &format!("{}", slot + 1), c.x, c.y - 7.0, TextStyle::BODY.sized(10.5).weighted(800.0), if hot { theme.text_strong } else if mapped { theme.accent } else { theme.text_lo }, Align::Center);
+            } else {
+                let r = MACRO_R - 2.0;
+                let on = v >= 0.5;
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if on { ink.multiply_alpha(0.85) } else { theme.well }, None, &Circle::new(c, r));
+                cx.scene.stroke(&Stroke::new(1.3), Affine::IDENTITY, if hot { theme.accent } else { theme.control_border }, None, &Circle::new(c, r));
+                cx.text.draw(cx.scene, &format!("{}", slot - KNOBS + 1), c.x, c.y - 7.0, TextStyle::BODY.sized(10.5).weighted(800.0), if on { theme.display } else if mapped { theme.accent } else { theme.text_lo }, Align::Center);
+            }
+            if learning == slot as i32 {
+                let t = self.started.elapsed().as_secs_f64();
+                let a = 0.4 + 0.6 * (0.5 + 0.5 * (t * 6.0).sin()) as f32;
+                cx.scene.stroke(&Stroke::new(1.8), Affine::IDENTITY, theme.accent.multiply_alpha(a), None, &Circle::new(c, MACRO_R + 4.0));
+            } else if doc.cc[slot].is_some() {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent, None, &Circle::new((c.x + MACRO_R - 1.0, c.y - MACRO_R + 1.0), 2.5));
+            }
+        }
+    }
+
+    /// What a slot drives, in words (for its help).
+    fn macro_words(&self, slot: usize) -> String {
+        let doc = self.ui.board.macros.doc();
+        let name = if slot < KNOBS { format!("Macro {}", slot + 1) } else { format!("Switch {}", slot - KNOBS + 1) };
+        let targets: Vec<String> = doc.targets[slot]
+            .iter()
+            .filter_map(|t| {
+                let b = self.block(t.block)?;
+                Some(if t.param.is_empty() {
+                    format!("{} on/off", b.kind().name())
+                } else {
+                    let p = b.kind().param_index(&t.param).map(|i| b.kind().params()[i].spec.name).unwrap_or("?");
+                    format!("{} · {p}", b.kind().name())
+                })
+            })
+            .collect();
+        let what = if targets.is_empty() { "drives nothing yet (right-click a block's control, or a block, to map it here)".to_owned() } else { format!("→ {}", targets.join(", ")) };
+        let cc = doc.cc[slot].map_or(String::new(), |c| format!(" · MIDI CC {c}"));
+        format!("{name} {what}{cc} — right-click: MIDI learn, forget, clear")
+    }
+
+    /// The slots a target is mapped to, as a badge ("M2 S1").
+    fn badge(&self, target: &Target) -> Option<String> {
+        let slots = self.ui.board.macros.slots_of(target);
+        if slots.is_empty() {
+            return None;
+        }
+        Some(slots.iter().map(|&s| if s < KNOBS { format!("M{}", s + 1) } else { format!("S{}", s - KNOBS + 1) }).collect::<Vec<_>>().join(" "))
+    }
+
+    fn draw_badge(cx: &mut DrawCx<'_>, text: &str, at: Point) {
+        let theme = cx.theme;
+        let style = TextStyle::LABEL.sized(8.5);
+        let w = f64::from(cx.text.measure(text, style)) + 8.0;
+        let r = RoundedRect::new(at.x - w / 2.0, at.y, at.x + w / 2.0, at.y + 13.0, 6.5);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent, None, &r);
+        cx.text.draw(cx.scene, text, at.x, at.y + 1.5, style, theme.display, Align::Center);
+    }
+
+    /// The right-click menu for a slot.
+    fn macro_menu(&self, slot: usize, at: Point) -> Context {
+        let macros = &self.ui.board.macros;
+        let mut rows = vec![("MIDI learn (move a controller)".to_owned(), macros.learning.load(Ordering::Acquire) == slot as i32, CtxAction::Learn(slot))];
+        if let Some(c) = macros.cc_of(slot) {
+            rows.push((format!("Forget MIDI CC {c}"), false, CtxAction::Forget(slot)));
+        }
+        if !macros.doc().targets[slot].is_empty() {
+            rows.push(("Unmap everything it drives".to_owned(), false, CtxAction::Clear(slot)));
+        }
+        Context { at, rows }
+    }
+
+    /// The right-click menu for a target: the knobs (a continuous control) or the switches.
+    fn map_menu(&self, target: Target, switch: bool, at: Point) -> Context {
+        let on = self.ui.board.macros.slots_of(&target);
+        let slots: Vec<usize> = if switch { (KNOBS..SLOTS).collect() } else { (0..KNOBS).collect() };
+        let rows = slots
+            .into_iter()
+            .map(|s| {
+                let name = if s < KNOBS { format!("Macro {}", s + 1) } else { format!("Switch {}", s - KNOBS + 1) };
+                (name, on.contains(&s), CtxAction::Toggle(s, target.clone()))
+            })
+            .collect();
+        Context { at, rows }
+    }
+
+    /// A right-click: a menu for what is under the pointer, if anything maps.
+    fn right_click(&mut self, pos: Point) -> bool {
+        self.context = None;
+        if let Some(Hot::Macro(slot)) = self.hot_at(pos) {
+            self.context = Some(self.macro_menu(slot, pos));
+            return true;
+        }
+        // A control of the selected block (its knobs, its switches).
+        if let Some(Selection::Block(id)) = self.selected {
+            if let Some(k) = self.knobs.iter().find(|k| k.center.distance(pos) <= k.diameter / 2.0 + 6.0) {
+                self.context = Some(self.map_menu(Target { block: id, param: k.id.clone() }, false, pos));
+                return true;
+            }
+            if let Some(PanelButton::Switch { param, .. }) = self.panel_buttons().into_iter().find(|b| panel_button(*b).contains(pos)) {
+                if let Some(b) = self.block(id) {
+                    let id = b.kind().params()[param].spec.id.to_owned();
+                    self.context = Some(self.map_menu(Target { block: b.id(), param: id }, true, pos));
+                    return true;
+                }
+            }
+        }
+        // A block: its on/off on a switch.
+        if let Some(Hot::Tile(id) | Hot::Led(id)) = self.hot_at(pos) {
+            self.context = Some(self.map_menu(Target { block: id, param: String::new() }, true, pos));
+            return true;
+        }
+        false
+    }
+
+    /// The right-click menu, right-clicks, and the header's macros. `None`: not theirs.
+    fn macro_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> Option<bool> {
+        if self.context.is_some() {
+            match *event {
+                UiEvent::PointerDown { pos, .. } => {
+                    let c = self.context.take()?;
+                    if let Some(i) = (0..c.rows.len()).find(|&i| c.row(i).contains(pos)) {
+                        self.run_context(c.rows[i].2.clone(), host);
+                    }
+                    self.hot = self.hot_at(pos);
+                    return Some(true);
+                }
+                UiEvent::PointerMove { pos, .. } => {
+                    self.pointer = Some(pos);
+                    self.hot = self.hot_at(pos);
+                    return Some(true);
+                }
+                UiEvent::KeyDown { key: Key::Escape, .. } => {
+                    self.context = None;
+                    return Some(true);
+                }
+                _ => return Some(false),
+            }
+        }
+        match *event {
+            UiEvent::PointerDown { pos, button: MouseButton::Right, .. } => {
+                if self.right_click(pos) {
+                    self.hot = self.hot_at(pos);
+                    return Some(true);
+                }
+                None
+            }
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
+                let Some(Hot::Macro(slot)) = self.hot_at(pos) else { return None };
+                let id = Self::macro_id(slot);
+                let v = host.normalized(id);
+                host.begin_gesture(id);
+                if slot < KNOBS {
+                    self.turning = Some((slot, pos.y, v));
+                } else {
+                    host.set_normalized(id, if v >= 0.5 { 0.0 } else { 1.0 });
+                    host.end_gesture(id);
+                }
+                Some(true)
+            }
+            UiEvent::PointerMove { pos, .. } => {
+                let (slot, y0, v0) = self.turning?;
+                self.pointer = Some(pos);
+                host.set_normalized(Self::macro_id(slot), (v0 + ((y0 - pos.y) / 150.0) as f32).clamp(0.0, 1.0));
+                Some(true)
+            }
+            UiEvent::PointerUp { .. } => {
+                let (slot, ..) = self.turning.take()?;
+                host.end_gesture(Self::macro_id(slot));
+                Some(true)
+            }
+            UiEvent::Wheel { pos, lines, .. } => {
+                let Some(Hot::Macro(slot)) = self.hot_at(pos) else { return None };
+                if slot >= KNOBS {
+                    return Some(false);
+                }
+                let id = Self::macro_id(slot);
+                host.begin_gesture(id);
+                host.set_normalized(id, (host.normalized(id) + lines * 0.02).clamp(0.0, 1.0));
+                host.end_gesture(id);
+                Some(true)
+            }
+            UiEvent::DoubleClick { pos, .. } => {
+                let Some(Hot::Macro(slot)) = self.hot_at(pos) else { return None };
+                if slot >= KNOBS {
+                    return Some(false);
+                }
+                let id = Self::macro_id(slot);
+                host.begin_gesture(id);
+                host.set_normalized(id, 0.0);
+                host.end_gesture(id);
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+
+    /// A target's value now as its slot would hold it (0…1): a mapping never moves the sound.
+    fn target_now(&self, target: &Target) -> Option<f32> {
+        let b = self.block(target.block)?;
+        if target.param.is_empty() {
+            return Some(if b.live.bypassed() { 0.0 } else { 1.0 });
+        }
+        let i = b.kind().param_index(&target.param)?;
+        Some(b.kind().params()[i].spec.normalize(b.live.value(i)))
+    }
+
+    fn run_context(&mut self, action: CtxAction, host: &dyn ParamHost) {
+        let macros = &self.ui.board.macros;
+        match action {
+            CtxAction::Toggle(slot, target) => {
+                // A slot's first mapping takes the control's value, before the mapping exists.
+                if macros.doc().targets[slot].is_empty() {
+                    if let Some(v) = self.target_now(&target) {
+                        let id = Self::macro_id(slot);
+                        host.begin_gesture(id);
+                        host.set_normalized(id, if slot >= KNOBS { if v >= 0.5 { 1.0 } else { 0.0 } } else { v });
+                        host.end_gesture(id);
+                    }
+                }
+                macros.toggle(slot, target);
+            }
+            CtxAction::Learn(slot) => {
+                let now = macros.learning.load(Ordering::Acquire);
+                macros.learning.store(if now == slot as i32 { -1 } else { slot as i32 }, Ordering::Release);
+            }
+            CtxAction::Forget(slot) => macros.set_cc(slot, None),
+            CtxAction::Clear(slot) => macros.clear(slot),
+        }
+        self.ui.board.poke();
+    }
+
+    fn draw_context(&self, cx: &mut DrawCx<'_>) {
+        let Some(m) = &self.context else { return };
+        let theme = cx.theme;
+        let shape = RoundedRect::from_rect(m.rect(), 9.0);
+        mite_ui::paint::glass_panel(cx, shape, theme.blur_menu);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.95), None, &shape);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.glass_border, None, &shape);
+        for (i, (words, ticked, _)) in m.rows.iter().enumerate() {
+            let r = m.row(i);
+            if self.hot == Some(Hot::Context(i)) {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.14), None, &RoundedRect::from_rect(r, 5.0));
+            }
+            if *ticked {
+                let c = Point::new(r.x0 + 12.0, r.center().y);
+                let mut tick = BezPath::new();
+                tick.move_to((c.x - 4.0, c.y));
+                tick.line_to((c.x - 1.0, c.y + 3.5));
+                tick.line_to((c.x + 5.0, c.y - 4.0));
+                cx.scene.stroke(&Stroke::new(1.8).with_caps(Cap::Round).with_join(Join::Round), Affine::IDENTITY, theme.accent, None, &tick);
+            }
+            cx.text.draw(cx.scene, words, r.x0 + 26.0, r.y0 + 5.0, TextStyle::BODY.sized(12.0).weighted(600.0), theme.text_strong, Align::Left);
+        }
     }
 
     fn fit(cx: &mut DrawCx<'_>, text: &str, style: TextStyle, width: f64) -> String {
@@ -958,6 +1300,9 @@ impl RigView {
         } else {
             cx.text.draw(cx.scene, b.kind().name(), cxm, y, style, ink_text, Align::Center);
             cx.text.draw(cx.scene, &Self::summary(&b), cxm, y + 15.0, TextStyle::BODY.sized(10.0), theme.text_mid.multiply_alpha(alpha), Align::Center);
+        }
+        if let Some(text) = self.badge(&Target { block: t.id, param: String::new() }) {
+            Self::draw_badge(cx, &text, Point::new(t.rect.x0 + 14.0, t.rect.y0 - 2.0));
         }
         // The on/off light, on the block itself.
         let led = shapes::led(look, area);
@@ -1137,6 +1482,12 @@ impl RigView {
                     for k in &self.knobs {
                         k.draw(&mut sub);
                     }
+                    // Which macros drive each.
+                    for k in &self.knobs {
+                        if let Some(text) = self.badge(&Target { block: id, param: k.id.clone() }) {
+                            Self::draw_badge(cx, &text, Point::new(k.center.x, k.center.y - k.diameter / 2.0 - 16.0));
+                        }
+                    }
                 }
             }
             Some(Selection::Split(id)) => {
@@ -1260,7 +1611,9 @@ impl RigView {
             return Help::default().text("Drop it on a + in the chain to add it there");
         }
         match self.hot {
-            Some(Hot::Tile(_)) => return Help::default().text("Click to set it up; drag it to another + to move it"),
+            Some(Hot::Macro(slot)) => return Help::default().text(self.macro_words(slot)),
+            Some(Hot::Context(_)) => return Help::default().text("A macro knob drives knobs (over their whole range), a switch turns blocks and switches on and off"),
+            Some(Hot::Tile(_)) => return Help::default().text("Click to set it up; drag it to another + to move it; right-click to put its on/off on a switch"),
             Some(Hot::Led(_)) => return Help::default().text("On and off (off: the signal passes it untouched, in time)"),
             Some(Hot::Gap(Place::Main(_))) => return Help::default().text("Add a block here, or a split (two or three parallel lanes)"),
             Some(Hot::Gap(_)) => return Help::default().text("Add a block to this lane"),
@@ -1307,10 +1660,16 @@ impl RigView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.turning.is_some() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
     }
 
     fn hot_at(&self, p: Point) -> Option<Hot> {
+        if let Some(c) = &self.context {
+            return (0..c.rows.len()).find(|&i| c.row(i).contains(p)).map(Hot::Context);
+        }
+        if let Some(slot) = (0..SLOTS).find(|&s| macro_at(s).distance(p) <= MACRO_R + 2.0) {
+            return Some(Hot::Macro(slot));
+        }
         if let Some(m) = &self.menu {
             let entries = m.entries();
             return (0..entries.len()).find(|&i| m.row(i).contains(p) && (entries[i].0.is_some() || entries[i].1 > 0)).map(Hot::Menu);
@@ -1425,6 +1784,9 @@ impl RigView {
                 }
                 return redraw || close;
             }
+        }
+        if let Some(r) = self.macro_event(event, host) {
+            return r;
         }
         if let UiEvent::KeyDown { key, mods } = *event {
             if key == Key::Escape && self.menu.is_some() {
@@ -1658,6 +2020,7 @@ impl View for RigView {
         self.draw_meters(cx);
         self.draw_menu(cx);
         self.draw_adding(cx);
+        self.draw_context(cx);
         if let Some(b) = &mut self.browser {
             b.draw(cx, &self.ui);
         }
@@ -1689,6 +2052,19 @@ impl View for RigView {
         let dt = self.last_tick.elapsed().as_secs_f64().min(0.1);
         self.last_tick = Instant::now();
         let mut fresh = self.read_board();
+        // MIDI: a CC learned, and CCs moving macros (written into the host's parameters, so the
+        // host shows and can record them).
+        let macros = &self.ui.board.macros;
+        fresh |= macros.take_learned();
+        let moved = macros.from_cc.swap(0, Ordering::AcqRel);
+        for slot in (0..SLOTS).filter(|s| moved & (1 << s) != 0) {
+            let id = Self::macro_id(slot);
+            host.begin_gesture(id);
+            host.set_normalized(id, macros.now[slot].load());
+            host.end_gesture(id);
+            fresh = true;
+        }
+        fresh |= macros.learning.load(Ordering::Acquire) >= 0;
         // The suite's plugins take their new values (their settings are computed here, off the
         // audio thread).
         for b in self.ui.board.blocks() {

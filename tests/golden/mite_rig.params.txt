@@ -3,3 +3,15 @@ size | choice | Full, Lite | 0
 mix | % | 0 | 100 | 100 | Linear
 out_gain | dB | -24 | 24 | 0 | Linear
 bypass | bool | false
+macro1 | % | 0 | 100 | 0 | Linear
+macro2 | % | 0 | 100 | 0 | Linear
+macro3 | % | 0 | 100 | 0 | Linear
+macro4 | % | 0 | 100 | 0 | Linear
+macro5 | % | 0 | 100 | 0 | Linear
+macro6 | % | 0 | 100 | 0 | Linear
+macro7 | % | 0 | 100 | 0 | Linear
+macro8 | % | 0 | 100 | 0 | Linear
+switch1 | bool | false
+switch2 | bool | false
+switch3 | bool | false
+switch4 | bool | false
