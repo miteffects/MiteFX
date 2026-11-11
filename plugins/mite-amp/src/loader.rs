@@ -15,7 +15,7 @@ use mite_nam::{LoadOptions, NamModel};
 use crate::dsp::{AmpShared, CabLoad, Loaded, ModelLoad};
 use crate::ir;
 use crate::params::AmpParams;
-use crate::rig::{Rig, Slot, Status};
+use crate::rig::{Gear, Rig, Slot, Status};
 
 /// Captures are built for blocks of this size (longer host blocks are cut).
 pub const MODEL_BLOCK: usize = 512;
@@ -65,9 +65,22 @@ impl LoaderCore {
         match NamModel::from_file(path, opts) {
             Ok(model) => {
                 let info = model.info().clone();
+                // What it is: TONE3000's word for it when it came from there, else the file's.
+                let source = self.rig.file(slot).source;
+                let gear = match source.as_ref().filter(|s| !s.gear.is_empty()) {
+                    Some(s) => Gear::of_tone3000(&s.gear, "nam"),
+                    None => Gear::of_nam(info.gear_type.as_deref()),
+                };
+                if !slot.accepts(gear) {
+                    let why = format!("This is {}: it goes in the {} slot", gear.words(), gear.home().name());
+                    self.rig.set_status(slot, Status::Failed(why));
+                    return (Box::new(ModelLoad { model: None }), false);
+                }
                 let sized = info.sizes.len() > 1;
                 self.rig.set_status(slot, Status::Model(Box::new(info)));
-                (Box::new(ModelLoad { model: Some(Loaded::new(model, f64::from(key.rate))) }), sized)
+                let mut loaded = Loaded::new(model, f64::from(key.rate));
+                loaded.full_rig = gear == Gear::FullRig;
+                (Box::new(ModelLoad { model: Some(loaded) }), sized)
             }
             Err(e) => {
                 self.rig.set_status(slot, Status::Failed(e));

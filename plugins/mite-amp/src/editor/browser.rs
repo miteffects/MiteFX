@@ -17,7 +17,7 @@ use mite_ui::paint::{glass_panel, icon_button};
 use mite_ui::peniko::{Blob, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, ImageQuality};
 use mite_ui::{Align, DrawCx, Key, MouseButton, TextStyle, UiEvent};
 
-use crate::rig::{Slot, SlotFile};
+use crate::rig::{Gear as RigGear, Slot, SlotFile};
 use crate::tone3000::{self, Gear, Model, Phase, Query, Sort, Source, Tone, View};
 use crate::AmpUi;
 
@@ -158,11 +158,27 @@ impl Browser {
         b
     }
 
-    /// Something to show once signed in: Explore by default, Cabs for the Cab.
+    /// Explore's gear filter for the slot it was opened from (kept when it already fits).
+    fn gear_for(slot: Slot, current: Gear) -> Gear {
+        match (slot, current) {
+            (Slot::Pedal, Gear::Pedal | Gear::Outboard) => current,
+            (Slot::Pedal, _) => Gear::Pedal,
+            (Slot::Amp, Gear::Amp | Gear::FullRig) => current,
+            (Slot::Amp, _) => Gear::Amp,
+            (Slot::Cab, _) => Gear::Cab,
+        }
+    }
+
+    /// Something to show once signed in: Explore, filtered to the slot's gear.
     fn ensure_feed(&mut self, ui: &AmpUi) {
         let v = ui.tone3000.view();
-        if v.phase == Phase::SignedIn && v.feed.tones.is_empty() && !v.feed.loading && v.feed.error.is_none() {
-            let gear = if self.slot == Slot::Cab { Gear::Cab } else { v.feed.query.gear };
+        if v.phase != Phase::SignedIn || v.feed.loading {
+            return;
+        }
+        let gear = Self::gear_for(self.slot, v.feed.query.gear);
+        let empty = v.feed.tones.is_empty() && v.feed.error.is_none();
+        let wrong = v.feed.source == Source::Search && gear != v.feed.query.gear;
+        if empty || wrong {
             ui.tone3000.search(v.feed.source, Query { gear, ..v.feed.query.clone() });
         }
     }
@@ -173,7 +189,11 @@ impl Browser {
         if version != self.seen {
             self.seen = version;
             self.view = ui.tone3000.view();
-            self.ensure_feed(ui);
+            // Signed in just now: something to show.
+            let v = &self.view;
+            if v.phase == Phase::SignedIn && v.feed.tones.is_empty() && !v.feed.loading && v.feed.error.is_none() {
+                self.ensure_feed(ui);
+            }
             fresh = true;
         }
         if let Some(at) = self.typed {
@@ -259,7 +279,17 @@ impl Browser {
     fn load_buttons(&self, i: usize, m: &Model) -> Vec<(Slot, Rect)> {
         let d = self.detail();
         let y = self.files_top() + i as f64 * FILE_ROW;
-        let slots: &[Slot] = if m.kind == "IR" { &[Slot::Cab] } else { &[Slot::Pedal, Slot::Amp] };
+        // Each file goes where its gear belongs: pedals into the Pedal, amps and full rigs into
+        // the Amp, IRs into the Cab (unknown gear: either capture slot).
+        let gear = self.view.tone.as_ref().map_or(RigGear::Unknown, |t| RigGear::of_tone3000(&t.gear, &t.format));
+        let slots: &[Slot] = match (m.kind == "IR", gear) {
+            (true, _) | (false, RigGear::Cab) => &[Slot::Cab],
+            (false, RigGear::Pedal) => &[Slot::Pedal],
+            (false, RigGear::Amp | RigGear::FullRig) => &[Slot::Amp],
+            (false, RigGear::Unknown) => &[Slot::Pedal, Slot::Amp],
+        };
+        let slots: Vec<Slot> = slots.iter().copied().filter(|s| (*s == Slot::Cab) == (m.kind == "IR")).collect();
+        let slots = &slots[..];
         let mut x = d.x1 - 8.0;
         let mut out = Vec::new();
         for s in slots.iter().rev() {

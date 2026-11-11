@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let params = Arc::new(AmpParams::default());
     let shared = Arc::new(AmpShared::new());
     if !v("empty") {
-        let _core = rig::load(&params, &shared, fs, true);
+        let _core = rig::load(&params, &shared, fs, false);
     }
     if v("failed") {
         let bad = std::env::temp_dir().join("mite-amp-broken.nam");
@@ -100,6 +100,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     view.tick(&host);
+    if let Ok(xy) = std::env::var("SNAPSHOT_CLICK") {
+        let mut it = xy.split(',').filter_map(|s| s.trim().parse::<f64>().ok());
+        if let (Some(x), Some(y)) = (it.next(), it.next()) {
+            let pos = Point::new(x, y);
+            view.event(&UiEvent::PointerMove { pos, mods: Modifiers::default() }, &host);
+            view.event(&UiEvent::PointerDown { pos, button: mite_ui::MouseButton::Left, mods: Modifiers::default() }, &host);
+            view.event(&UiEvent::PointerUp { pos, button: mite_ui::MouseButton::Left, mods: Modifiers::default() }, &host);
+        }
+    }
     if let Ok(xy) = std::env::var("SNAPSHOT_HOVER") {
         let mut it = xy.split(',').filter_map(|s| s.trim().parse::<f64>().ok());
         if let (Some(x), Some(y)) = (it.next(), it.next()) {

@@ -37,6 +37,75 @@ impl Slot {
             Slot::Cab => "Cab",
         }
     }
+
+    /// Whether a capture of `kind` belongs here (unknown: trust the user).
+    pub fn accepts(self, kind: Gear) -> bool {
+        match (self, kind) {
+            (_, Gear::Unknown) => self != Slot::Cab,
+            (Slot::Pedal, Gear::Pedal) => true,
+            (Slot::Amp, Gear::Amp | Gear::FullRig) => true,
+            (Slot::Cab, Gear::Cab) => true,
+            _ => false,
+        }
+    }
+}
+
+/// What a capture is of, from TONE3000's gear or a `.nam` file's `gear_type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gear {
+    /// Drives, boosts, outboard: before the amp.
+    Pedal,
+    Amp,
+    /// Amp and cabinet in one capture.
+    FullRig,
+    Cab,
+    Unknown,
+}
+
+impl Gear {
+    /// From TONE3000's `gear` and `format`.
+    pub fn of_tone3000(gear: &str, format: &str) -> Self {
+        if format == "ir" {
+            return Gear::Cab;
+        }
+        match gear {
+            "pedal" | "outboard" => Gear::Pedal,
+            "amp" => Gear::Amp,
+            "amp-cab" | "full-rig" => Gear::FullRig,
+            "cab" | "ir" => Gear::Cab,
+            _ => Gear::Unknown,
+        }
+    }
+
+    /// From a `.nam` file's `gear_type` (NAM's trainer: amp, pedal, pedal_amp, amp_cab,
+    /// amp_pedal_cab, preamp, studio).
+    pub fn of_nam(gear_type: Option<&str>) -> Self {
+        match gear_type.map(|g| g.to_ascii_lowercase().replace('-', "_")).as_deref() {
+            Some("pedal" | "studio") => Gear::Pedal,
+            Some("amp" | "preamp" | "pedal_amp") => Gear::Amp,
+            Some("amp_cab" | "amp_pedal_cab" | "full_rig") => Gear::FullRig,
+            _ => Gear::Unknown,
+        }
+    }
+
+    pub fn words(self) -> &'static str {
+        match self {
+            Gear::Pedal => "a pedal capture",
+            Gear::Amp => "an amp capture",
+            Gear::FullRig => "a full rig (amp and cabinet)",
+            Gear::Cab => "a cabinet IR",
+            Gear::Unknown => "a capture",
+        }
+    }
+
+    /// The slot it goes in.
+    pub fn home(self) -> Slot {
+        match self {
+            Gear::Pedal => Slot::Pedal,
+            Gear::Cab => Slot::Cab,
+            _ => Slot::Amp,
+        }
+    }
 }
 
 /// Where a file came from, kept for attribution (TONE3000's terms: creator and license stay
@@ -49,6 +118,9 @@ pub struct Source {
     pub creator: String,
     pub license: String,
     pub url: String,
+    /// TONE3000's gear ("amp", "pedal", "amp-cab", …).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub gear: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -180,7 +252,7 @@ mod tests {
     fn the_rig_round_trips_through_its_state_field() {
         let rig = Rig::new();
         assert!(rig.to_json().is_none());
-        let source = Source { tone_id: 7, model_id: 9, title: "Plexi".into(), creator: "someone".into(), license: "cc-by".into(), url: "https://www.tone3000.com/tones/plexi-7".into() };
+        let source = Source { tone_id: 7, model_id: 9, title: "Plexi".into(), creator: "someone".into(), license: "cc-by".into(), url: "https://www.tone3000.com/tones/plexi-7".into(), gear: "amp".into() };
         rig.set_file(Slot::Amp, SlotFile { path: Some("/x/plexi.nam".into()), source: Some(source.clone()) });
         rig.set_file(Slot::Cab, SlotFile { path: Some("/x/v30.wav".into()), source: None });
         assert_eq!(rig.status(Slot::Amp), Status::Loading);
@@ -191,5 +263,25 @@ mod tests {
         assert_eq!(back.file(Slot::Amp).source, Some(source));
         back.load_json(None);
         assert!(back.files().iter().all(|f| f.path.is_none()));
+    }
+}
+
+#[cfg(test)]
+mod gear_tests {
+    use super::*;
+
+    #[test]
+    fn each_slot_takes_only_its_gear() {
+        assert!(Slot::Pedal.accepts(Gear::of_tone3000("pedal", "nam")));
+        assert!(Slot::Pedal.accepts(Gear::of_tone3000("outboard", "nam")));
+        assert!(!Slot::Pedal.accepts(Gear::of_tone3000("amp-cab", "nam")));
+        assert!(!Slot::Pedal.accepts(Gear::of_tone3000("cab", "ir")));
+        assert!(Slot::Amp.accepts(Gear::of_tone3000("amp-cab", "nam")));
+        assert!(!Slot::Amp.accepts(Gear::of_tone3000("pedal", "nam")));
+        assert!(Slot::Cab.accepts(Gear::of_tone3000("", "ir")));
+        assert!(!Slot::Cab.accepts(Gear::of_tone3000("amp", "nam")));
+        assert_eq!(Gear::of_nam(Some("amp_cab")), Gear::FullRig);
+        assert!(Slot::Pedal.accepts(Gear::of_nam(None)));
+        assert!(!Slot::Cab.accepts(Gear::Unknown));
     }
 }

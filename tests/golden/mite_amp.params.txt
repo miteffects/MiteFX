@@ -16,3 +16,11 @@ high_cut | Hz | 2000 | 20000 | 20000 | Log
 mix | % | 0 | 100 | 100 | Linear
 out_gain | dB | -24 | 24 | 0 | Linear
 bypass | bool | false
+pedal_gain | dB | -24 | 24 | 0 | Linear
+pedal_level | dB | -24 | 24 | 0 | Linear
+pedal_bass | dB | -12 | 12 | 0 | Linear
+pedal_middle | dB | -12 | 12 | 0 | Linear
+pedal_treble | dB | -12 | 12 | 0 | Linear
+amp_gain | dB | -24 | 24 | 0 | Linear
+amp_level | dB | -24 | 24 | 0 | Linear
+cab_level | dB | -24 | 24 | 0 | Linear

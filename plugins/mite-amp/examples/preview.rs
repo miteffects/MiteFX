@@ -22,7 +22,7 @@ fn main() -> Result<(), String> {
     let params = Arc::new(AmpParams::default());
     let shared = Arc::new(AmpShared::new());
     let fs = 48_000.0f32;
-    let core = rig::load(&params, &shared, fs, true);
+    let core = rig::load(&params, &shared, fs, false);
     drop(core);
     let loader = Loader::new(LoaderCore::new(params.rig.clone(), shared.clone(), params.clone()));
     loader.core.set_rate(fs);

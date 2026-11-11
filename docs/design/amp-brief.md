@@ -34,7 +34,20 @@ Captures and cabinets load on a worker thread and arrive by `Handover`; a swap c
 30 ms, or, when the latency changes, happens behind a 10 ms dip. The audio thread never allocates
 or frees (tested under `assert_no_alloc` with mid-stream swaps).
 
-## 3. Parameters (state 1)
+## 2b. Slots and gear (2026-11-11, user: "limit it to only that type of gear", "tweak gain and
+output of a pedal … set its eq")
+
+- The Pedal slot takes pedals (and outboard); the Amp slot amps and full rigs; the Cab slot IRs.
+  From TONE3000 by the tone's gear (only the fitting Load buttons show; Explore opens filtered to
+  the slot's gear), from files by NAM's `gear_type` (refused with where it goes; files without
+  one are trusted). A full rig in the Amp slot rests the Cab (it has its own cabinet).
+- Each capture slot: Gain into it, Level out of it, and its own Bass/Middle/Treble (the pedal's
+  after the pedal; the amp's are BASS/MIDDLE/TREBLE). The Cab: Level, Low Cut, High Cut. A slot
+  switched off takes its gain, level and tone with it. Click a card: the strip and the curve's
+  grips are that slot's.
+
+## 3. Parameters (state 2; 1 → 2 appended pedal_gain, pedal_level, pedal_bass, pedal_middle,
+pedal_treble, amp_gain, amp_level, cab_level, all neutral)
 
 input, gate, gate_threshold, calibrate, interface_level, pedal, amp, cab, size (Full/Lite: A2
 containers' members), normalize, bass, middle, treble, low_cut, high_cut, mix, out_gain, bypass.

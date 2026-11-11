@@ -59,6 +59,14 @@ pub struct AmpSettings {
     pub mix: f32,
     pub out_db: f32,
     pub bypass: bool,
+    pub pedal_gain_db: f32,
+    pub pedal_level_db: f32,
+    pub pedal_bass_db: f32,
+    pub pedal_middle_db: f32,
+    pub pedal_treble_db: f32,
+    pub amp_gain_db: f32,
+    pub amp_level_db: f32,
+    pub cab_level_db: f32,
 }
 
 impl Default for AmpSettings {
@@ -81,11 +89,33 @@ impl Default for AmpSettings {
             mix: 1.0,
             out_db: 0.0,
             bypass: false,
+            pedal_gain_db: 0.0,
+            pedal_level_db: 0.0,
+            pedal_bass_db: 0.0,
+            pedal_middle_db: 0.0,
+            pedal_treble_db: 0.0,
+            amp_gain_db: 0.0,
+            amp_level_db: 0.0,
+            cab_level_db: 0.0,
         }
     }
 }
 
-/// The five tone bands as `mite_dsp::eq` settings (also what the editor draws).
+/// The pedal's tone (after it): the same three bands as the amp's.
+/// A switched-off pedal takes its tone with it (the bands fade out).
+pub fn pedal_bands(s: &AmpSettings) -> [BandSettings; 3] {
+    let t = tone_bands(&AmpSettings { bass_db: s.pedal_bass_db, middle_db: s.pedal_middle_db, treble_db: s.pedal_treble_db, ..*s });
+    [t[0], t[1], t[2]].map(|b| BandSettings { enabled: b.enabled && s.pedal, ..b })
+}
+
+/// A slot's gain or level: as set while the slot is on, unity while it is off (it passes the
+/// signal untouched).
+fn slot_gain(on: bool, db: f32) -> f32 {
+    if on { db_to_gain(db) } else { 1.0 }
+}
+
+/// The amp's tone and the cuts (before the cabinet) as `mite_dsp::eq` settings (also what the
+/// editor draws).
 pub fn tone_bands(s: &AmpSettings) -> [BandSettings; 5] {
     let band = |kind, freq: f64, gain: f32, q: f64, enabled: bool| BandSettings { enabled, kind, freq, gain_db: f64::from(gain), q, slope: CUT_SLOPE, ..BandSettings::default() };
     let q = std::f64::consts::FRAC_1_SQRT_2;
@@ -101,6 +131,8 @@ pub fn tone_bands(s: &AmpSettings) -> [BandSettings; 5] {
 /// A capture ready to play at the host's rate.
 pub struct Loaded {
     pub model: NamModel,
+    /// An amp and its cabinet in one capture: the Cab slot steps aside.
+    pub full_rig: bool,
     pub bracket: Option<Bracket>,
     pub loudness_db: Option<f32>,
     pub input_dbu: Option<f32>,
@@ -113,7 +145,7 @@ impl Loaded {
         let rate = info.sample_rate.unwrap_or(48_000.0);
         let (loudness_db, input_dbu, output_dbu) = (info.loudness.map(|v| v as f32), info.input_level_dbu.map(|v| v as f32), info.output_level_dbu.map(|v| v as f32));
         let bracket = (Bracket::latency_for(host_rate, rate) > 0).then(|| Bracket::new(host_rate, rate, model.max_block()));
-        Self { model, bracket, loudness_db, input_dbu, output_dbu }
+        Self { model, bracket, loudness_db, input_dbu, output_dbu, full_rig: false }
     }
 
     pub fn latency(&self) -> usize {
@@ -420,6 +452,13 @@ pub struct AmpEngine {
     cab_stash: Stash<CabLoad>,
     cab_on: LinearSmoother,
     tone: [BandProcessor; 5],
+    pedal_tone: [BandProcessor; 3],
+    /// Each slot's gain in and level out, and the cabinet's level.
+    pedal_gain: LinearSmoother,
+    pedal_level: LinearSmoother,
+    amp_gain: LinearSmoother,
+    amp_level: LinearSmoother,
+    cab_level: LinearSmoother,
     gate: Gate,
     gate_delay: Delay,
     input: LinearSmoother,
@@ -448,6 +487,12 @@ impl AmpEngine {
             cab_stash: Stash::new(),
             cab_on: LinearSmoother::new(1.0),
             tone: std::array::from_fn(|_| BandProcessor::new(f64::from(fs), 20.0)),
+            pedal_tone: std::array::from_fn(|_| BandProcessor::new(f64::from(fs), 20.0)),
+            pedal_gain: LinearSmoother::new(1.0),
+            pedal_level: LinearSmoother::new(1.0),
+            amp_gain: LinearSmoother::new(1.0),
+            amp_level: LinearSmoother::new(1.0),
+            cab_level: LinearSmoother::new(1.0),
             gate: Gate::new(fs),
             gate_delay: Delay::new(MAX_LATENCY),
             input: LinearSmoother::new(1.0),
@@ -476,8 +521,11 @@ impl AmpEngine {
         }
         self.fs = fs;
         self.gate = Gate::new(fs);
-        for b in &mut self.tone {
+        for b in self.tone.iter_mut().chain(self.pedal_tone.iter_mut()) {
             *b = BandProcessor::new(f64::from(fs), 20.0);
+        }
+        for sm in [&mut self.pedal_gain, &mut self.pedal_level, &mut self.amp_gain, &mut self.amp_level, &mut self.cab_level] {
+            sm.set_ramp(fs, 20.0);
         }
         let [s0, s1] = &mut self.slots;
         for sm in [&mut self.input, &mut self.out, &mut self.mix, &mut self.bypass, &mut self.cab_on, &mut s0.on, &mut s1.on] {
@@ -510,6 +558,14 @@ impl AmpEngine {
         for (b, t) in self.tone.iter_mut().zip(tone_bands(s)) {
             b.reset(&t);
         }
+        for (b, t) in self.pedal_tone.iter_mut().zip(pedal_bands(s)) {
+            b.reset(&t);
+        }
+        self.pedal_gain.reset(slot_gain(s.pedal, s.pedal_gain_db));
+        self.pedal_level.reset(slot_gain(s.pedal, s.pedal_level_db));
+        self.amp_gain.reset(slot_gain(s.amp, s.amp_gain_db));
+        self.amp_level.reset(slot_gain(s.amp, s.amp_level_db));
+        self.cab_level.reset(db_to_gain(s.cab_level_db));
         let (between, normal) = self.model_gains(s);
         self.input.reset(self.input_gain(s));
         self.between.reset(between);
@@ -517,7 +573,7 @@ impl AmpEngine {
         self.out.reset(db_to_gain(s.out_db));
         self.mix.reset(s.mix);
         self.bypass.reset(if s.bypass { 1.0 } else { 0.0 });
-        self.cab_on.reset(if s.cab { 1.0 } else { 0.0 });
+        self.cab_on.reset(if self.cab_engaged(s) { 1.0 } else { 0.0 });
         self.slots[0].on.reset(if s.pedal { 1.0 } else { 0.0 });
         self.slots[1].on.reset(if s.amp { 1.0 } else { 0.0 });
     }
@@ -547,6 +603,13 @@ impl AmpEngine {
             self.cab_fade = None;
         }
         gone
+    }
+
+    /// The cabinet plays when it is on, holds a response, and the amp is not a full rig (which
+    /// has its own). Otherwise the stage, its level with it, passes the signal.
+    pub fn cab_engaged(&self, s: &AmpSettings) -> bool {
+        let loaded = self.cabs[self.cab_active].loaded || self.cab_fade.is_some();
+        s.cab && loaded && !self.slots[1].active(s.amp).is_some_and(|m| m.full_rig)
     }
 
     fn input_gain(&self, s: &AmpSettings) -> f32 {
@@ -664,7 +727,15 @@ impl AmpEngine {
         self.out.set_target(db_to_gain(s.out_db));
         self.mix.set_target(s.mix);
         self.bypass.set_target(if s.bypass { 1.0 } else { 0.0 });
-        self.cab_on.set_target(if s.cab { 1.0 } else { 0.0 });
+        self.cab_on.set_target(if self.cab_engaged(s) { 1.0 } else { 0.0 });
+        self.pedal_gain.set_target(slot_gain(s.pedal, s.pedal_gain_db));
+        self.pedal_level.set_target(slot_gain(s.pedal, s.pedal_level_db));
+        self.amp_gain.set_target(slot_gain(s.amp, s.amp_gain_db));
+        self.amp_level.set_target(slot_gain(s.amp, s.amp_level_db));
+        self.cab_level.set_target(db_to_gain(s.cab_level_db));
+        for (b, t) in self.pedal_tone.iter_mut().zip(pedal_bands(s)) {
+            b.set_target(&t);
+        }
         self.slots[0].on.set_target(if s.pedal { 1.0 } else { 0.0 });
         self.slots[1].on.set_target(if s.amp { 1.0 } else { 0.0 });
         for (b, t) in self.tone.iter_mut().zip(tone_bands(s)) {
@@ -689,17 +760,24 @@ impl AmpEngine {
             let g = self.gate.next(v, s.gate, s.gate_db);
             gates[i] = self.gate_delay.tick(g);
         }
-        // The captures.
+        // The captures, each with its gain in and level out (the pedal's tone after it). A
+        // slot switched off passes the signal untouched: its gain, level and tone go with it.
         let fade = self.fade_len;
+        for v in x.iter_mut() {
+            *v *= self.pedal_gain.next_value();
+        }
         self.slots[0].process(x, y, fade);
+        for band in &mut self.pedal_tone {
+            band.process(&mut [&mut *y]);
+        }
         for v in y.iter_mut() {
-            *v *= self.between.next_value();
+            *v *= self.pedal_level.next_value() * self.between.next_value() * self.amp_gain.next_value();
         }
         self.slots[1].process(y, z, fade);
         let mut gate_db = 0.0f32;
         for i in 0..n {
             gate_db = gate_db.min(gates[i]);
-            z[i] *= self.normal.next_value() * db_to_gain(gates[i]);
+            z[i] *= self.normal.next_value() * db_to_gain(gates[i]) * self.amp_level.next_value();
         }
         // Tone.
         for band in &mut self.tone {
@@ -726,7 +804,8 @@ impl AmpEngine {
         }
         for i in 0..n {
             let g = self.cab_on.next_value();
-            x[i] = z[i] + g * (x[i] - z[i]);
+            let level = self.cab_level.next_value();
+            x[i] = z[i] + g * (x[i] * level - z[i]);
         }
         // Out: gain, mix against the waiting dry, bypass, the dip.
         let mut out_peak = 0.0f32;

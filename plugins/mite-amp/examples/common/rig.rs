@@ -66,7 +66,7 @@ pub fn load(params: &Arc<AmpParams>, shared: &Arc<AmpShared>, rate: f32, with_pe
     if with_pedal {
         rig.set_file(Slot::Pedal, SlotFile { path: Some(models_dir().join("wavenet.nam")), source: None });
     }
-    let source = Source { tone_id: 27156, model_id: 1, title: "Example A2 Rig".into(), creator: "Steven Atkinson".into(), license: "mit".into(), url: "https://www.tone3000.com".into() };
+    let source = Source { tone_id: 27156, model_id: 1, title: "Example A2 Rig".into(), creator: "Steven Atkinson".into(), license: "mit".into(), url: "https://www.tone3000.com".into(), gear: "amp".into() };
     rig.set_file(Slot::Amp, SlotFile { path: Some(models_dir().join("A2.nam")), source: Some(source) });
     rig.set_file(Slot::Cab, SlotFile { path: Some(cab), source: None });
     let core = Arc::new(LoaderCore::new(rig, shared.clone(), params.clone()));

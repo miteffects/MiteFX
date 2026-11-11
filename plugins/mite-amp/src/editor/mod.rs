@@ -67,8 +67,11 @@ const STRIP_TOP: f64 = PLOT.y1 + 8.0;
 const TOGGLE_Y: f64 = STRIP_TOP + 34.0;
 const TOGGLE_S: f64 = 60.0;
 const TOGGLE_X: [f64; 4] = [24.0, 96.0, 168.0, 240.0];
-const DIAL_X0: f64 = 380.0;
-const DIAL_STEP: f64 = 104.0;
+/// The strip's dials: INPUT and GATE, the selected slot's own, INTERFACE.
+const DIAL_GLOBAL_X: [f64; 2] = [372.0, 462.0];
+const DIAL_SLOT_X0: f64 = 590.0;
+const DIAL_SLOT_STEP: f64 = 94.0;
+const DIAL_INTERFACE_X: f64 = 1112.0;
 const DIAL_Y: f64 = STRIP_TOP + 68.0;
 const DIAL_D: f64 = 52.0;
 
@@ -158,8 +161,13 @@ pub enum Grip {
 impl Grip {
     const ALL: [Grip; 5] = [Grip::LowCut, Grip::Bass, Grip::Middle, Grip::Treble, Grip::HighCut];
 
-    fn spec(self) -> ParamSpec {
+    /// What it moves: the bands are the selected slot's (the pedal's own, or the amp's).
+    fn spec(self, selected: Slot) -> ParamSpec {
+        let pedal = selected == Slot::Pedal;
         match self {
+            Grip::Bass if pedal => PEDAL_BASS,
+            Grip::Middle if pedal => PEDAL_MIDDLE,
+            Grip::Treble if pedal => PEDAL_TREBLE,
             Grip::Bass => BASS,
             Grip::Middle => MIDDLE,
             Grip::Treble => TREBLE,
@@ -244,6 +252,8 @@ fn card_button(slot: Slot, b: CardButton) -> Rect {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hot {
     Card(Slot, CardButton),
+    /// A card's body: selects it.
+    Select(Slot),
     Grip(Grip),
     Toggle(Toggle),
 }
@@ -253,6 +263,10 @@ pub struct AmpView {
     session: Session,
     footer: Footer,
     knobs: Vec<Knob>,
+    /// Which slot each knob belongs to (none: always shown).
+    knob_slot: Vec<Option<Slot>>,
+    /// The slot whose controls the strip and the curve show.
+    selected: Slot,
     last_tick: Instant,
     started: Instant,
     pointer: Option<Point>,
@@ -289,23 +303,34 @@ impl AmpView {
             vec![FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input as it came (in time: the latency stays)" }],
             vec![FooterDial { spec: MIX, kind: KnobKind::Unipolar, name: "MIX", words: "Mix — the rig against the dry input (in time)" }, FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" }],
         );
-        let dials: [(ParamSpec, &str, KnobKind); 8] = [
-            (INPUT, "INPUT", KnobKind::Bipolar),
-            (GATE_THRESHOLD, "GATE", KnobKind::Unipolar),
-            (BASS, "BASS", KnobKind::Bipolar),
-            (MIDDLE, "MIDDLE", KnobKind::Bipolar),
-            (TREBLE, "TREBLE", KnobKind::Bipolar),
-            (LOW_CUT, "LOW CUT", KnobKind::Unipolar),
-            (HIGH_CUT, "HIGH CUT", KnobKind::Unipolar),
-            (INTERFACE_LEVEL, "INTERFACE", KnobKind::Unipolar),
+        let mut knobs = Vec::new();
+        let mut knob_slot = Vec::new();
+        let mut add = |spec: ParamSpec, label: &'static str, kind: KnobKind, x: f64, slot: Option<Slot>| {
+            knobs.push(Knob::new(spec, label, kind, Point::new(x, DIAL_Y), DIAL_D));
+            knob_slot.push(slot);
+        };
+        add(INPUT, "INPUT", KnobKind::Bipolar, DIAL_GLOBAL_X[0], None);
+        add(GATE_THRESHOLD, "GATE", KnobKind::Unipolar, DIAL_GLOBAL_X[1], None);
+        add(INTERFACE_LEVEL, "INTERFACE", KnobKind::Unipolar, DIAL_INTERFACE_X, None);
+        type Dials = Vec<(ParamSpec, &'static str, KnobKind)>;
+        let sets: [(Slot, Dials); 3] = [
+            (Slot::Pedal, vec![(PEDAL_GAIN, "GAIN", KnobKind::Bipolar), (PEDAL_LEVEL, "LEVEL", KnobKind::Bipolar), (PEDAL_BASS, "BASS", KnobKind::Bipolar), (PEDAL_MIDDLE, "MIDDLE", KnobKind::Bipolar), (PEDAL_TREBLE, "TREBLE", KnobKind::Bipolar)]),
+            (Slot::Amp, vec![(AMP_GAIN, "GAIN", KnobKind::Bipolar), (AMP_LEVEL, "LEVEL", KnobKind::Bipolar), (BASS, "BASS", KnobKind::Bipolar), (MIDDLE, "MIDDLE", KnobKind::Bipolar), (TREBLE, "TREBLE", KnobKind::Bipolar)]),
+            (Slot::Cab, vec![(CAB_LEVEL, "LEVEL", KnobKind::Bipolar), (LOW_CUT, "LOW CUT", KnobKind::Unipolar), (HIGH_CUT, "HIGH CUT", KnobKind::Unipolar)]),
         ];
-        let knobs = dials.into_iter().enumerate().map(|(i, (spec, label, kind))| Knob::new(spec, label, kind, Point::new(DIAL_X0 + i as f64 * DIAL_STEP, DIAL_Y), DIAL_D)).collect();
+        for (slot, dials) in sets {
+            for (i, (spec, label, kind)) in dials.into_iter().enumerate() {
+                add(spec, label, kind, DIAL_SLOT_X0 + i as f64 * DIAL_SLOT_STEP, Some(slot));
+            }
+        }
         let files = ui.rig.files();
         let status = Slot::ALL.map(|s| ui.rig.status(s));
         Self {
             session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, ui.snapshots.clone(), ui.preset.clone()),
             footer,
             knobs,
+            knob_slot,
+            selected: Slot::Amp,
             last_tick: Instant::now(),
             started: Instant::now(),
             pointer: None,
@@ -338,7 +363,7 @@ impl AmpView {
     }
 
     pub fn dial(&self, id: &str) -> Option<Point> {
-        self.knobs.iter().find(|k| k.id == id).map(|k| k.center)
+        self.knobs.iter().zip(&self.knob_slot).find(|(k, s)| k.id == id && s.is_none_or(|s| s == self.selected)).map(|(k, _)| k.center)
     }
 
     pub fn grip_at(&self, host: &dyn ParamHost, g: Grip) -> Point {
@@ -393,15 +418,47 @@ impl AmpView {
         f64::from(self.ui.sample_rate.load()).max(1.0)
     }
 
-    /// The tone stack's response at each of `freqs`, dB (each band designed once).
-    fn tone_curve(&self, host: &dyn ParamHost, freqs: &[f64]) -> Vec<f64> {
+    /// Bands' response at each of `freqs`, dB (each band designed once).
+    fn curve(&self, bands: &[eq::BandSettings], freqs: &[f64]) -> Vec<f64> {
         let fs = self.fs();
-        let designs: Vec<eq::Sections> = tone_bands(&settings(host)).iter().filter(|b| b.enabled).map(|b| eq::design(b, fs)).collect();
+        let designs: Vec<eq::Sections> = bands.iter().filter(|b| b.enabled).map(|b| eq::design(b, fs)).collect();
         freqs.iter().map(|f| designs.iter().map(|d| d.response_db(std::f64::consts::TAU * f / fs)).sum()).collect()
+    }
+
+    /// The selected slot's tone: the pedal's three bands, or the amp's with the cuts.
+    fn tone_curve(&self, host: &dyn ParamHost, freqs: &[f64]) -> Vec<f64> {
+        let s = settings(host);
+        if self.selected == Slot::Pedal {
+            self.curve(&crate::dsp::pedal_bands(&AmpSettings { pedal: true, ..s }), freqs)
+        } else {
+            self.curve(&tone_bands(&s), freqs)
+        }
     }
 
     fn tone_db(&self, host: &dyn ParamHost, f: f64) -> f64 {
         self.tone_curve(host, &[f])[0]
+    }
+
+    /// The grips the selected slot has: the pedal its bands, the amp its bands and the cuts, the
+    /// cabinet the cuts.
+    fn grips(&self) -> &'static [Grip] {
+        match self.selected {
+            Slot::Pedal => &[Grip::Bass, Grip::Middle, Grip::Treble],
+            Slot::Amp => &Grip::ALL,
+            Slot::Cab => &[Grip::LowCut, Grip::HighCut],
+        }
+    }
+
+    /// Whether the amp slot plays a full rig (its own cabinet: the Cab steps aside).
+    fn amp_is_full_rig(&self) -> bool {
+        let file = &self.files[Slot::Amp.index()];
+        match &self.status[Slot::Amp.index()] {
+            Status::Model(info) => match file.source.as_ref().filter(|s| !s.gear.is_empty()) {
+                Some(src) => crate::rig::Gear::of_tone3000(&src.gear, "nam") == crate::rig::Gear::FullRig,
+                None => crate::rig::Gear::of_nam(info.gear_type.as_deref()) == crate::rig::Gear::FullRig,
+            },
+            _ => false,
+        }
     }
 
     fn cab_db(&self) -> Option<&[f32]> {
@@ -412,7 +469,7 @@ impl AmpView {
     }
 
     fn grip(&self, host: &dyn ParamHost, g: Grip) -> Point {
-        let v = f64::from(Self::plain(host, g.spec().id));
+        let v = f64::from(Self::plain(host, g.spec(self.selected).id));
         let f = match g {
             Grip::Bass => crate::dsp::BASS_HZ,
             Grip::Middle => crate::dsp::MIDDLE_HZ,
@@ -507,14 +564,24 @@ impl AmpView {
             let on = Self::on(cx.host, [PEDAL.id, AMP.id, CAB.id][slot.index()]);
             let loaded = matches!(self.status[slot.index()], Status::Model(_) | Status::Cab(_));
             let lit = on && loaded;
+            let selected = slot == self.selected;
             let shape = RoundedRect::from_rect(r, 12.0);
             panel(cx.scene, shape, theme.panel_control, if lit { theme.accent.multiply_alpha(0.55) } else { theme.panel_control_border });
             if lit {
                 glow_stroke(cx, &shape, 1.0, theme.accent.multiply_alpha(0.5), theme.accent.multiply_alpha(0.35), 6.0);
             }
+            if selected {
+                cx.scene.stroke(&Stroke::new(2.0), Affine::IDENTITY, theme.accent, None, &RoundedRect::from_rect(r.inflate(3.0, 3.0), 14.0));
+            } else if self.hot == Some(Hot::Select(slot)) {
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.5), None, &RoundedRect::from_rect(r.inflate(3.0, 3.0), 14.0));
+            }
             let label = TextStyle::LABEL.sized(10.0);
             cx.text.draw(cx.scene, &slot.name().to_uppercase(), r.x0 + 18.0, r.y0 + 16.0, label, if lit { theme.accent } else { theme.text_lo }, Align::Left);
-            let (title, line2, line3) = self.slot_words(slot);
+            let (title, mut line2, mut line3) = self.slot_words(slot);
+            if slot == Slot::Cab && on && self.amp_is_full_rig() {
+                line2 = "Resting: the Amp is a full rig, with its own cabinet".to_owned();
+                line3 = "It plays again with an amp-only capture".to_owned();
+            }
             let big = TextStyle::BODY.sized(19.0).weighted(700.0);
             let width = r.width() - 36.0 - BUTTON - 10.0;
             let title = Self::fit(cx, &title, big, width);
@@ -583,6 +650,9 @@ impl AmpView {
         let pts = |f: &dyn Fn(f64, usize) -> f64| -> Vec<Point> { (0..RESPONSE_POINTS).map(|i| Point::new(freq_x(response_freq(i)), db_y(f(response_freq(i), i)))).collect() };
         let freqs: Vec<f64> = (0..RESPONSE_POINTS).map(response_freq).collect();
         let tone = self.tone_curve(host, &freqs);
+        // What is heard after the amp: its tone and the cuts, whatever slot is shown.
+        let post = self.curve(&tone_bands(&settings(host)), &freqs);
+        let cab_level = f64::from(Self::plain(host, CAB_LEVEL.id));
         // The cabinet's own response: dim, filled down to the floor.
         if let Some(cab) = self.cab_db() {
             let p = pts(&|_, i| f64::from(cab[i]));
@@ -600,12 +670,12 @@ impl AmpView {
         let tc = smooth_path(&pts(&|_, i| tone[i]));
         cx.scene.stroke(&Stroke::new(if hot { 1.8 } else { 1.4 }), Affine::IDENTITY, theme.accent.multiply_alpha(0.85), None, &tc);
         // What is heard: tone and cabinet together, lit.
-        if let (Some(cab), true) = (self.cab_db(), cab_on) {
-            let both = smooth_path(&pts(&|_, i| tone[i] + f64::from(cab[i])));
+        if let (Some(cab), true) = (self.cab_db(), cab_on && !self.amp_is_full_rig()) {
+            let both = smooth_path(&pts(&|_, i| post[i] + f64::from(cab[i]) + cab_level));
             glow_stroke(cx, &both, 1.6, theme.curve.multiply_alpha(0.85), theme.curve.multiply_alpha(0.6), 1.6);
         }
         cx.end_clip();
-        for g in Grip::ALL {
+        for &g in self.grips() {
             let p = self.grip(host, g);
             let hot = self.hot == Some(Hot::Grip(g)) || self.drag.is_some_and(|d| d.0 == g);
             let r = RoundedRect::from_rect(Rect::from_center_size(p, GRIP), 10.0);
@@ -654,9 +724,16 @@ impl AmpView {
             }
             cx.text.draw(cx.scene, t.label(), r.center().x, r.y1 + 8.0, label, theme.text_lo, Align::Center);
         }
-        for k in &self.knobs {
-            k.draw(cx);
+        for (k, slot) in self.knobs.iter().zip(&self.knob_slot) {
+            if slot.is_none_or(|s| s == self.selected) {
+                k.draw(cx);
+            }
         }
+        // The selected slot's section, named over its dials.
+        let x1 = DIAL_SLOT_X0 + if self.selected == Slot::Cab { 2.0 } else { 4.0 } * DIAL_SLOT_STEP;
+        let name = format!("{} — click a card to switch", self.selected.name().to_uppercase());
+        cx.text.draw(cx.scene, &name, (DIAL_SLOT_X0 + x1) / 2.0, STRIP_TOP + 10.0, TextStyle::LABEL.sized(9.0), theme.accent, Align::Center);
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.35), None, &Line::new((DIAL_SLOT_X0 - 40.0, STRIP_TOP + 26.0), (x1 + 40.0, STRIP_TOP + 26.0)));
     }
 
     fn draw_meters(&self, cx: &mut DrawCx<'_>) {
@@ -692,10 +769,10 @@ impl AmpView {
             return Help::default().text(b.help());
         }
         if let Some((g, _, _)) = self.drag {
-            return slot_help(&g.spec()).text(if g.is_cut() { " — drag left and right. Shift is fine." } else { " — drag up and down. Shift is fine." });
+            return slot_help(&g.spec(self.selected)).text(if g.is_cut() { " — drag left and right. Shift is fine." } else { " — drag up and down. Shift is fine." });
         }
         match self.hot {
-            Some(Hot::Grip(g)) => return slot_help(&g.spec()).text(if g.is_cut() { " — drag sideways (to the end: off); wheel; double-click: off" } else { " — drag up and down; wheel; double-click: flat" }),
+            Some(Hot::Grip(g)) => return slot_help(&g.spec(self.selected)).text(if g.is_cut() { " — drag sideways (to the end: off); wheel; double-click: off" } else { " — drag up and down; wheel; double-click: flat" }),
             Some(Hot::Card(slot, b)) => {
                 return Help::default().text(match (slot, b) {
                     (Slot::Cab, CardButton::Power) => "Cab on and off (off: the amp's sound without a cabinet, for a real one or another IR loader)",
@@ -719,7 +796,7 @@ impl AmpView {
         if let Some(h) = self.footer.help(host) {
             return h;
         }
-        if let Some(k) = self.knobs.iter().find(|k| self.pointer.is_some_and(|p| k.bounds().contains(p))) {
+        if let Some((k, _)) = self.knobs.iter().zip(&self.knob_slot).find(|(k, s)| s.is_none_or(|s| s == self.selected) && self.pointer.is_some_and(|p| k.bounds().contains(p))) {
             let v = Self::plain(host, &k.id);
             return Help::default().text(format!("{} ", k.spec.name)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(knob_words(k.spec.id));
         }
@@ -743,10 +820,13 @@ impl AmpView {
                 }
             }
         }
-        for g in Grip::ALL {
+        for &g in self.grips() {
             if Rect::from_center_size(self.grip(host, g), GRIP).inflate(4.0, 4.0).contains(p) {
                 return Some(Hot::Grip(g));
             }
+        }
+        if let Some(slot) = Slot::ALL.into_iter().find(|s| card_rect(*s).contains(p)) {
+            return Some(Hot::Select(slot));
         }
         Toggle::ALL.into_iter().find(|t| t.rect().contains(p)).map(Hot::Toggle)
     }
@@ -798,8 +878,8 @@ impl AmpView {
             return true;
         }
         if self.browser.is_none() {
-            for k in &mut self.knobs {
-                if k.event(event, host) {
+            for (k, slot) in self.knobs.iter_mut().zip(&self.knob_slot) {
+                if slot.is_none_or(|s| s == self.selected) && k.event(event, host) {
                     return true;
                 }
             }
@@ -808,7 +888,7 @@ impl AmpView {
             UiEvent::PointerMove { pos, mods } => {
                 self.pointer = Some(pos);
                 if let Some((g, start, v0)) = self.drag {
-                    let spec = g.spec();
+                    let spec = g.spec(self.selected);
                     let k = if mods.fine() { 0.2 } else { 1.0 };
                     let v = if g.is_cut() {
                         let f0 = f64::from(v0);
@@ -830,11 +910,16 @@ impl AmpView {
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => match self.hot_at(host, pos) {
                 Some(Hot::Card(slot, b)) => {
+                    self.selected = slot;
                     self.click_card(slot, b, host);
                     true
                 }
+                Some(Hot::Select(slot)) => {
+                    self.selected = slot;
+                    true
+                }
                 Some(Hot::Grip(g)) => {
-                    let id = g.spec().id;
+                    let id = g.spec(self.selected).id;
                     host.begin_gesture(id);
                     self.drag = Some((g, pos, Self::plain(host, id)));
                     true
@@ -848,7 +933,7 @@ impl AmpView {
             },
             UiEvent::PointerUp { button: MouseButton::Left, .. } => {
                 if let Some((g, _, _)) = self.drag.take() {
-                    host.end_gesture(g.spec().id);
+                    host.end_gesture(g.spec(self.selected).id);
                     return true;
                 }
                 false
@@ -856,7 +941,7 @@ impl AmpView {
             UiEvent::DoubleClick { pos, .. } => match self.hot_at(host, pos) {
                 Some(Hot::Grip(g)) => {
                     self.drag = None;
-                    let spec = g.spec();
+                    let spec = g.spec(self.selected);
                     Self::gesture(host, spec.id, spec.default);
                     true
                 }
@@ -865,7 +950,7 @@ impl AmpView {
             UiEvent::Wheel { pos, lines, mods } => {
                 match self.hot_at(host, pos) {
                     Some(Hot::Grip(g)) => {
-                        let spec = g.spec();
+                        let spec = g.spec(self.selected);
                         let v = spec.wheel(Self::plain(host, spec.id), lines, mods.fine());
                         write_if_changed(host, spec.id, host.normalize(spec.id, v));
                         true

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mite_amp::editor::{memory_host, AmpView, CardButton, Grip, Toggle};
-use mite_amp::params::{AMP, BASS, CAB, LOW_CUT, NORMALIZE, SIZE};
+use mite_amp::params::{AMP, BASS, CAB, LOW_CUT, NORMALIZE, PEDAL_BASS, PEDAL_GAIN, SIZE};
 use mite_amp::rig::{Slot, SlotFile, Status};
 use mite_amp::AmpUi;
 use mite_ui::kurbo::{Point, Rect};
@@ -115,4 +115,20 @@ fn tone3000_opens_over_the_display_and_closes() {
     assert_eq!(plain(&host, AMP.id), 1.0);
     view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
     assert_eq!(view.browser_open(), None);
+}
+
+#[test]
+fn selecting_a_card_gives_the_strip_and_the_grips_to_that_slot() {
+    let (mut view, host, _) = setup();
+    // The Amp is selected first: its bass grip moves the amp's bass.
+    assert!(view.dial(PEDAL_GAIN.id).is_none());
+    let card = view.button(Slot::Pedal, CardButton::Open);
+    let body = Point::new(card.x0 + 200.0, card.y0 - 40.0);
+    click(&mut view, &host, body);
+    assert!(view.dial(PEDAL_GAIN.id).is_some(), "the pedal's dials are shown");
+    let g = view.grip_at(&host, Grip::Bass);
+    drag(&mut view, &host, g, g - (0.0, 40.0));
+    assert!(plain(&host, PEDAL_BASS.id) > 4.0, "{}", plain(&host, PEDAL_BASS.id));
+    assert_eq!(plain(&host, BASS.id), 0.0);
+    draw(&mut view, &host);
 }

@@ -874,7 +874,7 @@ impl Session {
             let result = me.fetch_file(&tone, &model);
             match result {
                 Ok(path) => {
-                    let source = Source3k { tone_id: tone.id, model_id: model.id, title: tone.title.clone(), creator: tone.creator.clone(), license: tone.license.clone(), url: tone.url.clone() };
+                    let source = Source3k { tone_id: tone.id, model_id: model.id, title: tone.title.clone(), creator: tone.creator.clone(), license: tone.license.clone(), url: tone.url.clone(), gear: if tone.format == "ir" { "ir".to_owned() } else { tone.gear.clone() } };
                     rig.set_file(slot, SlotFile { path: Some(path), source: Some(source) });
                     me.update(|v| v.downloading = None);
                 }

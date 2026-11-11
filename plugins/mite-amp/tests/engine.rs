@@ -16,8 +16,11 @@ fn models_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mite-nam/tests/models")
 }
 
+/// A fresh path for each call (tests run in parallel and must not share files).
 fn tmp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("mite-amp-test-{}", std::process::id()));
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("mite-amp-test-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join(name)
 }
@@ -205,4 +208,56 @@ fn the_loader_builds_what_the_rig_asks_for_and_the_engine_takes_it() {
     assert_eq!(rig.status(Slot::Amp), Status::Empty);
     let _ = run(&mut e, &s, &shared, &x, 256);
     assert_eq!(e.latency(), 0);
+}
+
+/// A one-tap Linear model whose metadata says what gear it is.
+fn identity_gear(gear: &str) -> PathBuf {
+    let path = tmp(&format!("identity-{gear}.nam"));
+    std::fs::write(&path, format!(r#"{{"version":"0.5.4","architecture":"Linear","config":{{"receptive_field":1,"bias":false}},"weights":[1.0],"sample_rate":48000,"metadata":{{"gear_type":"{gear}"}}}}"#)).unwrap();
+    path
+}
+
+#[test]
+fn each_slot_takes_only_its_gear_and_a_full_rig_rests_the_cab() {
+    let params = Arc::new(AmpParams::default());
+    let rig = params.rig.clone();
+    let shared = Arc::new(AmpShared::new());
+    let core = LoaderCore::new(rig.clone(), shared.clone(), params.clone());
+    core.set_rate(48_000.0);
+    // A full rig in the Pedal slot, a pedal in the Amp slot: both refused, with where they go.
+    rig.set_file(Slot::Pedal, SlotFile { path: Some(identity_gear("amp_cab")), source: None });
+    rig.set_file(Slot::Amp, SlotFile { path: Some(identity_gear("pedal")), source: None });
+    core.step();
+    assert!(matches!(rig.status(Slot::Pedal), Status::Failed(ref e) if e.contains("Amp slot")), "{:?}", rig.status(Slot::Pedal));
+    assert!(matches!(rig.status(Slot::Amp), Status::Failed(ref e) if e.contains("Pedal slot")), "{:?}", rig.status(Slot::Amp));
+    // A full rig in the Amp slot plays, and the cabinet steps aside.
+    rig.set_file(Slot::Pedal, SlotFile::default());
+    rig.set_file(Slot::Amp, SlotFile { path: Some(identity_gear("amp_cab")), source: None });
+    core.step();
+    assert!(matches!(rig.status(Slot::Amp), Status::Model(_)));
+    let s = quiet();
+    let mut e = AmpEngine::new(48_000.0, &s);
+    let _ = run(&mut e, &s, &shared, &noise(4800, 0.1), 256);
+    assert!(!e.cab_engaged(&s));
+}
+
+#[test]
+fn a_slots_gain_and_level_act_only_while_it_is_on() {
+    let s = AmpSettings { pedal_gain_db: 6.0, pedal_level_db: -12.0, amp_gain_db: 3.0, amp_level_db: 1.0, cab_level_db: -20.0, ..quiet() };
+    let shared = AmpShared::new();
+    let mut e = AmpEngine::new(48_000.0, &s);
+    let id = identity_model(48_000);
+    drop(e.install_now([Some(model(&id, 48_000.0)), Some(model(&id, 48_000.0))], None));
+    e.reset(&s);
+    let x = noise(4800, 0.1);
+    let y = run(&mut e, &s, &shared, &x, 256);
+    // Identity captures, no cabinet (its level does nothing then): 6 − 12 + 3 + 1 = −2 dB.
+    let g = 10f32.powf(-2.0 / 20.0);
+    let err = x.iter().zip(&y).skip(2400).fold(0.0f32, |m, (a, b)| m.max((b - a * g).abs()));
+    assert!(err < 1e-5, "{err}");
+    // Both slots off: their gains and levels go with them.
+    let off = AmpSettings { pedal: false, amp: false, ..s };
+    let y = run(&mut e, &off, &shared, &x, 256);
+    let err = x.iter().zip(&y).skip(2400).fold(0.0f32, |m, (a, b)| m.max((b - a).abs()));
+    assert!(err < 1e-5, "{err}");
 }

@@ -16,7 +16,8 @@ use crate::dsp::AmpSettings;
 use crate::rig::Rig;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+/// 2 (2026-11-11): each slot's gain, level and (pedal) tone appended.
+pub const STATE_VERSION: u32 = 2;
 
 /// The state field holding the rig (files and their sources).
 pub const RIG_KEY: &str = "rig";
@@ -64,8 +65,22 @@ pub const MIX: ParamSpec = spec("mix", "Mix", "%", 0.0, 100.0, 100.0, ParamScale
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 
+// ---- Each slot's own (state 2) ----------------------------------------------------------
+
+/// Into the pedal (how hard it is hit), out of it (into the amp), and its tone after it.
+pub const PEDAL_GAIN: ParamSpec = spec("pedal_gain", "Pedal Gain", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const PEDAL_LEVEL: ParamSpec = spec("pedal_level", "Pedal Level", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const PEDAL_BASS: ParamSpec = spec("pedal_bass", "Pedal Bass", "dB", -12.0, 12.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const PEDAL_MIDDLE: ParamSpec = spec("pedal_middle", "Pedal Middle", "dB", -12.0, 12.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const PEDAL_TREBLE: ParamSpec = spec("pedal_treble", "Pedal Treble", "dB", -12.0, 12.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+/// Into the amp and out of it (its tone is BASS, MIDDLE, TREBLE).
+pub const AMP_GAIN: ParamSpec = spec("amp_gain", "Amp Gain", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const AMP_LEVEL: ParamSpec = spec("amp_level", "Amp Level", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+/// The cabinet's level (its cuts are LOW_CUT and HIGH_CUT).
+pub const CAB_LEVEL: ParamSpec = spec("cab_level", "Cab Level", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+
 /// The continuous parameters.
-pub const CONTINUOUS: [ParamSpec; 10] = [INPUT, GATE_THRESHOLD, INTERFACE_LEVEL, BASS, MIDDLE, TREBLE, LOW_CUT, HIGH_CUT, MIX, OUT_GAIN];
+pub const CONTINUOUS: [ParamSpec; 18] = [INPUT, GATE_THRESHOLD, INTERFACE_LEVEL, BASS, MIDDLE, TREBLE, LOW_CUT, HIGH_CUT, MIX, OUT_GAIN, PEDAL_GAIN, PEDAL_LEVEL, PEDAL_BASS, PEDAL_MIDDLE, PEDAL_TREBLE, AMP_GAIN, AMP_LEVEL, CAB_LEVEL];
 
 pub fn spec_for(id: &str) -> Option<ParamSpec> {
     CONTINUOUS.iter().find(|s| s.id == id).copied()
@@ -92,6 +107,14 @@ pub fn manifest() -> String {
         MIX.manifest_line(),
         OUT_GAIN.manifest_line(),
         BYPASS.manifest_line(),
+        PEDAL_GAIN.manifest_line(),
+        PEDAL_LEVEL.manifest_line(),
+        PEDAL_BASS.manifest_line(),
+        PEDAL_MIDDLE.manifest_line(),
+        PEDAL_TREBLE.manifest_line(),
+        AMP_GAIN.manifest_line(),
+        AMP_LEVEL.manifest_line(),
+        CAB_LEVEL.manifest_line(),
     ]
     .join("\n")
         + "\n"
@@ -130,6 +153,14 @@ pub struct AmpParams {
     pub mix: FloatParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
+    pub pedal_gain: FloatParam,
+    pub pedal_level: FloatParam,
+    pub pedal_bass: FloatParam,
+    pub pedal_middle: FloatParam,
+    pub pedal_treble: FloatParam,
+    pub amp_gain: FloatParam,
+    pub amp_level: FloatParam,
+    pub cab_level: FloatParam,
     pub snapshots: Arc<Snapshots>,
     pub preset: Arc<CurrentPreset>,
     /// The loaded files (saved with the state).
@@ -160,6 +191,14 @@ impl Default for AmpParams {
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: flag(&BYPASS),
+            pedal_gain: float_param(&PEDAL_GAIN),
+            pedal_level: float_param(&PEDAL_LEVEL),
+            pedal_bass: float_param(&PEDAL_BASS),
+            pedal_middle: float_param(&PEDAL_MIDDLE),
+            pedal_treble: float_param(&PEDAL_TREBLE),
+            amp_gain: float_param(&AMP_GAIN),
+            amp_level: float_param(&AMP_LEVEL),
+            cab_level: float_param(&CAB_LEVEL),
             snapshots: Arc::new(Snapshots::new()),
             preset: Arc::new(CurrentPreset::default()),
             rig: Arc::new(Rig::new()),
@@ -188,6 +227,14 @@ pub fn amp_settings(p: impl Fn(&str) -> f32) -> AmpSettings {
         mix: p(MIX.id) / 100.0,
         out_db: p(OUT_GAIN.id),
         bypass: on(BYPASS.id),
+        pedal_gain_db: p(PEDAL_GAIN.id),
+        pedal_level_db: p(PEDAL_LEVEL.id),
+        pedal_bass_db: p(PEDAL_BASS.id),
+        pedal_middle_db: p(PEDAL_MIDDLE.id),
+        pedal_treble_db: p(PEDAL_TREBLE.id),
+        amp_gain_db: p(AMP_GAIN.id),
+        amp_level_db: p(AMP_LEVEL.id),
+        cab_level_db: p(CAB_LEVEL.id),
     }
 }
 
@@ -212,6 +259,14 @@ impl AmpParams {
             "mix" => self.mix.value(),
             "out_gain" => self.out_gain.value(),
             "bypass" => flag(&self.bypass),
+            "pedal_gain" => self.pedal_gain.value(),
+            "pedal_level" => self.pedal_level.value(),
+            "pedal_bass" => self.pedal_bass.value(),
+            "pedal_middle" => self.pedal_middle.value(),
+            "pedal_treble" => self.pedal_treble.value(),
+            "amp_gain" => self.amp_gain.value(),
+            "amp_level" => self.amp_level.value(),
+            "cab_level" => self.cab_level.value(),
             _ => 0.0,
         }
     }
@@ -269,6 +324,14 @@ unsafe impl Params for AmpParams {
             p(MIX.id, self.mix.as_ptr(), ""),
             p(OUT_GAIN.id, self.out_gain.as_ptr(), ""),
             p(BYPASS.id, self.bypass.as_ptr(), ""),
+            p(PEDAL_GAIN.id, self.pedal_gain.as_ptr(), "Pedal"),
+            p(PEDAL_LEVEL.id, self.pedal_level.as_ptr(), "Pedal"),
+            p(PEDAL_BASS.id, self.pedal_bass.as_ptr(), "Pedal"),
+            p(PEDAL_MIDDLE.id, self.pedal_middle.as_ptr(), "Pedal"),
+            p(PEDAL_TREBLE.id, self.pedal_treble.as_ptr(), "Pedal"),
+            p(AMP_GAIN.id, self.amp_gain.as_ptr(), "Amp"),
+            p(AMP_LEVEL.id, self.amp_level.as_ptr(), "Amp"),
+            p(CAB_LEVEL.id, self.cab_level.as_ptr(), "Cab"),
         ]
     }
 }
