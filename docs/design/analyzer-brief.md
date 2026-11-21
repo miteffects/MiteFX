@@ -31,9 +31,20 @@ Bigger than the other plugins (user, 2026-11-09: "make more room for everything 
 - **Footer:** TARGET (Streaming −14, Apple Music −16, EBU R128 −23, ATSC A/85 −24, Club −9),
   VIEW, TILT, SPEED, HOLD; RESET on the right.
 
+- **Phase page** (2026-11-21, "focus on phase analysis" → "phase response of a chain"): the
+  footer's SPECTRUM | PHASE switch. Put a Mite Analyzer before a chain and one after it (or feed
+  the chain's input to the sidechain, "Reference"); the one after it shows the chain's
+  magnitude, phase (wrapped, on top of its delay) and group delay (total, the delay dashed), each
+  curve fading where the coherence says the two signals don't explain each other; the chain
+  delay in ms and samples, polarity, coherence (mean and across the band); the impulse response
+  around the delay. REFERENCE: Auto (the sidechain if it plays, else another instance), Sidechain,
+  Analyzer N. The one before the chain says it is the reference. Footer: SMOOTHING (1/48–1/3 oct),
+  AVERAGE (Fast 0.5 s, Normal 2 s, Slow 6 s, Long 20 s), RESET (measure again).
+
 ## 3. Parameters
 
-`target`, `view`, `tilt`, `speed` (choices), `hold` (bool). None affects the sound. State 1.
+`target`, `view`, `tilt`, `speed` (choices), `hold` (bool); `page`, `psmooth`, `pavg` (state 2,
+the phase page; `page` stays out of presets and snapshots). None affects the sound.
 
 ## 4. Open
 

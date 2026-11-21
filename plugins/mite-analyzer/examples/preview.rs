@@ -3,6 +3,9 @@
 //! measurement.
 //!
 //!     MITE_UI_TRACE=1 cargo run --release -p mite_analyzer --example preview
+//!
+//! PREVIEW_PHASE=1 opens the phase page with a chain to measure: the music through a 60 Hz
+//! high-pass and 128 samples of delay, the dry music on the sidechain.
 
 #[path = "common/music.rs"]
 #[allow(dead_code)]
@@ -18,6 +21,10 @@ use mite_ui::{run_standalone, ParamHost, ThemeKind, WindowOptions};
 
 fn main() -> Result<(), String> {
     let host = Arc::new(Mutex::new(memory_host()));
+    let phase = std::env::var_os("PREVIEW_PHASE").is_some();
+    if phase {
+        host.lock().expect("host").set_plain(mite_analyzer::params::PAGE.id, 1.0);
+    }
     let shared = Arc::new(AnalyzerShared::new());
     shared.sample_rate.store(48_000.0);
     let audio = shared.clone();
@@ -27,6 +34,14 @@ fn main() -> Result<(), String> {
         let start = Instant::now();
         let mut blocks = 0u64;
         let mut pos = 0usize;
+        // The chain: an RBJ high-pass (60 Hz, Q 0.707) per channel, then 128 samples of delay.
+        let w = std::f64::consts::TAU * 60.0 / 48_000.0;
+        let (c, alpha) = (w.cos(), w.sin() / (2.0 * std::f64::consts::FRAC_1_SQRT_2));
+        let a0 = 1.0 + alpha;
+        let (b0, b1, a1, a2) = ((1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, -2.0 * c / a0, (1.0 - alpha) / a0);
+        let mut state = [[0.0f64; 2]; 2];
+        let mut line = [vec![0.0f32; 128], vec![0.0f32; 128]];
+        let mut at = 0usize;
         loop {
             let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
             for i in 0..512 {
@@ -34,7 +49,24 @@ fn main() -> Result<(), String> {
                 r[i] = xr[(pos + i) % xr.len()];
             }
             pos = (pos + 512) % xl.len();
-            engine.process(&[&mut l, &mut r], &audio.tel);
+            if phase {
+                let dry = [l.clone(), r.clone()];
+                for i in 0..512 {
+                    for (ch, x) in [&mut l, &mut r].into_iter().enumerate() {
+                        let v = f64::from(x[i]);
+                        let s = &mut state[ch];
+                        let y = b0 * v + s[0];
+                        s[0] = b1 * v - a1 * y + s[1];
+                        s[1] = b0 * v - a2 * y;
+                        x[i] = std::mem::replace(&mut line[ch][at], y as f32);
+                    }
+                    at = (at + 1) % 128;
+                }
+                let sc: [&[f32]; 2] = [&dry[0], &dry[1]];
+                engine.process_with(&[&mut l, &mut r], Some(&sc), &audio.tel);
+            } else {
+                engine.process(&[&mut l, &mut r], &audio.tel);
+            }
             blocks += 1;
             let due = start + Duration::from_secs_f64(blocks as f64 * 512.0 / 48_000.0);
             if let Some(wait) = due.checked_duration_since(Instant::now()) {

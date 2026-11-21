@@ -1,0 +1,33 @@
+{
+  "fields": {
+    "mitefx_state": "2",
+    "preset": "Broadcast",
+    "snapshots": "{\"active\":0,\"slots\":[{\"hold\":0.0,\"pavg\":0.33333334,\"psmooth\":0.25,\"speed\":1.0,\"target\":0.5,\"tilt\":1.0,\"view\":0.5},{\"tilt\":0.0},null,null]}"
+  },
+  "params": {
+    "hold": {
+      "bool": false
+    },
+    "page": {
+      "i32": 0
+    },
+    "pavg": {
+      "i32": 1
+    },
+    "psmooth": {
+      "i32": 1
+    },
+    "speed": {
+      "i32": 2
+    },
+    "target": {
+      "i32": 2
+    },
+    "tilt": {
+      "i32": 2
+    },
+    "view": {
+      "i32": 1
+    }
+  }
+}

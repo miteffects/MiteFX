@@ -3,7 +3,10 @@
 //!
 //!     cargo run -p mite_analyzer --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, ms (Mid / Side), lr (Left / Right), menu (the target list open).
+//! SNAPSHOT_VARIANT: default, ms (Mid / Side), lr (Left / Right), menu (the target list open),
+//! phase (the phase page: the music through a test chain, a 60 Hz high-pass, a 12 kHz low-pass
+//! and 128 samples of delay, against the dry music on the sidechain), phase-menu (its reference
+//! list open).
 //! SNAPSHOT_HOVER=x,y hovers a point.
 
 #[path = "common/music.rs"]
@@ -44,8 +47,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     shared.sample_rate.store(fs);
     let mut engine = AnalyzerEngine::new(fs);
     let [mut l, mut r] = music::music(40.0, fs);
-    for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-        engine.process(&[a, b], &shared.tel);
+    if variant.starts_with("phase") {
+        host.set_plain(PAGE.id, 1.0);
+        let dry = [l.clone(), r.clone()];
+        for x in [&mut l, &mut r] {
+            *x = chain(x, fs);
+        }
+        for (i, (a, b)) in l.chunks_mut(480).zip(r.chunks_mut(480)).enumerate() {
+            let sc: [&[f32]; 2] = [&dry[0][i * 480..i * 480 + a.len()], &dry[1][i * 480..i * 480 + a.len()]];
+            engine.process_with(&[a, b], Some(&sc), &shared.tel);
+        }
+    } else {
+        for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
+            engine.process(&[a, b], &shared.tel);
+        }
     }
     let mut view = AnalyzerView::new(shared.clone());
     view.tick(&host);
@@ -53,8 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let theme_obj = Theme::load(theme, ACCENT);
     render_view(&mut view, &host, &theme_obj, 1.0)?;
     let mods = Modifiers::default();
-    if v("menu") {
-        let pos = view.button("target").expect("button").center();
+    if v("menu") || v("phase-menu") {
+        let pos = view.button(if v("menu") { "target" } else { "source" }).expect("button").center();
         view.event(&UiEvent::PointerMove { pos, mods }, &host);
         view.event(&UiEvent::PointerDown { pos, button: MouseButton::Left, mods }, &host);
         view.event(&UiEvent::PointerUp { pos, button: MouseButton::Left, mods }, &host);
@@ -73,4 +88,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.write_header()?.write_image_data(&image.rgba)?;
     println!("wrote {path} ({}×{})", image.width, image.height);
     Ok(())
+}
+
+/// The phase variant's test chain: RBJ high-pass 60 Hz and low-pass 12 kHz (Q 0.707), then 128
+/// samples of delay.
+fn chain(x: &[f32], fs: f32) -> Vec<f32> {
+    let fs = f64::from(fs);
+    let biquad = |x: Vec<f64>, f0: f64, high: bool| -> Vec<f64> {
+        let w = std::f64::consts::TAU * f0 / fs;
+        let (c, alpha) = (w.cos(), w.sin() / (2.0 * std::f64::consts::FRAC_1_SQRT_2));
+        let a0 = 1.0 + alpha;
+        let (b0, b1) = if high { ((1.0 + c) / 2.0, -(1.0 + c)) } else { ((1.0 - c) / 2.0, 1.0 - c) };
+        let (b0, b1, b2, a1, a2) = (b0 / a0, b1 / a0, b0 / a0, -2.0 * c / a0, (1.0 - alpha) / a0);
+        let (mut s1, mut s2) = (0.0, 0.0);
+        x.into_iter()
+            .map(|v| {
+                let y = b0 * v + s1;
+                s1 = b1 * v - a1 * y + s2;
+                s2 = b2 * v - a2 * y;
+                y
+            })
+            .collect()
+    };
+    let y = biquad(biquad(x.iter().map(|&v| f64::from(v)).collect(), 60.0, true), 12_000.0, false);
+    (0..y.len()).map(|i| if i >= 128 { y[i - 128] as f32 } else { 0.0 }).collect()
 }

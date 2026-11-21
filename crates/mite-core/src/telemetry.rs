@@ -88,6 +88,30 @@ impl SpectrumTap {
             *o = self.ring[start.wrapping_add(i) & mask].load();
         }
     }
+
+    /// How many samples were ever pushed (wrapping): the position of the newest sample + 1.
+    pub fn written(&self) -> usize {
+        self.write.load(Ordering::Acquire)
+    }
+
+    /// UI thread: copies the `out.len()` samples that end at write count `end`, oldest first.
+    /// False (and `out` untouched) when they are not all there: not yet written, or already
+    /// overwritten (`end` more than a ring minus `out.len()` behind, with a quarter ring of margin
+    /// for the writer moving on while this reads).
+    pub fn read_ending(&self, end: usize, out: &mut [f32]) -> bool {
+        let w = self.written();
+        let ahead = w.wrapping_sub(end) as isize;
+        let n = out.len();
+        if ahead < 0 || ahead as usize + n > self.ring.len() - self.ring.len() / 4 {
+            return false;
+        }
+        let mask = self.ring.len() - 1;
+        let start = end.wrapping_sub(n);
+        for (i, o) in out.iter_mut().enumerate() {
+            *o = self.ring[start.wrapping_add(i) & mask].load();
+        }
+        true
+    }
 }
 
 /// Lock-free ring of fixed-width records (one per time slice: levels, gain reduction…), written

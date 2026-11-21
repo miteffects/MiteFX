@@ -40,6 +40,7 @@ pub mod shape;
 pub mod smooth;
 pub mod spectral;
 pub mod stft;
+pub mod transfer;
 
 pub use gain::{MINUS_INFINITY_DB, db_to_gain, gain_to_db};
 pub use meter::PeakMeter;

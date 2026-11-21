@@ -6,6 +6,12 @@
 //! last minute of short-term loudness) and STEREO (the vectorscope, correlation, balance, and
 //! correlation per band). The footer picks the target, the view, the tilt and the speed; HOLD
 //! keeps the peak line; RESET restarts the integration (or click the integrated reading).
+//!
+//! The footer's first control switches to the PHASE page ([`phase`]): a chain's magnitude,
+//! phase and group delay, its delay, polarity and impulse response, measured against a reference
+//! (another Mite Analyzer before the chain, or the sidechain).
+
+pub mod phase;
 
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
@@ -31,6 +37,7 @@ use crate::dsp::{record, HISTORY_SLICE_MS};
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::AnalyzerShared;
+use phase::{PhaseLab, SOURCE_ITEMS};
 
 /// Mite Analyzer wears its accent (tokens.json `color.accent.analyzer`, pewter).
 pub const ACCENT: &str = "analyzer";
@@ -75,11 +82,15 @@ const BAND_EDGES: [f64; 6] = [20.0, 120.0, 500.0, 2000.0, 6000.0, 20_000.0];
 const BAND_NAMES: [&str; 5] = ["LOW", "LOW MID", "MID", "HIGH MID", "HIGH"];
 
 /// The footer's controls.
-const TARGET_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 236.0, FOOTER_TOP + 47.0);
-const VIEW_BUTTON: Rect = Rect::new(246.0, FOOTER_TOP + 9.0, 416.0, FOOTER_TOP + 47.0);
-const TILT_BUTTON: Rect = Rect::new(426.0, FOOTER_TOP + 9.0, 576.0, FOOTER_TOP + 47.0);
-const SPEED_BUTTON: Rect = Rect::new(586.0, FOOTER_TOP + 9.0, 726.0, FOOTER_TOP + 47.0);
-const HOLD_BUTTON: Rect = Rect::new(736.0, FOOTER_TOP + 9.0, 836.0, FOOTER_TOP + 47.0);
+/// The page switch: SPECTRUM | PHASE.
+const PAGE_BUTTON: Rect = Rect::new(16.0, FOOTER_TOP + 9.0, 236.0, FOOTER_TOP + 47.0);
+const TARGET_BUTTON: Rect = Rect::new(256.0, FOOTER_TOP + 9.0, 476.0, FOOTER_TOP + 47.0);
+const VIEW_BUTTON: Rect = Rect::new(486.0, FOOTER_TOP + 9.0, 656.0, FOOTER_TOP + 47.0);
+const TILT_BUTTON: Rect = Rect::new(666.0, FOOTER_TOP + 9.0, 816.0, FOOTER_TOP + 47.0);
+const SPEED_BUTTON: Rect = Rect::new(826.0, FOOTER_TOP + 9.0, 966.0, FOOTER_TOP + 47.0);
+const HOLD_BUTTON: Rect = Rect::new(976.0, FOOTER_TOP + 9.0, 1076.0, FOOTER_TOP + 47.0);
+const SMOOTH_BUTTON: Rect = Rect::new(256.0, FOOTER_TOP + 9.0, 416.0, FOOTER_TOP + 47.0);
+const AVERAGE_BUTTON: Rect = Rect::new(426.0, FOOTER_TOP + 9.0, 566.0, FOOTER_TOP + 47.0);
 const RESET_BUTTON: Rect = Rect::new(VIEW_W - 116.0, FOOTER_TOP + 9.0, VIEW_W - 16.0, FOOTER_TOP + 47.0);
 
 /// The readings change at most this often, s: a number that changes every frame cannot be read.
@@ -170,6 +181,10 @@ enum Menu {
     View,
     Tilt,
     Speed,
+    Smooth,
+    Average,
+    /// The phase page's reference (not a parameter: instances come and go).
+    Source,
 }
 
 impl Menu {
@@ -179,6 +194,15 @@ impl Menu {
             Self::View => &VIEW,
             Self::Tilt => &TILT,
             Self::Speed => &SPEED,
+            Self::Smooth => &SMOOTH,
+            Self::Average | Self::Source => &AVERAGE,
+        }
+    }
+
+    fn items(self) -> &'static [&'static str] {
+        match self {
+            Self::Source => SOURCE_ITEMS,
+            m => m.spec().choices,
         }
     }
 
@@ -188,10 +212,15 @@ impl Menu {
             Self::View => VIEW_BUTTON,
             Self::Tilt => TILT_BUTTON,
             Self::Speed => SPEED_BUTTON,
+            Self::Smooth => SMOOTH_BUTTON,
+            Self::Average => AVERAGE_BUTTON,
+            Self::Source => phase::SOURCE_BUTTON,
         }
     }
 
-    const ALL: [Menu; 4] = [Menu::Target, Menu::View, Menu::Tilt, Menu::Speed];
+    const SPECTRUM: &'static [Menu] = &[Menu::Target, Menu::View, Menu::Tilt, Menu::Speed];
+    /// The footer's menus on the phase page (the source sits in the chain panel).
+    const PHASE: &'static [Menu] = &[Menu::Smooth, Menu::Average, Menu::Source];
 }
 
 type ChoiceSpecRef = &'static mite_core::ChoiceSpec;
@@ -199,6 +228,11 @@ type ChoiceSpecRef = &'static mite_core::ChoiceSpec;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hot {
     Menu(Menu),
+    /// The page switch's half: 0 spectrum, 1 phase.
+    Page(usize),
+    PhasePlots,
+    Chain,
+    Impulse,
     Hold,
     Reset,
     Integrated,
@@ -303,6 +337,10 @@ pub struct AnalyzerView {
     shown: Shown,
     shown_at: Instant,
     menu: Option<(Menu, Dropdown)>,
+    /// The phase page is open (from `page`, as of the last tick or draw).
+    phase_open: bool,
+    /// The phase page's measurement.
+    phase: PhaseLab,
     pointer: Option<Point>,
     hot: Option<Hot>,
     last_tick: Instant,
@@ -338,6 +376,8 @@ impl AnalyzerView {
             shown: Shown::default(),
             shown_at: Instant::now(),
             menu: None,
+            phase_open: false,
+            phase: PhaseLab::new(f64::from(shared.sample_rate.load())),
             pointer: None,
             hot: None,
             last_tick: Instant::now(),
@@ -354,6 +394,9 @@ impl AnalyzerView {
     /// Lets everything land at once (tools render a single frame): the curves at their targets,
     /// the spectrogram filled with rows of now.
     pub fn settle(&mut self, host: &dyn ParamHost) {
+        if Self::phase_page(host) {
+            self.phase.settle(&self.shared, host);
+        }
         self.analyze(host, 1.0);
         for c in 0..2 {
             self.curves[c].copy_from_slice(&self.raw[c]);
@@ -378,6 +421,7 @@ impl AnalyzerView {
             balance: self.balance,
             bands: self.bands,
         };
+        self.phase.take_readings();
         self.shown_at = Instant::now();
     }
 
@@ -385,6 +429,11 @@ impl AnalyzerView {
 
     pub fn button(&self, name: &str) -> Option<Rect> {
         Some(match name {
+            "spectrum_page" => Rect::new(PAGE_BUTTON.x0, PAGE_BUTTON.y0, PAGE_BUTTON.center().x, PAGE_BUTTON.y1),
+            "phase_page" => Rect::new(PAGE_BUTTON.center().x, PAGE_BUTTON.y0, PAGE_BUTTON.x1, PAGE_BUTTON.y1),
+            "smooth" => SMOOTH_BUTTON,
+            "average" => AVERAGE_BUTTON,
+            "source" => phase::SOURCE_BUTTON,
             "target" => TARGET_BUTTON,
             "view" => VIEW_BUTTON,
             "tilt" => TILT_BUTTON,
@@ -407,6 +456,23 @@ impl AnalyzerView {
 
     pub fn correlation(&self) -> f64 {
         self.correlation
+    }
+
+    /// The phase page's measurement.
+    pub fn phase(&self) -> &PhaseLab {
+        &self.phase
+    }
+
+    fn phase_page(host: &dyn ParamHost) -> bool {
+        Self::index(host, PAGE.id) == 1
+    }
+
+    fn menus(host: &dyn ParamHost) -> &'static [Menu] {
+        if Self::phase_page(host) {
+            Menu::PHASE
+        } else {
+            Menu::SPECTRUM
+        }
     }
 
     // ---- reading ----------------------------------------------------------------------------
@@ -719,12 +785,30 @@ impl AnalyzerView {
 
     fn draw_footer(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
-        for m in Menu::ALL {
+        // The page switch: two halves, the open page lit.
+        let page = Self::index(cx.host, PAGE.id).min(1);
+        raised(cx.scene, RoundedRect::from_rect(PAGE_BUTTON, 6.0), theme.panel_control, theme.panel_control_border, theme.shadows);
+        for (i, name) in ["SPECTRUM", "PHASE"].into_iter().enumerate() {
+            let w = PAGE_BUTTON.width() / 2.0;
+            let half = Rect::new(PAGE_BUTTON.x0 + i as f64 * w, PAGE_BUTTON.y0, PAGE_BUTTON.x0 + (i + 1) as f64 * w, PAGE_BUTTON.y1);
+            let on = page == i;
+            if on {
+                cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.16), None, &RoundedRect::from_rect(half.inset(-3.0), 4.0));
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent, None, &RoundedRect::from_rect(half.inset(-3.0), 4.0));
+            }
+            let hot = self.hot == Some(Hot::Page(i));
+            let color = if on { theme.accent } else if hot { theme.text_hi } else { theme.text_mid };
+            cx.text.draw(cx.scene, name, half.center().x, half.center().y - 7.0, LABEL, color, Align::Center);
+        }
+        for &m in Self::menus(cx.host).iter().filter(|m| **m != Menu::Source) {
             let i = Self::index(cx.host, m.spec().id).min(m.spec().choices.len() - 1);
             let open = matches!(self.menu, Some((o, _)) if o == m);
             draw_dropdown_button(cx, m.button(), m.spec().choices[i], open, self.hot == Some(Hot::Menu(m)), |_, _| {});
         }
-        for (r, text, on, hot) in [(HOLD_BUTTON, "HOLD", Self::plain(cx.host, HOLD.id) >= 0.5, Hot::Hold), (RESET_BUTTON, "RESET", false, Hot::Reset)] {
+        let spectrum = page == 0;
+        let hold: &[(Rect, &str, bool, Hot)] = &[(HOLD_BUTTON, "HOLD", Self::plain(cx.host, HOLD.id) >= 0.5, Hot::Hold)];
+        let reset = [(RESET_BUTTON, "RESET", false, Hot::Reset)];
+        for &(r, text, on, hot) in (if spectrum { hold } else { &[] }).iter().chain(&reset) {
             let is_hot = self.hot == Some(hot);
             let border = if on || is_hot { theme.accent } else { theme.panel_control_border };
             raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, border, theme.shadows);
@@ -741,6 +825,15 @@ impl AnalyzerView {
             };
         }
         match self.hot {
+            Some(Hot::Page(0)) => Help::default().text("Spectrum — the spectrum, the spectrogram, loudness and the stereo field."),
+            Some(Hot::Page(_)) => Help::default().text("Phase — what a chain does: put a Mite Analyzer before it (or feed its input to the sidechain), this one after it."),
+            Some(Hot::PhasePlots) => Help::default().text(self.pointer.and_then(|p| self.phase.help(p)).unwrap_or_default()),
+            Some(Hot::Chain) => Help::default().text("The chain's delay (its latency, as heard), its polarity, and how well the two signals explain each other across the band; curves fade where they don't."),
+            Some(Hot::Impulse) => Help::default().text("The chain's impulse response around its delay: ringing before 0 is a linear-phase filter's pre-ring."),
+            Some(Hot::Menu(Menu::Smooth)) => Help::default().text("Smoothing — across frequency: finer shows more detail, wider settles noisy material."),
+            Some(Hot::Menu(Menu::Average)) => Help::default().text("Average — how long the measurement remembers: Fast follows changes, Long steadies music."),
+            Some(Hot::Menu(Menu::Source)) => Help::default().text("Reference — the signal before the chain: Auto takes the sidechain if it plays, else another Mite Analyzer."),
+            Some(Hot::Reset) if self.phase_open => Help::default().text("Reset — start the measurement again."),
             Some(Hot::Spectrum) => {
                 if let Some(p) = self.pointer {
                     let f = x_freq(p.x);
@@ -760,6 +853,7 @@ impl AnalyzerView {
             Some(Hot::Menu(Menu::View)) => Help::default().text("View — the spectrum of the sum, of mid and side, or of left and right."),
             Some(Hot::Menu(Menu::Tilt)) => Help::default().text("Tilt — 4.5 dB/oct reads a balanced mix (and pink noise) level; Flat is the raw spectrum."),
             Some(Hot::Menu(Menu::Speed)) => Help::default().text("Speed — how fast the spectrum follows the music."),
+            None if self.phase_open => Help::default().text("A chain's magnitude, phase and group delay, against the reference before it; curves fade where the two signals don't explain each other."),
             None => Help::default().text("Spectrum and spectrogram on the left; loudness and the stereo field on the right."),
         }
     }
@@ -771,10 +865,29 @@ impl AnalyzerView {
     }
 
     fn hot_at(&self, p: Point) -> Option<Hot> {
-        for m in Menu::ALL {
+        if PAGE_BUTTON.contains(p) {
+            return Some(Hot::Page(usize::from(p.x >= PAGE_BUTTON.center().x)));
+        }
+        let menus = if self.phase_open { Menu::PHASE } else { Menu::SPECTRUM };
+        for &m in menus {
             if m.button().contains(p) {
                 return Some(Hot::Menu(m));
             }
+        }
+        if RESET_BUTTON.contains(p) {
+            return Some(Hot::Reset);
+        }
+        if self.phase_open {
+            if (phase::X0..=phase::X1).contains(&p.x) && (phase::MAG.y0..=phase::GD.y1).contains(&p.y) {
+                return Some(Hot::PhasePlots);
+            }
+            if phase::CHAIN.contains(p) {
+                return Some(Hot::Chain);
+            }
+            if phase::IMPULSE.contains(p) {
+                return Some(Hot::Impulse);
+            }
+            return None;
         }
         if HOLD_BUTTON.contains(p) {
             return Some(Hot::Hold);
@@ -823,6 +936,10 @@ impl AnalyzerView {
             let m = *m;
             match list.event(event) {
                 DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) if m == Menu::Source => {
+                    self.menu = None;
+                    self.shared.phase_source.store(i as u32, Ordering::Relaxed);
+                }
                 DropdownEvent::Picked(i) => {
                     self.menu = None;
                     Self::gesture(host, m.spec().id, i as f32);
@@ -846,9 +963,25 @@ impl AnalyzerView {
                 true
             }
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => match self.hot_at(pos) {
+                Some(Hot::Page(i)) => {
+                    Self::gesture(host, PAGE.id, i as f32);
+                    self.phase_open = i == 1;
+                    true
+                }
+                Some(Hot::Menu(Menu::Source)) => {
+                    let i = self.shared.phase_source.load(Ordering::Relaxed) as usize;
+                    let shown = PhaseLab::source_choices(&self.shared);
+                    let list = Dropdown::new(Menu::Source.button(), SOURCE_ITEMS, i, (DISPLAY_TOP, FOOTER_TOP)).with_shown(shown).with_min_width(Menu::Source.button().width());
+                    self.menu = Some((Menu::Source, list));
+                    true
+                }
                 Some(Hot::Menu(m)) => {
                     let i = Self::index(host, m.spec().id);
-                    self.menu = Some((m, Dropdown::new(m.button(), m.spec().choices, i, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(m.button().width().max(150.0))));
+                    self.menu = Some((m, Dropdown::new(m.button(), m.items(), i, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(m.button().width().max(150.0))));
+                    true
+                }
+                Some(Hot::Reset) if self.phase_open => {
+                    self.phase.restart();
                     true
                 }
                 Some(Hot::Hold) => {
@@ -906,11 +1039,17 @@ impl View for AnalyzerView {
         let theme = cx.theme;
         self.set_gram_colors(theme);
         self.draw_header(cx);
+        self.phase_open = Self::phase_page(cx.host);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, VIEW_W, HELP_TOP));
-        self.draw_spectrum(cx);
-        self.draw_gram(cx);
-        self.draw_loudness(cx);
-        self.draw_stereo(cx);
+        if self.phase_open {
+            let source_open = matches!(self.menu, Some((Menu::Source, _)));
+            self.phase.draw(cx, &self.shared, self.pointer, source_open, self.hot == Some(Hot::Menu(Menu::Source)));
+        } else {
+            self.draw_spectrum(cx);
+            self.draw_gram(cx);
+            self.draw_loudness(cx);
+            self.draw_stereo(cx);
+        }
         self.help_text().draw(cx, Rect::new(0.0, HELP_TOP, VIEW_W, FOOTER_TOP));
         self.footer.draw_frame(cx);
         self.draw_footer(cx);
@@ -935,6 +1074,21 @@ impl View for AnalyzerView {
         self.session.follow(host, busy);
         let dt = self.last_tick.elapsed().as_secs_f64().min(0.1);
         self.last_tick = Instant::now();
+        self.phase_open = Self::phase_page(host);
+        if self.phase_open {
+            self.phase.tick(&self.shared, host, dt);
+            if self.shown_at.elapsed().as_secs_f64() >= READOUT_S {
+                self.take_readings();
+            }
+            let history = &mut self.history;
+            self.shared.tel.history.read_since(&mut self.seen, |r| {
+                if history.len() == 1024 {
+                    history.pop_front();
+                }
+                history.push_back(*r);
+            });
+            return true;
+        }
         self.analyze(host, 0.12);
         // Ballistics by SPEED: rise and fall time constants, s.
         let (rise, fall) = [(0.02, 0.15), (0.06, 0.4), (0.2, 1.2)][Self::index(host, SPEED.id).min(2)];

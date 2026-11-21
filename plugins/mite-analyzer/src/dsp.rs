@@ -25,8 +25,10 @@ pub mod record {
 pub const HISTORY_SLICE_MS: f32 = 100.0;
 /// About 13 minutes of history.
 pub const HISTORY_RECORDS: usize = 8192;
-/// The raw streams the editor reads (the largest FFT and the scope come out of it).
-pub const TAP_SAMPLES: usize = 32_768;
+/// The raw streams the editor reads: the spectrum and the scope, and for the phase page a
+/// 65536-sample delay search plus up to its half of delay, and a few seconds to settle on when
+/// a tool renders one frame (a ring keeps a quarter as margin).
+pub const TAP_SAMPLES: usize = 262_144;
 /// True peak: 4× (BS.1770-4 Annex 2).
 const TP_PHASES: usize = 4;
 
@@ -34,6 +36,10 @@ const TP_PHASES: usize = 4;
 pub struct Telemetry {
     pub left: SpectrumTap,
     pub right: SpectrumTap,
+    /// The sidechain (silence when unconnected), pushed before the main streams in the same
+    /// block, so a sample's write count is the same in both.
+    pub sc_left: SpectrumTap,
+    pub sc_right: SpectrumTap,
     pub history: HistoryTap<{ record::WIDTH }>,
     pub momentary: AtomicF32,
     pub short_term: AtomicF32,
@@ -50,6 +56,8 @@ impl Telemetry {
         Self {
             left: SpectrumTap::new(TAP_SAMPLES),
             right: SpectrumTap::new(TAP_SAMPLES),
+            sc_left: SpectrumTap::new(TAP_SAMPLES),
+            sc_right: SpectrumTap::new(TAP_SAMPLES),
             history: HistoryTap::new(HISTORY_RECORDS),
             momentary: AtomicF32::new(SILENCE_LUFS),
             short_term: AtomicF32::new(SILENCE_LUFS),
@@ -105,9 +113,28 @@ impl AnalyzerEngine {
 
     /// Measures one block (one or two channels); the audio is left as it is.
     pub fn process(&mut self, channels: &[&mut [f32]], tel: &Telemetry) {
+        self.process_with(channels, None, tel);
+    }
+
+    /// As [`Self::process`], with the sidechain (one or two channels, or none) for the phase
+    /// page's reference.
+    pub fn process_with(&mut self, channels: &[&mut [f32]], sidechain: Option<&[&[f32]]>, tel: &Telemetry) {
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
             return;
+        }
+        let len = channels[0].len().min(channels[n_ch - 1].len());
+        match sidechain.filter(|s| !s.is_empty()) {
+            Some(sc) => {
+                let (a, b) = (sc[0], sc[sc.len().min(2) - 1]);
+                let at = |x: &[f32], i: usize| x.get(i).copied().unwrap_or(0.0);
+                tel.sc_left.push((0..len).map(|i| at(a, i)));
+                tel.sc_right.push((0..len).map(|i| at(b, i)));
+            }
+            None => {
+                tel.sc_left.push(std::iter::repeat_n(0.0, len));
+                tel.sc_right.push(std::iter::repeat_n(0.0, len));
+            }
         }
         if tel.reset.swap(false, Ordering::AcqRel) {
             self.loudness.reset_integration();
@@ -115,7 +142,6 @@ impl AnalyzerEngine {
         }
         let left: &[f32] = channels[0];
         let right: &[f32] = channels[n_ch - 1];
-        let len = left.len().min(right.len());
         tel.left.push(left[..len].iter().copied());
         tel.right.push(right[..len].iter().copied());
         let mut start = 0;

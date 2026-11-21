@@ -20,8 +20,13 @@ fn engine_process_never_allocates() {
             tel.reset.store(true, Ordering::Relaxed);
         }
         let block = [1500, 1, 333, 512][i % 4];
+        let sc = r.clone();
         if i % 7 == 0 {
             process_wrapper(|| engine.process(&[&mut l[..block]], &tel));
+        } else if i % 3 == 0 {
+            // With the sidechain (the phase page's reference), stereo and mono.
+            let key: [&[f32]; 2] = [&sc[..block], &sc[..block]];
+            process_wrapper(|| engine.process_with(&[&mut l[..block], &mut r[..block]], Some(&key[..1 + i % 2]), &tel));
         } else {
             process_wrapper(|| engine.process(&[&mut l[..block], &mut r[..block]], &tel));
         }
