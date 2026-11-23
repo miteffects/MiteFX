@@ -33,6 +33,7 @@ impl Default for MiteComp {
         let mut shared = CompShared::with_stores(params.snapshots.clone(), params.preset.clone());
         shared.display_range = params.display_range.clone();
         shared.multi_stage = params.multi_stage.clone();
+        shared.focus_mode = params.focus_mode.clone();
         let shared = Arc::new(shared);
         Self { params, engine, shared, reported_latency: 0 }
     }

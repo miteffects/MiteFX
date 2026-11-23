@@ -34,6 +34,8 @@ pub struct CompShared {
     /// The editor shows every stage (the strip, pulling the line makes more); off, it is one
     /// compressor (the parameters' store, saved with the session).
     pub multi_stage: Arc<std::sync::atomic::AtomicBool>,
+    /// Focus mode: the history across the whole display (the square and its strip hidden).
+    pub focus_mode: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CompShared {
@@ -51,6 +53,7 @@ impl CompShared {
             preset,
             display_range: Arc::new(AtomicF32::new(0.0)),
             multi_stage: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            focus_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 

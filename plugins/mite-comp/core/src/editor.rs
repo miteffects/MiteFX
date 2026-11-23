@@ -44,7 +44,26 @@ const HEADER_ROW: (f64, f64) = (12.0, 44.0);
 
 /// History: 6 s across the left 776 px; levels −60…0 dB over the display; GR hangs from the top
 /// at 10 px/dB (to 25 dB), upward gain rises from the bottom (to 16 dB).
-const HIST_W: f64 = 776.0;
+const HIST_W_FULL: f64 = 776.0;
+/// Focus mode's history: across the display up to the meters.
+const HIST_W_FOCUS: f64 = 1180.0;
+thread_local! {
+    /// Focus mode in force for this view (set before drawing and handling events).
+    static FOCUS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn set_focus(on: bool) {
+    FOCUS.with(|f| f.set(on));
+}
+
+fn focus() -> bool {
+    FOCUS.with(std::cell::Cell::get)
+}
+
+/// The history's width (wider in focus mode).
+fn hist_w() -> f64 {
+    if focus() { HIST_W_FOCUS } else { HIST_W_FULL }
+}
 const HIST_SECONDS: f64 = 6.0;
 /// The history's level lane: 0 dB 24 px under the display's top, the range's floor this much lower.
 const LEVEL_SPAN_PX: f64 = 572.0;
@@ -79,7 +98,10 @@ fn gr_px_per_db() -> f64 {
     LEVEL_SPAN_PX / (level_range() + headroom())
 }
 /// Threshold lines end in a grip at the history's right edge.
-const GRIP_X: f64 = 738.0;
+/// The grips' column, at the history's right edge.
+fn grip_x() -> f64 {
+    hist_w() - 38.0
+}
 const GRIP_SIZE: (f64, f64) = (34.0, 22.0);
 
 /// Transfer square: −60…0 dB in and out.
@@ -262,6 +284,9 @@ fn sq_db(p: Point) -> (f32, f32) {
 }
 
 fn sq_rect() -> Rect {
+    if focus() {
+        return Rect::ZERO;
+    }
     Rect::new(SQ_X, SQ_Y, SQ_X + SQ, SQ_Y + SQ)
 }
 
@@ -279,11 +304,11 @@ fn lv_db(y: f64) -> f32 {
 
 /// The history's lane (shared drawing: `mite_ui::widgets::history`).
 fn history_lane() -> HistoryLane {
-    HistoryLane { x0: 0.0, width: HIST_W, top: DISPLAY_TOP, bottom: HELP_TOP, seconds: HIST_SECONDS, slice_ms: crate::dsp::HISTORY_SLICE_MS }
+    HistoryLane { x0: 0.0, width: hist_w(), top: DISPLAY_TOP, bottom: HELP_TOP, seconds: HIST_SECONDS, slice_ms: crate::dsp::HISTORY_SLICE_MS }
 }
 
 fn hist_rect() -> Rect {
-    Rect::new(0.0, DISPLAY_TOP, HIST_W, HELP_TOP)
+    Rect::new(0.0, DISPLAY_TOP, hist_w(), HELP_TOP)
 }
 
 /// What a drag is doing.
@@ -383,6 +408,7 @@ pub struct CompView {
     compact_hits: PanelHits,
     /// The header's multiple stages switch, and how many stages were on when last looked.
     stages_hit: Rect,
+    focus_hit: Rect,
     last_count: usize,
     hits: PanelHits,
     menu: Option<Menu>,
@@ -445,6 +471,7 @@ impl CompView {
             compact_for: None,
             compact_hits: PanelHits::default(),
             stages_hit: Rect::ZERO,
+            focus_hit: Rect::ZERO,
             last_count: 0,
             hits: PanelHits::default(),
             menu: None,
@@ -636,23 +663,24 @@ impl CompView {
 
     fn grip_rect(stages: &[Stage; STAGES], slot: usize, offset: f32) -> Rect {
         let y = lv_y(Self::threshold_input(stages, slot, offset));
-        Rect::new(GRIP_X, y - GRIP_SIZE.1 / 2.0, GRIP_X + GRIP_SIZE.0, y + GRIP_SIZE.1 / 2.0)
+        Rect::new(grip_x(), y - GRIP_SIZE.1 / 2.0, grip_x() + GRIP_SIZE.0, y + GRIP_SIZE.1 / 2.0)
     }
 
     fn target_rect(host: &dyn ParamHost) -> Rect {
         let y = DISPLAY_TOP + f64::from(Self::plain(host, TARGET_GR.id)) * gr_px_per_db();
-        Rect::new(GRIP_X - 30.0, y - 11.0, GRIP_X + GRIP_SIZE.0, y + 11.0)
+        Rect::new(grip_x() - 30.0, y - 11.0, grip_x() + GRIP_SIZE.0, y + 11.0)
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
         let stages = Self::stages(host);
         let offset = self.offset();
-        for slot in Self::ranked(&stages).into_iter().rev() {
+        // Nodes and diamonds live in the square, hidden in focus mode.
+        for slot in Self::ranked(&stages).into_iter().rev().filter(|_| !focus()) {
             if Self::node_pos(&stages, slot, offset).distance(p) <= NODE_HIT {
                 return Some(Hot::Node(slot));
             }
         }
-        for slot in Self::ranked(&stages) {
+        for slot in Self::ranked(&stages).into_iter().filter(|_| !focus()) {
             if Self::diamond_pos(&stages, slot, offset).distance(p) <= 8.0 {
                 return Some(Hot::Diamond(slot));
             }
@@ -662,7 +690,7 @@ impl CompView {
         }
         for slot in Self::ranked(&stages) {
             let r = Self::grip_rect(&stages, slot, offset);
-            let line = Rect::new(0.0, r.y0 + 6.0, GRIP_X, r.y1 - 6.0);
+            let line = Rect::new(0.0, r.y0 + 6.0, grip_x(), r.y1 - 6.0);
             if r.contains(p) || line.contains(p) {
                 return Some(Hot::Grip(slot));
             }
@@ -809,6 +837,16 @@ impl CompView {
             draw_glyph(cx.scene, d, r.center(), 20.0, ink, 1.7);
             self.head_hits[i] = r;
         }
+        // Focus mode.
+        let x = HEAD_BUTTONS_X + 4.0 * (HEAD_BUTTON_W + 6.0);
+        let r = Rect::new(x, y0, x + HEAD_BUTTON_W, y1);
+        let ink = icon_button(cx.scene, theme, r, theme.panel_control, self.pointer.is_some_and(|p| r.contains(p)), self.focus_on(), theme.accent);
+        mite_ui::widgets::draw_focus_glyph(cx.scene, r.center(), ink);
+        self.focus_hit = r;
+    }
+
+    fn focus_on(&self) -> bool {
+        self.shared.focus_mode.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn draw_history(&self, cx: &mut DrawCx<'_>, stages: &[Stage; STAGES]) {
@@ -902,10 +940,10 @@ impl CompView {
             if smart {
                 // Where you set it: dashed, in the quiet text colour.
                 let y = lv_y(Self::threshold_input(stages, slot, 0.0));
-                cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, theme.text_mid.multiply_alpha(0.7), None, &Line::new((0.0, y), (GRIP_X - 2.0, y)));
+                cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, theme.text_mid.multiply_alpha(0.7), None, &Line::new((0.0, y), (grip_x() - 2.0, y)));
             }
             let y = lv_y(Self::threshold_input(stages, slot, offset));
-            let line = Line::new((0.0, y), (GRIP_X - 2.0, y));
+            let line = Line::new((0.0, y), (grip_x() - 2.0, y));
             if selected || hot {
                 glow_stroke(cx, &line, 1.5, theme.accent.multiply_alpha(alpha), theme.accent, 3.0);
             } else {
@@ -1094,6 +1132,9 @@ impl CompView {
 
     /// Card `k` of the stage strip (stage k + 1 in threshold order).
     fn strip_rect(k: usize) -> Rect {
+        if focus() {
+            return Rect::ZERO;
+        }
         let w = (SQ - 24.0) / 4.0;
         let x = SQ_X + k as f64 * (w + 8.0);
         Rect::new(x, STRIP_TOP, x + w, STRIP_TOP + STRIP_H)
@@ -1107,6 +1148,9 @@ impl CompView {
 
     /// Single mode's stage controls: where the strip is otherwise.
     fn compact_rect() -> Rect {
+        if focus() {
+            return Rect::ZERO;
+        }
         Rect::new(SQ_X, STRIP_TOP, SQ_X + SQ, STRIP_TOP + STRIP_H)
     }
 
@@ -1695,6 +1739,13 @@ impl CompView {
         let last = self.history.back();
         let now = |k: usize| last.map_or(-150.0, |r| r[k].max(r[k + 1]));
         let gr = last.map_or(0.0, |r| r[record::CUT].min(r[record::CUT + 1]));
+        if self.focus_hit.contains(p) {
+            return Help::default().text(if self.focus_on() {
+                "Focus on — the history fills the display; edit on its grips · click to bring the curve and the controls back"
+            } else {
+                "Focus — hide the curve and controls so the history fills the display"
+            });
+        }
         if self.stages_hit.contains(p) {
             return Help::default().text(if Self::count_on(host) > 1 {
                 "Multiple stages — on while there are several; delete down to one to go back to a single compressor"
@@ -1767,7 +1818,9 @@ impl CompView {
             .slot(db(gr), "−60.0 dB")
             .text(" · OUT ")
             .slot(db(now(record::OUT)), "−60.0 dB")
-            .text(if self.single(host) && Self::count_on(host) == 1 {
+            .text(if focus() {
+                " — drag a threshold grip on the history; the focus switch brings the curve back"
+            } else if self.single(host) && Self::count_on(host) == 1 {
                 " — drag the knee for threshold and ratio, or the threshold grip on the history"
             } else {
                 " — pull the curve below the line to compress, above it to lift; drag a threshold grip on the history"
@@ -2018,6 +2071,11 @@ impl CompView {
     fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers, stages: &[Stage; STAGES]) -> bool {
         // Header buttons.
         if pos.y < HEADER {
+            if self.focus_hit.contains(pos) {
+                self.shared.focus_mode.store(!self.focus_on(), std::sync::atomic::Ordering::Relaxed);
+                set_focus(self.focus_on());
+                return true;
+            }
             if self.stages_hit.contains(pos) {
                 // Held on while two or more stages exist (delete down to one to leave).
                 if Self::count_on(host) <= 1 {
@@ -2350,6 +2408,7 @@ impl View for CompView {
     fn draw(&mut self, cx: &mut DrawCx<'_>) {
         set_level_range(self.range_shown);
         set_headroom(self.headroom);
+        set_focus(self.focus_on());
         self.settle_mode(cx.host);
         let theme = cx.theme;
         let stages = Self::stages(cx.host);
@@ -2363,18 +2422,24 @@ impl View for CompView {
         cx.begin_clip(&hist_rect());
         self.draw_history(cx, &stages);
         cx.end_clip();
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((HIST_W + 0.5, DISPLAY_TOP), (HIST_W + 0.5, HELP_TOP)));
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((hist_w() + 0.5, DISPLAY_TOP), (hist_w() + 0.5, HELP_TOP)));
         self.range.draw(cx, self.range_shown);
         self.draw_thresholds(cx, &stages);
         if hole.is_some() {
             cx.end_glow_hole();
         }
-        self.draw_square(cx, &stages);
-        if self.single(cx.host) {
-            self.draw_compact(cx, &stages);
-        } else {
+        if focus() {
             self.compact_hits = PanelHits::default();
-            self.draw_strip(cx, &stages);
+            self.compact_knobs.clear();
+            self.compact_for = None;
+        } else {
+            self.draw_square(cx, &stages);
+            if self.single(cx.host) {
+                self.draw_compact(cx, &stages);
+            } else {
+                self.compact_hits = PanelHits::default();
+                self.draw_strip(cx, &stages);
+            }
         }
         self.draw_meters(cx);
         self.draw_states(cx);
@@ -2389,6 +2454,7 @@ impl View for CompView {
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         set_level_range(self.range_shown);
         set_headroom(self.headroom);
+        set_focus(self.focus_on());
         self.session.begin(host);
         let recording = RecordingHost::new(host);
         let changed = self.handle_event(event, &recording);

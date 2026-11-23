@@ -15,6 +15,8 @@ use nih_plug::prelude::*;
 
 /// The session field that keeps the editor's multiple stages option (written only while on).
 pub const MULTI_STAGE_KEY: &str = "multi_stage";
+/// The session field that keeps focus mode (present only while on).
+pub const FOCUS_KEY: &str = "focus";
 
 /// The state format version (`mite_plugin::state`). Bump it, with a migration step in
 /// `MiteComp::filter_state` and a new golden state file, when a release changes what a state
@@ -305,6 +307,8 @@ pub struct CompParams {
     pub display_range: std::sync::Arc<mite_core::AtomicF32>,
     /// The editor's multiple stages option (a session field, `multi_stage`, only while on).
     pub multi_stage: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Focus mode (a session field, `focus`, only while on).
+    pub focus_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for CompParams {
@@ -347,6 +351,7 @@ impl Default for CompParams {
             preset: std::sync::Arc::new(CurrentPreset::default()),
             display_range: std::sync::Arc::new(mite_core::AtomicF32::new(0.0)),
             multi_stage: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            focus_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -456,6 +461,9 @@ unsafe impl Params for CompParams {
         let live = mite_plugin::state::live_values(self, &sound_ids());
         let mut fields = mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live);
         mite_plugin::state::add_display_range(&mut fields, self.display_range.load());
+        if self.focus_mode.load(std::sync::atomic::Ordering::Relaxed) {
+            fields.insert(FOCUS_KEY.to_owned(), "1".to_owned());
+        }
         if self.multi_stage.load(std::sync::atomic::Ordering::Relaxed) {
             fields.insert(MULTI_STAGE_KEY.to_owned(), "1".to_owned());
         }
@@ -466,6 +474,7 @@ unsafe impl Params for CompParams {
         mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
         self.display_range.store(mite_plugin::state::display_range(serialized));
         self.multi_stage.store(serialized.get(MULTI_STAGE_KEY).is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
+        self.focus_mode.store(serialized.get(FOCUS_KEY).is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
