@@ -57,7 +57,8 @@ pub const LINK: ParamSpec = spec("link", "Stereo Link", "%", 0.0, 100.0, 100.0, 
 pub const LOOKAHEAD: ParamSpec = spec("lookahead", "Lookahead", "ms", 0.0, 20.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Time);
 pub const HOLD: ParamSpec = spec("hold", "Hold", "ms", 0.0, 500.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Time);
 pub const MAKEUP: ParamSpec = spec("makeup", "Makeup", "dB", -12.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
-pub const AUTO_MAKEUP: BoolSpec = BoolSpec { id: "auto_makeup", name: "Auto Makeup", default: false };
+/// On by default (user, 2026-11-23): a fresh compressor comes out as loud as it went in.
+pub const AUTO_MAKEUP: BoolSpec = BoolSpec { id: "auto_makeup", name: "Auto Makeup", default: true };
 /// Reserved for the oversampled gain cell (Character saturation, a later slice); not drawn yet.
 pub const OVERSAMPLING: ChoiceSpec = ChoiceSpec { id: "oversampling", name: "Oversampling", choices: &["1×", "2×", "4×"], default: 0 };
 

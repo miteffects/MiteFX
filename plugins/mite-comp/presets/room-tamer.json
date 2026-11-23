@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Room Tamer",
   "params": {
+    "auto_makeup": 0.0,
     "s1_on": 1.0,
     "s1_quad": 1.0,
     "s1_thresh": -36,

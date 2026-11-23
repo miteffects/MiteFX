@@ -15,7 +15,7 @@ link | % | 0 | 100 | 100 | Linear
 lookahead | ms | 0 | 20 | 0 | Linear
 hold | ms | 0 | 500 | 0 | Linear
 makeup | dB | -12 | 24 | 0 | Linear
-auto_makeup | bool | false
+auto_makeup | bool | true
 oversampling | choice | 1×, 2×, 4× | 0
 sc_source | choice | Internal, External | 0
 listen | bool | false
