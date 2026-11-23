@@ -110,6 +110,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The masking view shows when asked for (it is off by default).
     let masking = std::env::var_os("SNAPSHOT_SIDECHAIN").is_some() || std::env::var_os("SNAPSHOT_PEER").is_some();
     shared.show_masking.store(masking, std::sync::atomic::Ordering::Relaxed);
+    // SNAPSHOT_FOCUS: focus mode (no band panel).
+    shared.focus_mode.store(std::env::var_os("SNAPSHOT_FOCUS").is_some(), std::sync::atomic::Ordering::Relaxed);
     shared.sample_rate.store(48_000.0);
     let mut engine = EqEngine::new(48_000.0, &settings, 0.0);
     let mut seed = 0x2545_F491_u32;

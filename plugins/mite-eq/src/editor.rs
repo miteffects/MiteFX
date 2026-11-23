@@ -438,6 +438,8 @@ impl MaskSource {
 const MATCH_X: (f64, f64) = (790.0, 822.0);
 /// The masking switch, beside EQ Match.
 const MASK_X: (f64, f64) = (830.0, 862.0);
+/// Focus mode's switch.
+const FOCUS_X: (f64, f64) = (870.0, 902.0);
 const MATCH_REFIT_S: f64 = 0.5;
 const MATCH_FULL_S: f64 = 10.0;
 
@@ -1614,6 +1616,13 @@ impl EqView {
             let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
             h.text(" — drag to move, Shift for fine, ").text(wheel).text(", double-click resets, right-click deletes")
         };
+        if self.pointer.is_some_and(|p| Rect::new(FOCUS_X.0, HEADER_ROW.0, FOCUS_X.1, HEADER_ROW.1).contains(p)) {
+            return Help::default().text(if self.focus_on() {
+                "Focus on — the band panel is hidden, the selected band's values sit in the corner · click for the panel"
+            } else {
+                "Focus — hide the band panel so the plot is never covered (edit on the nodes: drag, wheel for Q, right-click)"
+            });
+        }
         if self.pointer.is_some_and(|p| Rect::new(MASK_X.0, HEADER_ROW.0, MASK_X.1, HEADER_ROW.1).contains(p)) {
             return Help::default().text(if self.masking_on() {
                 "Masking on — where this track and the sidechain or another Mite EQ peak together, a red glow (strongest where they clash most) · click to hide"
@@ -2932,6 +2941,13 @@ impl EqView {
         if !s.enabled {
             return;
         }
+        if self.focus_on() {
+            // Focus: no panel; the band's values in a quiet bar in the plot's corner.
+            self.panel_hits = None;
+            self.panel_knobs.clear();
+            self.draw_focus_bar(cx, b, &s);
+            return;
+        }
         let theme = cx.theme;
         // The panel holds still while anything is dragged, so nothing moves under the pointer.
         let locked = self.drag.is_some() || self.panel_knobs.iter().any(Knob::is_dragging);
@@ -3260,6 +3276,14 @@ impl EqView {
         let r = Rect::new(MASK_X.0, y0, MASK_X.1, y1);
         let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), self.masking_on(), theme.masking);
         draw_masking_glyph(cx.scene, r.center(), ink);
+        // Focus.
+        let r = Rect::new(FOCUS_X.0, y0, FOCUS_X.1, y1);
+        let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), self.focus_on(), theme.accent);
+        mite_ui::widgets::draw_focus_glyph(cx.scene, r.center(), ink);
+    }
+
+    fn focus_on(&self) -> bool {
+        self.shared.focus_mode.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn masking_on(&self) -> bool {
@@ -3376,6 +3400,31 @@ impl EqView {
 
     /// The Match panel, in the band panel's place: learn (with a ring filling as audio is
     /// learned) and start over, the three dials, then close and add.
+    /// Focus mode's bar: the selected band's number, type and values, bottom left of the plot.
+    fn draw_focus_bar(&self, cx: &mut DrawCx<'_>, b: usize, s: &BandSettings) {
+        let theme = cx.theme;
+        let mut text = format!("Band {}  ·  {}  ·  {}", b + 1, BandType::NAMES[s.kind as usize], FREQ.format(s.freq as f32));
+        if !matches!(s.kind, BandType::LowCut | BandType::HighCut | BandType::Notch | BandType::BandPass | BandType::AllPass) {
+            text += &format!("  ·  {}", GAIN.format(s.gain_db as f32));
+        }
+        if s.kind.has_slope() {
+            text += &format!("  ·  {}", mite_dsp::eq::SLOPE_NAMES[s.slope.min(mite_dsp::eq::SLOPE_NAMES.len() - 1)]);
+        } else {
+            text += &format!("  ·  Q {:.2}", s.q);
+        }
+        if s.dynamics.enabled {
+            text += &format!("  ·  dynamic {}", GAIN.format(s.dynamics.range_db as f32));
+        }
+        let style = TextStyle::BODY.weighted(600.0);
+        let w = f64::from(cx.text.measure(&text, style)) + 36.0;
+        let r = RoundedRect::new(14.0, PLOT_BOT - 40.0, 14.0 + w, PLOT_BOT - 10.0, 15.0);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window.multiply_alpha(0.85), None, &r);
+        let color = theme.band_ramp[s.placement as usize % theme.band_ramp.len()];
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, color.multiply_alpha(0.7), None, &r);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &Circle::new((30.0, PLOT_BOT - 25.0), 4.0));
+        cx.text.draw(cx.scene, &text, 42.0, PLOT_BOT - 33.0, style, theme.text_hi, Align::Left);
+    }
+
     /// The band a click would make, as a ghost: its curve dashed over a faint fill, its node.
     fn draw_auto_preview(&self, cx: &mut DrawCx<'_>) {
         let Some(s) = self.auto_preview(cx.host) else { return };
@@ -3945,6 +3994,12 @@ impl EqView {
                     let (y0, y1) = HEADER_ROW;
                     if Rect::new(MATCH_X.0, y0, MATCH_X.1, y1).contains(pos) {
                         self.toggle_match();
+                    }
+                    if Rect::new(FOCUS_X.0, y0, FOCUS_X.1, y1).contains(pos) {
+                        self.shared.focus_mode.store(!self.focus_on(), std::sync::atomic::Ordering::Relaxed);
+                        self.panel_hits = None;
+                        self.panel_knobs.clear();
+                        self.panel_dock = None;
                     }
                     if Rect::new(MASK_X.0, y0, MASK_X.1, y1).contains(pos) {
                         self.shared.show_masking.store(!self.masking_on(), std::sync::atomic::Ordering::Relaxed);
