@@ -223,6 +223,7 @@ fn the_relative_toggle_makes_the_threshold_follow_the_surroundings() {
 #[test]
 fn live_spectral_cuts_draw_on_the_plot() {
     let shared = Arc::new(EqShared::new());
+    shared.show_masking.store(true, std::sync::atomic::Ordering::Relaxed);
     let (mut view, host) = setup_with(shared.clone());
     host.set_plain(&band_id(0, DYN.id), 1.0);
     host.set_plain(&band_id(0, SPECTRAL.id), 1.0);
@@ -580,6 +581,7 @@ fn enabled(host: &MemoryParamHost) -> Vec<usize> {
 #[test]
 fn eq_match_learns_a_darker_reference_and_adds_its_bands_as_one_step() {
     let shared = Arc::new(EqShared::new());
+    shared.show_masking.store(true, std::sync::atomic::Ordering::Relaxed);
     let (mut view, host) = setup_with(shared.clone());
     click(&mut view, &host, MATCH);
     // The reference is the same kind of noise through a one-pole low-pass (about 1.2 kHz).
@@ -626,6 +628,7 @@ fn eq_match_learns_a_darker_reference_and_adds_its_bands_as_one_step() {
 #[test]
 fn masking_hatches_where_both_peak_and_its_ring_carves_there() {
     let shared = Arc::new(EqShared::new());
+    shared.show_masking.store(true, std::sync::atomic::Ordering::Relaxed);
     let (mut view, host) = setup_with(shared.clone());
     // Close the band panel; both play a 100 Hz tone over noise.
     key(&mut view, &host, Key::Escape, false, false);
@@ -694,6 +697,7 @@ static PEERS: mite_core::Registry<EqShared> = mite_core::Registry::new();
 #[test]
 fn another_instance_peaking_with_this_track_can_be_carved_on_either() {
     let (a, b) = (Arc::new(EqShared::new()), Arc::new(EqShared::new()));
+    a.show_masking.store(true, std::sync::atomic::Ordering::Relaxed);
     PEERS.register(&a);
     PEERS.register(&b);
     let other = Arc::new(SyncHost(std::sync::Mutex::new(mite_eq::editor::memory_host())));
@@ -777,6 +781,7 @@ fn eq_match_matches_to_a_file_without_a_sidechain() {
         .collect();
     write_wav(&path, 48_000, &samples);
     let shared = Arc::new(EqShared::new());
+    shared.show_masking.store(true, std::sync::atomic::Ordering::Relaxed);
     let (mut view, host) = setup_with(shared.clone());
     view.load_match_reference(path);
     let mut a = 1u32;
@@ -865,4 +870,23 @@ fn escape_closes_the_panel() {
     view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods: mods() }, &host);
     assert!(view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host));
     assert!(!view.event(&UiEvent::KeyDown { key: Key::Escape, mods: mods() }, &host), "nothing left to close");
+}
+
+/// Masking is off by default; the header switch shows it, and the switch is saved with the state.
+#[test]
+fn the_masking_switch_is_off_by_default_and_saved() {
+    let shared = Arc::new(EqShared::new());
+    let (mut view, host) = setup_with(shared.clone());
+    assert!(!shared.show_masking.load(std::sync::atomic::Ordering::Relaxed));
+    click(&mut view, &host, Point::new(846.0, 28.0));
+    assert!(shared.show_masking.load(std::sync::atomic::Ordering::Relaxed));
+    click(&mut view, &host, Point::new(846.0, 28.0));
+    assert!(!shared.show_masking.load(std::sync::atomic::Ordering::Relaxed));
+    let params = mite_eq::params::EqParams::default();
+    params.show_masking.store(true, std::sync::atomic::Ordering::Relaxed);
+    use nih_plug::prelude::Params;
+    let fields = params.serialize_fields();
+    let back = mite_eq::params::EqParams::default();
+    back.deserialize_fields(&fields);
+    assert!(back.show_masking.load(std::sync::atomic::Ordering::Relaxed));
 }

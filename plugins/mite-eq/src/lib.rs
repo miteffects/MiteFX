@@ -59,6 +59,8 @@ pub struct EqShared {
     pub snapshots: Arc<Snapshots>,
     /// The plot's dB range picked by hand (0: Auto; the parameters' store, saved with the state).
     pub display_range: Arc<AtomicF32>,
+    /// Whether the masking regions are shown (the parameters' store, saved with the state).
+    pub show_masking: Arc<std::sync::atomic::AtomicBool>,
     pub preset: Arc<CurrentPreset>,
     /// This instance's parameters for other instances' editors to write (a carve), once its own
     /// editor has opened (UI threads only).
@@ -90,6 +92,7 @@ impl EqShared {
             focus_gain: std::array::from_fn(|_| AtomicF32::new(0.0)),
             remote: std::sync::Mutex::new(None),
             display_range: Arc::new(AtomicF32::new(0.0)),
+            show_masking: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -139,6 +142,7 @@ impl Default for MiteEq {
         let engine = EqEngine::new(48_000.0, &settings, params.out_gain.value());
         let mut shared = EqShared::with_stores(params.snapshots.clone(), params.preset.clone());
         shared.display_range = params.display_range.clone();
+        shared.show_masking = params.show_masking.clone();
         let shared = Arc::new(shared);
         INSTANCES.register(&shared);
         Self { params, engine, shared, reported_latency: 0 }

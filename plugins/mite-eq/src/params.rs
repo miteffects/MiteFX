@@ -482,6 +482,8 @@ pub struct EqParams {
     pub preset: std::sync::Arc<mite_core::presets::CurrentPreset>,
     /// The display's dB range picked by hand (0: Auto), saved with the state.
     pub display_range: std::sync::Arc<mite_core::AtomicF32>,
+    /// Whether the masking regions are shown (off by default; saved with the state).
+    pub show_masking: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub bands: [BandParams; BANDS],
 }
 
@@ -502,6 +504,7 @@ impl Default for EqParams {
             snapshots: std::sync::Arc::new(mite_core::snapshots::Snapshots::new()),
             preset: std::sync::Arc::new(mite_core::presets::CurrentPreset::default()),
             display_range: std::sync::Arc::new(mite_core::AtomicF32::new(0.0)),
+            show_masking: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             bands: std::array::from_fn(BandParams::new),
         }
     }
@@ -509,18 +512,25 @@ impl Default for EqParams {
 
 // SAFETY: every `ParamPtr` points into `self`, which nih-plug keeps alive (in an `Arc`) for as
 // long as it uses the map. The ids match `manifest()` (checked by tests/params.rs).
+/// The session field that keeps the masking switch (present only while on).
+pub const MASKING_KEY: &str = "masking";
+
 unsafe impl Params for EqParams {
     /// The snapshots (A–D), with the band parameters now as the active slot.
     fn serialize_fields(&self) -> std::collections::BTreeMap<String, String> {
         let live = mite_plugin::state::live_values(self, &snapshot_ids());
         let mut fields = mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live);
         mite_plugin::state::add_display_range(&mut fields, self.display_range.load());
+        if self.show_masking.load(std::sync::atomic::Ordering::Relaxed) {
+            fields.insert(MASKING_KEY.to_owned(), "1".to_owned());
+        }
         fields
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
         mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
         self.display_range.store(mite_plugin::state::display_range(serialized));
+        self.show_masking.store(serialized.get(MASKING_KEY).is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {

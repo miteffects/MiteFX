@@ -420,6 +420,8 @@ impl MaskSource {
 /// EQ Match: the header button, how often a learning fit is refreshed (s), and how much audio
 /// fills the learning ring (s).
 const MATCH_X: (f64, f64) = (790.0, 822.0);
+/// The masking switch, beside EQ Match.
+const MASK_X: (f64, f64) = (830.0, 862.0);
 const MATCH_REFIT_S: f64 = 0.5;
 const MATCH_FULL_S: f64 = 10.0;
 
@@ -667,6 +669,26 @@ fn draw_match_glyph(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
     let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
     scene.stroke(&round.clone().with_dashes(0.0, [2.0, 2.5]), Affine::IDENTITY, color.multiply_alpha(0.7), None, &wave(-2.5));
     scene.stroke(&round, Affine::IDENTITY, color, None, &wave(2.5));
+}
+
+/// Masking centred on `c`: two humps overlapping, the overlap filled.
+fn draw_masking_glyph(scene: &mut mite_ui::vello::Scene, c: Point, color: Color) {
+    let hump = |dx: f64| {
+        let mut p = BezPath::new();
+        p.move_to((c.x + dx - 7.0, c.y + 6.0));
+        p.curve_to((c.x + dx - 3.0, c.y + 6.0), (c.x + dx - 3.0, c.y - 7.0), (c.x + dx, c.y - 7.0));
+        p.curve_to((c.x + dx + 3.0, c.y - 7.0), (c.x + dx + 3.0, c.y + 6.0), (c.x + dx + 7.0, c.y + 6.0));
+        p
+    };
+    let round = Stroke::new(1.5).with_caps(mite_ui::kurbo::Cap::Round);
+    let mut overlap = BezPath::new();
+    overlap.move_to((c.x - 3.0, c.y + 6.0));
+    overlap.curve_to((c.x - 1.5, c.y + 1.0), (c.x - 0.5, c.y - 1.5), (c.x, c.y - 1.5));
+    overlap.curve_to((c.x + 0.5, c.y - 1.5), (c.x + 1.5, c.y + 1.0), (c.x + 3.0, c.y + 6.0));
+    overlap.close_path();
+    scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.6), None, &overlap);
+    scene.stroke(&round, Affine::IDENTITY, color, None, &hump(-3.5));
+    scene.stroke(&round, Affine::IDENTITY, color, None, &hump(3.5));
 }
 
 /// A bin centred on `c`: removes the band.
@@ -1277,7 +1299,7 @@ impl EqView {
     /// closed) and fades them in or out. Returns whether anything drawn changed.
     fn update_masking(&mut self, dt: f64) -> bool {
         let playing = |src: &MaskSource| src.heard && src.average.seconds() >= 1.0;
-        let show = self.matcher.is_none() && self.sources.iter().any(playing);
+        let show = self.masking_on() && self.matcher.is_none() && self.sources.iter().any(playing);
         let mut changed = false;
         if show && self.last_mask.elapsed().as_secs_f64() >= MASK_UPDATE_S {
             self.last_mask = Instant::now();
@@ -1576,6 +1598,13 @@ impl EqView {
             let wheel = if s.kind.has_slope() { "wheel for slope" } else { "Alt-drag or wheel for Q" };
             h.text(" — drag to move, Shift for fine, ").text(wheel).text(", double-click resets, right-click deletes")
         };
+        if self.pointer.is_some_and(|p| Rect::new(MASK_X.0, HEADER_ROW.0, MASK_X.1, HEADER_ROW.1).contains(p)) {
+            return Help::default().text(if self.masking_on() {
+                "Masking on — where this track and the sidechain or another Mite EQ peak together, a red glow (strongest where they clash most) · click to hide"
+            } else {
+                "Masking off — click to show where this track and the sidechain or another Mite EQ peak together"
+            });
+        }
         if let Some(m) = &self.matcher {
             if let Some(e) = &m.error {
                 return Help::default().text(format!("EQ Match — could not read {e}"));
@@ -3181,9 +3210,18 @@ impl EqView {
         let r = Rect::new(MATCH_X.0, y0, MATCH_X.1, y1);
         let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), self.matcher.is_some(), theme.accent);
         draw_match_glyph(cx.scene, r.center(), ink);
+        // Masking.
+        let r = Rect::new(MASK_X.0, y0, MASK_X.1, y1);
+        let ink = icon_button(cx.scene, theme, r, theme.panel_control, hot(r), self.masking_on(), theme.masking);
+        draw_masking_glyph(cx.scene, r.center(), ink);
     }
 
-    /// Masking: each collision as a 45° hatch with lit edges (tokens.json `masking`), and the
+    fn masking_on(&self) -> bool {
+        self.shared.show_masking.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Masking (when switched on): each collision as a red glow, faint at its edges and strongest
+    /// at its peak (tokens.json `masking`), and the
     /// carve the one under the pointer suggests, as a ghost Bell and a dashed ring.
     fn draw_masking(&self, cx: &mut DrawCx<'_>) {
         let a = self.mask_alpha;
@@ -3195,22 +3233,20 @@ impl EqView {
         let (top, bottom) = (PLOT_TOP, PLOT_BOT);
         for (i, (_, c)) in self.collisions.iter().enumerate() {
             let (x0, x1) = (fx(spectrum_point_freq(c.start)), fx(spectrum_point_freq(c.end)));
+            let xp = fx(spectrum_point_freq(c.peak)).clamp(x0, x1);
             let hot = self.collision_hot == Some(i);
-            let area = Rect::new(x0, top, x1, bottom);
-            cx.scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &area);
-            let mut hatch = BezPath::new();
-            let h = bottom - top;
-            let mut x = x0 - h;
-            while x < x1 {
-                hatch.move_to((x, bottom));
-                hatch.line_to((x + h, top));
-                x += 8.0;
-            }
-            cx.scene.stroke(&Stroke::new(3.0), Affine::IDENTITY, color.multiply_alpha(a * if hot { 0.3 } else { 0.22 }), None, &hatch);
-            cx.scene.pop_layer();
-            for x in [x0, x1] {
-                cx.scene.stroke(&Stroke::new(1.5), Affine::IDENTITY, color.multiply_alpha(a * 0.9), None, &Line::new((x, top), (x, bottom)));
-            }
+            // A glow across the region: faint at its edges, strongest where they clash most.
+            let peak = a * if hot { 0.42 } else { 0.32 };
+            let edge = a * 0.03;
+            let at = |x: f64| ((x - x0) / (x1 - x0).max(1.0)) as f32;
+            let grad = mite_ui::peniko::Gradient::new_linear((x0, 0.0), (x1, 0.0)).with_stops([
+                (0.0, color.multiply_alpha(edge)),
+                (0.5 * at(xp), color.multiply_alpha(0.5 * (edge + peak))),
+                (at(xp), color.multiply_alpha(peak)),
+                (0.5 * (at(xp) + 1.0), color.multiply_alpha(0.5 * (edge + peak))),
+                (1.0, color.multiply_alpha(edge)),
+            ]);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, &grad, None, &Rect::new(x0, top, x1, bottom));
         }
         let Some(i) = self.collision_hot.filter(|&i| i < self.collisions.len()) else { return };
         let s = self.carve(i);
@@ -3808,6 +3844,9 @@ impl EqView {
                     let (y0, y1) = HEADER_ROW;
                     if Rect::new(MATCH_X.0, y0, MATCH_X.1, y1).contains(pos) {
                         self.toggle_match();
+                    }
+                    if Rect::new(MASK_X.0, y0, MASK_X.1, y1).contains(pos) {
+                        self.shared.show_masking.store(!self.masking_on(), std::sync::atomic::Ordering::Relaxed);
                     }
                     return true;
                 }
