@@ -291,6 +291,16 @@ impl GateParams {
         }
     }
 
+    pub fn midi(&self) -> crate::dsp::MidiSettings {
+        crate::dsp::MidiSettings {
+            on: self.midi_on.value(),
+            note: self.midi_note.value().round().clamp(0.0, 127.0) as u8,
+            channel: (self.midi_channel.value().round().clamp(1.0, 16.0) - 1.0) as u8,
+            from_level: self.midi_velocity.value() == 1,
+            fixed: self.midi_vel_fixed.value().round().clamp(1.0, 127.0) as u8,
+        }
+    }
+
     pub fn output(&self) -> Output {
         Output { mix: self.mix.value() / 100.0, gain_db: self.out_gain.value(), delta: self.delta.value(), bypass: self.bypass.value() }
     }

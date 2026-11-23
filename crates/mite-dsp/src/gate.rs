@@ -28,8 +28,11 @@ pub const MAX_LOOKAHEAD_MS: f32 = 10.0;
 /// The detectors' windows: the peak's release and the RMS's time, ms.
 const PEAK_RELEASE_MS: f32 = 10.0;
 const RMS_MS: f32 = 10.0;
-/// MIDI-style events (openings and closings) a block reports at most.
+/// MIDI-style events (openings, closings, peaks) a block reports at most.
 pub const MAX_EVENTS: usize = 32;
+/// After an opening, how long the key's peak is measured for a trigger's velocity, ms: a drum
+/// hit crosses the threshold on its way up and reaches its peak within a couple of milliseconds.
+pub const VELOCITY_WINDOW_MS: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -168,11 +171,24 @@ pub fn transfer_db(s: &GateSettings, l: f32, open: bool) -> f32 {
     }
 }
 
-/// An opening (`on`) or a closing at `offset` samples into the block, with the key's level.
+/// What a [`GateEvent`] marks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EventKind {
+    /// It opened (the Ducker: began to duck; the Expander: passed half its range).
+    #[default]
+    Open,
+    /// It closed.
+    Close,
+    /// [`VELOCITY_WINDOW_MS`] after an opening (or at the closing, if sooner): `level_db` is the
+    /// key's peak since the opening.
+    Peak,
+}
+
+/// An event at `offset` samples into the block, with the key's level (the detector's, linked).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct GateEvent {
     pub offset: usize,
-    pub on: bool,
+    pub kind: EventKind,
     pub level_db: f32,
 }
 
@@ -255,6 +271,9 @@ pub struct Gate {
     sections: [Sections; KEY_BANDS],
     designed: [BandSettings; KEY_BANDS],
     write: usize,
+    /// Samples left of the velocity window after an opening (0: none running), and its peak.
+    vel_left: usize,
+    vel_peak: f32,
 }
 
 impl Gate {
@@ -267,6 +286,8 @@ impl Gate {
             sections: [Sections::default(); KEY_BANDS],
             designed: [BandSettings::default(); KEY_BANDS],
             write: 0,
+            vel_left: 0,
+            vel_peak: 0.0,
         };
         g.design(&GateSettings::default(), true);
         g
@@ -291,6 +312,8 @@ impl Gate {
             c.reset(rest);
         }
         self.write = 0;
+        self.vel_left = 0;
+        self.vel_peak = 0.0;
         self.design(s, true);
     }
 
@@ -343,6 +366,13 @@ impl Gate {
         let mut peak_out = [0.0f32; 2];
         let mut key_max = 0.0f32;
         let mut gain_min = [1.0f32; 2];
+        let vel_window = ((VELOCITY_WINDOW_MS * 0.001 * fs).round() as usize).max(1);
+        let push = |t: &mut GateTelemetry, e: GateEvent| {
+            if t.event_count < MAX_EVENTS {
+                t.events[t.event_count] = e;
+                t.event_count += 1;
+            }
+        };
         for i in 0..len {
             // The key, filtered, per channel.
             let mut det = [0.0f32; 2];
@@ -415,13 +445,25 @@ impl Gate {
                         db_to_gain(ch.held_db)
                     }
                 };
-                if ch.active != was && c == 0 && t.event_count < MAX_EVENTS {
-                    t.events[t.event_count] = GateEvent {
-                        offset: i,
-                        on: ch.active,
-                        level_db: l,
-                    };
-                    t.event_count += 1;
+                if c == 0 {
+                    let peak = |v: f32| GateEvent { offset: i, kind: EventKind::Peak, level_db: gain_to_db(v) };
+                    if ch.active != was && ch.active {
+                        push(&mut t, GateEvent { offset: i, kind: EventKind::Open, level_db: l });
+                        self.vel_left = vel_window;
+                        self.vel_peak = lin[0];
+                    } else if ch.active != was {
+                        if self.vel_left > 0 {
+                            push(&mut t, peak(self.vel_peak));
+                            self.vel_left = 0;
+                        }
+                        push(&mut t, GateEvent { offset: i, kind: EventKind::Close, level_db: l });
+                    } else if self.vel_left > 0 {
+                        self.vel_peak = self.vel_peak.max(lin[0]);
+                        self.vel_left -= 1;
+                        if self.vel_left == 0 {
+                            push(&mut t, peak(self.vel_peak));
+                        }
+                    }
                 }
                 // Two stages: attack towards the active state, release back. For the Ducker the
                 // active state is down.
@@ -632,8 +674,54 @@ mod tests {
         let mut x = vec![0.0f32; 4096];
         x[200..300].copy_from_slice(&tone(100, -6.0));
         let t = g.process(&mut [&mut x], None, &s);
-        assert!(t.event_count >= 2);
-        assert!(t.events[0].on && t.events[0].offset >= 200 && t.events[0].offset < 205);
-        assert!(!t.events[t.event_count - 1].on);
+        assert!(t.event_count >= 3);
+        assert!(t.events[0].kind == EventKind::Open && t.events[0].offset >= 200 && t.events[0].offset < 205);
+        assert_eq!(t.events[t.event_count - 1].kind, EventKind::Close);
+    }
+
+    /// The peak event comes the velocity window after the opening, with the hit's peak (not the
+    /// level at the crossing, which is near the threshold on any hit).
+    #[test]
+    fn the_peak_after_an_opening_is_the_hits_peak() {
+        let s = GateSettings { hold_ms: 0.0, threshold_db: -40.0, ..GateSettings::default() };
+        let window = (VELOCITY_WINDOW_MS * 0.001 * FS).round() as usize;
+        for top in [-30.0f32, -12.0, -3.0] {
+            let mut g = Gate::new(FS);
+            g.reset(&s);
+            // A hit rising over 1 ms (48 samples) to `top`, then decaying.
+            let a = db_to_gain(top);
+            let mut x: Vec<f32> = (0..4096)
+                .map(|i| {
+                    if i < 500 {
+                        return 0.0;
+                    }
+                    let t = (i - 500) as f32;
+                    let env = if t < 48.0 { t / 48.0 } else { (-(t - 48.0) / 400.0).exp() };
+                    a * env * if (i / 7) % 2 == 0 { 1.0 } else { -1.0 }
+                })
+                .collect();
+            let t = g.process(&mut [&mut x], None, &s);
+            let ev = &t.events[..t.event_count];
+            let open = ev.iter().find(|e| e.kind == EventKind::Open).unwrap();
+            let peak = ev.iter().find(|e| e.kind == EventKind::Peak).unwrap();
+            assert_eq!(peak.offset - open.offset, window);
+            assert!(open.level_db < top - 6.0, "the crossing is low: {}", open.level_db);
+            assert!((peak.level_db - top).abs() < 0.5, "{top}: peak {}", peak.level_db);
+        }
+    }
+
+    /// A closing inside the window reports the peak first, so a trigger is never left without its
+    /// velocity.
+    #[test]
+    fn a_closing_inside_the_window_reports_the_peak_first() {
+        // A click just over the threshold: the peak detector falls back under it within 0.2 ms.
+        let s = GateSettings { hold_ms: 0.0, hysteresis_db: 0.0, threshold_db: -40.0, ..GateSettings::default() };
+        let mut g = Gate::new(FS);
+        g.reset(&s);
+        let mut x = vec![0.0f32; 256];
+        x[10] = db_to_gain(-39.8);
+        let t = g.process(&mut [&mut x], None, &s);
+        let kinds: Vec<EventKind> = t.events[..t.event_count].iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, [EventKind::Open, EventKind::Peak, EventKind::Close]);
     }
 }

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use mite_gate::dsp::GateEngine;
-use mite_gate::editor::{memory_host, output, settings, GateView, ACCENT};
+use mite_gate::editor::{memory_host, midi, output, settings, GateView, ACCENT};
 use mite_gate::params::*;
 use mite_gate::GateShared;
 use mite_ui::{run_standalone, ParamHost, ThemeKind, WindowOptions};
@@ -33,15 +33,16 @@ fn main() -> Result<(), String> {
         let [l0, r0] = music::drum_loop(8.0, 48_000.0);
         let read = || {
             let h = params.lock().expect("host");
-            (settings(&*h), output(&*h))
+            (settings(&*h), output(&*h), midi(&*h))
         };
-        let (s0, o0) = read();
+        let (s0, o0, _) = read();
         let mut engine = GateEngine::new(48_000.0, &s0, &o0);
         let start = Instant::now();
         let mut blocks = 0u64;
         let mut pos = 0usize;
         loop {
-            let (s, out) = read();
+            let (s, out, m) = read();
+            engine.midi = m;
             let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
             for i in 0..512 {
                 l[i] = l0[(pos + i) % l0.len()];

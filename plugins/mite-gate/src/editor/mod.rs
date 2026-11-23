@@ -23,7 +23,11 @@ use mite_ui::widgets::history::{self, HistoryLane};
 use mite_ui::widgets::{ease_range, Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, KeyEq, Knob, KnobKind, RangePicker, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
+mod midi;
+pub use midi::MidiPanel;
+
 use crate::dsp::{record, HISTORY_RECORDS, HISTORY_SLICE_MS};
+use midi::MIDI_GLYPH;
 use crate::params::*;
 use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::GateShared;
@@ -207,6 +211,18 @@ pub fn settings(host: &dyn ParamHost) -> GateSettings {
     }
 }
 
+/// The MIDI trigger as a host's parameters set it (as `GateParams::midi` does).
+pub fn midi(host: &dyn ParamHost) -> crate::dsp::MidiSettings {
+    let p = |id: &str| host.plain(id, host.normalized(id));
+    crate::dsp::MidiSettings {
+        on: p(MIDI_ON.id) >= 0.5,
+        note: p(MIDI_NOTE.id).round().clamp(0.0, 127.0) as u8,
+        channel: (p(MIDI_CHANNEL.id).round().clamp(1.0, 16.0) - 1.0) as u8,
+        from_level: p(MIDI_VELOCITY.id).round() as i32 == 1,
+        fixed: p(MIDI_VEL_FIXED.id).round().clamp(1.0, 127.0) as u8,
+    }
+}
+
 /// The output stage as a host's parameters set it.
 pub fn output(host: &dyn ParamHost) -> crate::dsp::Output {
     let p = |id: &str| host.plain(id, host.normalized(id));
@@ -234,6 +250,8 @@ enum Hot {
     Source,
     EqButton,
     EqPanel,
+    MidiButton,
+    MidiPanel,
 }
 
 pub struct GateView {
@@ -254,6 +272,8 @@ pub struct GateView {
     key_eq: KeyEq,
     key_spectrum: mite_ui::widgets::key_eq::KeySpectrum,
     eq_open: bool,
+    midi: MidiPanel,
+    midi_open: bool,
     history: VecDeque<[f32; record::WIDTH]>,
     seen: usize,
     /// IN L/R, GAIN L/R, OUT L/R as drawn.
@@ -269,6 +289,11 @@ const EQ_BUTTON: Rect = Rect::new(164.0, FOOTER_TOP + 9.0, 204.0, FOOTER_TOP + 4
 /// It stops short of the grips' column, so both thresholds stay in reach. Opaque: a glass panel
 /// blurred the threshold lines behind it into a green haze (user, 2026-11-03).
 const EQ_PANEL: Rect = Rect::new(12.0, DISPLAY_TOP + 300.0, GRIP_X - 10.0, DISPLAY_TOP + 610.0);
+/// The MIDI trigger's button (beside the EQ's) and its panel, docked as the EQ's.
+const MIDI_BUTTON: Rect = Rect::new(212.0, FOOTER_TOP + 9.0, 252.0, FOOTER_TOP + 47.0);
+const MIDI_PANEL: Rect = Rect::new(12.0, DISPLAY_TOP + 400.0, GRIP_X - 10.0, DISPLAY_TOP + 610.0);
+/// How long a sent note lights its key, s.
+const NOTE_FLASH_S: f64 = 0.25;
 /// The sidechain EQ's sliders glyph.
 const EQ_GLYPH: &str = "M4 7 H20 M4 12 H20 M4 17 H20 M8.5 5 V9 M15 10 V14 M10.5 15 V19";
 
@@ -308,6 +333,8 @@ impl GateView {
             },
             key_spectrum: mite_ui::widgets::key_eq::KeySpectrum::new(),
             eq_open: false,
+            midi: MidiPanel::new(MIDI_PANEL),
+            midi_open: false,
             history: VecDeque::with_capacity(HISTORY_RECORDS),
             seen: 0,
             meters: [SILENT, SILENT, 0.0, 0.0, SILENT, SILENT],
@@ -396,6 +423,19 @@ impl GateView {
     /// The shape menu's rows while it is open (tests and tools).
     pub fn eq_menu_rows(&self) -> Vec<Rect> {
         self.key_eq.menu_rows()
+    }
+
+    pub fn midi_button(&self) -> Rect {
+        MIDI_BUTTON
+    }
+
+    pub fn midi_panel(&self) -> Option<&MidiPanel> {
+        self.midi_open.then_some(&self.midi)
+    }
+
+    pub fn open_midi(&mut self) {
+        self.midi_open = true;
+        self.eq_open = false;
     }
 
     pub fn open_eq(&mut self) {
@@ -512,6 +552,14 @@ impl GateView {
                 cx.scene.stroke(&Stroke::new(1.4).with_dashes(0.0, [6.0, 3.0]), Affine::IDENTITY, theme.text_hi.multiply_alpha(0.75), None, &det);
             }
             cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.spectrum_pre.multiply_alpha(0.85), None, &input);
+            // Each MIDI note sent: a tick down from the top, as long as its velocity.
+            if Self::on(cx.host, MIDI_ON.id) {
+                for c in cols.iter().filter(|c| c.high[record::NOTE] > 0.0) {
+                    let len = 6.0 + 30.0 * f64::from(c.high[record::NOTE]) / 127.0;
+                    let x = c.x;
+                    cx.scene.stroke(&Stroke::new(2.0).with_caps(Cap::Round), Affine::IDENTITY, theme.accent.multiply_alpha(0.85), None, &Line::new((x, DISPLAY_TOP + 4.0), (x, DISPLAY_TOP + 4.0 + len)));
+                }
+            }
         }
         cx.end_clip();
         self.draw_thresholds(cx);
@@ -672,7 +720,10 @@ impl GateView {
         let eq_on = (0..KEY_BANDS).any(|b| Self::on(cx.host, &key_id(b, K_ON.id)));
         let ink = icon_button(cx.scene, theme, EQ_BUTTON, theme.panel_control, self.hot == Some(Hot::EqButton), self.eq_open || eq_on, theme.sidechain);
         draw_glyph(cx.scene, EQ_GLYPH, EQ_BUTTON.center(), 22.0, ink, 1.6);
-        self.footer.draw_latency(cx, 220.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
+        let midi_on = Self::on(cx.host, MIDI_ON.id);
+        let ink = icon_button(cx.scene, theme, MIDI_BUTTON, theme.panel_control, self.hot == Some(Hot::MidiButton), self.midi_open || midi_on, theme.accent);
+        draw_glyph(cx.scene, MIDI_GLYPH, MIDI_BUTTON.center(), 22.0, ink, 1.6);
+        self.footer.draw_latency(cx, 268.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
         self.footer.draw_controls(cx);
         if let Some(list) = &self.source_menu {
             list.draw(cx, theme.accent, |_, _, _, _| {});
@@ -688,6 +739,21 @@ impl GateView {
         draw_glyph(cx.scene, KEY_GLYPH, Point::new(EQ_PANEL.x0 + 28.0, EQ_PANEL.y0 + 22.0), 20.0, theme.sidechain, 1.7);
         cx.text.draw(cx.scene, "Sidechain", EQ_PANEL.x0 + 46.0, EQ_PANEL.y0 + 15.0, TextStyle::BODY.weighted(700.0), theme.text_hi, Align::Left);
         self.key_eq.draw_with(cx, Some(&self.key_spectrum));
+    }
+
+    /// The last note sent within [`NOTE_FLASH_S`]: its velocity and what is left of its flash.
+    fn note_flash(&self) -> Option<(f32, f32)> {
+        let slices = (NOTE_FLASH_S * 1000.0 / f64::from(HISTORY_SLICE_MS)) as usize;
+        self.history.iter().rev().take(slices).enumerate().find(|(_, r)| r[record::NOTE] > 0.0).map(|(age, r)| {
+            let age = (age as f64 + self.since_fresh()) / slices as f64;
+            (r[record::NOTE], (1.0 - age.min(1.0)) as f32)
+        })
+    }
+
+    fn draw_midi_panel(&self, cx: &mut DrawCx<'_>) {
+        if self.midi_open {
+            self.midi.draw(cx, self.note_flash());
+        }
     }
 
     fn draw_states(&self, cx: &mut DrawCx<'_>) {
@@ -738,6 +804,8 @@ impl GateView {
             Some(Hot::Source) => return Help::default().text("Sidechain — what keys the gate: the input, or the plugin's sidechain input."),
             Some(Hot::EqButton) => return Help::default().text(if self.eq_open { "Sidechain EQ — click to close" } else { "Sidechain EQ — shape what the detector hears (a low cut keeps a kick's bleed out of a snare's gate)" }),
             Some(Hot::EqPanel) => return self.key_eq.help(host).unwrap_or_default(),
+            Some(Hot::MidiButton) => return Help::default().text(if self.midi_open { "MIDI trigger — click to close" } else { "MIDI trigger — send a note at each opening (drum replacement, a sampler keyed by the gate)" }),
+            Some(Hot::MidiPanel) => return self.midi.help(host).or_else(|| self.midi.knob_help(host, self.pointer)).unwrap_or_default(),
             None => {}
         }
         if self.range.menu_open() {
@@ -795,7 +863,7 @@ impl GateView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.key_eq.busy() || self.key_eq.menu_open() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy()
+        self.drag.is_some() || self.key_eq.busy() || self.key_eq.menu_open() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy() || self.midi.busy()
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
@@ -804,6 +872,12 @@ impl GateView {
         }
         if EQ_BUTTON.contains(p) {
             return Some(Hot::EqButton);
+        }
+        if self.midi_open && MIDI_PANEL.contains(p) {
+            return Some(Hot::MidiPanel);
+        }
+        if MIDI_BUTTON.contains(p) {
+            return Some(Hot::MidiButton);
         }
         if Self::grip(lv_y(Self::plain(host, THRESHOLD.id))).inflate(3.0, 2.0).contains(p) {
             return Some(Hot::Threshold);
@@ -835,8 +909,9 @@ impl GateView {
             return used;
         }
         match key {
-            Key::Escape if self.eq_open => {
+            Key::Escape if self.eq_open || self.midi_open => {
                 self.eq_open = false;
+                self.midi_open = false;
                 true
             }
             Key::Up | Key::Down => {
@@ -876,9 +951,16 @@ impl GateView {
             }
             Some(Hot::EqButton) => {
                 self.eq_open = !self.eq_open;
+                self.midi_open = false;
                 true
             }
             Some(Hot::EqPanel) => true,
+            Some(Hot::MidiButton) => {
+                self.midi_open = !self.midi_open;
+                self.eq_open = false;
+                true
+            }
+            Some(Hot::MidiPanel) => true,
             Some(Hot::Source) => {
                 let current = usize::from(Self::on(host, SC_SOURCE.id));
                 self.source_menu = Some(Dropdown::new(SOURCE_BUTTON, SC_SOURCE.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(170.0));
@@ -925,6 +1007,26 @@ impl GateView {
                 return true;
             }
             // The rest of the panel is the panel's own: nothing under it reacts.
+            if let UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } = *event {
+                if in_panel(pos) {
+                    return true;
+                }
+            }
+        }
+        if self.midi_open {
+            let in_panel = |p: Point| MIDI_PANEL.contains(p);
+            let ours = match *event {
+                UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } => in_panel(pos),
+                UiEvent::PointerMove { pos, .. } => in_panel(pos) || self.midi.busy(),
+                _ => true,
+            };
+            if ours && self.midi.event(event, host) {
+                if let UiEvent::PointerMove { pos, .. } = *event {
+                    self.pointer = Some(pos);
+                    self.hot = Some(Hot::MidiPanel);
+                }
+                return true;
+            }
             if let UiEvent::PointerDown { pos, .. } | UiEvent::DoubleClick { pos, .. } | UiEvent::Wheel { pos, .. } = *event {
                 if in_panel(pos) {
                     return true;
@@ -1069,11 +1171,12 @@ impl View for GateView {
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
         // Nothing under the EQ panel glows through it.
-        if self.eq_open {
-            cx.begin_glow_hole(RoundedRect::from_rect(EQ_PANEL, 12.0));
+        let hole = if self.eq_open { Some(EQ_PANEL) } else if self.midi_open { Some(MIDI_PANEL) } else { None };
+        if let Some(r) = hole {
+            cx.begin_glow_hole(RoundedRect::from_rect(r, 12.0));
         }
         self.draw_history(cx);
-        if self.eq_open {
+        if hole.is_some() {
             cx.end_glow_hole();
         }
         self.draw_square(cx);
@@ -1081,6 +1184,7 @@ impl View for GateView {
         self.draw_meters(cx);
         self.draw_states(cx);
         self.draw_eq_panel(cx);
+        self.draw_midi_panel(cx);
         self.help_text(cx.host).draw(cx, Rect::new(0.0, HELP_TOP, WIDTH, FOOTER_TOP));
         self.draw_footer(cx);
         self.range.draw_menu(cx);
@@ -1146,7 +1250,7 @@ impl View for GateView {
             }
         }
         let spectrum = self.eq_open && self.key_spectrum.update(&self.shared.key_spectrum, f64::from(self.shared.sample_rate.load()), f64::from(dt));
-        let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
+        let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25 || self.midi_open && self.note_flash().is_some_and(|(_, f)| f > 0.0);
         fresh || flowing || spectrum || moved || busy || self.headroom != before || self.meters.iter().enumerate().any(|(i, &m)| if i == 2 || i == 3 { m < -0.01 } else { m > SILENT + 1.0 })
     }
 }

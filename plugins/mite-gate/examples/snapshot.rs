@@ -4,7 +4,8 @@
 //!     cargo run -p mite_gate --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
 //! SNAPSHOT_VARIANT: default, expander, ducker, rms, delta, listen, source (the list open), eq
-//! (the sidechain EQ open, two bands on).
+//! (the sidechain EQ open, two bands on), midi (the trigger on, its panel open), midi-level (velocity
+//! from the level).
 //! SNAPSHOT_HOVER=x,y hovers a point; SNAPSHOT_RANGE=48 picks the level range.
 
 #[path = "common/music.rs"]
@@ -13,7 +14,7 @@ mod music;
 use std::sync::Arc;
 
 use mite_gate::dsp::GateEngine;
-use mite_gate::editor::{memory_host, output, settings, GateView, ACCENT};
+use mite_gate::editor::{memory_host, midi, output, settings, GateView, ACCENT};
 use mite_gate::params::*;
 use mite_gate::GateShared;
 use mite_ui::kurbo::Point;
@@ -53,11 +54,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(LISTEN.id, 1.0);
         host.set_plain(&key_id(0, K_ON.id), 1.0);
     }
+    if v("midi") || v("midi-level") {
+        host.set_plain(MIDI_ON.id, 1.0);
+        host.set_plain(MIDI_NOTE.id, 38.0);
+        host.set_plain(MIDI_CHANNEL.id, 10.0);
+        host.set_plain(MIDI_VELOCITY.id, if v("midi-level") { 1.0 } else { 0.0 });
+    }
     let shared = Arc::new(GateShared::new());
     let sample_rate = 48_000.0;
     shared.sample_rate.store(sample_rate);
     let (s, out) = (settings(&host), output(&host));
     let mut engine = GateEngine::new(sample_rate, &s, &out);
+    engine.midi = midi(&host);
     // The loop with a quiet bleed under it (what a gate is for).
     let [mut l, mut r] = music::drum_loop(8.0, sample_rate);
     let mut seed = 0x1234_5678u32;
@@ -90,6 +98,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(&key_id(5, K_SLOPE.id), 6.0);
         view.open_eq();
         view.settle_spectrum();
+    }
+    if v("midi") || v("midi-level") {
+        view.open_midi();
     }
     if v("source") {
         let at = view.source_button().center();

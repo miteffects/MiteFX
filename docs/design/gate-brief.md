@@ -116,7 +116,9 @@ the hysteresis band between the two thresholds is shaded in the accent.
    (tanh) towards a level just beyond the well's edge: the old hard clamp at ±20 dB drew a flat
    floor with a corner under a low cut. In Gate the EQ button beside the sidechain source opens
    the panel over the history's bottom, short of the grips' column; Esc closes it.
-3. MIDI trigger output.
+3. (done 2026-11-23) MIDI trigger output: notes at the audio's openings (lookahead latency
+   included), velocity fixed or from the hit's peak over 2 ms after the opening; the MIDI panel
+   from the footer; the history's note ticks. See BLUEPRINT §6.9.
 
    Built: every parameter (state 1, the key bands Comp's ids and ranges, tested), the engine
    (mix, Delta, bypass against the delayed dry; a dip on a lookahead change), the editor as

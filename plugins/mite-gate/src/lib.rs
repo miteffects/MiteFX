@@ -90,6 +90,8 @@ impl Plugin for MiteGate {
     ];
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+    /// The trigger's notes (brief §1.5).
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::Basic;
 
     type SysExMessage = ();
     type BackgroundTask = ();
@@ -132,7 +134,16 @@ impl Plugin for MiteGate {
             }
         }
         let key = (key_channels > 0).then_some(&key[..key_channels]);
+        self.engine.midi = self.params.midi();
         self.engine.process(buffer.as_slice(), key, &settings, &output, &self.shared.history, Some(&self.shared.key_spectrum));
+        for n in self.engine.midi_notes() {
+            let timing = n.offset as u32;
+            context.send_event(if n.on {
+                NoteEvent::NoteOn { timing, voice_id: None, channel: n.channel, note: n.note, velocity: f32::from(n.velocity) / 127.0 }
+            } else {
+                NoteEvent::NoteOff { timing, voice_id: None, channel: n.channel, note: n.note, velocity: 0.0 }
+            });
+        }
         let latency = self.engine.latency() as u32;
         if latency != self.reported_latency {
             self.reported_latency = latency;

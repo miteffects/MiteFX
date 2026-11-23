@@ -198,3 +198,46 @@ fn a_click_makes_a_band_and_right_click_gives_every_shape() {
     click(&mut view, &host, rows[10].center());
     assert_eq!(plain(&host, &key_id(0, K_ON.id)), 0.0);
 }
+
+/// The MIDI panel: the footer button opens it (closing the EQ), the power, a key and an octave
+/// set the note, a cell the channel, the glyphs the velocity mode; clicks inside it reach nothing
+/// under it; Esc closes it.
+#[test]
+fn the_midi_panel_sets_the_trigger() {
+    use mite_gate::params::{MIDI_CHANNEL, MIDI_NOTE, MIDI_ON, MIDI_VELOCITY};
+    let (mut view, host) = setup();
+    view.open_eq();
+    let b = view.midi_button().center();
+    click(&mut view, &host, b);
+    assert!(view.eq_area().is_none(), "the MIDI panel closes the EQ");
+    let at = |view: &GateView, f: &dyn Fn(&mite_gate::editor::MidiPanel) -> mite_ui::kurbo::Rect| f(view.midi_panel().expect("open")).center();
+    let c = at(&view, &|p| p.power_button());
+    click(&mut view, &host, c);
+    assert_eq!(plain(&host, MIDI_ON.id), 1.0);
+    // D (white) in the octave shown (36 = C2): 38; then octave 3: 50; then D# (black): 51.
+    let c = at(&view, &|p| p.key_rect(2));
+    click(&mut view, &host, c);
+    assert_eq!(plain(&host, MIDI_NOTE.id), 38.0);
+    let c = at(&view, &|p| p.octave_rect(4));
+    click(&mut view, &host, c);
+    assert_eq!(plain(&host, MIDI_NOTE.id), 50.0);
+    let c = at(&view, &|p| p.key_rect(3));
+    click(&mut view, &host, c);
+    assert_eq!(plain(&host, MIDI_NOTE.id), 51.0);
+    let at_key = at(&view, &|p| p.key_rect(3));
+    view.event(&UiEvent::Wheel { pos: at_key, lines: 1.0, mods: MODS }, &host);
+    assert_eq!(plain(&host, MIDI_NOTE.id), 52.0);
+    let c = at(&view, &|p| p.channel_rect(9));
+    click(&mut view, &host, c);
+    assert_eq!(plain(&host, MIDI_CHANNEL.id), 10.0);
+    let c = at(&view, &|p| p.velocity_rect(1));
+    click(&mut view, &host, c);
+    assert_eq!(plain(&host, MIDI_VELOCITY.id), 1.0);
+    // Under the panel lies the history; the threshold does not move on a click in the panel.
+    let t = plain(&host, THRESHOLD.id);
+    let panel = view.midi_panel().unwrap().rect();
+    click(&mut view, &host, Point::new(panel.x0 + 300.0, panel.y1 - 6.0));
+    assert_eq!(plain(&host, THRESHOLD.id), t);
+    view.event(&UiEvent::KeyDown { key: Key::Escape, mods: MODS }, &host);
+    assert!(view.midi_panel().is_none());
+}
