@@ -36,6 +36,11 @@ const DOUBLE_CLICK_SLOP: f64 = 4.0;
 const PIXELS_PER_LINE: f32 = 40.0;
 /// Resize grip: the square of this size (window logical px) in the bottom-right corner.
 const GRIP: f64 = 16.0;
+/// A pointer move renders at once only when the last frame took less than this…
+const MOVE_RENDER_MAX: Duration = Duration::from_millis(8);
+/// …and at least this long ago (so a fast mouse cannot ask for frames faster than a display).
+const MOVE_RENDER_GAP: Duration = Duration::from_millis(4);
+
 /// Window scale range relative to the view's design size (BLUEPRINT: 50–400 %).
 pub const MIN_ZOOM: f64 = 0.5;
 pub const MAX_ZOOM: f64 = 4.0;
@@ -100,6 +105,26 @@ pub fn run_standalone(
     window.run_until_closed()
 }
 
+/// The X11 id of the standalone window, once it exists (0: none, or not X11). An app can embed
+/// another program's window in it (Miteboard: a VST3 plugin's own view, under its BACK bar).
+static NATIVE_WINDOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn native_window() -> Option<u64> {
+    Some(NATIVE_WINDOW.load(std::sync::atomic::Ordering::Acquire)).filter(|&id| id != 0)
+}
+
+fn publish_native_window(ctx: &WindowContext) {
+    use raw_window_handle::RawWindowHandle;
+    let handle = ctx.platform_handle();
+    let Ok(h) = handle.window_handle() else { return };
+    let id = match h.as_raw() {
+        RawWindowHandle::Xcb(x) => u64::from(x.window.get()),
+        RawWindowHandle::Xlib(x) => x.window as u64,
+        _ => 0,
+    };
+    NATIVE_WINDOW.store(id, std::sync::atomic::Ordering::Release);
+}
+
 fn settings(options: &WindowOptions) -> WindowSettings {
     let (w, h) = options.logical_size;
     WindowSettings::new()
@@ -148,6 +173,10 @@ struct UiWindow {
     /// scheduled on absolute times so frames don't drift or bunch up.
     frame_period: Duration,
     next_animation: Cell<Instant>,
+    /// When the last frame finished, and what it cost (pointer moves render at once only while
+    /// frames are cheap).
+    last_render: Cell<Instant>,
+    render_cost: Cell<Duration>,
     _timer: Option<TimerHandle>,
     ctx: WindowContext,
     on_resize: Option<ResizeRequest>,
@@ -182,6 +211,7 @@ impl UiWindow {
         host_resize: Option<HostResize>,
     ) -> Result<Self, HandlerError> {
         let design = view.logical_size();
+        publish_native_window(&ctx);
         let size = ctx.size();
         let (w, h) = (size.physical.width.max(1), size.physical.height.max(1));
         trace("init start");
@@ -233,6 +263,8 @@ impl UiWindow {
             dirty: Cell::new(true),
             frame_period: animation_period(),
             next_animation: Cell::new(Instant::now()),
+            last_render: Cell::new(Instant::now()),
+            render_cost: Cell::new(Duration::ZERO),
             _timer: timer,
             requested: Cell::new((size.logical.width.round() as u32, size.logical.height.round() as u32)),
             ctx,
@@ -250,11 +282,21 @@ impl UiWindow {
         let State { view, host, .. } = &mut *st;
         let changed = view.event(&event, host.as_ref());
         drop(st);
-        // Input renders right away instead of waiting for the next tick (~4 ms average).
         if changed {
             self.dirty.set(true);
-            if let Err(e) = self.render() {
-                trace(&format!("render failed: {e}"));
+            // Anything but a move renders right away. A move does too while frames are cheap
+            // and the last one is at least its own cost ago, so the picture follows the mouse
+            // with no wait for the tick (waiting for it lagged up to 16 ms, user 2026-11-23).
+            // Where frames are slow (the Miteboard X4: a touchscreen's ~50 moves a second each
+            // rendered queued up until a drag trailed the finger by a second), a move only marks
+            // the frame dirty and the next tick draws the latest position once.
+            let cost = self.render_cost.get();
+            let cheap = cost < MOVE_RENDER_MAX;
+            let rested = self.last_render.get().elapsed() >= cost.max(MOVE_RENDER_GAP);
+            if !matches!(event, UiEvent::PointerMove { .. }) || (cheap && rested) {
+                if let Err(e) = self.render() {
+                    trace(&format!("render failed: {e}"));
+                }
             }
         }
         EventStatus::Captured
@@ -399,6 +441,13 @@ impl UiWindow {
     /// Renders and presents one frame. Clears `dirty` once the frame is on screen.
     fn render(&self) -> Result<(), HandlerError> {
         let t0 = Instant::now();
+        let result = self.render_frame(t0);
+        self.render_cost.set(t0.elapsed());
+        self.last_render.set(Instant::now());
+        result
+    }
+
+    fn render_frame(&self, t0: Instant) -> Result<(), HandlerError> {
         let mut st = self.state.borrow_mut();
         let State { view, host, theme, text, logical, fx, scale, logical_size, .. } = &mut *st;
         logical.reset();
