@@ -29,6 +29,8 @@ pub struct ShapeShared {
     /// Snapshots A–D and the current preset (the parameters' stores, shared with the editor).
     pub snapshots: Arc<Snapshots>,
     pub preset: Arc<CurrentPreset>,
+    /// Focus mode: the history over the cards' room (the parameters' store, saved with the state).
+    pub focus_mode: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ShapeShared {
@@ -45,6 +47,7 @@ impl ShapeShared {
             latency: AtomicF32::new(0.0),
             snapshots,
             preset,
+            focus_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -84,7 +87,9 @@ impl Default for MiteShape {
     fn default() -> Self {
         let params = Arc::new(ShapeParams::default());
         let engine = ShapeEngine::new(48_000.0, &params.settings());
-        let shared = Arc::new(ShapeShared::with_stores(params.snapshots.clone(), params.preset.clone()));
+        let mut shared = ShapeShared::with_stores(params.snapshots.clone(), params.preset.clone());
+        shared.focus_mode = params.focus_mode.clone();
+        let shared = Arc::new(shared);
         Self { params, engine, shared, reported_latency: 0 }
     }
 }

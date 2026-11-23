@@ -193,9 +193,26 @@ struct Lanes {
 
 const SINGLE: [f64; 10] = [12.0, 194.0, 204.0, 268.0, 332.0, 340.0, 36.0, 376.0, 384.0, 228.0];
 const MULTI: [f64; 10] = [12.0, 164.0, 174.0, 234.0, 292.0, 300.0, 80.0, 380.0, 396.0, 216.0];
+/// Focus mode: no cards; the level and gain lanes take their room, the rail at the bottom.
+const FOCUS_SINGLE: [f64; 10] = [12.0, 360.0, 370.0, 466.0, 560.0, 568.0, 36.0, 620.0, 620.0, 0.0];
+const FOCUS_MULTI: [f64; 10] = [12.0, 330.0, 340.0, 422.0, 504.0, 512.0, 80.0, 620.0, 620.0, 0.0];
+
+thread_local! {
+    /// Focus mode in force for this view (set before drawing and handling events).
+    static FOCUS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn set_focus(on: bool) {
+    FOCUS.with(|f| f.set(on));
+}
+
+fn focus() -> bool {
+    FOCUS.with(std::cell::Cell::get)
+}
 
 fn lanes(grow: f64) -> Lanes {
-    let v: Vec<f64> = SINGLE.iter().zip(MULTI).map(|(a, b)| a + (b - a) * grow).collect();
+    let (single, multi) = if focus() { (FOCUS_SINGLE, FOCUS_MULTI) } else { (SINGLE, MULTI) };
+    let v: Vec<f64> = single.iter().zip(multi).map(|(a, b)| a + (b - a) * grow).collect();
     let y = |i: usize| DISPLAY_TOP + v[i];
     Lanes { lv0: y(0), lv1: y(1), sep: y(2), gz: y(3), h1: y(4), ry: y(5), rh: v[6], fy: y(7), cy: y(8), ch: v[9] }
 }
@@ -312,6 +329,7 @@ pub struct ShapeView {
     hits: PanelHits,
     menu: Option<BandMenu>,
     head_hits: [Rect; 2],
+    focus_hit: Rect,
     lr4_hit: Option<Rect>,
     /// The cards' dials, for the bands and the selection they were made for.
     card_knobs: Vec<Knob>,
@@ -378,6 +396,7 @@ impl ShapeView {
             hits: PanelHits::default(),
             menu: None,
             head_hits: [Rect::ZERO; 2],
+            focus_hit: Rect::ZERO,
             lr4_hit: None,
             card_knobs: Vec::new(),
             card_key: None,
@@ -541,6 +560,9 @@ impl ShapeView {
     }
 
     fn cards(&self, layout: &Layout, lanes: &Lanes) -> Vec<Card> {
+        if focus() {
+            return Vec::new();
+        }
         let bands = layout.bands();
         let n = bands.len();
         let (y, h) = (lanes.cy, lanes.ch);
@@ -749,6 +771,16 @@ impl ShapeView {
             draw_glyph(cx.scene, d, r.center(), 20.0, ink, 1.7);
             self.head_hits[i] = r;
         }
+        // Focus mode.
+        let x = HEAD_BUTTONS_X + 2.0 * (HEAD_BUTTON_W + 6.0);
+        let r = Rect::new(x, y0, x + HEAD_BUTTON_W, y1);
+        let ink = icon_button(cx.scene, theme, r, theme.panel_control, self.pointer.is_some_and(|q| r.contains(q)), self.focus_on(), theme.accent);
+        mite_ui::widgets::draw_focus_glyph(cx.scene, r.center(), ink);
+        self.focus_hit = r;
+    }
+
+    fn focus_on(&self) -> bool {
+        self.shared.focus_mode.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Records' worth of time since the newest arrived (up to a few), so the history keeps
@@ -1253,6 +1285,13 @@ impl ShapeView {
         if self.lr4_hit.is_some_and(|r| r.contains(p)) {
             return Help::default().text("Crossover · LR4 — 24 dB/oct, minimum phase; the bands always add up flat");
         }
+        if self.focus_hit.contains(p) {
+            return Help::default().text(if self.focus_on() {
+                "Focus on — the history and the rail fill the display; the bands' cards are hidden · click to bring them back"
+            } else {
+                "Focus — hide the bands' cards so the history fills the display"
+            });
+        }
         for (i, words) in ["Stereo — L/R or M/S, and how tightly the two sides' detectors are linked", "Detector — what the detector hears, Listen, the floor and lookahead"].into_iter().enumerate() {
             if self.head_hits[i].contains(p) {
                 return Help::default().text(words);
@@ -1350,7 +1389,11 @@ impl ShapeView {
             .slot(fmt_db(f64::from(now(record::OUT))), "−60.0")
             .text(" · gain ")
             .slot(fmt_db(f64::from(gain_now)), "+18.0")
-            .text(" — drag the scope's first part for attack and its tail for sustain; pull a crossover in from either end of the strip to split the sound into bands")
+            .text(if focus() {
+                " — pull a crossover in from either end of the strip to split the sound into bands; the focus switch brings the bands' cards back"
+            } else {
+                " — drag the scope's first part for attack and its tail for sustain; pull a crossover in from either end of the strip to split the sound into bands"
+            })
     }
 
     // ---- events -----------------------------------------------------------------------------
@@ -1383,6 +1426,12 @@ impl ShapeView {
     /// Makes the cards' dials for the bands in use and the selection, and moves them where the
     /// cards are now.
     fn sync_knobs(&mut self, host: &dyn ParamHost) {
+        set_focus(self.focus_on());
+        if focus() {
+            self.card_knobs.clear();
+            self.card_key = None;
+            return;
+        }
         let layout = Self::layout(host);
         let cards = self.cards(&layout, &lanes(self.grow));
         let key = (layout.bands().to_vec(), self.rail.current(&layout));
@@ -1590,6 +1639,13 @@ impl ShapeView {
 
     fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers) -> bool {
         if pos.y < HEADER {
+            if self.focus_hit.contains(pos) {
+                self.shared.focus_mode.store(!self.focus_on(), std::sync::atomic::Ordering::Relaxed);
+                set_focus(self.focus_on());
+                self.card_knobs.clear();
+                self.card_key = None;
+                return true;
+            }
             for (i, p) in [Panel::Stereo, Panel::Detector].into_iter().enumerate() {
                 if self.head_hits[i].contains(pos) {
                     self.panel = if self.panel == Some(p) { None } else { Some(p) };
@@ -1898,6 +1954,7 @@ impl View for ShapeView {
     }
 
     fn tick(&mut self, host: &dyn ParamHost) -> bool {
+        set_focus(self.focus_on());
         let busy = self.busy();
         self.session.follow(host, busy);
         let dt = self.last_tick.elapsed().as_secs_f64().min(0.1);

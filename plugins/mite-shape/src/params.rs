@@ -217,6 +217,8 @@ pub struct ShapeParams {
     /// `serialize_fields`).
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
+    /// Focus mode (a session field, `focus`, only while on).
+    pub focus_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for ShapeParams {
@@ -246,6 +248,7 @@ impl Default for ShapeParams {
             bands: std::array::from_fn(BandParams::new),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
+            focus_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -271,11 +274,16 @@ impl ShapeParams {
 unsafe impl Params for ShapeParams {
     fn serialize_fields(&self) -> std::collections::BTreeMap<String, String> {
         let live = mite_plugin::state::live_values(self, &sound_ids());
-        mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live)
+        let mut fields = mite_plugin::state::session_fields(STATE_VERSION, &self.snapshots, &self.preset, live);
+        if self.focus_mode.load(std::sync::atomic::Ordering::Relaxed) {
+            fields.insert("focus".to_owned(), "1".to_owned());
+        }
+        fields
     }
 
     fn deserialize_fields(&self, serialized: &std::collections::BTreeMap<String, String>) {
         mite_plugin::state::load_session_fields(serialized, &self.snapshots, &self.preset);
+        self.focus_mode.store(serialized.get("focus").is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
     }
 
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {

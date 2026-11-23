@@ -92,6 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the real engine over the loop so the history holds genuine records.
     let shared = Arc::new(ShapeShared::new());
+    // SNAPSHOT_FOCUS: focus mode.
+    shared.focus_mode.store(std::env::var_os("SNAPSHOT_FOCUS").is_some(), std::sync::atomic::Ordering::Relaxed);
     let sample_rate = 48_000.0;
     shared.sample_rate.store(sample_rate);
     let settings = mite_shape::editor::settings(&host);
