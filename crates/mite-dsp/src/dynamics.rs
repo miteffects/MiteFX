@@ -1052,6 +1052,12 @@ impl Compressor {
         self.latency
     }
 
+    /// Takes `s`'s lookahead now (the latency [`Self::latency`] reports), without clearing
+    /// anything: the delay line is always written, so the new length reads real audio.
+    pub fn follow_lookahead(&mut self, s: &CompSettings) {
+        self.latency = self.lookahead(s);
+    }
+
     /// Adds what `other` holds in its lookahead delay into this one's, aligned to the moment each
     /// will play it: a band that takes another's region (a merge) plays out what that band had
     /// delayed. Allocation-free; both must run at the same lookahead.

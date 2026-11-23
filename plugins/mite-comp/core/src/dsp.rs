@@ -96,7 +96,7 @@ impl CompEngine {
             bypass: LinearSmoother::new(0.0),
             gain: LinearSmoother::new(1.0),
             pan: LinearSmoother::new(0.0),
-            dip: LinearSmoother::new(1.0),
+            dip: LinearSmoother::new_s_curve(1.0),
             lookahead_ms: s.lookahead_ms,
             oversampling: s.oversampling,
             slice_len: 1,

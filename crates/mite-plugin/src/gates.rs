@@ -38,8 +38,10 @@ impl Step {
     }
 }
 
-/// A stereo test signal: a 220 Hz tone at −12 dBFS with a little noise (so dynamics and
-/// detectors have something to follow) and a slow swell, `n` samples at `rate`.
+/// A stereo test signal: a steady 220 Hz tone at −12 dBFS with a little noise (so detectors
+/// have something to follow), `n` samples at `rate`. Steady, so the step test's windows before,
+/// during and after a change hear the same level (a swell biased them by up to 4 dB, and far
+/// more through a saturator, whose harmonics grow steeply with level).
 pub fn test_signal(rate: f64, n: usize) -> [Vec<f32>; 2] {
     let mut seed = 0x2468_ace1u32;
     let mut l = Vec::with_capacity(n);
@@ -50,8 +52,7 @@ pub fn test_signal(rate: f64, n: usize) -> [Vec<f32>; 2] {
         seed ^= seed << 5;
         let noise = (seed as f64 / u32::MAX as f64 * 2.0 - 1.0) * 0.002;
         let t = i as f64 / rate;
-        let swell = 0.75 + 0.25 * (std::f64::consts::TAU * 0.7 * t).sin();
-        let tone = 0.25 * swell * (std::f64::consts::TAU * 220.0 * t).sin();
+        let tone = 0.25 * (std::f64::consts::TAU * 220.0 * t).sin();
         l.push((tone + noise) as f32);
         r.push((0.9 * tone - noise) as f32);
     }
@@ -61,6 +62,21 @@ pub fn test_signal(rate: f64, n: usize) -> [Vec<f32>; 2] {
 impl Gates {
     pub fn new(entry: &'static clap_plugin_entry, id: &str) -> Self {
         Self { entry, id: id.to_owned(), state: None, sample_rate: 48_000.0 }
+    }
+
+    /// Loads the newest golden state `<dir>/<prefix>.state.v<N>.json` (a state that switches the
+    /// plugin's features on) into every instance, if there is one.
+    pub fn with_golden_state(self, dir: &std::path::Path, prefix: &str) -> Self {
+        let newest = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter_map(|n| n.strip_prefix(&format!("{prefix}.state.v"))?.strip_suffix(".json")?.parse::<u32>().ok())
+            .max();
+        match newest {
+            Some(v) => self.with_state(std::fs::read(dir.join(format!("{prefix}.state.v{v}.json"))).expect("golden state")),
+            None => self,
+        }
     }
 
     /// Loads `state` (a saved state's JSON) into every instance first.
@@ -179,7 +195,7 @@ impl Gates {
         let input = test_signal(rate, n);
         let measure = |from: f64, to: f64| -> f64 {
             let mut p = self.instance(rate);
-            let mut out: Vec<f32> = Vec::with_capacity(n);
+            let mut out: [Vec<f32>; 2] = [Vec::with_capacity(n), Vec::with_capacity(n)];
             let mut at = 0;
             let block = 256;
             let mut first = true;
@@ -195,10 +211,18 @@ impl Gates {
                 }
                 let mut b = vec![input[0][at..at + len].to_vec(), input[1][at..at + len].to_vec()];
                 p.process(&mut b, &changes);
-                out.extend_from_slice(&b[0]);
+                out[0].extend_from_slice(&b[0]);
+                out[1].extend_from_slice(&b[1]);
                 at += len;
             }
-            let d2 = |range: std::ops::Range<usize>| range.map(|i| (out[i] - 2.0 * out[i - 1] + out[i - 2]).abs()).fold(0.0f32, f32::max);
+            // MITEFX_GATES_DUMP=<dir>: the output of every step, as raw f32 (`<param>-<up|down>.f32`).
+            if let Some(dir) = std::env::var_os("MITEFX_GATES_DUMP") {
+                let name = format!("{}-{}.f32", param.name.replace(' ', "_"), if to > from { "up" } else { "down" });
+                let bytes: Vec<u8> = out[0].iter().flat_map(|v| v.to_le_bytes()).collect();
+                let _ = std::fs::write(std::path::Path::new(&dir).join(name), bytes);
+            }
+            // Both channels: a pan or balance silences one of them.
+            let d2 = |range: std::ops::Range<usize>| out.iter().flat_map(|o| range.clone().map(move |i| (o[i] - 2.0 * o[i - 1] + o[i - 2]).abs())).fold(0.0f32, f32::max);
             let before = d2(jump - window..jump);
             let during = d2(jump..jump + window);
             let after = d2(n - window..n);
@@ -207,4 +231,61 @@ impl Gates {
         };
         Step { param: param.name.clone(), up_db: measure(param.min, param.max), down_db: measure(param.max, param.min) }
     }
+}
+
+/// The four gate tests for a plugin crate's `tests/gates.rs`:
+///
+/// ```ignore
+/// mite_plugin::gate_tests!(mite_comp, MiteComp, "mite_comp", block_tolerance = 0.0, skip = []);
+/// ```
+///
+/// `block_tolerance` is the largest difference allowed between block sizes (0: bit-identical);
+/// `skip` names parameters left out of the ramp test (each with its reason beside it).
+#[macro_export]
+macro_rules! gate_tests {
+    ($krate:ident, $plugin:ident, $prefix:literal, block_tolerance = $tol:expr, skip = [$($skip:literal),* $(,)?]) => {
+        fn gates() -> $crate::gates::Gates {
+            use nih_plug::prelude::ClapPlugin;
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden");
+            $crate::gates::Gates::new(&$krate::clap_entry, $krate::$plugin::CLAP_ID).with_golden_state(&dir, $prefix)
+        }
+
+        #[test]
+        fn the_output_is_the_same_at_every_block_size() {
+            let tol: f32 = $tol;
+            for (blocks, diff) in gates().block_sizes(1.0) {
+                println!("blocks {blocks}: max difference {diff:e}");
+                assert!(diff <= tol, "blocks {blocks}: max difference {diff} (allowed {tol})");
+            }
+        }
+
+        #[test]
+        fn every_sample_rate_from_44_1_to_384_khz_works() {
+            for (rate, r) in gates().sample_rates() {
+                let (peak, latency) = r.unwrap_or_else(|e| panic!("{rate} Hz: {e}"));
+                println!("{rate} Hz: peak {peak:.3}, latency {latency}");
+                assert!(peak < 8.0, "{rate} Hz: peak {peak}");
+                assert!(f64::from(latency) < rate, "{rate} Hz: latency {latency}");
+            }
+        }
+
+        #[test]
+        fn nan_and_inf_recover_through_reset() {
+            let (finite, peak) = gates().nan_recovery();
+            println!("after reset: peak {peak}");
+            assert!(finite, "non-finite output after reset");
+        }
+
+        #[test]
+        fn no_continuous_parameter_clicks_when_it_jumps_end_to_end() {
+            let g = gates();
+            let mut steps: Vec<_> = g.continuous(&[$($skip),*]).iter().map(|p| g.step(p)).collect();
+            steps.sort_by(|a, b| b.worst_db().total_cmp(&a.worst_db()));
+            for s in steps.iter().take(12) {
+                println!("{:<32} up {:+6.1} dB  down {:+6.1} dB", s.param, s.up_db, s.down_db);
+            }
+            let clicks: Vec<_> = steps.iter().filter(|s| s.worst_db() > 6.0).map(|s| format!("{} ({:+.1} dB)", s.param, s.worst_db())).collect();
+            assert!(clicks.is_empty(), "{} of {} click: {}", clicks.len(), steps.len(), clicks.join(", "));
+        }
+    };
 }

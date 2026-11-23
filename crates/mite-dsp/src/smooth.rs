@@ -29,6 +29,14 @@ impl LinearSmoother {
         }
     }
 
+    /// A smoother sitting at `value` that ramps along a smoothstep ([`Self::set_s_curve`]): for
+    /// fades whose ends must not be corners (the latency dips).
+    pub const fn new_s_curve(value: f32) -> Self {
+        let mut s = Self::new(value);
+        s.s_curve = true;
+        s
+    }
+
     /// Ramps along a smoothstep: the same time, but starting and arriving with zero slope. For a
     /// parameter whose effect is concentrated at one end of its range (a bell's Q, in log), where
     /// a straight ramp ends on a corner that is heard.

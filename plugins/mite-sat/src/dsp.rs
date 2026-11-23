@@ -199,7 +199,7 @@ impl SatEngine {
             bypass: LinearSmoother::new(0.0),
             gain: LinearSmoother::new(1.0),
             pan: LinearSmoother::new(0.0),
-            dip: LinearSmoother::new(1.0),
+            dip: LinearSmoother::new_s_curve(1.0),
             switch: Switch::Steady,
             slice_len: 1,
             slice_pos: 0,

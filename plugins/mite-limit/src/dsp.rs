@@ -332,6 +332,8 @@ pub struct LimitEngine {
     dither: Dither,
     /// The structure switch: fades out, reconfigures, fades back in.
     dip: LinearSmoother,
+    /// Samples left before a dip may fade back in (the new delay lines filling).
+    refill: usize,
     active: LimitSettings,
     meter: [TruePeak; 2],
     /// The input's true peak (after the gain), for the history.
@@ -378,7 +380,8 @@ impl LimitEngine {
             dc: [Tdf2::default(); 2],
             dc_coeffs: dc_coeffs(sample_rate),
             dither: Dither::new(),
-            dip: LinearSmoother::new(1.0),
+            dip: LinearSmoother::new_s_curve(1.0),
+            refill: 0,
             active: *s,
             meter: [TruePeak::new(4), TruePeak::new(4)],
             in_meter: [TruePeak::new(4), TruePeak::new(4)],
@@ -437,6 +440,7 @@ impl LimitEngine {
         self.bypass.reset(if s.bypass { 1.0 } else { 0.0 });
         self.preview.reset(1.0);
         self.dip.reset(1.0);
+        self.refill = 0;
         self.protect_amount.reset(s.protect);
         self.clip_mix.reset(if s.clip_on { 1.0 } else { 0.0 });
         self.clip_level.reset(db_to_gain(s.clip_db));
@@ -536,8 +540,14 @@ impl LimitEngine {
                 if self.dip.current() == 0.0 {
                     self.active = *s;
                     self.configure();
-                    self.dip.set_target(1.0);
+                    // The limiter starts with empty delay lines: stay silent until they hold a
+                    // latency of real audio, then fade in (fading in at once, the sound jumped
+                    // back in a latency later, half way up the fade: the §10 ramp test).
+                    self.refill = self.latency();
                 }
+            }
+            if self.refill == 0 && self.dip.target() == 0.0 && s.structure() == (self.active.lookahead_ms, self.active.true_peak, self.active.oversampling, self.protecting) {
+                self.dip.set_target(1.0);
             }
             self.active = LimitSettings { lookahead_ms: self.active.lookahead_ms, true_peak: self.active.true_peak, oversampling: self.active.oversampling, ..*s };
             let f = self.os.factor();
@@ -702,6 +712,7 @@ impl LimitEngine {
                 self.acc = empty_record();
                 self.slice_pos = 0;
             }
+            self.refill = self.refill.saturating_sub(n);
             start = end;
         }
         tap.momentary.store(self.loudness.momentary());

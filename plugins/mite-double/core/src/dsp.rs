@@ -52,7 +52,7 @@ impl DoubleEngine {
         let mut e = Self {
             doubler: Doubler::new(sample_rate),
             wet: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
-            gain: LinearSmoother::new(1.0),
+            gain: LinearSmoother::new_s_curve(1.0),
             bypass: LinearSmoother::new(0.0),
             slice_len: 1,
             slice_pos: 0,

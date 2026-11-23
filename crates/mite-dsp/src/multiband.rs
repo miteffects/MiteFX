@@ -233,7 +233,7 @@ impl Multiband {
             out: LinearSmoother::new(1.0),
             delta: LinearSmoother::new(0.0),
             bypass: LinearSmoother::new(0.0),
-            dip: LinearSmoother::new(1.0),
+            dip: LinearSmoother::new_s_curve(1.0),
             lookahead_ms: 0.0,
         };
         for sm in [&mut m.mix, &mut m.out] {
@@ -388,13 +388,16 @@ impl Multiband {
         let mut band_in = [0.0f32; BANDS];
         let mut start = 0;
         while start < len {
-            // A lookahead change: fade out, then reset every band at the new lookahead.
+            // A lookahead change: fade out, switch, fade back in. The bands keep their state:
+            // their delay lines are always written, so the new lookahead reads real audio (a
+            // reset emptied them, and the sound jumped back in a lookahead after the switch,
+            // half way up the fade: the §10 ramp test).
             if s.lookahead_ms != self.lookahead_ms {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
                     self.lookahead_ms = s.lookahead_ms;
                     for (b, c) in self.comps.iter_mut().enumerate() {
-                        c.reset(&comp_settings(s, b));
+                        c.follow_lookahead(&comp_settings(s, b));
                     }
                     self.set_delays();
                     self.dip.set_target(1.0);

@@ -725,12 +725,11 @@ impl Shaper {
                     for c in 0..n_ch {
                         band.gain[c] += band.step[c];
                         let r = ring(core.ring_len, b, c);
-                        let delayed = if delay == 0 {
-                            sig[c][p]
-                        } else {
-                            core.rings[r.start + w] = sig[c][p] as f32;
-                            f64::from(core.rings[r.start + read])
-                        };
+                        // Written even with no lookahead: a lookahead switched on later reads
+                        // the last moments from here (unwritten, they were stale, and the sound
+                        // jumped back in a lookahead after the latency dip: the §10 ramp test).
+                        core.rings[r.start + w] = sig[c][p] as f32;
+                        let delayed = if delay == 0 { sig[c][p] } else { f64::from(core.rings[r.start + read]) };
                         let g = band.gain[c];
                         y[c] += delayed * ((1.0 - e.mix) + e.mix * g) * e.out * e.audible;
                         d_sum[c] += delayed;
@@ -741,12 +740,8 @@ impl Shaper {
                     for c in 0..n_ch {
                         y[c] = if layout.n == 0 {
                             let r = ring(core.ring_len, BANDS, c);
-                            if delay == 0 {
-                                listen[c]
-                            } else {
-                                core.rings[r.start + w] = listen[c] as f32;
-                                f64::from(core.rings[r.start + read])
-                            }
+                            core.rings[r.start + w] = listen[c] as f32;
+                            if delay == 0 { listen[c] } else { f64::from(core.rings[r.start + read]) }
                         } else {
                             // Several bands: the bands as they are heard, unshaped.
                             let mut v = 0.0;
