@@ -1,12 +1,19 @@
 //! A minimal CLAP host for tests: creates a plugin through its real `clap_entry` (the code a DAW
-//! runs) and saves and loads its state, so golden state files are checked through nih-plug's
-//! actual wrapper rather than a copy of it.
+//! runs), saves and loads its state, and activates and runs it with parameter events, so golden
+//! states and the quality gates (`gates`, BLUEPRINT §10) go through nih-plug's actual wrapper
+//! rather than a copy of it.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 
+use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
+use clap_sys::events::{clap_event_header, clap_event_param_value, clap_input_events, clap_output_events, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE};
+use clap_sys::ext::audio_ports::{clap_audio_port_info, clap_plugin_audio_ports, CLAP_EXT_AUDIO_PORTS};
+use clap_sys::ext::latency::{clap_plugin_latency, CLAP_EXT_LATENCY};
+use clap_sys::ext::params::{clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED};
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
+use clap_sys::process::clap_process;
 use clap_sys::factory::plugin_factory::{clap_plugin_factory, CLAP_PLUGIN_FACTORY_ID};
 use clap_sys::host::clap_host;
 use clap_sys::plugin::clap_plugin;
@@ -19,12 +26,36 @@ unsafe extern "C" fn no_extension(_: *const clap_host, _: *const c_char) -> *con
 
 unsafe extern "C" fn ignore(_: *const clap_host) {}
 
-/// One plugin instance, initialised (not activated). Dropping it destroys the instance.
+/// One plugin instance, initialised (activated by [`ClapInstance::activate`]). Dropping it
+/// destroys the instance.
 pub struct ClapInstance {
     entry: &'static clap_plugin_entry,
     plugin: *const clap_plugin,
     /// The host the plugin keeps a pointer to: it must outlive the plugin.
     _host: Box<clap_host>,
+    active: bool,
+    steady: i64,
+}
+
+/// A parameter as the plugin describes it to a host.
+#[derive(Debug, Clone)]
+pub struct ParamInfo {
+    pub id: u32,
+    pub name: String,
+    pub min: f64,
+    pub max: f64,
+    pub default: f64,
+    pub stepped: bool,
+    /// Hidden, read-only or the host's bypass: not one a host automates as a sound parameter.
+    pub internal: bool,
+}
+
+/// A parameter change `offset` samples into a block, to `value` in the plugin's CLAP units.
+#[derive(Debug, Clone, Copy)]
+pub struct ParamChange {
+    pub offset: u32,
+    pub id: u32,
+    pub value: f64,
 }
 
 impl ClapInstance {
@@ -51,7 +82,162 @@ impl ClapInstance {
             let plugin = ((*factory).create_plugin.expect("create_plugin"))(factory, &*host, id.as_ptr());
             assert!(!plugin.is_null(), "unknown plugin id {id:?}");
             assert!(((*plugin).init.expect("init"))(plugin), "plugin init failed");
-            Self { entry, plugin, _host: host }
+            Self { entry, plugin, _host: host, active: false, steady: 0 }
+        }
+    }
+
+    fn extension<T>(&self, id: &CStr) -> Option<&T> {
+        // SAFETY: the plugin is alive; an extension it returns lives as long as it does.
+        unsafe {
+            let ext = ((*self.plugin).get_extension.expect("get_extension"))(self.plugin, id.as_ptr()) as *const T;
+            ext.as_ref()
+        }
+    }
+
+    /// Every parameter the plugin exposes.
+    pub fn params(&self) -> Vec<ParamInfo> {
+        let Some(ext) = self.extension::<clap_plugin_params>(CLAP_EXT_PARAMS) else { return Vec::new() };
+        // SAFETY: indices below `count`, an info struct for the plugin to fill.
+        unsafe {
+            let n = (ext.count.expect("count"))(self.plugin);
+            (0..n)
+                .filter_map(|i| {
+                    let mut info: clap_param_info = std::mem::zeroed();
+                    (ext.get_info.expect("get_info"))(self.plugin, i, &mut info).then(|| ParamInfo {
+                        id: info.id,
+                        name: CStr::from_ptr(info.name.as_ptr()).to_string_lossy().into_owned(),
+                        min: info.min_value,
+                        max: info.max_value,
+                        default: info.default_value,
+                        stepped: info.flags & CLAP_PARAM_IS_STEPPED != 0,
+                        internal: info.flags & (CLAP_PARAM_IS_HIDDEN | CLAP_PARAM_IS_READONLY | CLAP_PARAM_IS_BYPASS) != 0,
+                    })
+                })
+                .collect()
+        }
+    }
+
+    /// A parameter's current value (CLAP units).
+    pub fn param_value(&self, id: u32) -> Option<f64> {
+        let ext = self.extension::<clap_plugin_params>(CLAP_EXT_PARAMS)?;
+        let mut v = 0.0;
+        // SAFETY: an out value for the plugin to fill.
+        unsafe { (ext.get_value.expect("get_value"))(self.plugin, id, &mut v) }.then_some(v)
+    }
+
+    /// The channel counts of the input (or output) ports, in order.
+    pub fn ports(&self, input: bool) -> Vec<u32> {
+        let Some(ext) = self.extension::<clap_plugin_audio_ports>(CLAP_EXT_AUDIO_PORTS) else { return vec![2] };
+        // SAFETY: indices below `count`, an info struct for the plugin to fill.
+        unsafe {
+            let n = (ext.count.expect("count"))(self.plugin, input);
+            (0..n)
+                .map(|i| {
+                    let mut info: clap_audio_port_info = std::mem::zeroed();
+                    if (ext.get.expect("get"))(self.plugin, i, input, &mut info) { info.channel_count } else { 0 }
+                })
+                .collect()
+        }
+    }
+
+    /// The latency the plugin reports now (samples).
+    pub fn latency(&self) -> u32 {
+        // SAFETY: the plugin is alive.
+        self.extension::<clap_plugin_latency>(CLAP_EXT_LATENCY).map_or(0, |ext| unsafe { (ext.get.expect("get"))(self.plugin) })
+    }
+
+    /// Activates the plugin at `sample_rate` for blocks of 1…`max_block` samples and starts
+    /// processing (deactivating it first if it was active).
+    pub fn activate(&mut self, sample_rate: f64, max_block: u32) {
+        self.deactivate();
+        // SAFETY: the plugin is initialised and not active.
+        unsafe {
+            assert!(((*self.plugin).activate.expect("activate"))(self.plugin, sample_rate, 1, max_block), "activate failed at {sample_rate} Hz");
+            assert!(((*self.plugin).start_processing.expect("start_processing"))(self.plugin), "start_processing failed");
+        }
+        self.active = true;
+        self.steady = 0;
+    }
+
+    pub fn deactivate(&mut self) {
+        if self.active {
+            // SAFETY: the plugin is active and processing.
+            unsafe {
+                ((*self.plugin).stop_processing.expect("stop_processing"))(self.plugin);
+                ((*self.plugin).deactivate.expect("deactivate"))(self.plugin);
+            }
+            self.active = false;
+        }
+    }
+
+    /// The plugin's `reset()`: what a host calls on a transport jump (clears the DSP state).
+    pub fn reset(&mut self) {
+        // SAFETY: the plugin is active.
+        unsafe { ((*self.plugin).reset.expect("reset"))(self.plugin) }
+    }
+
+    /// Runs one block: `main` (the main input's channels, replaced by the output) with the other
+    /// input ports silent, and `changes` (sorted by offset) as parameter events.
+    pub fn process(&mut self, main: &mut [Vec<f32>], changes: &[ParamChange]) {
+        assert!(self.active, "activate first");
+        let frames = main.iter().map(Vec::len).min().unwrap_or(0);
+        let ins = self.ports(true);
+        let outs = self.ports(false);
+        // Inputs: the main port gets a copy of `main`, the others silence.
+        let mut in_data: Vec<Vec<Vec<f32>>> = ins.iter().enumerate().map(|(p, &ch)| (0..ch as usize).map(|c| if p == 0 { main.get(c).or(main.first()).map_or(vec![0.0; frames], |v| v[..frames].to_vec()) } else { vec![0.0; frames] }).collect()).collect();
+        let mut out_data: Vec<Vec<Vec<f32>>> = outs.iter().map(|&ch| vec![vec![0.0f32; frames]; ch as usize]).collect();
+        let mut in_ptrs: Vec<Vec<*mut f32>> = in_data.iter_mut().map(|p| p.iter_mut().map(|c| c.as_mut_ptr()).collect()).collect();
+        let mut out_ptrs: Vec<Vec<*mut f32>> = out_data.iter_mut().map(|p| p.iter_mut().map(|c| c.as_mut_ptr()).collect()).collect();
+        let buffer = |ptrs: &mut Vec<*mut f32>| clap_audio_buffer { data32: ptrs.as_mut_ptr(), data64: ptr::null_mut(), channel_count: ptrs.len() as u32, latency: 0, constant_mask: 0 };
+        let inputs: Vec<clap_audio_buffer> = in_ptrs.iter_mut().map(buffer).collect();
+        let mut outputs: Vec<clap_audio_buffer> = out_ptrs.iter_mut().map(buffer).collect();
+        let events: Vec<clap_event_param_value> = changes
+            .iter()
+            .map(|c| clap_event_param_value {
+                header: clap_event_header { size: std::mem::size_of::<clap_event_param_value>() as u32, time: c.offset, space_id: CLAP_CORE_EVENT_SPACE_ID, type_: CLAP_EVENT_PARAM_VALUE, flags: 0 },
+                param_id: c.id,
+                cookie: ptr::null_mut(),
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+                value: c.value,
+            })
+            .collect();
+        unsafe extern "C" fn size(list: *const clap_input_events) -> u32 {
+            // SAFETY: `ctx` is the events Vec below.
+            unsafe { (*((*list).ctx as *const Vec<clap_event_param_value>)).len() as u32 }
+        }
+        unsafe extern "C" fn get(list: *const clap_input_events, index: u32) -> *const clap_event_header {
+            // SAFETY: `ctx` is the events Vec below; the plugin asks for indices below `size`.
+            unsafe {
+                let events: &Vec<clap_event_param_value> = &*((*list).ctx as *const Vec<clap_event_param_value>);
+                &events[index as usize].header
+            }
+        }
+        unsafe extern "C" fn push(_: *const clap_output_events, _: *const clap_event_header) -> bool {
+            true
+        }
+        let in_events = clap_input_events { ctx: &events as *const _ as *mut c_void, size: Some(size), get: Some(get) };
+        let out_events = clap_output_events { ctx: ptr::null_mut(), try_push: Some(push) };
+        let process = clap_process {
+            steady_time: self.steady,
+            frames_count: frames as u32,
+            transport: ptr::null(),
+            audio_inputs: inputs.as_ptr(),
+            audio_outputs: outputs.as_mut_ptr(),
+            audio_inputs_count: inputs.len() as u32,
+            audio_outputs_count: outputs.len() as u32,
+            in_events: &in_events,
+            out_events: &out_events,
+        };
+        // SAFETY: every buffer and event outlives the call.
+        unsafe { ((*self.plugin).process.expect("process"))(self.plugin, &process) };
+        self.steady += frames as i64;
+        for (c, ch) in main.iter_mut().enumerate() {
+            if let Some(out) = out_data.first().and_then(|p| p.get(c)) {
+                ch[..frames].copy_from_slice(out);
+            }
         }
     }
 
@@ -117,6 +303,7 @@ impl ClapInstance {
 
 impl Drop for ClapInstance {
     fn drop(&mut self) {
+        self.deactivate();
         // SAFETY: created by this host and not used after.
         unsafe {
             ((*self.plugin).destroy.expect("destroy"))(self.plugin);

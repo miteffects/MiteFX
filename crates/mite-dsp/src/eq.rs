@@ -918,6 +918,10 @@ impl BandProcessor {
             detector_key: (0.0, 0.0, BandType::Bell),
             detect_region: None,
         };
+        // A bell's Q acts mostly at one end of its range (in log Q, a wide bell reaches a far
+        // tone only at the bottom): a straight glide put a whole level change into its last
+        // milliseconds and stopped on a corner, a click on a Q jumped end to end (§10 ramp test).
+        p.log_q.set_s_curve(true);
         p.prepare(sample_rate, smoothing_ms, &BandSettings::default());
         p
     }

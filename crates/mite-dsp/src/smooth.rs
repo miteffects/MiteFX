@@ -12,6 +12,8 @@ pub struct LinearSmoother {
     target: f32,
     remaining: u32,
     ramp_samples: u32,
+    /// Ease in and out along a smoothstep instead of a straight line (no corner at either end).
+    s_curve: bool,
 }
 
 impl LinearSmoother {
@@ -23,7 +25,15 @@ impl LinearSmoother {
             target: value,
             remaining: 0,
             ramp_samples: 0,
+            s_curve: false,
         }
+    }
+
+    /// Ramps along a smoothstep: the same time, but starting and arriving with zero slope. For a
+    /// parameter whose effect is concentrated at one end of its range (a bell's Q, in log), where
+    /// a straight ramp ends on a corner that is heard.
+    pub fn set_s_curve(&mut self, on: bool) {
+        self.s_curve = on;
     }
 
     /// Sets the ramp length from a sample rate and a time in milliseconds. Does not move the value.
@@ -65,6 +75,7 @@ impl LinearSmoother {
                 self.target
             } else {
                 let done = (self.ramp_samples - self.remaining) as f32 / self.ramp_samples as f32;
+                let done = if self.s_curve { done * done * (3.0 - 2.0 * done) } else { done };
                 self.start + (self.target - self.start) * done
             };
         }
@@ -144,5 +155,17 @@ mod tests {
         let mut s = smoother(0.0);
         s.set_target(0.5);
         assert_eq!(s.next_value(), 0.5);
+    }
+
+    #[test]
+    fn the_s_curve_starts_and_lands_flat_in_the_same_time() {
+        let mut s = smoother(10.0);
+        s.set_s_curve(true);
+        s.set_target(1.0);
+        let v: Vec<f32> = (0..480).map(|_| s.next_value()).collect();
+        assert_eq!(v[479], 1.0);
+        assert!(v[0] < 1e-4 && 1.0 - v[478] < 1e-4, "flat at both ends");
+        assert!((v[239] - 0.5).abs() < 0.01);
+        assert!(v.windows(2).all(|w| w[1] >= w[0]));
     }
 }
