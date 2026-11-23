@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Clip Then Limit",
+  "params": {
+    "gain": 9.0,
+    "ceiling": -1.0,
+    "style": 2.0,
+    "lookahead": 1.5,
+    "release": 80.0,
+    "oversampling": 2.0,
+    "clip_on": 1.0,
+    "clip_level": 2.0,
+    "clip_curve": 1.0
+  }
+}

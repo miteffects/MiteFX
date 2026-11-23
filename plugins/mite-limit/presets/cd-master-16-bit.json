@@ -1,0 +1,16 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "CD Master 16 bit",
+  "params": {
+    "gain": 6.0,
+    "ceiling": -0.3,
+    "style": 0.0,
+    "lookahead": 2.0,
+    "release": 150.0,
+    "oversampling": 2.0,
+    "dither": 3.0,
+    "shaping": 2.0,
+    "dc_filter": 1.0
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "plugin": "Mite Limit",
+  "version": 1,
+  "name": "Drum Bus Protect",
+  "params": {
+    "gain": 6.0,
+    "ceiling": -0.5,
+    "style": 1.0,
+    "lookahead": 1.0,
+    "release": 50.0,
+    "oversampling": 1.0,
+    "protect": 60.0,
+    "clip_on": 1.0,
+    "clip_level": 3.0,
+    "clip_curve": 2.0
+  }
+}

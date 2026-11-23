@@ -330,5 +330,8 @@ next with enhancing limiter").
    do: presets for the new stages, `docs/compare/pro-l-2.md`, validators.
 7. Dither, noise shaping, DC filter (done 2026-11-09): `mite_dsp::dither`; one footer list holds
    the word length and the shaping (10 rows). Off under bypass, so bypass still nulls.
-8. Report and finish: `docs/dsp/limit-truepeak.md` (compliance and CPU per factor), presets,
-   `docs/compare/pro-l-2.md`, validators, CI.
+8. Report and finish (done 2026-11-23): `docs/dsp/limit-truepeak.md` (compliance and CPU per
+   factor); presets for the new stages (Clip Then Limit, Drum Bus Protect, CD Master 16 bit);
+   `docs/compare/pro-l-2.md` with `cargo xtask compare limit` (Pro-L 2 under yabridge: 11 pass,
+   2 fail: Safe's distortion on a steady tone, CPU). CI already bundles and validates Mite Limit;
+   it has not run since 2026-11-11 (GitHub billing), and validators are not installed locally.
