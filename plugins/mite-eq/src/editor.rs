@@ -204,6 +204,22 @@ fn sy(db: f64) -> f64 {
     PLOT_TOP + (-db / 90.0) * (PLOT_BOT - PLOT_TOP)
 }
 
+/// The shape a new band takes at `freq` (auto shape): cuts at the extremes, shelves in the
+/// low and high ends, a Bell between.
+pub fn auto_kind(freq: f64) -> BandType {
+    if freq < 30.0 {
+        BandType::LowCut
+    } else if freq < 70.0 {
+        BandType::LowShelf
+    } else if freq > 15_000.0 {
+        BandType::HighCut
+    } else if freq > 9_000.0 {
+        BandType::HighShelf
+    } else {
+        BandType::Bell
+    }
+}
+
 fn note_name(freq: f64) -> String {
     const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let midi = 69.0 + 12.0 * (freq / 440.0).log2();
@@ -1708,7 +1724,7 @@ impl EqView {
                 .slot(note_name(f), "C#10 −50 ct")
                 .text(" · ")
                 .slot(format!("{:+.1} dB", yg(p.y)).replace('-', "−"), "+30.0 dB")
-                .text(" — click to add a band");
+                .text(format!(" — click to add a {}", BandType::NAMES[auto_kind(f) as usize]));
         }
         if let Some(b) = self.selected {
             return band_line(b);
@@ -1831,11 +1847,41 @@ impl EqView {
         open
     }
 
-    /// A Bell at the pointer, Q 1. The band it made, unless all are in use.
+    /// The band a click at `p` on the empty plot makes (as Pro-Q's auto shape): a low cut at the
+    /// far left, a low shelf in the low end, a high shelf in the high end, a high cut at the far
+    /// right, a Bell (Q 1) between; the gain from the height (none for a cut).
+    pub fn auto_shape(p: Point) -> BandSettings {
+        let freq = xf(p.x).clamp(FREQ_MIN, FREQ_MAX);
+        let kind = auto_kind(freq);
+        let gain = if matches!(kind, BandType::LowCut | BandType::HighCut) { 0.0 } else { yg(p.y).clamp(-18.0, 18.0) };
+        let q = if kind == BandType::Bell { 1.0 } else { std::f64::consts::FRAC_1_SQRT_2 };
+        BandSettings { enabled: true, kind, freq, gain_db: gain, q, slope: mite_dsp::eq::DEFAULT_SLOPE, ..Default::default() }
+    }
+
+    /// The auto-shaped band at the pointer (see [`Self::auto_shape`]). The band it made, unless
+    /// all are in use.
     fn add_band(&mut self, host: &dyn ParamHost, p: Point) -> Option<usize> {
         let free = (0..BANDS).find(|&b| !self.band(host, b).enabled)?;
-        self.add_bell(host, xf(p.x), yg(p.y).clamp(-18.0, 18.0), 1.0);
+        let s = Self::auto_shape(p);
+        let ids = &self.ids[free];
+        Self::set(host, &ids.kind, s.kind as usize as f32);
+        Self::set(host, &ids.freq, s.freq as f32);
+        Self::set(host, &ids.gain, s.gain_db as f32);
+        Self::set(host, &ids.q, s.q as f32);
+        Self::set(host, &ids.slope, s.slope as f32);
+        Self::set(host, &ids.on, 1.0);
+        self.select(Some(free));
         Some(free)
+    }
+
+    /// Where a click would make a band, with nothing else under the pointer: the band it makes.
+    fn auto_preview(&self, host: &dyn ParamHost) -> Option<BandSettings> {
+        let p = self.pointer?;
+        let over_panel = self.panel_hits.is_some_and(|h| h.panel.contains(p)) || (self.matcher.is_some() && Match::rect().contains(p));
+        let free = (0..BANDS).any(|b| !self.band(host, b).enabled);
+        let busy = self.drag.is_some() || self.grab.is_some() || self.menu.is_some() || self.session.menu_open() || self.collision_hot.is_some();
+        (free && !busy && !over_panel && p.x >= 0.0 && p.x < PLOT_W && p.y > PLOT_TOP && p.y < PLOT_BOT && self.node_at(host, p).is_none() && self.hot_at(host, p).is_none() && self.find_peak(p).is_none())
+            .then(|| Self::auto_shape(p))
     }
 
     /// Adds a Bell in the first free band and selects it.
@@ -3330,6 +3376,59 @@ impl EqView {
 
     /// The Match panel, in the band panel's place: learn (with a ring filling as audio is
     /// learned) and start over, the three dials, then close and add.
+    /// The band a click would make, as a ghost: its curve dashed over a faint fill, its node.
+    fn draw_auto_preview(&self, cx: &mut DrawCx<'_>) {
+        let Some(s) = self.auto_preview(cx.host) else { return };
+        let theme = cx.theme;
+        let color = Self::new_band_color(theme);
+        let xs: Vec<(f64, Option<usize>)> = (0..POINTS).map(|i| (grid_x(i), None)).collect();
+        let values = self.curve_at(&s, &xs, self.sample_rate());
+        let clamp = |db: f64| gy(if db.is_nan() { 0.0 } else { db.clamp(-40.0, 40.0) });
+        let curve = Self::xy_path(&xs, &values, clamp);
+        let mut fill = curve.clone();
+        fill.line_to((PLOT_W, MID));
+        fill.line_to((0.0, MID));
+        fill.close_path();
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, color.multiply_alpha(0.08), None, &fill);
+        cx.scene.stroke(&Stroke::new(1.5).with_dashes(0.0, [5.0, 4.0]), Affine::IDENTITY, color.multiply_alpha(0.75), None, &curve);
+        let node = Point::new(fx(s.freq), gy(s.gain_db));
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display.multiply_alpha(0.6), None, &Circle::new(node, 6.0));
+        cx.scene.stroke(&Stroke::new(1.4), Affine::IDENTITY, color.multiply_alpha(0.8), None, &Circle::new(node, 6.0));
+    }
+
+    /// Where the pointer is on the plot (as Pro-Q shows it): a faint hairline, the frequency and
+    /// its note in a pill at the plot's top (the band panel docks over the axis), and the gain in a pill at the plot's right edge.
+    fn draw_cursor(&self, cx: &mut DrawCx<'_>) {
+        let Some(p) = self.pointer else { return };
+        let over_panel = self.panel_hits.is_some_and(|h| h.panel.contains(p)) || (self.matcher.is_some() && Match::rect().contains(p));
+        if p.x < 0.0 || p.x >= PLOT_W || p.y < PLOT_TOP || p.y > PLOT_BOT || over_panel || self.menu.is_some() || self.session.menu_open() {
+            return;
+        }
+        let theme = cx.theme;
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.text_lo.multiply_alpha(0.35), None, &Line::new((p.x.round() + 0.5, PLOT_TOP), (p.x.round() + 0.5, PLOT_BOT)));
+        let pill = |cx: &mut DrawCx<'_>, text: &str, x: f64, y: f64, align: Align| {
+            let style = TextStyle::READOUT.sized(11.0);
+            let w = f64::from(cx.text.measure(text, style)) + 16.0;
+            let x0 = match align {
+                Align::Left => x,
+                Align::Right => x - w,
+                Align::Center => x - 0.5 * w,
+            }
+            .clamp(2.0, PLOT_W - w - 2.0);
+            let r = RoundedRect::new(x0, y, x0 + w, y + 20.0, 10.0);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.panel_control, None, &r);
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.accent.multiply_alpha(0.8), None, &r);
+            cx.text.draw(cx.scene, text, x0 + 0.5 * w, y + 4.0, style, theme.text_hi, Align::Center);
+        };
+        let f = xf(p.x);
+        let note = note_name(f);
+        let note = note.split(' ').next().unwrap_or_default();
+        pill(cx, &format!("{}  {note}", FREQ.format(f as f32)), p.x, DISPLAY_TOP + 2.0, Align::Center);
+        let db = yg(p.y);
+        let db = if db.abs() < 0.05 { 0.0 } else { db };
+        pill(cx, &format!("{}{:.1} dB", if db > 0.0 { "+" } else if db < 0.0 { "−" } else { "" }, db.abs()), PLOT_W - 6.0, p.y - 10.0, Align::Right);
+    }
+
     fn draw_match_panel(&mut self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
         let pointer = self.pointer;
@@ -3518,8 +3617,10 @@ impl View for EqView {
         self.draw_curves(cx, &bands);
         self.draw_match(cx);
         self.draw_grab(cx);
+        self.draw_auto_preview(cx);
         cx.end_clip();
         self.draw_nodes(cx, &bands);
+        self.draw_cursor(cx);
         self.meter.draw(cx);
         let r = self.meter.rect;
         cx.text.draw(cx.scene, "OUT", r.center().x, DISPLAY_TOP + 596.0, TextStyle::LABEL.sized(9.0), theme.text_lo, Align::Center);

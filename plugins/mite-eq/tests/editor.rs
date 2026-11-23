@@ -890,3 +890,21 @@ fn the_masking_switch_is_off_by_default_and_saved() {
     back.deserialize_fields(&fields);
     assert!(back.show_masking.load(std::sync::atomic::Ordering::Relaxed));
 }
+
+/// Auto shape: a click at the far left makes a low cut, low end a low shelf, the middle a Bell,
+/// high end a high shelf, far right a high cut.
+#[test]
+fn a_click_makes_the_shape_its_place_suggests() {
+    use mite_dsp::eq::BandType;
+    for (hz, kind) in [(22.0, BandType::LowCut), (50.0, BandType::LowShelf), (1000.0, BandType::Bell), (11_000.0, BandType::HighShelf), (18_000.0, BandType::HighCut)] {
+        let (mut view, host) = setup();
+        let x = 1200.0 * (hz / 10.0f64).ln() / (30_000.0f64 / 10.0).ln();
+        assert_eq!(mite_eq::editor::auto_kind(hz), kind);
+        let before: Vec<usize> = enabled(&host);
+        click(&mut view, &host, Point::new(x, 300.0));
+        let after = enabled(&host);
+        let new: Vec<usize> = after.into_iter().filter(|b| !before.contains(b)).collect();
+        assert_eq!(new.len(), 1, "{hz} Hz made one band");
+        assert_eq!(band_plain(&host, new[0], "type").round() as usize, kind as usize, "{hz} Hz");
+    }
+}
