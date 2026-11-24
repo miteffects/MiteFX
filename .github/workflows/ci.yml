@@ -41,6 +41,9 @@ jobs:
   bundle:
     name: Bundle + validate (${{ matrix.os }})
     needs: test
+    # Runs when no test failed: a test job GitHub never found a machine for (macOS) does not
+    # hold the others back.
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
     strategy:
       fail-fast: false
       matrix:
