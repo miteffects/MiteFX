@@ -17,6 +17,42 @@ use mite_ui::{MemoryParamHost, View};
 
 use crate::blocks::{BlockParam, Kind, Unit};
 use crate::board::Live;
+use crate::parts::{Delay as DelayLine, MAX_LATENCY, SUB};
+use mite_dsp::LinearSmoother;
+
+/// The rig's own Dry and Wet levels for the time-based blocks (Delay, Reverb, Mod), instead of the
+/// plugin's Mix balance (Miteboard; the plugins themselves keep Mix alone). With [`DRY_WET`] on,
+/// the plugin plays fully wet and the block adds the dry itself, in time with the plugin's latency.
+pub const DRY_WET: &str = "rig_drywet";
+pub const DRY: &str = "rig_dry";
+pub const WET: &str = "rig_wet";
+/// The levels' range: the bottom is off.
+pub const LEVEL_OFF_DB: f32 = -60.0;
+pub const LEVEL_MAX_DB: f32 = 6.0;
+/// How fast the levels (and a switch between Mix and Dry/Wet) move.
+const LEVEL_RAMP_MS: f32 = 20.0;
+
+/// A level's gain: 0 at the bottom of the range.
+pub fn level_gain(db: f32) -> f32 {
+    if db <= LEVEL_OFF_DB + 1e-3 { 0.0 } else { mite_dsp::db_to_gain(db) }
+}
+
+fn level_spec(id: &'static str, name: &'static str, default: f32) -> mite_core::ParamSpec {
+    mite_core::ParamSpec { id, name, unit: "dB", min: LEVEL_OFF_DB, max: LEVEL_MAX_DB, default, scale: mite_core::ParamScale::Linear, smoothing_ms: LEVEL_RAMP_MS, decimals: 1, wheel_step: 0.5, wheel_step_fine: 0.1, display: mite_core::ParamDisplay::Number }
+}
+
+/// The block's Dry/Wet state, as gains (`on` false: the plugin's Mix decides).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Levels {
+    on: bool,
+    dry: f32,
+    wet: f32,
+}
+
+fn levels_of(live: &Live) -> Levels {
+    let on = live.kind.param_index(DRY_WET).is_some_and(|i| live.value(i) >= 0.5);
+    Levels { on, dry: level_gain(value_of(live, DRY)), wet: level_gain(value_of(live, WET)) }
+}
 
 /// The host's tempo (bpm), for synced delays and modulations. One per process: the last Rig to
 /// play sets it.
@@ -47,6 +83,11 @@ pub trait Embedded: Send + Sync + 'static {
     }
     /// The parameters the simple view shows (in order).
     fn simple() -> &'static [&'static str];
+    /// Whether the block offers Dry and Wet levels besides the plugin's Mix (its `mix` is a
+    /// linear balance, 100 % being the wet alone).
+    fn dry_wet() -> bool {
+        false
+    }
     fn shared() -> Self::Shared;
     fn set_rate(shared: &Self::Shared, fs: f32);
     fn settings(p: &dyn Fn(&str) -> f32, tempo: f32) -> Self::Settings;
@@ -84,7 +125,7 @@ pub trait Embed: Send + Sync {
 
 struct State<P: Embedded> {
     shared: Arc<P::Shared>,
-    settings: Mutex<P::Settings>,
+    settings: Mutex<(P::Settings, Levels)>,
     version: AtomicU64,
     scratch: Mutex<Scratch>,
     me: std::sync::Weak<State<P>>,
@@ -96,17 +137,35 @@ fn value_of(live: &Live, id: &str) -> f32 {
 
 impl<P: Embedded> Embed for State<P> {
     fn recompute(&self, live: &Live) {
-        let p = |id: &str| value_of(live, id);
+        let levels = levels_of(live);
+        // Dry/Wet: the plugin plays its wet alone; the unit adds the dry.
+        let p = |id: &str| if levels.on && id == "mix" { 100.0 } else { value_of(live, id) };
         let s = P::settings(&p, tempo());
-        *self.settings.lock().unwrap_or_else(|e| e.into_inner()) = s;
+        *self.settings.lock().unwrap_or_else(|e| e.into_inner()) = (s, levels);
         self.version.fetch_add(1, Ordering::AcqRel);
     }
 
     fn unit(&self, fs: f32) -> Box<dyn Unit> {
         let state = self.me.upgrade().expect("the state is alive while it builds");
         P::set_rate(&state.shared, fs);
-        let s = *state.settings.lock().unwrap_or_else(|e| e.into_inner());
-        Box::new(EmbedUnit::<P> { engine: P::engine(fs, &s), local: s, seen: state.version.load(Ordering::Acquire), state })
+        let (s, levels) = *state.settings.lock().unwrap_or_else(|e| e.into_inner());
+        let (d, w) = gains(levels);
+        let smoother = |v: f32| {
+            let mut sm = LinearSmoother::new(v);
+            sm.set_ramp(fs, LEVEL_RAMP_MS);
+            sm
+        };
+        Box::new(EmbedUnit::<P> {
+            engine: P::engine(fs, &s),
+            local: s,
+            levels,
+            seen: state.version.load(Ordering::Acquire),
+            state,
+            dry: [DelayLine::new(MAX_LATENCY), DelayLine::new(MAX_LATENCY)],
+            input: [vec![0.0; SUB], vec![0.0; SUB]],
+            dry_gain: smoother(d),
+            wet_gain: smoother(w),
+        })
     }
 
     fn view(&self) -> Box<dyn View> {
@@ -127,11 +186,23 @@ impl<P: Embedded> Embed for State<P> {
     }
 }
 
+/// The unit's (dry, wet) gains for `levels`: with Mix the plugin's output passes as it is.
+fn gains(levels: Levels) -> (f32, f32) {
+    if levels.on { (levels.dry, levels.wet) } else { (0.0, 1.0) }
+}
+
 struct EmbedUnit<P: Embedded> {
     state: Arc<State<P>>,
     engine: P::Engine,
     local: P::Settings,
+    levels: Levels,
     seen: u64,
+    /// The dry signal, as late as the plugin's output (Dry/Wet).
+    dry: [DelayLine; 2],
+    /// The block's input, kept while the plugin processes in place.
+    input: [Vec<f32>; 2],
+    dry_gain: LinearSmoother,
+    wet_gain: LinearSmoother,
 }
 
 impl<P: Embedded> Unit for EmbedUnit<P> {
@@ -140,11 +211,29 @@ impl<P: Embedded> Unit for EmbedUnit<P> {
         if v != self.seen {
             // Never waits: if the editor is writing right now, the next block takes it.
             if let Ok(s) = self.state.settings.try_lock() {
-                self.local = *s;
+                (self.local, self.levels) = *s;
                 self.seen = v;
             }
         }
+        // The graph hands units at most SUB frames at a time.
+        let n = l.len().min(r.len()).min(SUB);
+        self.input[0][..n].copy_from_slice(&l[..n]);
+        self.input[1][..n].copy_from_slice(&r[..n]);
         P::process(&mut self.engine, l, r, &self.local, &self.state.shared, tempo());
+        let (d, w) = gains(self.levels);
+        self.dry_gain.set_target(d);
+        self.wet_gain.set_target(w);
+        let lat = P::latency(&self.engine).min(MAX_LATENCY);
+        let [dl, dr] = &mut self.dry;
+        dl.delay = lat;
+        dr.delay = lat;
+        // The dry line runs even with Mix, so a switch to Dry/Wet starts from the live input.
+        for i in 0..n {
+            let (xl, xr) = (dl.tick(self.input[0][i]), dr.tick(self.input[1][i]));
+            let (a, b) = (self.dry_gain.next_value(), self.wet_gain.next_value());
+            l[i] = a * xl + b * l[i];
+            r[i] = a * xr + b * r[i];
+        }
     }
 
     fn latency(&self) -> usize {
@@ -153,6 +242,10 @@ impl<P: Embedded> Unit for EmbedUnit<P> {
 
     fn reset(&mut self, _live: &Live) {
         P::reset(&mut self.engine, &self.local);
+        self.dry.iter_mut().for_each(DelayLine::reset);
+        let (d, w) = gains(self.levels);
+        self.dry_gain.reset(d);
+        self.wet_gain.reset(w);
     }
 }
 
@@ -193,6 +286,13 @@ fn params_of<P: Embedded>() -> Vec<BlockParam> {
             p.spec.default = *v;
         }
     }
+    if P::dry_wet() {
+        // Appended: the plugin's own ids keep their places.
+        let switch = mite_core::ParamSpec { unit: "", min: 0.0, max: 1.0, default: 0.0, decimals: 0, wheel_step: 1.0, wheel_step_fine: 1.0, ..level_spec(DRY_WET, "Dry/Wet", 0.0) };
+        out.push(BlockParam { spec: switch, toggle: true, choices: &[] });
+        out.push(BlockParam { spec: level_spec(DRY, "Dry", 0.0), toggle: false, choices: &[] });
+        out.push(BlockParam { spec: level_spec(WET, "Wet", -6.0), toggle: false, choices: &[] });
+    }
     out
 }
 
@@ -224,7 +324,7 @@ macro_rules! kinds {
         /// A new block's plugin state (none for blocks that are not a plugin).
         pub fn state(kind: Kind) -> Option<Arc<dyn Embed>> {
             match kind {
-                $(Kind::$kind => Some(Arc::new_cyclic(|me| State::<$p> { shared: Arc::new(<$p>::shared()), settings: Mutex::new(<$p>::settings(&|id: &str| params(kind).and_then(|ps| ps.iter().find(|p| p.spec.id == id)).map_or(0.0, |p| p.spec.default), tempo())), version: AtomicU64::new(0), scratch: Mutex::new(Scratch::default()), me: me.clone() }) as Arc<dyn Embed>),)*
+                $(Kind::$kind => Some(Arc::new_cyclic(|me| State::<$p> { shared: Arc::new(<$p>::shared()), settings: Mutex::new((<$p>::settings(&|id: &str| params(kind).and_then(|ps| ps.iter().find(|p| p.spec.id == id)).map_or(0.0, |p| p.spec.default), tempo()), Levels::default())), version: AtomicU64::new(0), scratch: Mutex::new(Scratch::default()), me: me.clone() }) as Arc<dyn Embed>),)*
                 _ => None,
             }
         }
@@ -327,6 +427,9 @@ impl Embedded for DelayPlugin {
     fn simple() -> &'static [&'static str] {
         &["mode", "t1_time", "t1_feedback", "mix", "drive", "width", "t1_sync", "t1_pingpong"]
     }
+    fn dry_wet() -> bool {
+        true
+    }
     fn shared() -> Self::Shared {
         mite_delay_core::DelayShared::new()
     }
@@ -376,6 +479,9 @@ impl Embedded for VerbPlugin {
     fn simple() -> &'static [&'static str] {
         &["reverb_type", "decay", "size", "predelay", "mix", "width", "freeze"]
     }
+    fn dry_wet() -> bool {
+        true
+    }
     fn shared() -> Self::Shared {
         mite_verb_core::VerbShared::new()
     }
@@ -420,6 +526,9 @@ impl Embedded for ModPlugin {
     }
     fn simple() -> &'static [&'static str] {
         &["mode", "rate", "depth", "feedback", "mix", "width", "sync"]
+    }
+    fn dry_wet() -> bool {
+        true
     }
     fn shared() -> Self::Shared {
         mite_mod_core::ModShared::new()
@@ -611,6 +720,74 @@ mod tests {
         u.reset(&live);
         let dry = rms(&run(&mut u)[SUB * 4..]);
         assert!(dry < wet * 0.01, "mix 0: {dry} vs {wet}");
+    }
+
+    /// The block's output for a noise burst and its tail, with `set` applied to its values.
+    fn render(kind: Kind, set: &[(&str, f32)]) -> (Vec<f32>, usize) {
+        let live = Live::new(1, kind);
+        for (id, v) in set {
+            live.set(kind.param_index(id).unwrap(), *v);
+        }
+        live.settle();
+        let mut u = crate::blocks::build(&live, 48_000.0);
+        u.reset(&live);
+        let mut seed = 0x1357_9bdfu32;
+        let mut out = Vec::new();
+        for k in 0..120 {
+            let x: Vec<f32> = (0..SUB)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    if k < 20 { 0.3 * (seed as f32 / u32::MAX as f32 * 2.0 - 1.0) } else { 0.0 }
+                })
+                .collect();
+            let (mut l, mut r) = (x.clone(), x);
+            u.process(&mut l, &mut r, &live);
+            out.extend_from_slice(&l);
+        }
+        (out, u.latency())
+    }
+
+    fn diff(a: &[f32], b: &[f32]) -> f32 {
+        rms(&a.iter().zip(b).map(|(x, y)| x - y).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn the_time_based_blocks_offer_dry_and_wet_levels() {
+        for kind in [Kind::Delay, Kind::Reverb, Kind::Mod] {
+            for id in [DRY_WET, DRY, WET] {
+                assert!(kind.param_index(id).is_some(), "{}: {id}", kind.id());
+            }
+        }
+        for kind in [Kind::Comp, Kind::Double, Kind::Tuner] {
+            assert!(kind.param_index(DRY_WET).is_none(), "{}", kind.id());
+        }
+    }
+
+    /// Dry/Wet at the levels a Mix balance gives sounds the same as that Mix; each level alone is
+    /// the dry or the wet alone.
+    #[test]
+    fn dry_and_wet_levels_split_the_mix() {
+        let db = |g: f32| 20.0 * g.log10();
+        for kind in [Kind::Delay, Kind::Reverb, Kind::Mod] {
+            let name = kind.id();
+            let (balance, _) = render(kind, &[("mix", 30.0)]);
+            let (levels, _) = render(kind, &[("mix", 80.0), (DRY_WET, 1.0), (DRY, db(0.7)), (WET, db(0.3))]);
+            assert!(diff(&balance, &levels) < 1e-3 * rms(&balance), "{name}: Dry/Wet at the mix's levels is the mix");
+
+            let (wet_only, _) = render(kind, &[("mix", 100.0)]);
+            let (wet_level, _) = render(kind, &[(DRY_WET, 1.0), (DRY, LEVEL_OFF_DB), (WET, 0.0)]);
+            assert!(diff(&wet_only, &wet_level) < 1e-3 * rms(&wet_only), "{name}: Wet alone is Mix 100 %");
+
+            let (dry_only, _) = render(kind, &[("mix", 0.0)]);
+            let (dry_level, _) = render(kind, &[(DRY_WET, 1.0), (DRY, 0.0), (WET, LEVEL_OFF_DB)]);
+            assert!(diff(&dry_only, &dry_level) < 1e-3 * rms(&dry_only), "{name}: Dry alone is Mix 0 %");
+
+            let (loud, _) = render(kind, &[(DRY_WET, 1.0), (DRY, LEVEL_OFF_DB), (WET, 6.0)]);
+            let ratio = rms(&loud) / rms(&wet_only);
+            assert!((ratio - 2.0).abs() < 0.01, "{name}: Wet +6 dB is twice the wet ({ratio})");
+        }
     }
 
     #[test]

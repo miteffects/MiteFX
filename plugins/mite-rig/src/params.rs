@@ -94,6 +94,9 @@ pub struct RigParams {
     pub preset: Arc<CurrentPreset>,
     /// The board (saved with the state).
     pub board: Arc<Board>,
+    /// A host without parameters (Miteboard) picks the model size here: -1 follows `size`,
+    /// else the choice index (0 Full, 1 Lite).
+    pub size_override: std::sync::atomic::AtomicI8,
 }
 
 impl Default for RigParams {
@@ -111,6 +114,7 @@ impl Default for RigParams {
             snapshots: Arc::new(Snapshots::new()),
             preset: Arc::new(CurrentPreset::default()),
             board: Arc::new(Board::with_default()),
+            size_override: std::sync::atomic::AtomicI8::new(-1),
         }
     }
 }
@@ -129,7 +133,8 @@ impl RigParams {
     }
 
     pub fn model_size(&self) -> f64 {
-        size_value(self.size.value().max(0) as usize)
+        let o = self.size_override.load(std::sync::atomic::Ordering::Relaxed);
+        size_value(if o >= 0 { o as usize } else { self.size.value().max(0) as usize })
     }
 }
 

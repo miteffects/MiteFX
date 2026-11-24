@@ -44,6 +44,12 @@ pub struct Live {
     has_path: AtomicBool,
     /// What the block shows of itself (the tuner's pitch and clarity, the comp's reduction).
     pub readout: [AtomicF32; 3],
+    /// What a [`Kind::Plugin`] block's host keeps with it (opaque to Mite Rig; saved as `"ext"`).
+    pub ext: Mutex<Option<serde_json::Value>>,
+    /// The block's input and output peaks (linear, both sides) since a reader last took them:
+    /// what reaches a threshold, what the block makes of it. Written by the audio thread.
+    pub peak_in: AtomicF32,
+    pub peak_out: AtomicF32,
     /// A block that is one of the suite's plugins: its engine's state, telemetry and editor.
     pub embed: Option<Arc<dyn crate::embed::Embed>>,
     /// An embedded block's values changed since its settings were computed.
@@ -64,6 +70,9 @@ impl Live {
             reload: AtomicBool::new(false),
             has_path: AtomicBool::new(false),
             readout: [AtomicF32::new(0.0), AtomicF32::new(0.0), AtomicF32::new(0.0)],
+            ext: Mutex::new(None),
+            peak_in: AtomicF32::new(0.0),
+            peak_out: AtomicF32::new(0.0),
             embed: crate::embed::state(kind),
             dirty: AtomicBool::new(false),
         }
@@ -104,6 +113,15 @@ impl Live {
                 self.dirty.store(true, Ordering::Release);
             }
         }
+    }
+
+    /// The input and output peaks since the last call (linear), and starts new ones. A reader
+    /// that races a write loses at most one block's peak.
+    pub fn take_peaks(&self) -> (f32, f32) {
+        let p = (self.peak_in.load(), self.peak_out.load());
+        self.peak_in.store(0.0);
+        self.peak_out.store(0.0);
+        p
     }
 
     pub fn bypassed(&self) -> bool {
@@ -246,6 +264,8 @@ struct BlockDoc {
     bypass: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     file: Option<SlotFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ext: Option<serde_json::Value>,
 }
 
 fn half() -> f32 {
@@ -508,6 +528,7 @@ impl Board {
                 values: params.iter().enumerate().filter(|(i, p)| (b.live.value(*i) - p.spec.default).abs() > 1e-6).map(|(i, p)| (p.spec.id.to_owned(), (b.live.value(i) * 1e4).round() / 1e4)).collect(),
                 bypass: b.live.bypassed(),
                 file: Some(b.live.file()).filter(|f| f.path.is_some()),
+                ext: b.live.ext.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             }
         };
         let doc = BoardDoc {
@@ -576,6 +597,7 @@ impl Board {
             }
             live.settle();
             live.bypass.store(d.bypass, Ordering::Relaxed);
+            *live.ext.lock().unwrap_or_else(|e| e.into_inner()) = d.ext.clone();
             let file = d.file.clone().unwrap_or_default();
             if live.set_file_raw(file.clone()) || reused.is_none() {
                 live.set_status(if file.path.is_some() { Status::Loading } else { Status::Empty });

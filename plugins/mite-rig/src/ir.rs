@@ -129,6 +129,7 @@ pub fn prepare(raw: &[f32], file_rate: f64, host_rate: f64) -> Result<(Vec<f64>,
     while h.len() > 1 && h.last().is_some_and(|v| v.abs() <= floor) {
         h.pop();
     }
+    trim_tail(&mut h, host_rate);
     let energy: f64 = h.iter().map(|v| v * v).sum();
     if energy.is_nan() || energy <= 1e-20 || !energy.is_finite() {
         return Err("it is silent".to_owned());
@@ -143,6 +144,33 @@ pub fn prepare(raw: &[f32], file_rate: f64, host_rate: f64) -> Result<(Vec<f64>,
     let g = 1.0 / mean.sqrt();
     h.iter_mut().for_each(|v| *v *= g);
     Ok((h, truncated))
+}
+
+/// What comes after the response's level has dropped for good more than 60 dB below its loudest
+/// part goes (faded over 5 ms): every 2.5 ms window from the cut on stays under that. Cab IRs come
+/// 0.5-0.75 s long with their sound in the first 30-200 ms and a recorded noise floor after it,
+/// inaudible next to the cab, but the convolver paid for every tap: two cabs took the X4's audio
+/// core from 46 % to 62 % (2026-11-17). An energy threshold does not work here: half a second of
+/// a floor 70 dB down still holds more than a millionth of the energy.
+fn trim_tail(h: &mut Vec<f64>, rate: f64) {
+    let w = ((0.0025 * rate) as usize).max(1);
+    let rms: Vec<f64> = h.chunks(w).map(|c| (c.iter().map(|v| v * v).sum::<f64>() / c.len() as f64).sqrt()).collect();
+    let peak = rms.iter().cloned().fold(0.0f64, f64::max);
+    if !(peak > 0.0) {
+        return;
+    }
+    let Some(last) = rms.iter().rposition(|&r| r > peak * 1e-3) else { return };
+    let fade = (0.005 * rate) as usize;
+    let keep = ((last + 1) * w + fade).min(h.len());
+    if keep >= h.len() {
+        return;
+    }
+    h.truncate(keep);
+    let fade = fade.min(keep / 4);
+    for i in 0..fade {
+        let t = (i as f64 + 0.5) / fade as f64;
+        h[keep - fade + i] *= 0.5 + 0.5 * (std::f64::consts::PI * t).cos();
+    }
 }
 
 /// |H(f)|² of a response at `rate`.
@@ -192,6 +220,40 @@ pub fn load(path: &Path, host_rate: f64) -> Result<(Cab, IrInfo), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cab-like response (40 ms of decaying ring) followed by half a second of a noise floor
+    /// 70 dB down, like the TONE3000 packs: the floor is cut, the sound is not.
+    #[test]
+    fn a_long_noise_floor_after_the_cab_is_cut_and_the_response_stays() {
+        let rate = 48_000.0;
+        let mut seed = 0x1357_9bdfu32;
+        let mut noise = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+        };
+        let raw: Vec<f32> = (0..24_000)
+            .map(|i| {
+                let t = i as f32 / 48_000.0;
+                let ring = (-t / 0.006).exp() * (std::f32::consts::TAU * 2_500.0 * t).sin() + (-t / 0.002).exp() * noise();
+                ring + 3e-4 * noise()
+            })
+            .collect();
+        // without the trim: the whole half second
+        let mut full: Vec<f64> = raw.iter().map(|&v| f64::from(v)).collect();
+        let (h, _) = prepare(&raw, rate, rate).unwrap();
+        assert!(h.len() < (0.1 * rate) as usize, "kept {} ms", h.len() as f64 / rate * 1000.0);
+        let g = h[..400].iter().zip(&full[..400]).map(|(a, b)| a / b).find(|r| r.is_finite()).unwrap();
+        full.iter_mut().for_each(|v| *v *= g);
+        for f in [100.0, 400.0, 1_000.0, 2_500.0, 5_000.0] {
+            let (a, b) = (power_at(&h, f, rate), power_at(&full, f, rate));
+            let db = 10.0 * (a / b).log10();
+            // well under what can be heard (the floor removed is a larger share where this
+            // synthetic response is weak, ~0.2 dB at 400 Hz)
+            assert!(db.abs() < 0.5, "{f} Hz moved {db:.2} dB");
+        }
+    }
 
     #[test]
     fn a_response_comes_out_at_0_db_in_the_guitar_band_and_holds_across_rates() {

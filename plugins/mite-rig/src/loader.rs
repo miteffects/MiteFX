@@ -74,7 +74,11 @@ impl LoaderCore {
         };
         live.set_status(Status::Loading);
         let opts = LoadOptions { fast_tanh: true, size: key.size, max_block: MODEL_BLOCK };
-        let result = NamModel::from_file(path, opts);
+        // The right channel's copy builds alongside (dropped if the left one is refused).
+        let (result, right) = std::thread::scope(|s| {
+            let right = s.spawn(|| NamModel::from_file(path, opts).ok());
+            (NamModel::from_file(path, opts), right.join().ok().flatten())
+        });
         self.board.touch();
         match result {
             Ok(model) => {
@@ -92,7 +96,7 @@ impl LoaderCore {
                 let mut loaded = Loaded::new(model, f64::from(key.rate));
                 loaded.full_rig = full_rig;
                 // The right channel's own copy (played only while the block's input is stereo).
-                let right = NamModel::from_file(path, opts).ok().map(|m| {
+                let right = right.map(|m| {
                     let mut r = Loaded::new(m, f64::from(key.rate));
                     r.full_rig = full_rig;
                     r
@@ -112,12 +116,15 @@ impl LoaderCore {
             return Box::new(CabLoad { cab: None, right: None });
         };
         live.set_status(Status::Loading);
-        let result = ir::load(path, f64::from(key.rate));
+        let rate = f64::from(key.rate);
+        let (result, right) = std::thread::scope(|s| {
+            let right = s.spawn(|| ir::load(path, rate).ok().map(|(c, _)| c));
+            (ir::load(path, rate), right.join().ok().flatten())
+        });
         self.board.touch();
         match result {
             Ok((cab, info)) => {
                 live.set_status(Status::Cab(Box::new(info)));
-                let right = ir::load(path, f64::from(key.rate)).ok().map(|(c, _)| c);
                 Box::new(CabLoad { cab: Some(cab), right })
             }
             Err(e) => {
@@ -149,8 +156,8 @@ impl LoaderCore {
             return false;
         }
         let mut built = self.built.lock().unwrap_or_else(|e| e.into_inner());
-        let mut any = false;
         let blocks = self.board.blocks();
+        let mut jobs = Vec::new();
         for b in &blocks {
             let live = &b.live;
             if !live.kind.has_file() {
@@ -164,18 +171,42 @@ impl LoaderCore {
             if same && !reload {
                 continue;
             }
-            match live.kind {
-                Kind::Pedal | Kind::Amp => {
-                    let (m, sized) = self.build_model(live, &key);
-                    live.model.send(m);
-                    built.files.insert(live.id, (key, sized));
+            jobs.push((live, key));
+        }
+        // Built in parallel: a capture's build is mostly its pre-warm (CPU), and a preset holds
+        // several, each twice (left and right). Serially that was the whole of a preset load.
+        // Each block's result goes to the audio thread the moment it is ready.
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).min(jobs.len());
+        let done: Vec<(u64, Key, bool)> = std::thread::scope(|s| {
+            let work = || {
+                let mut out = Vec::new();
+                while let Some((live, key)) = jobs.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let sized = match live.kind {
+                        Kind::Pedal | Kind::Amp => {
+                            let (m, sized) = self.build_model(live, key);
+                            live.model.send(m);
+                            sized
+                        }
+                        _ => {
+                            live.cab.send(self.build_cab(live, key));
+                            false
+                        }
+                    };
+                    out.push((live.id, key.clone(), sized));
                 }
-                _ => {
-                    live.cab.send(self.build_cab(live, &key));
-                    built.files.insert(live.id, (key, false));
-                }
+                out
+            };
+            let helpers: Vec<_> = (1..workers).map(|_| s.spawn(work)).collect();
+            let mut all = work();
+            for h in helpers {
+                all.extend(h.join().unwrap_or_default());
             }
-            any = true;
+            all
+        });
+        let any = !done.is_empty();
+        for (id, key, sized) in done {
+            built.files.insert(id, (key, sized));
         }
         // Blocks no longer on the board are forgotten.
         built.files.retain(|id, _| blocks.iter().any(|b| b.id() == *id));

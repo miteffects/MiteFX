@@ -23,6 +23,8 @@ pub struct Node {
     /// The input, as late as the unit makes its output (a bypass stays in time).
     dry: [Delay; 2],
     tmp: [Vec<f32>; 2],
+    /// This block's bypass amount per sample (0 on … 1 off).
+    gains: Vec<f32>,
 }
 
 impl Node {
@@ -31,7 +33,7 @@ impl Node {
         bypass.set_ramp(fs, 15.0);
         let mut unit = blocks::build(&live, fs);
         unit.reset(&live);
-        Self { id: live.id, unit, bypass, dry: [Delay::new(MAX_LATENCY), Delay::new(MAX_LATENCY)], tmp: [vec![0.0; SUB], vec![0.0; SUB]], live }
+        Self { id: live.id, unit, bypass, dry: [Delay::new(MAX_LATENCY), Delay::new(MAX_LATENCY)], tmp: [vec![0.0; SUB], vec![0.0; SUB]], gains: vec![0.0; SUB], live }
     }
 
     fn latency(&self) -> usize {
@@ -43,18 +45,45 @@ impl Node {
         self.tmp[0][..n].copy_from_slice(l);
         self.tmp[1][..n].copy_from_slice(r);
         self.bypass.set_target(if self.live.bypassed() { 1.0 } else { 0.0 });
+        for g in &mut self.gains[..n] {
+            *g = self.bypass.next_value();
+        }
+        // Delays and reverbs keep their tails (like a pedal with trails, or the GX-100's
+        // carryover): switched off, their INPUT fades out and the dry signal goes around them,
+        // while what is already in them rings out. Anything else crossfades its output to dry.
+        let trails = matches!(self.live.kind, crate::blocks::Kind::Delay | crate::blocks::Kind::Reverb);
+        if trails {
+            for i in 0..n {
+                l[i] *= 1.0 - self.gains[i];
+                r[i] *= 1.0 - self.gains[i];
+            }
+        }
         // Fully bypassed and settled: the unit still runs (its state stays warm, its file
-        // swaps still land), and its output is not used.
+        // swaps still land; with trails it plays out its tail).
         self.unit.process(l, r, &self.live);
         let lat = self.latency();
         let [dl, dr] = &mut self.dry;
         dl.delay = lat;
         dr.delay = lat;
         for i in 0..n {
-            let b = self.bypass.next_value();
+            let b = self.gains[i];
             let (xl, xr) = (dl.tick(self.tmp[0][i]), dr.tick(self.tmp[1][i]));
-            l[i] += b * (xl - l[i]);
-            r[i] += b * (xr - r[i]);
+            if trails {
+                l[i] += b * xl;
+                r[i] += b * xr;
+            } else {
+                l[i] += b * (xl - l[i]);
+                r[i] += b * (xr - r[i]);
+            }
+        }
+        // The meters: peaks in and out, held until the UI takes them.
+        let peak = |a: &[f32], b: &[f32]| a.iter().chain(b).fold(0.0f32, |m, x| m.max(x.abs()));
+        let (pin, pout) = (peak(&self.tmp[0][..n], &self.tmp[1][..n]), peak(l, r));
+        if pin > self.live.peak_in.load() {
+            self.live.peak_in.store(pin);
+        }
+        if pout > self.live.peak_out.load() {
+            self.live.peak_out.store(pout);
         }
     }
 
@@ -343,6 +372,29 @@ mod tests {
         let after: *const dyn Unit = new.find(keep).map(|n| &*n.unit as *const dyn Unit).unwrap();
         assert!(std::ptr::addr_eq(before, after), "the same unit moved over");
         assert!(new.find(boost).is_some());
+    }
+
+    /// A delay switched off keeps its echoes (trails); a boost switched off is plain dry at once.
+    #[test]
+    fn a_delay_switched_off_rings_out_and_passes_dry() {
+        let board = Board::new();
+        let d = board.insert(Kind::Delay, Place::Main(0)).unwrap();
+        let mut g = Graph::build(&board.items(), 48_000.0);
+        // A click, then silence long enough for the first echoes (default time 380 ms).
+        let mut x = vec![0.0f32; 48_000];
+        x[100] = 1.0;
+        let _ = run(&mut g, &x[..4_800]);
+        board.blocks().iter().find(|b| b.id() == d).unwrap().live.bypass.store(true, std::sync::atomic::Ordering::Relaxed);
+        let (l, _) = run(&mut g, &x[4_800..]);
+        let echo = l.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(echo > 0.01, "the echoes still come after it was switched off: peak {echo}");
+        // And with it off, new input passes dry, with no new echoes of it.
+        let mut y = vec![0.0f32; 48_000];
+        y[0] = 0.5;
+        let mut g2 = Graph::build(&board.items(), 48_000.0);
+        let (l2, _) = run(&mut g2, &y);
+        assert!((l2[0] - 0.5).abs() < 1e-3, "dry passes: {}", l2[0]);
+        assert!(l2[1_000..].iter().all(|v| v.abs() < 1e-3), "nothing new goes in while it is off");
     }
 
     /// Pan moves a lane across at the same loudness: hard right, a mono lane is all on the right

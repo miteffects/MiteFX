@@ -63,6 +63,8 @@ impl Look {
             Kind::Tremolo => Look::Stomp(Sign::Tremolo),
             Kind::Double => Look::Stomp(Sign::Double),
             Kind::Tuner => Look::Stomp(Sign::Tuner),
+            // A host's plugin (Miteboard): drawn as a generic stompbox here.
+            Kind::Plugin => Look::Stomp(Sign::Tone),
         }
     }
 }
@@ -115,6 +117,7 @@ pub fn accent_key(kind: Kind) -> &'static str {
         Kind::Delay => "delay",
         Kind::Reverb => "verb",
         Kind::Tuner => "tuner",
+        Kind::Plugin => "utility",
     }
 }
 

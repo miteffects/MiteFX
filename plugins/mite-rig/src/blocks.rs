@@ -47,6 +47,9 @@ pub enum Kind {
     Tuner,
     Wah,
     Octaver,
+    /// A plugin the host runs (Miteboard: a VST3 in its own process), through
+    /// [`crate::external`]. Not in [`Kind::ALL`]: Mite Rig's own editor cannot add one.
+    Plugin,
 }
 
 /// A block's parameter: its spec (the id is frozen), and whether it is a switch.
@@ -133,11 +136,12 @@ impl Kind {
             Kind::Tremolo => "tremolo",
             Kind::Double => "double",
             Kind::Tuner => "tuner",
+            Kind::Plugin => "plugin",
         }
     }
 
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.id() == id)
+        Self::ALL.into_iter().chain([Kind::Plugin]).find(|k| k.id() == id)
     }
 
     /// The NAM captures (they play `.nam` files).
@@ -170,6 +174,7 @@ impl Kind {
             Kind::Tremolo => "Tremolo",
             Kind::Double => "Double",
             Kind::Tuner => "Tuner",
+            Kind::Plugin => "Plugin",
         }
     }
 
@@ -193,6 +198,7 @@ impl Kind {
             Kind::Tremolo => "Tremolo: sine, square or harmonic",
             Kind::Double => "A doubled part from one take (Mite Double's)",
             Kind::Tuner => "A tuner (Mite Tuner's): the note on the block, muted while tuning if asked",
+            Kind::Plugin => "A plugin the host runs (a VST3 in Miteboard)",
         }
     }
 
@@ -208,6 +214,8 @@ impl Kind {
             Kind::Tremolo => &crate::pedals::TREMOLO,
             Kind::Wah => &crate::pedals::WAH,
             Kind::Octaver => &crate::pedals::OCTAVER,
+            // Its parameters are the plugin's own, known only to the host.
+            Kind::Plugin => &[],
             // The suite's plugins: their whole parameter sets.
             _ => crate::embed::params(self).unwrap_or(&[]),
         }
@@ -270,6 +278,7 @@ pub fn build(live: &crate::board::Live, fs: f32) -> Box<dyn Unit> {
         Kind::Tremolo => Box::new(crate::pedals::TremoloUnit::new(fs)),
         Kind::Wah => Box::new(crate::pedals::WahUnit::new(fs)),
         Kind::Octaver => Box::new(crate::pedals::OctaverUnit::new(fs)),
+        Kind::Plugin => crate::external::unit(live, fs),
         _ => unreachable!("the suite's plugins are embedded"),
     }
 }

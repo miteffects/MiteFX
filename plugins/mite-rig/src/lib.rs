@@ -17,6 +17,7 @@ pub mod bracket;
 pub mod editor;
 pub mod embed;
 pub mod engine;
+pub mod external;
 pub mod graph;
 pub mod ir;
 pub mod loader;
