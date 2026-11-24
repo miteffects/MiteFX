@@ -1,0 +1,246 @@
+{
+ "mite-eq": [
+  [
+   "img/mite-eq-1.webp",
+   "A band as a transient shaper: attack up, sustain down, only where the band sits"
+  ],
+  [
+   "img/mite-eq-2.webp",
+   "Linear Phase: no phase shift, the latency reported to the host"
+  ],
+  [
+   "img/mite-eq-3.webp",
+   "Light theme (also high contrast and colour-blind)"
+  ]
+ ],
+ "mite-comp": [
+  [
+   "img/mite-comp-1.webp",
+   "Stages: several compressors in series, each drawn on the history"
+  ],
+  [
+   "img/mite-comp-2.webp",
+   "Character: from clean to vocal, opto and FET-like styles"
+  ],
+  [
+   "img/mite-comp-3.webp",
+   "Sidechain with its own EQ, external or internal"
+  ]
+ ],
+ "mite-limit": [
+  [
+   "img/mite-limit-1.webp",
+   "Pushed 12 dB: every peak it caught, drawn as it happened"
+  ],
+  [
+   "img/mite-limit-2.webp",
+   "Preview: hear the master as Spotify will turn it down"
+  ],
+  [
+   "img/mite-limit-3.webp",
+   "The clipper before the limiter, for the last few dB"
+  ]
+ ],
+ "mite-multiband": [
+  [
+   "img/mite-multiband-1.webp",
+   "Up to six bands, crossovers dragged on the spectrum"
+  ],
+  [
+   "img/mite-multiband-2.webp",
+   "Solo a band to hear exactly what it holds"
+  ],
+  [
+   "img/mite-multiband-3.webp",
+   "A sidechain EQ keys each band from what you choose"
+  ]
+ ],
+ "mite-shape": [
+  [
+   "img/mite-shape-1.webp",
+   "Per band: tighten the kick, soften the hats"
+  ],
+  [
+   "img/mite-shape-2.webp",
+   "The detector: how it finds a hit, adjustable"
+  ],
+  [
+   "img/mite-shape-3.webp",
+   "Split a band anywhere by dragging in the spectrum"
+  ]
+ ],
+ "mite-sat": [
+  [
+   "img/mite-sat-1.webp",
+   "Multiband: a different saturation on each band"
+  ],
+  [
+   "img/mite-sat-2.webp",
+   "Tape: magnetic hysteresis, soft and warm"
+  ],
+  [
+   "img/mite-sat-3.webp",
+   "Up to 16\u00d7 oversampling, linear or minimum phase"
+  ]
+ ],
+ "mite-gate": [
+  [
+   "img/mite-gate-1.webp",
+   "MIDI trigger out: replace or layer drums from the hits"
+  ],
+  [
+   "img/mite-gate-2.webp",
+   "Sidechain EQ: open on the kick, ignore the bleed"
+  ],
+  [
+   "img/mite-gate-3.webp",
+   "Expander mode for gentle downward control"
+  ]
+ ],
+ "mite-deess": [
+  [
+   "img/mite-deess-1.webp",
+   "Spectral: only the bins that hiss are turned down"
+  ],
+  [
+   "img/mite-deess-2.webp",
+   "Wideband: the classic de-esser, whole signal ducks"
+  ],
+  [
+   "img/mite-deess-3.webp",
+   "Split band: only the sibilant range is reduced"
+  ]
+ ],
+ "mite-denoise": [
+  [
+   "img/mite-denoise-1.webp",
+   "A learned noise profile, held fixed"
+  ],
+  [
+   "img/mite-denoise-2.webp",
+   "Learning: it listens to the gaps between words"
+  ],
+  [
+   "img/mite-denoise-3.webp",
+   "Listen to what it takes out: only noise, no voice"
+  ]
+ ],
+ "mite-verb": [
+  [
+   "img/mite-verb-1.webp",
+   "A large dark hall: decay shaped with shelves and cuts"
+  ],
+  [
+   "img/mite-verb-2.webp",
+   "Decay bells: a longer tail only where you want it"
+  ],
+  [
+   "img/mite-verb-3.webp",
+   "Freeze: hold the tail as a pad"
+  ]
+ ],
+ "mite-delay": [
+  [
+   "img/mite-delay-1.webp",
+   "Four taps and an EQ inside the feedback loop"
+  ],
+  [
+   "img/mite-delay-2.webp",
+   "Tape: wow, flutter and saturation on every repeat"
+  ],
+  [
+   "img/mite-delay-3.webp",
+   "Ducking: the echoes step aside while you play"
+  ]
+ ],
+ "mite-mod": [
+  [
+   "img/mite-mod-1.webp",
+   "Rotary speaker: horn and drum, slow and fast"
+  ],
+  [
+   "img/mite-mod-2.webp",
+   "Phaser with its notches drawn live"
+  ],
+  [
+   "img/mite-mod-3.webp",
+   "Flanger, through-zero too"
+  ]
+ ],
+ "mite-double": [
+  [
+   "img/mite-double-1.webp",
+   "Three doubles, spread across the stereo field"
+  ],
+  [
+   "img/mite-double-3.webp",
+   "Light theme"
+  ]
+ ],
+ "mite-pitch": [
+  [
+   "img/mite-pitch-1.webp",
+   "ARA: the whole track, no transfer, edits play at once"
+  ],
+  [
+   "img/mite-pitch-2.webp",
+   "Light theme"
+  ]
+ ],
+ "mite-tuner": [
+  [
+   "img/mite-tuner-1.webp",
+   "In tune: within \u00b12 cents"
+  ],
+  [
+   "img/mite-tuner-2.webp",
+   "Low E, a little flat"
+  ],
+  [
+   "img/mite-tuner-3.webp",
+   "Light theme"
+  ]
+ ],
+ "mite-analyzer": [
+  [
+   "img/mite-analyzer-1.webp",
+   "Mid / Side: the spectrum of each"
+  ],
+  [
+   "img/mite-analyzer-2.webp",
+   "Phase page: the phase response of a whole chain"
+  ],
+  [
+   "img/mite-analyzer-3.webp",
+   "Measure against loudness targets"
+  ]
+ ],
+ "mite-rig": [
+  [
+   "img/mite-rig-1.webp",
+   "Split into parallel lanes: boost, tone, dry"
+  ],
+  [
+   "img/mite-rig-2.webp",
+   "Our own pedals, with full editors"
+  ],
+  [
+   "img/mite-rig-3.webp",
+   "Browse NAM captures and cabinet IRs"
+  ]
+ ],
+ "mite-gain": [
+  [
+   "img/mite-gain-1.webp",
+   "Light theme"
+  ],
+  [
+   "img/mite-gain-2.webp",
+   "High-contrast theme"
+  ],
+  [
+   "img/mite-gain-3.webp",
+   "Colour-blind theme"
+  ]
+ ]
+}

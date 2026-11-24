@@ -9,7 +9,7 @@
 <meta property="og:description" content="18 free plugins, VST3 and CLAP, for Windows, macOS and Linux.">
 <meta property="og:image" content="img/mite-sat.webp">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101217'/%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M10.5 15 L5 12 M10 19 L4 19 M10.5 23 L5 26 M21.5 15 L27 12 M22 19 L28 19 M21.5 23 L27 26' stroke='%23a3abb8' stroke-width='1.6'/%3E%3Cpath d='M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z M18.6 7.4 A2.6 2.6 0 1 1 13.4 7.4 A2.6 2.6 0 1 1 18.6 7.4 Z' stroke='%23e8ebf0' stroke-width='2'/%3E%3Cpath d='M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21' stroke='%23F0284A' stroke-width='2.2'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div class="meter" aria-hidden="true"><i></i></div>
@@ -51,7 +51,7 @@
 
 <section id="plugins">
   <h2>The plugins</h2>
-  <p class="sub">Every control is something you can see and grab: curves you drag, histories you read, honest meters.</p>
+  <p class="sub">Every control is something you can see and grab: curves you drag, histories you read, honest meters. Click a plugin for more.</p>
   <div class="grid" id="grid"></div>
 </section>
 
@@ -128,16 +128,103 @@ const plugins = [
   ["mite-rig", "Mite Rig", "#FFD4BF", "Guitar and bass rig: a pedalboard with parallel lanes, Neural Amp Modeler captures, cabinets and our own pedals."],
   ["mite-gain", "Mite Gain", "#95A0AB", "Gain with a meter: the smallest plugin, for trimming levels anywhere in a chain."],
 ];
+const FEATURES = {
+  "mite-eq": ["Bands drawn on a live pre/post spectrum: drag, scroll, double-click", "Dynamic bands, and bands that shape transients", "Zero latency, natural phase or linear phase", "Masking view between instances: see where tracks fight", "Match to a reference file; an auto shape that suggests a curve", "Stereo, Mid or Side per band"],
+  "mite-comp": ["Styles from clean to vocal, each a different detector and knee", "Stages: compressors in series on one history", "Auto release and auto makeup that holds through phrases", "Sidechain with listen, lookahead, stereo link and Mid/Side", "Delta: hear only what it takes away"],
+  "mite-limit": ["True-peak ceiling with oversampling", "Loudness meters and targets: streaming, EBU R128, your own", "Preview: hear your master as the platforms will play it", "A clipper before the limiter, and dither", "Transient protection keeps the punch"],
+  "mite-multiband": ["Up to six bands, crossovers dragged on the spectrum", "Each band's gain history drawn over the spectrum", "Sidechain, and a sidechain EQ to key each band", "Lookahead across bands, auto gain", "Solo, bypass and delta per band"],
+  "mite-shape": ["More or less attack and sustain, per band", "Every hit shown in a focus view", "A clip stage for the peaks it brings up", "Adjustable detector and lookahead", "Stereo, Mid/Side, and delta listening"],
+  "mite-sat": ["Nine models: tape, tube, transformer, diode, soft, hard, fold, rectify and drawn harmonics", "Up to six bands, each its own model", "Punch and body: drive that follows the hits or the sustain", "Feedback, bias, auto gain", "Up to 16× oversampling, linear or minimum phase", "A modulation matrix"],
+  "mite-gate": ["Gate, expander and ducker", "Sidechain from any source, with its own EQ", "Lookahead so no attack is lost", "MIDI trigger out for drum replacement", "Listen and delta"],
+  "mite-deess": ["Detection relative to the voice, not a fixed threshold", "Four ways to reduce: wideband, split band, spectral and more", "A heat map of what it caught", "Auto gain and lookahead"],
+  "mite-denoise": ["Learns the noise from the gaps between words", "Adaptive, or a learned profile held fixed", "Listen to only what it removes", "No swirl: the threshold drawn over the noise floor"],
+  "mite-verb": ["Rooms, halls and plates with long modulated tails", "Shimmer", "Decay shaped with bells, shelves and cuts", "Freeze and ducking", "A history of the tail as it falls"],
+  "mite-delay": ["Four taps, placed by dragging", "Digital, tape or bucket-brigade", "An EQ inside the feedback loop", "Ducking and tempo sync", "A modulation matrix"],
+  "mite-mod": ["Chorus, ensemble, flanger (through-zero too), phaser, vibrato", "A rotary speaker, slow and fast", "Micro pitch shift for width", "Free or tempo-synced, with a modulation matrix"],
+  "mite-double": ["Up to three doubles from one take", "Timing and pitch drift like a second performance", "Stereo spread, correlation drawn", "Auto gain"],
+  "mite-pitch": ["Notes detected and drawn: drag pitch and timing", "Snap to scale and grid, bars and beats", "ARA in VST3 hosts: the whole track, no transfer", "Edits play at once, with undo"],
+  "mite-tuner": ["A big note you can read across the room", "A cents strip and a pitch trace", "Sub-cent accuracy", "Alternate tunings"],
+  "mite-analyzer": ["Loudness (LUFS) and true peak", "Spectrum and spectrogram, L/R or Mid/Side", "Stereo image", "The phase response of a whole chain"],
+  "mite-rig": ["A pedalboard with parallel lanes", "Neural Amp Modeler captures and cabinet IRs", "Browse TONE3000 captures", "Our own pedals, macros and MIDI control", "Board presets with undo"],
+  "mite-gain": ["Gain with a meter", "Dark, light, high-contrast and colour-blind themes"],
+};
 const grid = document.getElementById("grid");
+let SHOTS = {};
 for (const [slug, name, accent, words] of plugins) {
   const card = document.createElement("article");
   card.className = "card";
+  card.id = slug;
+  card.tabIndex = 0;
   card.style.setProperty("--accent", accent);
+  card.setAttribute("aria-expanded", "false");
   card.innerHTML = `<div class="shot"><img loading="lazy" src="img/${slug}.webp" alt="${name}" width="1280" height="760"></div>
-    <h3><span class="dot"></span>${name}</h3><p>${words}</p>`;
+    <div class="body"><h3><span class="dot"></span>${name}<span class="more-hint" aria-hidden="true">+</span></h3><p>${words}</p>
+    <ul class="features">${(FEATURES[slug] || []).map((f) => `<li>${f}</li>`).join("")}</ul>
+    <p class="caption"></p><div class="thumbs"></div>
+    <button class="close" type="button" aria-label="Close">×</button></div>`;
   grid.appendChild(card);
 }
+fetch("shots.json").then((r) => r.json()).then((j) => { SHOTS = j; }).catch(() => {});
+
+// A card opens across the grid: a large screen, more screens, and what the plugin offers.
+function setShot(card, i) {
+  const list = card._shots;
+  card._i = (i + list.length) % list.length;
+  const [src, cap] = list[card._i];
+  const img = card.querySelector(".shot img");
+  img.classList.add("swap");
+  const next = new Image();
+  next.onload = () => { img.src = src; img.classList.remove("swap"); };
+  next.src = src;
+  card.querySelector(".caption").textContent = cap;
+  card.querySelectorAll(".thumbs button").forEach((b, k) => b.classList.toggle("on", k === card._i));
+}
+function toggle(card, open) {
+  const was = grid.querySelector(".card.expanded");
+  const go = () => {
+    if (was && was !== card) close(was);
+    if (!open) { close(card); return; }
+    const slug = card.id;
+    card._shots = [[`img/${slug}.webp`, "The main view"], ...(SHOTS[slug] || [])];
+    card.querySelector(".thumbs").innerHTML = card._shots.map(([src], k) => `<button type="button" aria-label="Screen ${k + 1}"><img src="${src}" alt="" loading="lazy"></button>`).join("");
+    card.querySelectorAll(".thumbs button").forEach((b, k) => b.addEventListener("click", (e) => { e.stopPropagation(); setShot(card, k); }));
+    card.classList.add("expanded");
+    card.setAttribute("aria-expanded", "true");
+    setShot(card, 0);
+  };
+  if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    for (const c of grid.children) c.style.viewTransitionName = `c-${c.id}`;
+    const vt = document.startViewTransition(go);
+    vt.finished.finally(() => { for (const c of grid.children) c.style.viewTransitionName = ""; if (open) card.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
+  } else { go(); if (open) card.scrollIntoView({ block: "nearest" }); }
+}
+function close(card) {
+  card.classList.remove("expanded");
+  card.setAttribute("aria-expanded", "false");
+  card.querySelector(".shot img").src = `img/${card.id}.webp`;
+}
+grid.addEventListener("click", (e) => {
+  const card = e.target.closest(".card");
+  if (!card) return;
+  if (e.target.closest(".close")) { e.stopPropagation(); toggle(card, false); return; }
+  if (card.classList.contains("expanded")) {
+    if (e.target.closest(".shot")) setShot(card, card._i + 1);
+    return;
+  }
+  toggle(card, true);
+});
+document.addEventListener("keydown", (e) => {
+  const open = grid.querySelector(".card.expanded");
+  if (e.key === "Enter" && e.target.classList?.contains("card") && !open) toggle(e.target, true);
+  if (!open) return;
+  if (e.key === "Escape") toggle(open, false);
+  if (e.key === "ArrowRight") setShot(open, open._i + 1);
+  if (e.key === "ArrowLeft") setShot(open, open._i - 1);
+});
+if (location.hash && document.getElementById(location.hash.slice(1))?.classList.contains("card")) {
+  addEventListener("load", () => setTimeout(() => toggle(document.getElementById(location.hash.slice(1)), true), 300));
+}
 </script>
-<script src="live.js?v=4" defer></script>
+<script src="live.js?v=5" defer></script>
 </body>
 </html>
