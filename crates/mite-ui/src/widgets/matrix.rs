@@ -64,7 +64,7 @@ pub struct MatrixPanel {
     picking: Option<usize>,
 }
 
-fn slot_id(slot: usize, what: &str) -> String {
+fn slot_id(slot: usize, what: &str) -> mite_core::ParamId {
     mod_id(slot, what)
 }
 

@@ -7,6 +7,7 @@
 pub mod handover;
 pub mod modmatrix;
 pub mod param;
+pub mod param_id;
 pub mod presets;
 pub mod registry;
 pub mod snapshots;
@@ -14,6 +15,7 @@ pub mod telemetry;
 pub mod undo;
 
 pub use param::{manifest, BoolSpec, ChoiceSpec, DialCurve, ParamDisplay, ParamScale, ParamSpec};
+pub use param_id::ParamId;
 pub use registry::Registry;
 pub use undo::History;
 pub use handover::{triple_buffer, Handover, TripleReader, TripleWriter};

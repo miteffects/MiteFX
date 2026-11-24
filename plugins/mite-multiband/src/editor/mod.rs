@@ -102,7 +102,7 @@ fn lanes(grow: f64) -> Lanes {
 }
 
 fn rail_params() -> RailParams {
-    RailParams { cross_on: |k| cross_id(k, X_ON.id), cross_freq: |k| cross_id(k, X_FREQ.id), freq: X_FREQ, solo: |b| band_id(b, B_SOLO.id), mute: |b| band_id(b, B_MUTE.id), copy: MbView::copy_band }
+    RailParams { cross_on: |k| String::from(cross_id(k, X_ON.id)), cross_freq: |k| String::from(cross_id(k, X_FREQ.id)), freq: X_FREQ, solo: |b| String::from(band_id(b, B_SOLO.id)), mute: |b| String::from(band_id(b, B_MUTE.id)), copy: MbView::copy_band }
 }
 
 /// A band's sound settings, in copy order.

@@ -1342,12 +1342,12 @@ impl CompView {
                 let col = (STAGE_PANEL.x1 - 14.0 - 36.0 - 12.0 - x0) / 3.0;
                 let at = |i: usize| Point::new(x0 + col * ((i % 3) as f64 + 0.5), STAGE_PANEL.y0 + 50.0 + 94.0 * (i / 3) as f64);
                 vec![
-                    Self::knob(S_THRESH, stage_id(slot, S_THRESH.id), "THRESHOLD", at(0)),
-                    Self::knob(S_RATIO, stage_id(slot, S_RATIO.id), "RATIO", at(1)),
-                    Self::knob(S_KNEE, stage_id(slot, S_KNEE.id), "KNEE", at(2)),
-                    Self::knob(S_ATTACK, stage_id(slot, S_ATTACK.id), "ATTACK", at(3)).with_curve(ATTACK_DIAL),
-                    Self::knob(S_RELEASE, stage_id(slot, S_RELEASE.id), "RELEASE", at(4)).with_curve(RELEASE_DIAL),
-                    Self::knob(S_RANGE, stage_id(slot, S_RANGE.id), "RANGE", at(5)),
+                    Self::knob(S_THRESH, String::from(stage_id(slot, S_THRESH.id)), "THRESHOLD", at(0)),
+                    Self::knob(S_RATIO, String::from(stage_id(slot, S_RATIO.id)), "RATIO", at(1)),
+                    Self::knob(S_KNEE, String::from(stage_id(slot, S_KNEE.id)), "KNEE", at(2)),
+                    Self::knob(S_ATTACK, String::from(stage_id(slot, S_ATTACK.id)), "ATTACK", at(3)).with_curve(ATTACK_DIAL),
+                    Self::knob(S_RELEASE, String::from(stage_id(slot, S_RELEASE.id)), "RELEASE", at(4)).with_curve(RELEASE_DIAL),
+                    Self::knob(S_RANGE, String::from(stage_id(slot, S_RANGE.id)), "RANGE", at(5)),
                 ]
             }
             Panel::Custom => {

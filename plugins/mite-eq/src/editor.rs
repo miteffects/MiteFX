@@ -64,7 +64,7 @@ pub fn memory_host() -> mite_ui::MemoryParamHost {
         .with(boolean(&DELTA))
         .with(boolean(&BYPASS));
     for b in 0..BANDS {
-        let id = |param: &str| leak(band_id(b, param));
+        let id = |param: &str| leak(String::from(band_id(b, param)));
         host = host
             .with_id(id(ON.id), boolean(&ON))
             .with_id(id(TYPE.id), choice(&TYPE))
@@ -261,30 +261,30 @@ struct BandIds {
 impl BandIds {
     fn new(b: usize) -> Self {
         Self {
-            on: band_id(b, ON.id),
-            kind: band_id(b, TYPE.id),
-            freq: band_id(b, FREQ.id),
-            gain: band_id(b, GAIN.id),
-            q: band_id(b, Q.id),
-            slope: band_id(b, SLOPE.id),
-            stereo: band_id(b, STEREO.id),
-            dyn_on: band_id(b, DYN.id),
-            range: band_id(b, RANGE.id),
-            thresh: band_id(b, THRESH.id),
-            attack: band_id(b, ATTACK.id),
-            release: band_id(b, RELEASE.id),
-            ratio: band_id(b, RATIO.id),
-            dmode: band_id(b, DMODE.id),
-            sustain: band_id(b, SUSTAIN.id),
-            transient: band_id(b, TRANSIENT.id),
-            ttime: band_id(b, TTIME.id),
-            transition: band_id(b, TRANSITION.id),
-            spectral: band_id(b, SPECTRAL.id),
-            srel: band_id(b, SREL.id),
-            rthresh: band_id(b, RTHRESH.id),
-            ssmooth: band_id(b, SSMOOTH.id),
-            solo: band_id(b, SOLO.id),
-            dsrc: band_id(b, DSRC.id),
+            on: String::from(band_id(b, ON.id)),
+            kind: String::from(band_id(b, TYPE.id)),
+            freq: String::from(band_id(b, FREQ.id)),
+            gain: String::from(band_id(b, GAIN.id)),
+            q: String::from(band_id(b, Q.id)),
+            slope: String::from(band_id(b, SLOPE.id)),
+            stereo: String::from(band_id(b, STEREO.id)),
+            dyn_on: String::from(band_id(b, DYN.id)),
+            range: String::from(band_id(b, RANGE.id)),
+            thresh: String::from(band_id(b, THRESH.id)),
+            attack: String::from(band_id(b, ATTACK.id)),
+            release: String::from(band_id(b, RELEASE.id)),
+            ratio: String::from(band_id(b, RATIO.id)),
+            dmode: String::from(band_id(b, DMODE.id)),
+            sustain: String::from(band_id(b, SUSTAIN.id)),
+            transient: String::from(band_id(b, TRANSIENT.id)),
+            ttime: String::from(band_id(b, TTIME.id)),
+            transition: String::from(band_id(b, TRANSITION.id)),
+            spectral: String::from(band_id(b, SPECTRAL.id)),
+            srel: String::from(band_id(b, SREL.id)),
+            rthresh: String::from(band_id(b, RTHRESH.id)),
+            ssmooth: String::from(band_id(b, SSMOOTH.id)),
+            solo: String::from(band_id(b, SOLO.id)),
+            dsrc: String::from(band_id(b, DSRC.id)),
         }
     }
 }

@@ -55,7 +55,7 @@ pub fn v6_to_v7(state: &mut PluginState) {
 /// normalized values: `d…_type` was index / 3 and is now index / 5 (unchanged, a Low Shelf
 /// snapshot would come back a High Shelf), so every slot's shapes are rescaled.
 pub fn v7_to_v8(state: &mut PluginState) {
-    let ids: Vec<String> = (0..mite_dsp::reverb::DECAY_BANDS).map(|b| band_id(b, D_TYPE.id)).collect();
+    let ids: Vec<String> = (0..mite_dsp::reverb::DECAY_BANDS).map(|b| String::from(band_id(b, D_TYPE.id))).collect();
     rescale_snapshot_choices(state, &ids, 4, D_TYPE.choices.len());
 }
 
@@ -109,20 +109,20 @@ fn lifted(get: impl Fn(&ParamSpec) -> Option<f32>) -> Vec<(String, New)> {
     let q = std::f32::consts::FRAC_1_SQRT_2;
     for (band, shape, mult, freq) in [(4, DecayShape::LowShelf, v(&LO_MULT), v(&LO_FREQ)), (5, DecayShape::HighShelf, v(&HI_MULT), v(&HI_FREQ))] {
         if (mult - 1.0).abs() > 1e-4 {
-            out.push((band_id(band, D_ON.id), New::Flag(true)));
-            out.push((band_id(band, D_TYPE.id), New::Choice(shape.index(), D_TYPE.choices.len())));
-            out.push((band_id(band, D_FREQ.id), New::Plain(D_FREQ, freq)));
-            out.push((band_id(band, D_MULT.id), New::Plain(D_MULT, mult)));
-            out.push((band_id(band, D_Q.id), New::Plain(D_Q, q.max(D_Q.min))));
+            out.push((String::from(band_id(band, D_ON.id)), New::Flag(true)));
+            out.push((String::from(band_id(band, D_TYPE.id)), New::Choice(shape.index(), D_TYPE.choices.len())));
+            out.push((String::from(band_id(band, D_FREQ.id)), New::Plain(D_FREQ, freq)));
+            out.push((String::from(band_id(band, D_MULT.id)), New::Plain(D_MULT, mult)));
+            out.push((String::from(band_id(band, D_Q.id)), New::Plain(D_Q, q.max(D_Q.min))));
         }
     }
     for (band, kind, freq, acts) in [(0, 3, v(&LO_CUT), v(&LO_CUT) > 20.5), (1, 4, v(&HI_CUT), v(&HI_CUT) < 19_900.0)] {
         if acts {
-            out.push((tone_id(band, E_ON.id), New::Flag(true)));
-            out.push((tone_id(band, E_TYPE.id), New::Choice(kind, E_TYPE.choices.len())));
-            out.push((tone_id(band, E_FREQ.id), New::Plain(E_FREQ, freq.clamp(E_FREQ.min, E_FREQ.max))));
-            out.push((tone_id(band, E_Q.id), New::Plain(E_Q, q)));
-            out.push((tone_id(band, E_SLOPE.id), New::Choice(1, E_SLOPE.choices.len())));
+            out.push((String::from(tone_id(band, E_ON.id)), New::Flag(true)));
+            out.push((String::from(tone_id(band, E_TYPE.id)), New::Choice(kind, E_TYPE.choices.len())));
+            out.push((String::from(tone_id(band, E_FREQ.id)), New::Plain(E_FREQ, freq.clamp(E_FREQ.min, E_FREQ.max))));
+            out.push((String::from(tone_id(band, E_Q.id)), New::Plain(E_Q, q)));
+            out.push((String::from(tone_id(band, E_SLOPE.id)), New::Choice(1, E_SLOPE.choices.len())));
         }
     }
     out
@@ -165,8 +165,8 @@ fn lift_snapshots(json: &str) -> Option<String> {
         // The bells' frequencies: the range grew (50…16 000 Hz → 20…20 000 Hz).
         for b in 0..V2_BANDS {
             let id = band_id(b, D_FREQ.id);
-            if let Some(n) = values.get(&id).and_then(serde_json::Value::as_f64) {
-                values.insert(id, D_FREQ.normalize(OLD_D_FREQ.denormalize(n as f32)).into());
+            if let Some(n) = values.get((id).as_str()).and_then(serde_json::Value::as_f64) {
+                values.insert(String::from(id), D_FREQ.normalize(OLD_D_FREQ.denormalize(n as f32)).into());
             }
         }
         if !GONE.iter().any(|s| values.contains_key(s.id)) {

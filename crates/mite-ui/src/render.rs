@@ -38,6 +38,11 @@ pub fn render_view(view: &mut dyn View, host: &dyn ParamHost, theme: &Theme, sca
 
     let mut cx = RenderContext::new();
     let dev_id = pollster::block_on(cx.device(None)).ok_or("no compatible GPU device")?;
+    // Windows without a GPU offers WARP, its software renderer, which crashes on Vello's
+    // compute shaders (CI machines): treated as no GPU, so GPU tests skip there.
+    if cfg!(windows) && cx.devices[dev_id].adapter().get_info().device_type == wgpu::DeviceType::Cpu {
+        return Err("only a software renderer (WARP)".into());
+    }
     let device = &cx.devices[dev_id].device;
     let queue = &cx.devices[dev_id].queue;
     let mut renderer = Renderer::new(

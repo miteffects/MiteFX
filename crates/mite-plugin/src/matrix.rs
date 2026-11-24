@@ -88,11 +88,11 @@ impl MatrixParams {
     pub fn param_map(&self, map: &mut Vec<(String, ParamPtr, String)>) {
         for (i, l) in self.lfos.iter().enumerate() {
             let group = format!("LFO {}", i + 1);
-            map.push((lfo_id(i, LFO_RATE.id), l.rate.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_SYNC.id), l.sync.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_DIV.id), l.div.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_SHAPE.id), l.shape.as_ptr(), group.clone()));
-            map.push((lfo_id(i, LFO_PHASE.id), l.phase.as_ptr(), group));
+            map.push((String::from(lfo_id(i, LFO_RATE.id)), l.rate.as_ptr(), group.clone()));
+            map.push((String::from(lfo_id(i, LFO_SYNC.id)), l.sync.as_ptr(), group.clone()));
+            map.push((String::from(lfo_id(i, LFO_DIV.id)), l.div.as_ptr(), group.clone()));
+            map.push((String::from(lfo_id(i, LFO_SHAPE.id)), l.shape.as_ptr(), group.clone()));
+            map.push((String::from(lfo_id(i, LFO_PHASE.id)), l.phase.as_ptr(), group));
         }
         let group = "Envelope".to_owned();
         map.push((ENV_ATT.id.to_owned(), self.env_att.as_ptr(), group.clone()));
@@ -103,9 +103,9 @@ impl MatrixParams {
         }
         for (i, m) in self.slots.iter().enumerate() {
             let group = "Modulation".to_owned();
-            map.push((mod_id(i, M_SRC.id), m.src.as_ptr(), group.clone()));
-            map.push((mod_id(i, "dst"), m.dst.as_ptr(), group.clone()));
-            map.push((mod_id(i, M_AMT.id), m.amt.as_ptr(), group));
+            map.push((String::from(mod_id(i, M_SRC.id)), m.src.as_ptr(), group.clone()));
+            map.push((String::from(mod_id(i, "dst")), m.dst.as_ptr(), group.clone()));
+            map.push((String::from(mod_id(i, M_AMT.id)), m.amt.as_ptr(), group));
         }
     }
 }

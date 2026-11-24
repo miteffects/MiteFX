@@ -107,13 +107,13 @@ pub const E_Q: ParamSpec = spec("q", "Q", "", 0.1, 10.0, std::f32::consts::FRAC_
 pub const E_SLOPE: ChoiceSpec = ChoiceSpec { id: "slope", name: "Slope", choices: &["6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "30 dB/oct", "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct"], default: DEFAULT_SLOPE };
 
 /// A decay band parameter's id, e.g. `d2_mult` (`band` from 0).
-pub fn band_id(band: usize, param: &str) -> String {
-    format!("d{}_{param}", band + 1)
+pub fn band_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("d", band + 1, 0, param)
 }
 
 /// A tone band parameter's id, e.g. `e2_gain` (`band` from 0).
-pub fn tone_id(band: usize, param: &str) -> String {
-    format!("e{}_{param}", band + 1)
+pub fn tone_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("e", band + 1, 0, param)
 }
 
 /// Dials: common values get more travel.
@@ -460,12 +460,12 @@ unsafe impl Params for VerbParams {
         ];
         for (b, band) in self.bands.iter().enumerate() {
             for (id, ptr) in [(D_ON.id, band.on.as_ptr()), (D_TYPE.id, band.kind.as_ptr()), (D_FREQ.id, band.freq.as_ptr()), (D_MULT.id, band.mult.as_ptr()), (D_Q.id, band.q.as_ptr())] {
-                map.push((band_id(b, id), ptr, "Decay EQ".to_owned()));
+                map.push((String::from(band_id(b, id)), ptr, "Decay EQ".to_owned()));
             }
         }
         for (b, band) in self.tone.iter().enumerate() {
             for (id, ptr) in [(E_ON.id, band.on.as_ptr()), (E_TYPE.id, band.kind.as_ptr()), (E_FREQ.id, band.freq.as_ptr()), (E_GAIN.id, band.gain.as_ptr()), (E_Q.id, band.q.as_ptr()), (E_SLOPE.id, band.slope.as_ptr())] {
-                map.push((tone_id(b, id), ptr, "Tone EQ".to_owned()));
+                map.push((String::from(tone_id(b, id)), ptr, "Tone EQ".to_owned()));
             }
         }
         map.push(p(SHIMMER.id, self.shimmer.as_ptr(), "Shimmer"));
@@ -477,7 +477,7 @@ unsafe impl Params for VerbParams {
         map.push(p(SHIMMER_BLEND.id, self.shimmer_blend.as_ptr(), "Shimmer"));
         map.push(p(SHIMMER_DETUNE.id, self.shimmer_detune.as_ptr(), "Shimmer"));
         for (b, band) in self.bands.iter().enumerate() {
-            map.push((band_id(b, D_SLOPE.id), band.slope.as_ptr(), "Decay EQ".to_owned()));
+            map.push((String::from(band_id(b, D_SLOPE.id)), band.slope.as_ptr(), "Decay EQ".to_owned()));
         }
         map
     }

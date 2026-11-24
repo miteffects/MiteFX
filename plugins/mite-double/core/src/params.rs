@@ -53,8 +53,8 @@ pub const MONO_BASS: BoolSpec = BoolSpec { id: "mono_bass", name: "Mono Bass", d
 pub const BASS_FREQ: ParamSpec = spec("bass_freq", "Mono Bass Frequency", "Hz", 40.0, 400.0, 150.0, ParamScale::Log, 0, (1.0 / 24.0, 1.0 / 96.0), ParamDisplay::Frequency);
 
 /// A double's parameter id, e.g. `v2_pan` (`voice` from 0).
-pub fn voice_id(voice: usize, param: &str) -> String {
-    format!("v{}_{param}", voice + 1)
+pub fn voice_id(voice: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("v", voice + 1, 0, param)
 }
 
 /// A double's spec with its own default.
@@ -264,8 +264,8 @@ unsafe impl Params for DoubleParams {
             p(BYPASS.id, self.bypass.as_ptr(), ""),
         ];
         for (v, voice) in self.voice.iter().enumerate() {
-            map.push((voice_id(v, "pan"), voice.pan.as_ptr(), "Doubles".to_owned()));
-            map.push((voice_id(v, "level"), voice.level.as_ptr(), "Doubles".to_owned()));
+            map.push((String::from(voice_id(v, "pan")), voice.pan.as_ptr(), "Doubles".to_owned()));
+            map.push((String::from(voice_id(v, "level")), voice.level.as_ptr(), "Doubles".to_owned()));
         }
         map.push((AUTO_GAIN.id.to_owned(), self.auto_gain.as_ptr(), String::new()));
         map.push((MONO_BASS.id.to_owned(), self.mono_bass.as_ptr(), "Doubles".to_owned()));

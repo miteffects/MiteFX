@@ -18,30 +18,30 @@ type Fields = (bool, usize, f32, f32, f32, f32);
 
 pub fn v1_to_v2(state: &mut PluginState) {
     let params = &mut state.params;
-    let f = |params: &std::collections::BTreeMap<String, ParamValue>, slot: usize, spec: &ParamSpec| match params.get(&stage_id(slot, spec.id)) {
+    let f = |params: &std::collections::BTreeMap<String, ParamValue>, slot: usize, spec: &ParamSpec| match params.get((stage_id(slot, spec.id)).as_str()) {
         Some(ParamValue::F32(v)) => *v,
         Some(ParamValue::I32(v)) => *v as f32,
         Some(ParamValue::Bool(v)) => f32::from(u8::from(*v)),
         _ => spec.default,
     };
-    let flag = |params: &std::collections::BTreeMap<String, ParamValue>, slot: usize, id: &str| match params.get(&stage_id(slot, id)) {
+    let flag = |params: &std::collections::BTreeMap<String, ParamValue>, slot: usize, id: &str| match params.get((stage_id(slot, id)).as_str()) {
         Some(ParamValue::Bool(v)) => *v,
         Some(ParamValue::F32(v)) => *v >= 0.5,
         Some(ParamValue::I32(v)) => *v != 0,
         _ => false,
     };
-    let quad = |params: &std::collections::BTreeMap<String, ParamValue>, slot: usize| match params.get(&stage_id(slot, S_QUAD.id)) {
+    let quad = |params: &std::collections::BTreeMap<String, ParamValue>, slot: usize| match params.get((stage_id(slot, S_QUAD.id)).as_str()) {
         Some(ParamValue::I32(v)) => (*v).max(0) as usize,
         Some(ParamValue::F32(v)) => v.round().max(0.0) as usize,
         _ => 0,
     };
     let old: [Fields; STAGES] = std::array::from_fn(|i| (flag(params, i, S_ON.id), quad(params, i), f(params, i, &S_THRESH), f(params, i, &S_RATIO), f(params, i, &S_KNEE), f(params, i, &S_RANGE)));
     for (slot, (threshold, knee)) in on_the_input(&old).into_iter().enumerate() {
-        if params.contains_key(&stage_id(slot, S_THRESH.id)) {
-            params.insert(stage_id(slot, S_THRESH.id), ParamValue::F32(threshold));
+        if params.contains_key((stage_id(slot, S_THRESH.id)).as_str()) {
+            params.insert(String::from(stage_id(slot, S_THRESH.id)), ParamValue::F32(threshold));
         }
-        if params.contains_key(&stage_id(slot, S_KNEE.id)) {
-            params.insert(stage_id(slot, S_KNEE.id), ParamValue::F32(knee));
+        if params.contains_key((stage_id(slot, S_KNEE.id)).as_str()) {
+            params.insert(String::from(stage_id(slot, S_KNEE.id)), ParamValue::F32(knee));
         }
     }
     if let Some(json) = state.fields.get_mut(mite_plugin::state::SNAPSHOTS_KEY) {
@@ -57,15 +57,15 @@ fn lift_snapshots(json: &str) -> Option<String> {
     let mut state: serde_json::Value = serde_json::from_str(json).ok()?;
     for slot in state.get_mut("slots")?.as_array_mut()?.iter_mut() {
         let Some(values) = slot.as_object_mut() else { continue };
-        let get = |i: usize, id: &str| values.get(&stage_id(i, id)).and_then(serde_json::Value::as_f64).map(|v| v as f32);
+        let get = |i: usize, id: &str| values.get((stage_id(i, id)).as_str()).and_then(serde_json::Value::as_f64).map(|v| v as f32);
         let plain = |i: usize, spec: &ParamSpec| get(i, spec.id).map_or(spec.default, |n| spec.denormalize(n));
         let old: [Fields; STAGES] = std::array::from_fn(|i| (get(i, S_ON.id).unwrap_or(0.0) >= 0.5, (get(i, S_QUAD.id).unwrap_or(0.0) * 3.0).round().max(0.0) as usize, plain(i, &S_THRESH), plain(i, &S_RATIO), plain(i, &S_KNEE), plain(i, &S_RANGE)));
         for (i, (threshold, knee)) in on_the_input(&old).into_iter().enumerate() {
-            if values.contains_key(&stage_id(i, S_THRESH.id)) {
-                values.insert(stage_id(i, S_THRESH.id), S_THRESH.normalize(threshold).into());
+            if values.contains_key((stage_id(i, S_THRESH.id)).as_str()) {
+                values.insert(String::from(stage_id(i, S_THRESH.id)), S_THRESH.normalize(threshold).into());
             }
-            if values.contains_key(&stage_id(i, S_KNEE.id)) {
-                values.insert(stage_id(i, S_KNEE.id), S_KNEE.normalize(knee).into());
+            if values.contains_key((stage_id(i, S_KNEE.id)).as_str()) {
+                values.insert(String::from(stage_id(i, S_KNEE.id)), S_KNEE.normalize(knee).into());
             }
         }
     }

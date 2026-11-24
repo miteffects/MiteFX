@@ -125,13 +125,13 @@ pub const ATTACK_DIAL: DialCurve = DialCurve(&[(0.0, 0.05), (0.25, 1.0), (0.5, 1
 pub const RELEASE_DIAL: DialCurve = DialCurve(&[(0.0, 5.0), (0.2, 40.0), (0.45, 100.0), (0.8, 400.0), (1.0, 2500.0)]);
 
 /// A stage parameter's host id, e.g. `s2_thresh` (`stage` from 0).
-pub fn stage_id(stage: usize, param: &str) -> String {
-    format!("s{}_{param}", stage + 1)
+pub fn stage_id(stage: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("s", stage + 1, 0, param)
 }
 
 /// A detector EQ band parameter's host id, e.g. `k1_freq` (`band` from 0).
-pub fn key_id(band: usize, param: &str) -> String {
-    format!("k{}_{param}", band + 1)
+pub fn key_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("k", band + 1, 0, param)
 }
 
 /// Every parameter's manifest line, in host order.
@@ -504,11 +504,11 @@ unsafe impl Params for CompParams {
         ];
         for (i, k) in self.keys.iter().enumerate() {
             let group = "Sidechain".to_owned();
-            map.push((key_id(i, K_ON.id), k.on.as_ptr(), group.clone()));
-            map.push((key_id(i, K_TYPE.id), k.kind.as_ptr(), group.clone()));
-            map.push((key_id(i, K_FREQ.id), k.freq.as_ptr(), group.clone()));
-            map.push((key_id(i, K_GAIN.id), k.gain.as_ptr(), group.clone()));
-            map.push((key_id(i, K_Q.id), k.q.as_ptr(), group));
+            map.push((String::from(key_id(i, K_ON.id)), k.on.as_ptr(), group.clone()));
+            map.push((String::from(key_id(i, K_TYPE.id)), k.kind.as_ptr(), group.clone()));
+            map.push((String::from(key_id(i, K_FREQ.id)), k.freq.as_ptr(), group.clone()));
+            map.push((String::from(key_id(i, K_GAIN.id)), k.gain.as_ptr(), group.clone()));
+            map.push((String::from(key_id(i, K_Q.id)), k.q.as_ptr(), group));
         }
         map.extend([
             global(MIX.id, self.mix.as_ptr(), ""),
@@ -519,19 +519,19 @@ unsafe impl Params for CompParams {
         ]);
         for (i, s) in self.stages.iter().enumerate() {
             let group = format!("Stage {}", i + 1);
-            map.push((stage_id(i, S_ON.id), s.on.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_QUAD.id), s.quad.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_THRESH.id), s.thresh.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_RATIO.id), s.ratio.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_KNEE.id), s.knee.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_ATTACK.id), s.attack.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_RELEASE.id), s.release.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_RANGE.id), s.range.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_DET.id), s.det.as_ptr(), group.clone()));
-            map.push((stage_id(i, S_SOLO.id), s.solo.as_ptr(), group));
+            map.push((String::from(stage_id(i, S_ON.id)), s.on.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_QUAD.id)), s.quad.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_THRESH.id)), s.thresh.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_RATIO.id)), s.ratio.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_KNEE.id)), s.knee.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_ATTACK.id)), s.attack.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_RELEASE.id)), s.release.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_RANGE.id)), s.range.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_DET.id)), s.det.as_ptr(), group.clone()));
+            map.push((String::from(stage_id(i, S_SOLO.id)), s.solo.as_ptr(), group));
         }
         for (i, s) in self.stages.iter().enumerate() {
-            map.push((stage_id(i, S_AUTO_REL.id), s.auto_rel.as_ptr(), format!("Stage {}", i + 1)));
+            map.push((String::from(stage_id(i, S_AUTO_REL.id)), s.auto_rel.as_ptr(), format!("Stage {}", i + 1)));
         }
         map
     }

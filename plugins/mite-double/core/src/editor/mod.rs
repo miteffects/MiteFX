@@ -261,7 +261,7 @@ impl DoubleView {
     fn ids(puck: Puck) -> (String, String) {
         match puck {
             Puck::Source => (SOURCE_PAN.id.to_owned(), SOURCE_LEVEL.id.to_owned()),
-            Puck::Voice(v) => (voice_id(v, "pan"), voice_id(v, "level")),
+            Puck::Voice(v) => (String::from(voice_id(v, "pan")), String::from(voice_id(v, "level"))),
         }
     }
 

@@ -328,14 +328,14 @@ pub const SNAPSHOT_PARAMS: [&str; 23] = [
 ];
 
 /// `b03_freq` for band index 2.
-pub fn band_id(band: usize, param: &str) -> String {
-    format!("b{:02}_{param}", band + 1)
+pub fn band_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("b", band + 1, 2, param)
 }
 
 /// The frozen parameter manifest, in host order.
 /// Every snapshot parameter id, in order (the bands' sound settings).
 pub fn snapshot_ids() -> Vec<String> {
-    (0..BANDS).flat_map(|b| SNAPSHOT_PARAMS.iter().map(move |p| band_id(b, p))).collect()
+    (0..BANDS).flat_map(|b| SNAPSHOT_PARAMS.iter().map(move |p| String::from(band_id(b, p)))).collect()
 }
 
 pub fn manifest() -> String {
@@ -555,30 +555,30 @@ unsafe impl Params for EqParams {
         ];
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
-            map.push((band_id(i, ON.id), b.on.as_ptr(), group.clone()));
-            map.push((band_id(i, TYPE.id), b.kind.as_ptr(), group.clone()));
-            map.push((band_id(i, FREQ.id), b.freq.as_ptr(), group.clone()));
-            map.push((band_id(i, GAIN.id), b.gain.as_ptr(), group.clone()));
-            map.push((band_id(i, Q.id), b.q.as_ptr(), group.clone()));
-            map.push((band_id(i, SLOPE.id), b.slope.as_ptr(), group.clone()));
-            map.push((band_id(i, STEREO.id), b.stereo.as_ptr(), group.clone()));
-            map.push((band_id(i, DYN.id), b.dyn_on.as_ptr(), group.clone()));
-            map.push((band_id(i, RANGE.id), b.range.as_ptr(), group.clone()));
-            map.push((band_id(i, THRESH.id), b.thresh.as_ptr(), group.clone()));
-            map.push((band_id(i, ATTACK.id), b.attack.as_ptr(), group.clone()));
-            map.push((band_id(i, RELEASE.id), b.release.as_ptr(), group.clone()));
-            map.push((band_id(i, RATIO.id), b.ratio.as_ptr(), group.clone()));
-            map.push((band_id(i, DMODE.id), b.dmode.as_ptr(), group.clone()));
-            map.push((band_id(i, SUSTAIN.id), b.sustain.as_ptr(), group.clone()));
-            map.push((band_id(i, TRANSIENT.id), b.transient.as_ptr(), group.clone()));
-            map.push((band_id(i, TTIME.id), b.ttime.as_ptr(), group.clone()));
-            map.push((band_id(i, TRANSITION.id), b.transition.as_ptr(), group.clone()));
-            map.push((band_id(i, SPECTRAL.id), b.spectral.as_ptr(), group.clone()));
-            map.push((band_id(i, SSMOOTH.id), b.ssmooth.as_ptr(), group.clone()));
-            map.push((band_id(i, SREL.id), b.srel.as_ptr(), group.clone()));
-            map.push((band_id(i, RTHRESH.id), b.rthresh.as_ptr(), group.clone()));
-            map.push((band_id(i, SOLO.id), b.solo.as_ptr(), group.clone()));
-            map.push((band_id(i, DSRC.id), b.dsrc.as_ptr(), group));
+            map.push((String::from(band_id(i, ON.id)), b.on.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, TYPE.id)), b.kind.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, FREQ.id)), b.freq.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, GAIN.id)), b.gain.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, Q.id)), b.q.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, SLOPE.id)), b.slope.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, STEREO.id)), b.stereo.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, DYN.id)), b.dyn_on.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, RANGE.id)), b.range.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, THRESH.id)), b.thresh.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, ATTACK.id)), b.attack.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, RELEASE.id)), b.release.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, RATIO.id)), b.ratio.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, DMODE.id)), b.dmode.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, SUSTAIN.id)), b.sustain.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, TRANSIENT.id)), b.transient.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, TTIME.id)), b.ttime.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, TRANSITION.id)), b.transition.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, SPECTRAL.id)), b.spectral.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, SSMOOTH.id)), b.ssmooth.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, SREL.id)), b.srel.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, RTHRESH.id)), b.rthresh.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, SOLO.id)), b.solo.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, DSRC.id)), b.dsrc.as_ptr(), group));
         }
         map
     }

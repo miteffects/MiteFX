@@ -503,9 +503,9 @@ impl DelayView {
 
     fn node_params(node: Node) -> Vec<String> {
         match node {
-            Node::Tap(t) => vec![tap_id(t, T_NOTE.id), tap_id(t, T_TIME.id), tap_id(t, T_LEVEL.id)],
-            Node::Feedback(t) => vec![tap_id(t, T_FEEDBACK.id)],
-            Node::Band(b) => vec![band_id(b, E_FREQ.id), band_id(b, E_GAIN.id)],
+            Node::Tap(t) => vec![String::from(tap_id(t, T_NOTE.id)), String::from(tap_id(t, T_TIME.id)), String::from(tap_id(t, T_LEVEL.id))],
+            Node::Feedback(t) => vec![String::from(tap_id(t, T_FEEDBACK.id))],
+            Node::Band(b) => vec![String::from(band_id(b, E_FREQ.id)), String::from(band_id(b, E_GAIN.id))],
         }
     }
 

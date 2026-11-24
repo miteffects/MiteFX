@@ -106,16 +106,16 @@ pub const B_EXTERNAL: BoolSpec = BoolSpec { id: "external", name: "External Key"
 pub const ATTACK_DIAL: DialCurve = DialCurve(&[(0.0, 0.05), (0.25, 1.0), (0.5, 10.0), (0.8, 50.0), (1.0, 250.0)]);
 pub const RELEASE_DIAL: DialCurve = DialCurve(&[(0.0, 5.0), (0.2, 40.0), (0.45, 100.0), (0.8, 400.0), (1.0, 2500.0)]);
 
-pub fn key_id(band: usize, param: &str) -> String {
-    format!("k{}_{param}", band + 1)
+pub fn key_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("k", band + 1, 0, param)
 }
 
-pub fn cross_id(k: usize, param: &str) -> String {
-    format!("x{}_{param}", k + 1)
+pub fn cross_id(k: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("x", k + 1, 0, param)
 }
 
-pub fn band_id(b: usize, param: &str) -> String {
-    format!("b{}_{param}", b + 1)
+pub fn band_id(b: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("b", b + 1, 0, param)
 }
 
 /// Every parameter's manifest line, in host order.
@@ -376,12 +376,12 @@ unsafe impl Params for MbParams {
         ];
         for (i, k) in self.keys.iter().enumerate() {
             for (id, ptr) in [(K_ON.id, k.on.as_ptr()), (K_TYPE.id, k.kind.as_ptr()), (K_FREQ.id, k.freq.as_ptr()), (K_GAIN.id, k.gain.as_ptr()), (K_Q.id, k.q.as_ptr()), (K_SLOPE.id, k.slope.as_ptr())] {
-                map.push(p(key_id(i, id), ptr, "Sidechain"));
+                map.push(p(String::from(key_id(i, id)), ptr, "Sidechain"));
             }
         }
         for (k, x) in self.cross.iter().enumerate() {
-            map.push(p(cross_id(k, X_ON.id), x.on.as_ptr(), "Crossovers"));
-            map.push(p(cross_id(k, X_FREQ.id), x.freq.as_ptr(), "Crossovers"));
+            map.push(p(String::from(cross_id(k, X_ON.id)), x.on.as_ptr(), "Crossovers"));
+            map.push(p(String::from(cross_id(k, X_FREQ.id)), x.freq.as_ptr(), "Crossovers"));
         }
         for (b, s) in self.bands.iter().enumerate() {
             let g = format!("Band {}", b + 1);
@@ -402,7 +402,7 @@ unsafe impl Params for MbParams {
                 (B_DELTA.id, s.delta.as_ptr()),
                 (B_EXTERNAL.id, s.external.as_ptr()),
             ] {
-                map.push(p(band_id(b, id), ptr, &g));
+                map.push(p(String::from(band_id(b, id)), ptr, &g));
             }
         }
         map.push(p(AUTO_GAIN.id.into(), self.auto_gain.as_ptr(), ""));

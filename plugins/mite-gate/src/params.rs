@@ -95,8 +95,8 @@ pub const HOLD_DIAL: DialCurve = DialCurve(&[(0.0, 0.0), (0.4, 30.0), (0.75, 200
 pub const RELEASE_DIAL: DialCurve = DialCurve(&[(0.0, 1.0), (0.2, 20.0), (0.45, 100.0), (0.8, 600.0), (1.0, 2500.0)]);
 
 /// A key band parameter's host id, e.g. `k1_freq` (`band` from 0).
-pub fn key_id(band: usize, param: &str) -> String {
-    format!("k{}_{param}", band + 1)
+pub fn key_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("k", band + 1, 0, param)
 }
 
 /// Every parameter's manifest line, in host order.
@@ -339,11 +339,11 @@ unsafe impl Params for GateParams {
             p(LISTEN.id, self.listen.as_ptr(), "Sidechain"),
         ];
         for (i, k) in self.keys.iter().enumerate().take(V1_KEY_BANDS) {
-            map.push((key_id(i, K_ON.id), k.on.as_ptr(), "Sidechain".to_owned()));
-            map.push((key_id(i, K_TYPE.id), k.kind.as_ptr(), "Sidechain".to_owned()));
-            map.push((key_id(i, K_FREQ.id), k.freq.as_ptr(), "Sidechain".to_owned()));
-            map.push((key_id(i, K_GAIN.id), k.gain.as_ptr(), "Sidechain".to_owned()));
-            map.push((key_id(i, K_Q.id), k.q.as_ptr(), "Sidechain".to_owned()));
+            map.push((String::from(key_id(i, K_ON.id)), k.on.as_ptr(), "Sidechain".to_owned()));
+            map.push((String::from(key_id(i, K_TYPE.id)), k.kind.as_ptr(), "Sidechain".to_owned()));
+            map.push((String::from(key_id(i, K_FREQ.id)), k.freq.as_ptr(), "Sidechain".to_owned()));
+            map.push((String::from(key_id(i, K_GAIN.id)), k.gain.as_ptr(), "Sidechain".to_owned()));
+            map.push((String::from(key_id(i, K_Q.id)), k.q.as_ptr(), "Sidechain".to_owned()));
         }
         map.extend([
             p(MIX.id, self.mix.as_ptr(), ""),
@@ -358,11 +358,11 @@ unsafe impl Params for GateParams {
         ]);
         // State 2.
         for (i, k) in self.keys.iter().enumerate().take(V1_KEY_BANDS) {
-            map.push((key_id(i, K_SLOPE.id), k.slope.as_ptr(), "Sidechain".to_owned()));
+            map.push((String::from(key_id(i, K_SLOPE.id)), k.slope.as_ptr(), "Sidechain".to_owned()));
         }
         for (i, k) in self.keys.iter().enumerate().skip(V1_KEY_BANDS) {
             for (id, ptr) in [(K_ON.id, k.on.as_ptr()), (K_TYPE.id, k.kind.as_ptr()), (K_FREQ.id, k.freq.as_ptr()), (K_GAIN.id, k.gain.as_ptr()), (K_Q.id, k.q.as_ptr()), (K_SLOPE.id, k.slope.as_ptr())] {
-                map.push((key_id(i, id), ptr, "Sidechain".to_owned()));
+                map.push((String::from(key_id(i, id)), ptr, "Sidechain".to_owned()));
             }
         }
         map

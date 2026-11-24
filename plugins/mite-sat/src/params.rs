@@ -268,13 +268,13 @@ pub fn modulate_settings(s: &mut SatSettings, out: &mut crate::dsp::Output, offs
 }
 
 /// A crossover parameter's host id, e.g. `x2_freq` (`slot` from 0).
-pub fn cross_id(slot: usize, param: &str) -> String {
-    format!("x{}_{param}", slot + 1)
+pub fn cross_id(slot: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("x", slot + 1, 0, param)
 }
 
 /// A band parameter's host id, e.g. `b3_drive` (`band` from 0).
-pub fn band_id(band: usize, param: &str) -> String {
-    format!("b{}_{param}", band + 1)
+pub fn band_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("b", band + 1, 0, param)
 }
 
 /// The continuous band parameters, in host order.
@@ -505,39 +505,39 @@ unsafe impl Params for SatParams {
         ];
         for (i, x) in self.crossovers.iter().enumerate() {
             let group = "Crossovers".to_owned();
-            map.push((cross_id(i, X_ON.id), x.on.as_ptr(), group.clone()));
-            map.push((cross_id(i, X_FREQ.id), x.freq.as_ptr(), group));
+            map.push((String::from(cross_id(i, X_ON.id)), x.on.as_ptr(), group.clone()));
+            map.push((String::from(cross_id(i, X_FREQ.id)), x.freq.as_ptr(), group));
         }
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
-            map.push((band_id(i, B_MODEL.id), b.model.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_MODEL.id)), b.model.as_ptr(), group.clone()));
             for (spec, p) in BAND_SPECS.iter().zip(&b.floats) {
-                map.push((band_id(i, spec.id), p.as_ptr(), group.clone()));
+                map.push((String::from(band_id(i, spec.id)), p.as_ptr(), group.clone()));
             }
-            map.push((band_id(i, B_STEREO.id), b.stereo.as_ptr(), group.clone()));
-            map.push((band_id(i, B_BYPASS.id), b.bypass.as_ptr(), group.clone()));
-            map.push((band_id(i, B_MUTE.id), b.mute.as_ptr(), group.clone()));
-            map.push((band_id(i, B_SOLO.id), b.solo.as_ptr(), group));
+            map.push((String::from(band_id(i, B_STEREO.id)), b.stereo.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_BYPASS.id)), b.bypass.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_MUTE.id)), b.mute.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_SOLO.id)), b.solo.as_ptr(), group));
         }
         self.matrix.param_map(&mut map);
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
-            map.push((band_id(i, B_LR.id), b.lr.as_ptr(), group.clone()));
-            map.push((band_id(i, B_MS.id), b.ms.as_ptr(), group));
+            map.push((String::from(band_id(i, B_LR.id)), b.lr.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_MS.id)), b.ms.as_ptr(), group));
         }
         map.push(global(PHASE.id, self.phase.as_ptr()));
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
-            map.push((band_id(i, B_FB.id), b.fb.as_ptr(), group.clone()));
-            map.push((band_id(i, B_FB_FREQ.id), b.fb_freq.as_ptr(), group));
+            map.push((String::from(band_id(i, B_FB.id)), b.fb.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_FB_FREQ.id)), b.fb_freq.as_ptr(), group));
         }
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
             for (spec, p) in B_HARM.iter().zip(&b.harm) {
-                map.push((band_id(i, spec.id), p.as_ptr(), group.clone()));
+                map.push((String::from(band_id(i, spec.id)), p.as_ptr(), group.clone()));
             }
-            map.push((band_id(i, B_PUNCH.id), b.punch.as_ptr(), group.clone()));
-            map.push((band_id(i, B_BODY.id), b.body.as_ptr(), group));
+            map.push((String::from(band_id(i, B_PUNCH.id)), b.punch.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_BODY.id)), b.body.as_ptr(), group));
         }
         map
     }

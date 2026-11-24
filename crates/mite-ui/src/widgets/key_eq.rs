@@ -33,8 +33,8 @@ const REMOVE: usize = 10;
 const SPECTRUM_DB: (f32, f32) = (-96.0, -12.0);
 
 /// A key band parameter's host id, e.g. `k1_freq` (`band` from 0).
-pub fn key_id(band: usize, param: &str) -> String {
-    format!("k{}_{param}", band + 1)
+pub fn key_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("k", band + 1, 0, param)
 }
 
 fn plain(host: &dyn ParamHost, id: &str) -> f32 {

@@ -520,8 +520,8 @@ impl VerbView {
 
     fn node_params(node: Node) -> Vec<String> {
         match node {
-            Node::Decay(b) => vec![band_id(b, D_FREQ.id), band_id(b, D_MULT.id)],
-            Node::Tone(b) => vec![tone_id(b, E_FREQ.id), tone_id(b, E_GAIN.id)],
+            Node::Decay(b) => vec![String::from(band_id(b, D_FREQ.id)), String::from(band_id(b, D_MULT.id))],
+            Node::Tone(b) => vec![String::from(tone_id(b, E_FREQ.id)), String::from(tone_id(b, E_GAIN.id))],
         }
     }
 

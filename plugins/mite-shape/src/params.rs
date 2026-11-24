@@ -88,13 +88,13 @@ pub fn length_ms(plain: f32) -> f32 {
 }
 
 /// A crossover parameter's host id, e.g. `x2_freq` (`slot` from 0).
-pub fn cross_id(slot: usize, param: &str) -> String {
-    format!("x{}_{param}", slot + 1)
+pub fn cross_id(slot: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("x", slot + 1, 0, param)
 }
 
 /// A band parameter's host id, e.g. `b3_attack` (`band` from 0).
-pub fn band_id(band: usize, param: &str) -> String {
-    format!("b{}_{param}", band + 1)
+pub fn band_id(band: usize, param: &str) -> mite_core::ParamId {
+    mite_core::ParamId::indexed("b", band + 1, 0, param)
 }
 
 /// Every parameter's manifest line, in host order.
@@ -308,20 +308,20 @@ unsafe impl Params for ShapeParams {
         ];
         for (i, x) in self.crossovers.iter().enumerate() {
             let group = "Crossovers".to_owned();
-            map.push((cross_id(i, X_ON.id), x.on.as_ptr(), group.clone()));
-            map.push((cross_id(i, X_FREQ.id), x.freq.as_ptr(), group));
+            map.push((String::from(cross_id(i, X_ON.id)), x.on.as_ptr(), group.clone()));
+            map.push((String::from(cross_id(i, X_FREQ.id)), x.freq.as_ptr(), group));
         }
         for (i, b) in self.bands.iter().enumerate() {
             let group = format!("Band {}", i + 1);
-            map.push((band_id(i, B_ATTACK.id), b.attack.as_ptr(), group.clone()));
-            map.push((band_id(i, B_SUSTAIN.id), b.sustain.as_ptr(), group.clone()));
-            map.push((band_id(i, B_TIME.id), b.time.as_ptr(), group.clone()));
-            map.push((band_id(i, B_TRANSITION.id), b.transition.as_ptr(), group.clone()));
-            map.push((band_id(i, B_MIX.id), b.mix.as_ptr(), group.clone()));
-            map.push((band_id(i, B_OUT.id), b.out.as_ptr(), group.clone()));
-            map.push((band_id(i, B_LENGTH.id), b.length.as_ptr(), group.clone()));
-            map.push((band_id(i, B_MUTE.id), b.mute.as_ptr(), group.clone()));
-            map.push((band_id(i, B_SOLO.id), b.solo.as_ptr(), group));
+            map.push((String::from(band_id(i, B_ATTACK.id)), b.attack.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_SUSTAIN.id)), b.sustain.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_TIME.id)), b.time.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_TRANSITION.id)), b.transition.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_MIX.id)), b.mix.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_OUT.id)), b.out.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_LENGTH.id)), b.length.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_MUTE.id)), b.mute.as_ptr(), group.clone()));
+            map.push((String::from(band_id(i, B_SOLO.id)), b.solo.as_ptr(), group));
         }
         map
     }

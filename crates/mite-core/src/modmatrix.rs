@@ -69,13 +69,13 @@ fn leak(s: &str) -> &'static str {
 }
 
 /// An LFO parameter's host id, e.g. `lfo2_rate` (`lfo` from 0).
-pub fn lfo_id(lfo: usize, param: &str) -> String {
-    format!("lfo{}_{param}", lfo + 1)
+pub fn lfo_id(lfo: usize, param: &str) -> crate::ParamId {
+    crate::ParamId::indexed("lfo", lfo + 1, 0, param)
 }
 
 /// A slot parameter's host id, e.g. `m3_amt` (`slot` from 0).
-pub fn mod_id(slot: usize, param: &str) -> String {
-    format!("m{}_{param}", slot + 1)
+pub fn mod_id(slot: usize, param: &str) -> crate::ParamId {
+    crate::ParamId::indexed("m", slot + 1, 0, param)
 }
 
 /// The matrix's manifest lines, in host order: the LFOs, the envelope (with `env_src` when

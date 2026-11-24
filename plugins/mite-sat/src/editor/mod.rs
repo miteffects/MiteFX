@@ -99,11 +99,11 @@ fn lanes(grow: f64) -> Lanes {
 /// How the shared rail reads and writes Sat's crossovers and bands.
 fn rail_params() -> RailParams {
     RailParams {
-        cross_on: |k| cross_id(k, X_ON.id),
-        cross_freq: |k| cross_id(k, X_FREQ.id),
+        cross_on: |k| String::from(cross_id(k, X_ON.id)),
+        cross_freq: |k| String::from(cross_id(k, X_FREQ.id)),
         freq: X_FREQ,
-        solo: |b| band_id(b, B_SOLO.id),
-        mute: |b| band_id(b, B_MUTE.id),
+        solo: |b| String::from(band_id(b, B_SOLO.id)),
+        mute: |b| String::from(band_id(b, B_MUTE.id)),
         copy: SatView::copy_band,
     }
 }
@@ -599,7 +599,7 @@ impl SatView {
 
     /// What a drag on band `b`'s bars moves: its model and its recipe (one undo step).
     fn harmonic_ids(b: usize) -> Vec<String> {
-        std::iter::once(band_id(b, B_MODEL.id)).chain(B_HARM.iter().map(|h| band_id(b, h.id))).collect()
+        std::iter::once(band_id(b, B_MODEL.id)).chain(B_HARM.iter().map(|h| band_id(b, h.id))).map(String::from).collect()
     }
 
     fn curve(&self, host: &dyn ParamHost, b: usize) -> curve::Curve {
@@ -1218,7 +1218,7 @@ impl SatView {
     }
 
     fn curve_ids(band: usize, alt: bool) -> Vec<String> {
-        if alt { vec![band_id(band, B_TONE.id)] } else { vec![band_id(band, B_DRIVE.id), band_id(band, B_BIAS.id)] }
+        if alt { vec![String::from(band_id(band, B_TONE.id))] } else { vec![String::from(band_id(band, B_DRIVE.id)), String::from(band_id(band, B_BIAS.id))] }
     }
 
     /// Harmonic `k` of the dragged band's recipe to the pointer's height in its bars.
