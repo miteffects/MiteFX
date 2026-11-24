@@ -1,20 +1,22 @@
 name: Release
 
-# A tag `v*` (or a manual run with a tag name) builds every plugin on Windows, macOS (universal)
-# and Linux and publishes them as a GitHub Release: one archive per platform, CLAP and VST3,
-# which the website links to through releases/latest/download/.
+# Every push to main builds every plugin on Windows, macOS (universal) and Linux and replaces the
+# downloads of the current version's release (v + workspace version in Cargo.toml; the tag moves
+# to the new commit). A newer push cancels a build still running. Bump the workspace version to
+# start a new release. The website links to releases/latest/download/.
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths-ignore: ["site/**", "docs/**", "**.md", ".github/workflows/pages.yml", ".github/workflows/ci.yml"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (created on the current commit if missing), e.g. v0.1.0"
-        required: true
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -80,14 +82,19 @@ jobs:
         with:
           pattern: release-*
           merge-multiple: true
-      - name: Create or update the release
+      - name: Create or replace the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           ls -la MiteFX-*
+          TAG="v$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
+          echo "release $TAG at $GITHUB_SHA"
+          # The tag follows main (a push made with GITHUB_TOKEN starts no workflow).
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" MiteFX-* --clobber
+            gh release edit "$TAG" --notes-file packaging/RELEASE_NOTES.md
           else
             gh release create "$TAG" MiteFX-* --title "MiteFX $TAG" --target "$GITHUB_SHA" --notes-file packaging/RELEASE_NOTES.md
           fi

@@ -44,11 +44,9 @@ pre code { background: none; border: 0; padding: 0; }
 }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
 .brand b { color: var(--accent); font-weight: 800; }
-.mark {
-  width: 26px; height: 26px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--line);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M7 22 C11 6 13 6 16 16 S21 26 25 10' fill='none' stroke='%23F0284A' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-size: cover;
-}
+.mark { width: 30px; height: 30px; overflow: visible; }
+.mark .sig { filter: drop-shadow(0 0 3px var(--accent)); animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.55; } }
 nav { display: flex; gap: clamp(14px, 2.5vw, 28px); font-size: 15px; }
 nav a { color: var(--mid); text-decoration: none; }
 nav a:hover { color: var(--text); }
@@ -115,4 +113,68 @@ footer { border-top: 1px solid var(--line); margin-top: 72px; padding: 26px clam
 @media (max-width: 560px) {
   nav a:not(.gh) { display: none; }
   .btn { width: 100%; }
+}
+
+/* ---- Live layer: scroll meter, mites, the hero signal, reveals ---- */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 64px 64px; background-position: 0 calc(var(--scroll, 0) * -0.25px);
+  mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 75%);
+}
+:root { --grid: rgba(255, 255, 255, 0.028); }
+
+.meter { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 20; pointer-events: none; }
+.meter i {
+  display: block; height: 100%; width: calc(var(--progress, 0) * 100%);
+  background: linear-gradient(90deg, #0ED4F6, #59FCE1, #6BA208, #FACCFC, #F0284A);
+  background-size: 100vw 100%;
+  box-shadow: 0 0 10px rgba(240, 40, 74, 0.6), 0 0 2px #fff;
+}
+#mites { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; }
+
+.hero { position: relative; }
+#signal { position: absolute; left: 50%; top: 40px; width: min(1400px, 100vw); height: 360px; transform: translateX(-50%); z-index: -1; pointer-events: none; opacity: 0.9; }
+.hero-shot { perspective: 1400px; }
+.hero-shot img {
+  transform: rotateX(calc((1 - var(--lift, 1)) * 22deg)) scale(calc(0.9 + var(--lift, 1) * 0.1));
+  transform-origin: 50% 0; will-change: transform;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.55), 0 0 calc(var(--lift, 1) * 80px) rgba(14, 212, 246, calc(var(--lift, 1) * 0.16));
+}
+
+h2::after {
+  content: ""; display: block; width: 72px; height: 3px; margin-top: 12px; border-radius: 2px;
+  background: var(--accent); box-shadow: 0 0 14px var(--accent);
+  transform: scaleX(0); transform-origin: left; transition: transform 0.9s cubic-bezier(.2,.8,.2,1) 0.15s;
+}
+.hero h2::after, .open h2::after { margin-left: auto; margin-right: auto; transform-origin: center; }
+.open h2::after { margin-left: auto; margin-right: auto; }
+.in h2::after, h2.in::after { transform: scaleX(1); }
+
+.js .reveal { opacity: 0; transform: translateY(34px) scale(0.985); filter: blur(4px); }
+.js .reveal.in {
+  opacity: 1; transform: none; filter: none;
+  transition: opacity 0.8s ease var(--d, 0s), transform 0.9s cubic-bezier(.2,.8,.2,1) var(--d, 0s), filter 0.8s ease var(--d, 0s);
+}
+
+.card { transform-style: preserve-3d; will-change: transform; }
+.card:hover { transform: perspective(900px) rotateX(var(--ty, 0deg)) rotateY(var(--tx, 0deg)) translateY(-4px); }
+.card .shot { position: relative; overflow: hidden; }
+.card .shot::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s ease;
+  background: radial-gradient(400px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%);
+}
+.card:hover .shot::after { opacity: 1; }
+.card:hover .dot { animation: pulse 1s ease-in-out infinite; }
+.card .shot img { transform: translateY(var(--par, 0px)) scale(1.04); transition: transform 0.1s linear; }
+
+.facts b { font-variant-numeric: tabular-nums; }
+.btn.primary { animation: breathe 3.2s ease-in-out infinite; }
+@keyframes breathe { 50% { box-shadow: 0 8px 44px rgba(240, 40, 74, 0.5); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal { opacity: 1; transform: none; filter: none; }
+  .btn.primary, .mark .sig, .card:hover .dot { animation: none; }
+  #mites, #signal { display: none; }
+  .hero-shot img { transform: none; }
 }
