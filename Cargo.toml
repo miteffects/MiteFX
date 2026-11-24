@@ -55,6 +55,15 @@ debug = false
 lto = "thin"
 strip = "symbols"
 
+# Tests: release optimisation (DSP timings and figures stay realistic), without LTO (it does not
+# change floating-point results) and incremental, so an edit rebuilds in seconds, not minutes.
+# `cargo test --profile fasttest --lib --tests -p <crate>`; bundles still build with `release`.
+[profile.fasttest]
+inherits = "release"
+lto = false
+incremental = true
+strip = "none"
+
 [profile.profiling]
 inherits = "release"
 debug = true

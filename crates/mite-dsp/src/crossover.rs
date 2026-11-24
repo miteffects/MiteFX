@@ -154,6 +154,15 @@ impl<const B: usize> Layout<B> {
         }
     }
 
+    /// The same crossovers as `other`, in another order (no band made or merged).
+    pub fn reordered(&self, other: &Self) -> bool {
+        let mut a = self.crossovers;
+        let mut b = other.crossovers;
+        a[..self.n].sort_unstable();
+        b[..other.n].sort_unstable();
+        self != other && self.n == other.n && a[..self.n] == b[..other.n]
+    }
+
     /// The bands in use, from the bottom.
     pub fn bands(&self) -> &[usize] {
         &self.owners[..=self.n]
@@ -271,6 +280,12 @@ impl<const B: usize> Split<B> {
                 out[p] = self.ap[c][owner][k].allpass(&tunes[k], out[p]);
             }
         }
+    }
+
+    /// Every crossover takes its section's tuning at the next sample instead of gliding there
+    /// (a split that jumps, under a crossfade).
+    pub fn retune(&mut self) {
+        self.g = [[0.0; B]; 2];
     }
 
     /// Carries every state across an L/R ↔ M/S switch (the filters are linear): to M/S the

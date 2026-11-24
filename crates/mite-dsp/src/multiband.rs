@@ -172,6 +172,18 @@ fn comp_settings_at(s: &MbSettings, b: usize, lookahead_ms: f32) -> CompSettings
     }
 }
 
+/// One sample of channel `c` through `split`, by band slot (slots `layout` leaves out are 0).
+#[inline]
+fn by_slot(split: &mut Split<BANDS>, c: usize, x: f64, layout: &Layout<BANDS>, cross: &[Cross]) -> [f64; BANDS] {
+    let mut sig = [0.0f64; BANDS];
+    split.process(c, x, layout, cross, &mut sig);
+    let mut out = [0.0f64; BANDS];
+    for p in 0..=layout.n {
+        out[layout.owners[p]] = sig[p];
+    }
+    out
+}
+
 pub struct Multiband {
     fs: f64,
     layout: Layout<BANDS>,
@@ -179,6 +191,15 @@ pub struct Multiband {
     key_split: Split<BANDS>,
     cross: [Cross; CROSSOVERS],
     log_freq: [f64; CROSSOVERS],
+    /// A crossover set past a neighbour: the split jumps to the new order and frequencies, and
+    /// each band's input crossfades from the old split (held as it was) into it, `reorder` going
+    /// 0…1. The bands keep their compressors throughout.
+    reorder: Option<f64>,
+    reorder_step: f64,
+    old_layout: Layout<BANDS>,
+    old_split: Split<BANDS>,
+    old_key_split: Split<BANDS>,
+    old_cross: [Cross; CROSSOVERS],
     comps: Vec<Compressor>,
     key_sections: [Sections; KEY_BANDS],
     key_designed: [BandSettings; KEY_BANDS],
@@ -214,6 +235,12 @@ impl Multiband {
             key_split: Split::default(),
             cross: DEFAULT_CROSSOVERS.map(|f| Cross::new(f64::from(f), fs)),
             log_freq: DEFAULT_CROSSOVERS.map(|f| f64::from(f).ln()),
+            reorder: None,
+            reorder_step: 1.0 / (f64::from(SWITCH_MS) * 0.001 * fs),
+            old_layout: Layout::new(&[None; CROSSOVERS]),
+            old_split: Split::default(),
+            old_key_split: Split::default(),
+            old_cross: DEFAULT_CROSSOVERS.map(|f| Cross::new(f64::from(f), fs)),
             comps: (0..BANDS).map(|_| Compressor::new(sample_rate)).collect(),
             key_sections: [Sections::default(); KEY_BANDS],
             key_designed: [BandSettings::default(); KEY_BANDS],
@@ -257,6 +284,7 @@ impl Multiband {
         self.layout = Layout::new(&s.crossovers);
         self.split.reset();
         self.key_split.reset();
+        self.reorder = None;
         for k in 0..CROSSOVERS {
             let f = s.crossovers[k].unwrap_or(DEFAULT_CROSSOVERS[k]);
             self.log_freq[k] = f64::from(f).ln();
@@ -324,9 +352,34 @@ impl Multiband {
         }
         let len = channels.iter().map(|c| c.len()).min().unwrap_or(0);
         self.design_key(s, false);
-        // A structure change: carry the split's states over, start new bands from rest.
-        let layout = Layout::new(&s.crossovers);
-        if layout != self.layout {
+        let mut layout = Layout::new(&s.crossovers);
+        if layout.reordered(&self.layout) {
+            if self.reorder.is_none() {
+                // Gliding there, the crossover would pass through orders where the music sat in
+                // the wrong band (re-sorted at once, a band still split at 20 kHz: +19 dB, the
+                // §10 step test, 2026-11-24).
+                self.old_layout = self.layout;
+                self.old_split = self.split;
+                self.old_key_split = self.key_split;
+                self.old_cross = self.cross;
+                for k in 0..CROSSOVERS {
+                    if let Some(f) = s.crossovers[k] {
+                        let f = f.clamp(FREQ_MIN, FREQ_MAX);
+                        self.log_freq[k] = f64::from(f).ln();
+                        self.cross[k] = Cross::new(f64::from(f), self.fs);
+                    }
+                }
+                self.split.retune();
+                self.key_split.retune();
+                self.reorder = Some(0.0);
+                self.layout = layout;
+            } else {
+                // One at a time: the next waits for this crossfade.
+                layout = self.layout;
+            }
+        } else if layout != self.layout {
+            // A structure change: carry the split's states over, start new bands from rest.
+            self.reorder = None;
             for k in 0..CROSSOVERS {
                 let was_on = self.layout.crossovers[..self.layout.n].contains(&k);
                 if !was_on && let Some(f) = s.crossovers[k] {
@@ -421,18 +474,23 @@ impl Multiband {
                         }
                     }
                 }
-                let mut sig = [0.0f64; BANDS];
+                let fade = self.reorder.map(|t| t * t * (3.0 - 2.0 * t));
                 for c in 0..n_ch {
                     let x = channels[c][start + i];
                     peak_in[c] = peak_in[c].max(x.abs());
-                    self.split
-                        .process(c, f64::from(x), &layout, &self.cross, &mut sig);
+                    let mut v = by_slot(&mut self.split, c, f64::from(x), &layout, &self.cross);
+                    if let Some(u) = fade {
+                        let o = by_slot(&mut self.old_split, c, f64::from(x), &self.old_layout, &self.old_cross);
+                        for b in 0..BANDS {
+                            v[b] = o[b] + u * (v[b] - o[b]);
+                        }
+                    }
                     let mut sum = 0.0f64;
                     for p in 0..=layout.n {
                         let slot = layout.owners[p];
-                        self.band[slot][c][i] = sig[p] as f32;
-                        band_in[slot] = band_in[slot].max(sig[p].abs() as f32);
-                        sum += sig[p];
+                        self.band[slot][c][i] = v[slot] as f32;
+                        band_in[slot] = band_in[slot].max(v[slot].abs() as f32);
+                        sum += v[slot];
                     }
                     self.sum_scratch[c][i] = sum as f32;
                     if any_external {
@@ -450,14 +508,25 @@ impl Multiband {
                                 y = st.process(coeffs, y);
                             }
                         }
-                        self.key_split.process(c, y, &layout, &self.cross, &mut sig);
+                        let mut v = by_slot(&mut self.key_split, c, y, &layout, &self.cross);
+                        if let Some(u) = fade {
+                            let o = by_slot(&mut self.old_key_split, c, y, &self.old_layout, &self.old_cross);
+                            for b in 0..BANDS {
+                                v[b] = o[b] + u * (v[b] - o[b]);
+                            }
+                        }
                         let mut ks = 0.0f64;
                         for p in 0..=layout.n {
-                            self.key[layout.owners[p]][c][i] = sig[p] as f32;
-                            ks += sig[p];
+                            let slot = layout.owners[p];
+                            self.key[slot][c][i] = v[slot] as f32;
+                            ks += v[slot];
                         }
                         self.key_sum[c][i] = ks as f32;
                     }
+                }
+                if let Some(t) = self.reorder {
+                    let t = t + self.reorder_step;
+                    self.reorder = (t < 1.0).then_some(t);
                 }
             }
             self.dry_ap.write(

@@ -13,6 +13,7 @@ Package names use underscores (`mite_gain`); bundle names come from `bundler.tom
 
 ```bash
 cargo test --workspace                          # DSP, core, UI and plugin tests
+cargo test --profile fasttest --lib --tests -p mite_sat   # one crate, release speed, rebuilds in seconds
 cargo clippy --workspace --all-targets
 cargo xtask bundle mite_gain --release          # CLAP + VST3 into target/bundled/
 cargo xtask bundle mite_gain                    # debug build: allocations in process() abort

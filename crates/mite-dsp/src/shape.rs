@@ -35,9 +35,10 @@ const CONTROL: usize = 8;
 const GLIDE_MS: f64 = 20.0;
 /// Solo and mute fade, ms.
 const SOLO_MS: f64 = 10.0;
-/// A change of the split (a band made or removed, L/R ↔ M/S) crossfades between the old and the
-/// new structure over this long, ms.
-const STRUCTURE_MS: f64 = 10.0;
+/// A change of the split (a band made or removed, L/R ↔ M/S, a crossover set past another)
+/// crossfades between the old and the new structure over this long, ms. 10 ms left the new
+/// split's filters, copied from another order, audible as they settled (+8 dB on a reorder).
+const STRUCTURE_MS: f64 = 30.0;
 /// Below the floor a lift fades out over this many dB.
 const FLOOR_FADE_DB: f64 = 6.0;
 /// Sustain lengths reach this long, ms; the top of the range is "endless" (`f32::INFINITY`).
@@ -354,6 +355,8 @@ pub struct Shaper {
     /// Crossover frequencies as they glide (ln Hz) and their sections.
     log_freq: [f64; CROSSOVERS],
     cross: [Cross; CROSSOVERS],
+    /// The sections the playing core keeps while it fades out (the new one may jump).
+    old_cross: [Cross; CROSSOVERS],
     /// The detector filter's sections (high-pass, low-pass) and whether each runs.
     det_hp: (Coeffs, bool, f32),
     det_lp: (Coeffs, bool, f32),
@@ -386,6 +389,7 @@ impl Shaper {
             eased: [Eased::at(&BandShape::default(), true); BANDS],
             log_freq: DEFAULT_CROSSOVERS.map(|f| f64::from(f).ln()),
             cross: DEFAULT_CROSSOVERS.map(|f| Cross::new(f64::from(f), f64::from(sample_rate))),
+            old_cross: DEFAULT_CROSSOVERS.map(|f| Cross::new(f64::from(f), f64::from(sample_rate))),
             det_hp: (Coeffs::IDENTITY, false, 0.0),
             det_lp: (Coeffs::IDENTITY, false, 0.0),
             countdown: 0,
@@ -496,7 +500,23 @@ impl Shaper {
                     self.cross[k] = Cross::new(f64::from(f), self.fs);
                 }
             }
+            let reordered = key.layout.reordered(&from.key.layout);
             to.restructure(key, &s.crossovers);
+            self.old_cross = self.cross;
+            if reordered {
+                // A crossover set past a neighbour: the new core jumps to the new order and
+                // frequencies instead of gliding there. Gliding, it passed through orders where the
+                // music sat in the wrong band (a band still split at 20 kHz took it all into the
+                // lowest band, whose detector heard a hit: +9 dB, the §10 step test, 2026-11-24).
+                for k in 0..CROSSOVERS {
+                    if let Some(f) = s.crossovers[k] {
+                        let f = f.clamp(FREQ_MIN, FREQ_MAX);
+                        self.log_freq[k] = f64::from(f).ln();
+                        self.cross[k] = Cross::new(f64::from(f), self.fs);
+                    }
+                }
+                to.split.retune();
+            }
             self.fade = Some(0.0);
             // Every detector takes its band's times again (a new band came from another).
             for e in &mut self.eased {
@@ -676,8 +696,8 @@ impl Shaper {
                 let mut sig = [[0.0f64; BANDS]; 2];
                 let mut listen = [0.0f64; 2];
                 for c in 0..n_ch {
-                    core.split
-                        .process(c, input[c], &layout, &self.cross, &mut sig[c]);
+                    let cross = if fading.is_some() && ci == self.active { &self.old_cross } else { &self.cross };
+                    core.split.process(c, input[c], &layout, cross, &mut sig[c]);
                     if layout.n == 0 {
                         // One band: the detector hears the input through its own filter.
                         let f = &mut core.det_filter[c];
@@ -960,7 +980,8 @@ mod tests {
     /// the crossover's extraction into `crate::crossover` must leave Shape's output unchanged.
     /// (Re-blessed 2026-10-26: with lookahead, a new band now starts with an empty delay and a
     /// merged band's delay joins the band below. Re-blessed 2026-10-30: the differential detector.
-    /// Re-blessed 2026-11-24: the split on state-variable sections, within −250 dB of the biquads.)
+    /// Re-blessed 2026-11-24: the split on state-variable sections, within −250 dB of the biquads;
+    /// then the structure crossfade at 30 ms (was 10).)
     #[test]
     fn render_checksum_is_unchanged() {
         let n = 20_000;
@@ -1005,7 +1026,7 @@ mod tests {
         for v in yl.iter().chain(&yr).chain(&dl).chain(&dr) {
             hash = (hash ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
-        assert_eq!(hash, 0x2fee_34bc_a624_81ed, "checksum {hash:#x}");
+        assert_eq!(hash, 0x6431_46d5_0787_27d6, "checksum {hash:#x}");
     }
 
     #[test]
