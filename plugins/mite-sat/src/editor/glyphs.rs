@@ -1,8 +1,7 @@
-//! Glyphs (24×24, stroked) and the model icons, each a tiny drawing of its own curve.
+//! Glyphs (24×24, stroked) and the model icons: a pictogram of what each model is (the card's
+//! transfer square draws its curve; the icons all looked alike as tiny curves).
 
-use std::sync::OnceLock;
-
-use mite_dsp::sat::{magnet_loop, transfer, Model};
+use mite_dsp::sat::Model;
 use mite_ui::kurbo::{Affine, BezPath, Cap, Join, Point, Stroke};
 use mite_ui::peniko::Color;
 use mite_ui::vello::Scene;
@@ -19,23 +18,29 @@ pub fn draw(scene: &mut Scene, d: &str, c: Point, size: f64, color: Color, width
     scene.stroke(&stroke, Affine::IDENTITY, color, None, &path);
 }
 
-/// The drive each model's icon is drawn at: enough to show its character.
-fn icon_drive(model: Model) -> f32 {
-    match model {
-        Model::Fold => 13.0,
-        Model::Rectify => 12.0,
-        Model::Diode => 20.0,
-        _ => 14.0,
-    }
-}
-
-/// Tape's and Transformer's icons: their loop (from the DSP) where their emphasis is flat
-/// (Tape at 200 Hz, Transformer at 1 kHz), so it shows the core's curve and loop; traced once.
-fn icon_loop(model: Model) -> &'static [(f32, f32)] {
-    static LOOPS: OnceLock<[Vec<(f32, f32)>; 2]> = OnceLock::new();
-    let loops = LOOPS.get_or_init(|| [magnet_loop(Model::Tape, 1.0 / mite_dsp::sat::CALIBRATION, 12.0, 0.0, 200.0, 64), magnet_loop(Model::Transformer, 1.0 / mite_dsp::sat::CALIBRATION, 9.0, 0.0, 1000.0, 64)]);
-    &loops[model.magnet().unwrap_or(0)]
-}
+/// Tape: a cassette, its two reels and the tape window.
+const TAPE: &str = "M4 5 H20 A2 2 0 0 1 22 7 V17 A2 2 0 0 1 20 19 H4 A2 2 0 0 1 2 17 V7 A2 2 0 0 1 4 5 Z \
+    M10.6 11 A2.6 2.6 0 1 0 5.4 11 A2.6 2.6 0 1 0 10.6 11 Z M18.6 11 A2.6 2.6 0 1 0 13.4 11 A2.6 2.6 0 1 0 18.6 11 Z \
+    M10.6 11 H13.4 M7 19 L8.5 15.5 H15.5 L17 19";
+/// Tube: a valve, its glass dome, plates and filament, the base and its pins.
+const TUBE: &str = "M7 17 V9 A5 5 0 0 1 17 9 V17 M5.5 17 H18.5 V20 H5.5 Z M9 20 V22.5 M12 20 V22.5 M15 20 V22.5 \
+    M9.5 7.5 V14.5 M14.5 7.5 V14.5 M11 14.5 L12 11 L13 14.5";
+/// Transformer: two coils on an iron core (the schematic symbol).
+const TRANSFORMER: &str = "M7 3 V5 A1.75 1.75 0 0 1 7 8.5 A1.75 1.75 0 0 1 7 12 A1.75 1.75 0 0 1 7 15.5 A1.75 1.75 0 0 1 7 19 V21 \
+    M17 3 V5 A1.75 1.75 0 0 0 17 8.5 A1.75 1.75 0 0 0 17 12 A1.75 1.75 0 0 0 17 15.5 A1.75 1.75 0 0 0 17 19 V21 \
+    M11 4 V20 M13 4 V20";
+/// Diode: the schematic symbol, its triangle against the bar.
+const DIODE: &str = "M2 12 H8 M8 6.5 V17.5 L16 12 Z M16 6.5 V17.5 M16 12 H22";
+/// Soft: a pillow.
+const SOFT: &str = "M5 5 Q12 8 19 5 Q16 12 19 19 Q12 16 5 19 Q8 12 5 5 Z";
+/// Hard: a brick wall, the ceiling nothing passes.
+const HARD: &str = "M3 5.5 H21 V18.5 H3 Z M3 9.8 H21 M3 14.2 H21 M9 5.5 V9.8 M15 5.5 V9.8 M6 9.8 V14.2 M12 9.8 V14.2 \
+    M18 9.8 V14.2 M9 14.2 V18.5 M15 14.2 V18.5";
+/// Fold: a sheet folded in pleats.
+const FOLD: &str = "M3 8 L7.5 5 L12 8 L16.5 5 L21 8 M3 18 L7.5 15 L12 18 L16.5 15 L21 18 \
+    M3 8 V18 M7.5 5 V15 M12 8 V18 M16.5 5 V15 M21 8 V18";
+/// Rectify: a bridge rectifier, four diodes round a diamond.
+const RECTIFY: &str = "M12 3 L21 12 L12 21 L3 12 Z M12 1 V3 M12 21 V23 M1 12 H3 M21 12 H23 M7.71 9.97 L8.63 6.37 L5.03 7.29 Z M9.97 7.71 L7.29 5.03 M18.97 7.29 L15.37 6.37 L16.29 9.97 Z M16.71 5.03 L14.03 7.71 M9.97 16.29 L6.37 15.37 L7.29 18.97 Z M7.71 14.03 L5.03 16.71 M16.71 18.97 L17.63 15.37 L14.03 16.29 Z M18.97 16.71 L16.29 14.03";
 
 /// A stereo mode's icon: two overlapping rings (left and right), with a dot on what is saturated
 /// separately: nothing for plain stereo, the overlap for Mid, the outer parts for Side, all for M/S.
@@ -62,40 +67,17 @@ pub fn draw_stereo(scene: &mut Scene, mode: usize, c: Point, size: f64, color: C
     }
 }
 
-/// A model's icon: its own transfer curve (from the DSP) over −1…1, `size` across, centred on
-/// `c` (Tape and Transformer: their loop).
+/// A model's icon, `size` across, centred on `c`.
 pub fn draw_model(scene: &mut Scene, model: Model, c: Point, size: f64, color: Color, width: f64) {
-    let stroke = Stroke::new(width).with_caps(Cap::Round).with_join(Join::Round);
-    let half = size / 2.0;
-    if model.magnet().is_some() {
-        let pts = icon_loop(model);
-        let peak = pts.iter().fold(0.0f32, |m, p| m.max(p.1.abs())).max(1e-6);
-        let mut path = BezPath::new();
-        for (i, &(x, y)) in pts.iter().enumerate() {
-            let p = Point::new(c.x + f64::from(x) * f64::from(mite_dsp::sat::CALIBRATION) * half, c.y - f64::from(y / peak) * half * 0.8);
-            if i == 0 {
-                path.move_to(p);
-            } else {
-                path.line_to(p);
-            }
-        }
-        path.close_path();
-        scene.stroke(&stroke, Affine::IDENTITY, color, None, &path);
-        return;
-    }
-    let drive = icon_drive(model);
-    // Fit the curve's height to the box, so models that never reach ±1 still read.
-    let n = 48;
-    let ys: Vec<f64> = (0..=n).map(|i| f64::from(transfer(model, (-1.0 + 2.0 * i as f32 / n as f32) / mite_dsp::sat::CALIBRATION, drive, 0.0))).collect();
-    let peak = ys.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1e-6);
-    let mut path = BezPath::new();
-    for (i, y) in ys.iter().enumerate() {
-        let p = Point::new(c.x - half + size * i as f64 / n as f64, c.y - y / peak * half * 0.8);
-        if i == 0 {
-            path.move_to(p);
-        } else {
-            path.line_to(p);
-        }
-    }
-    scene.stroke(&stroke, Affine::IDENTITY, color, None, &path);
+    let d = match model {
+        Model::Tape => TAPE,
+        Model::Tube => TUBE,
+        Model::Transformer => TRANSFORMER,
+        Model::Diode => DIODE,
+        Model::Soft => SOFT,
+        Model::Hard => HARD,
+        Model::Fold => FOLD,
+        Model::Rectify => RECTIFY,
+    };
+    draw(scene, d, c, size, color, width);
 }

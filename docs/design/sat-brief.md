@@ -187,8 +187,8 @@ x 1180–1280, as in Shape.
   drive engagement `a`.
 
 ### 3.2 Band card
-- **Model glyphs**: one 32 px icon button per model, each glyph a tiny drawing of its own curve
-  (from the same function). The current one is lit in the accent; hovering one previews its
+- **Model glyphs**: one 32 px icon button per model, a pictogram of what it is (2026-11-24, user: the tiny curves all looked alike): Tape a cassette, Tube a valve, Transformer two coils on a core, Diode its schematic symbol, Soft a pillow, Hard a brick wall, Fold a pleated sheet, Rectify a bridge of four diodes. The card's transfer square draws the curve.
+  The current one is lit in the accent; hovering one previews its
   curve as a ghost in the transfer square (never writes the parameter).
 - **Transfer square** (260 × 260 on the wide card): input −1…1 across, output −1…1 up, the
   identity as a faint diagonal, the band's curve as a glowing accent line (`x + a(F − x)` with
