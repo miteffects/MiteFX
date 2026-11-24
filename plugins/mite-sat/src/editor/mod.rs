@@ -1247,6 +1247,7 @@ impl SatView {
                 true
             }
             Some(Hot::Harmonic(b, k)) => {
+                self.rail.selected = b;
                 // Drawing: on another model the band becomes Harmonic, its recipe what the bars
                 // show it making now, so the sound carries on from where it was.
                 for id in Self::harmonic_ids(b) {
@@ -1279,7 +1280,7 @@ impl SatView {
                 self.rail.remove_band(host, b);
                 true
             }
-            Some(Hot::Card(b) | Hot::Harmonic(b, _)) => {
+            Some(Hot::Card(b)) => {
                 self.rail.selected = b;
                 true
             }
