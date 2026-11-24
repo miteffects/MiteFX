@@ -322,6 +322,39 @@ pub fn normalized_state_json(state: &[u8]) -> serde_json::Value {
     v
 }
 
+/// Whether two saved states match: the same structure, keys and text, with numbers equal to one
+/// part in a million (a migration that recomputes a value with `powf` or `ln` rounds its last
+/// bit differently on macOS's and Windows' maths libraries), looking inside fields that hold
+/// JSON as text (snapshots). `Err` names the first difference.
+pub fn same_state(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Result<(), String> {
+    use serde_json::Value;
+    let nested = |s: &str| serde_json::from_str::<Value>(s).ok().filter(|v| v.is_object() || v.is_array());
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            let (x, y) = (x.as_f64().unwrap_or(f64::NAN), y.as_f64().unwrap_or(f64::NAN));
+            if x == y || (x - y).abs() <= 1e-6 * x.abs().max(y.abs()).max(1.0) { Ok(()) } else { Err(format!("{path}: {x} vs {y}")) }
+        }
+        (Value::String(x), Value::String(y)) if x != y => match (nested(x), nested(y)) {
+            (Some(x), Some(y)) => same_state(&x, &y, path),
+            _ => Err(format!("{path}: {x:?} vs {y:?}")),
+        },
+        (Value::Array(x), Value::Array(y)) => {
+            if x.len() != y.len() {
+                return Err(format!("{path}: {} vs {} items", x.len(), y.len()));
+            }
+            x.iter().zip(y).enumerate().try_for_each(|(i, (x, y))| same_state(x, y, &format!("{path}[{i}]")))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            if let Some(k) = x.keys().find(|k| !y.contains_key(*k)).or_else(|| y.keys().find(|k| !x.contains_key(*k))) {
+                return Err(format!("{path}.{k}: only on one side"));
+            }
+            x.iter().try_for_each(|(k, v)| same_state(v, &y[k], &format!("{path}.{k}")))
+        }
+        _ if a == b => Ok(()),
+        _ => Err(format!("{path}: {a} vs {b}")),
+    }
+}
+
 /// The golden state check every plugin runs (BLUEPRINT §5). In `dir`, each
 /// `<prefix>.state.v<N>.json` is a state saved by version N: loaded through `entry` and saved
 /// again, it must come back as `<prefix>.state.v<N>.expected.json` when that exists (an old
@@ -346,8 +379,31 @@ pub fn check_golden_states(entry: &'static clap_plugin_entry, id: &str, dir: &st
         assert!(plugin.load(&golden), "{name} did not load");
         let expected_path = path.with_file_name(name.replace(".json", ".expected.json"));
         let expected = if expected_path.exists() { std::fs::read(&expected_path).expect("read expected state") } else { golden };
-        assert_eq!(normalized_state_json(&plugin.save()), normalized_state_json(&expected), "{name} came back different");
+        if let Err(e) = same_state(&normalized_state_json(&plugin.save()), &normalized_state_json(&expected), "") {
+            panic!("{name} came back different: {e}");
+        }
         checked += 1;
     }
     assert!(checked >= 1);
+}
+
+#[cfg(test)]
+mod same_state_tests {
+    use super::same_state;
+    use serde_json::json;
+
+    #[test]
+    fn a_last_digit_passes_and_real_changes_do_not() {
+        let a = json!({"params": {"b02_freq": 0.6640831}, "fields": {"snapshots": "{\"slots\":[{\"b02_freq\":0.6640831}]}", "preset": "Kick"}});
+        let close = json!({"params": {"b02_freq": 0.66408306}, "fields": {"snapshots": "{\"slots\":[{\"b02_freq\":0.66408306}]}", "preset": "Kick"}});
+        assert_eq!(same_state(&a, &close, ""), Ok(()));
+        let moved = json!({"params": {"b02_freq": 0.665}, "fields": {"snapshots": "{\"slots\":[{\"b02_freq\":0.6640831}]}", "preset": "Kick"}});
+        assert!(same_state(&a, &moved, "").is_err());
+        let inner = json!({"params": {"b02_freq": 0.6640831}, "fields": {"snapshots": "{\"slots\":[{\"b02_freq\":0.7}]}", "preset": "Kick"}});
+        assert!(same_state(&a, &inner, "").unwrap_err().contains("snapshots"));
+        let renamed = json!({"params": {"b02_freq": 0.6640831}, "fields": {"snapshots": "{\"slots\":[{\"b02_freq\":0.6640831}]}", "preset": "Snare"}});
+        assert!(same_state(&a, &renamed, "").is_err());
+        let missing = json!({"params": {}, "fields": {"snapshots": "{\"slots\":[{\"b02_freq\":0.6640831}]}", "preset": "Kick"}});
+        assert!(same_state(&a, &missing, "").is_err());
+    }
 }
