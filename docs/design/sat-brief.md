@@ -14,7 +14,7 @@ computed from the DSP, direct manipulation, no words in the display.
 A saturation and distortion plugin. It splits the signal into up to **6 bands** (5 crossovers,
 LR4 with allpass compensation, shared with Shape: `mite_dsp::crossover`), and each band has its
 own **model**, **drive**, **bias**, **tone**, mix, output, dynamics and stereo mode. Every model
-runs oversampled (1/2/4/8×, linear-phase half-bands, ≥ 100 dB image and alias rejection).
+runs oversampled (1/2/4/8/16×, 4× by default, linear-phase half-bands, ≥ 100 dB image and alias rejection).
 Modulation (two LFOs, an envelope follower, 8 slots) can move any band control.
 
 Neutral settings null: drive 0 dB, band bypass, band mix 0 or global mix 0 are the input
