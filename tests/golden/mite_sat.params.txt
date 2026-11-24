@@ -15,7 +15,7 @@ x4_on | bool | false
 x4_freq | Hz | 20 | 20000 | 6000 | Log
 x5_on | bool | false
 x5_freq | Hz | 20 | 20000 | 12000 | Log
-b1_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
+b1_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify, Harmonic | 1
 b1_drive | dB | 0 | 60 | 0 | Linear
 b1_bias | % | -100 | 100 | 0 | Linear
 b1_tone | dB | -12 | 12 | 0 | Linear
@@ -29,7 +29,7 @@ b1_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b1_bypass | bool | false
 b1_mute | bool | false
 b1_solo | bool | false
-b2_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
+b2_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify, Harmonic | 1
 b2_drive | dB | 0 | 60 | 0 | Linear
 b2_bias | % | -100 | 100 | 0 | Linear
 b2_tone | dB | -12 | 12 | 0 | Linear
@@ -43,7 +43,7 @@ b2_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b2_bypass | bool | false
 b2_mute | bool | false
 b2_solo | bool | false
-b3_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
+b3_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify, Harmonic | 1
 b3_drive | dB | 0 | 60 | 0 | Linear
 b3_bias | % | -100 | 100 | 0 | Linear
 b3_tone | dB | -12 | 12 | 0 | Linear
@@ -57,7 +57,7 @@ b3_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b3_bypass | bool | false
 b3_mute | bool | false
 b3_solo | bool | false
-b4_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
+b4_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify, Harmonic | 1
 b4_drive | dB | 0 | 60 | 0 | Linear
 b4_bias | % | -100 | 100 | 0 | Linear
 b4_tone | dB | -12 | 12 | 0 | Linear
@@ -71,7 +71,7 @@ b4_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b4_bypass | bool | false
 b4_mute | bool | false
 b4_solo | bool | false
-b5_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
+b5_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify, Harmonic | 1
 b5_drive | dB | 0 | 60 | 0 | Linear
 b5_bias | % | -100 | 100 | 0 | Linear
 b5_tone | dB | -12 | 12 | 0 | Linear
@@ -85,7 +85,7 @@ b5_stereo | choice | Stereo, Mid, Side, M/S, Left, Right | 0
 b5_bypass | bool | false
 b5_mute | bool | false
 b5_solo | bool | false
-b6_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
+b6_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify, Harmonic | 1
 b6_drive | dB | 0 | 60 | 0 | Linear
 b6_bias | % | -100 | 100 | 0 | Linear
 b6_tone | dB | -12 | 12 | 0 | Linear
@@ -162,3 +162,63 @@ b5_fb | % | 0 | 100 | 0 | Linear
 b5_fb_freq | Hz | 20 | 10000 | 250 | Log
 b6_fb | % | 0 | 100 | 0 | Linear
 b6_fb_freq | Hz | 20 | 10000 | 250 | Log
+b1_h2 | dB | -72 | 0 | -18 | Linear
+b1_h3 | dB | -72 | 0 | -26 | Linear
+b1_h4 | dB | -72 | 0 | -32 | Linear
+b1_h5 | dB | -72 | 0 | -40 | Linear
+b1_h6 | dB | -72 | 0 | -72 | Linear
+b1_h7 | dB | -72 | 0 | -72 | Linear
+b1_h8 | dB | -72 | 0 | -72 | Linear
+b1_h9 | dB | -72 | 0 | -72 | Linear
+b1_punch | dB | -24 | 24 | 0 | Linear
+b1_body | dB | -24 | 24 | 0 | Linear
+b2_h2 | dB | -72 | 0 | -18 | Linear
+b2_h3 | dB | -72 | 0 | -26 | Linear
+b2_h4 | dB | -72 | 0 | -32 | Linear
+b2_h5 | dB | -72 | 0 | -40 | Linear
+b2_h6 | dB | -72 | 0 | -72 | Linear
+b2_h7 | dB | -72 | 0 | -72 | Linear
+b2_h8 | dB | -72 | 0 | -72 | Linear
+b2_h9 | dB | -72 | 0 | -72 | Linear
+b2_punch | dB | -24 | 24 | 0 | Linear
+b2_body | dB | -24 | 24 | 0 | Linear
+b3_h2 | dB | -72 | 0 | -18 | Linear
+b3_h3 | dB | -72 | 0 | -26 | Linear
+b3_h4 | dB | -72 | 0 | -32 | Linear
+b3_h5 | dB | -72 | 0 | -40 | Linear
+b3_h6 | dB | -72 | 0 | -72 | Linear
+b3_h7 | dB | -72 | 0 | -72 | Linear
+b3_h8 | dB | -72 | 0 | -72 | Linear
+b3_h9 | dB | -72 | 0 | -72 | Linear
+b3_punch | dB | -24 | 24 | 0 | Linear
+b3_body | dB | -24 | 24 | 0 | Linear
+b4_h2 | dB | -72 | 0 | -18 | Linear
+b4_h3 | dB | -72 | 0 | -26 | Linear
+b4_h4 | dB | -72 | 0 | -32 | Linear
+b4_h5 | dB | -72 | 0 | -40 | Linear
+b4_h6 | dB | -72 | 0 | -72 | Linear
+b4_h7 | dB | -72 | 0 | -72 | Linear
+b4_h8 | dB | -72 | 0 | -72 | Linear
+b4_h9 | dB | -72 | 0 | -72 | Linear
+b4_punch | dB | -24 | 24 | 0 | Linear
+b4_body | dB | -24 | 24 | 0 | Linear
+b5_h2 | dB | -72 | 0 | -18 | Linear
+b5_h3 | dB | -72 | 0 | -26 | Linear
+b5_h4 | dB | -72 | 0 | -32 | Linear
+b5_h5 | dB | -72 | 0 | -40 | Linear
+b5_h6 | dB | -72 | 0 | -72 | Linear
+b5_h7 | dB | -72 | 0 | -72 | Linear
+b5_h8 | dB | -72 | 0 | -72 | Linear
+b5_h9 | dB | -72 | 0 | -72 | Linear
+b5_punch | dB | -24 | 24 | 0 | Linear
+b5_body | dB | -24 | 24 | 0 | Linear
+b6_h2 | dB | -72 | 0 | -18 | Linear
+b6_h3 | dB | -72 | 0 | -26 | Linear
+b6_h4 | dB | -72 | 0 | -32 | Linear
+b6_h5 | dB | -72 | 0 | -40 | Linear
+b6_h6 | dB | -72 | 0 | -72 | Linear
+b6_h7 | dB | -72 | 0 | -72 | Linear
+b6_h8 | dB | -72 | 0 | -72 | Linear
+b6_h9 | dB | -72 | 0 | -72 | Linear
+b6_punch | dB | -24 | 24 | 0 | Linear
+b6_body | dB | -24 | 24 | 0 | Linear

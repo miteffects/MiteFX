@@ -23,7 +23,7 @@ use nih_plug::prelude::*;
 ///   version 2 state gets them centred, what it was.
 /// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
 ///   version 3 state gets Minimum Phase, what it was.
-pub const STATE_VERSION: u32 = 7;
+pub const STATE_VERSION: u32 = 8;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -83,6 +83,18 @@ pub const B_MS: ParamSpec = spec("ms", "M/S Balance", "%", -100.0, 100.0, 0.0, P
 /// resonant band-pass, ringing at the frequency. Appended after `phase`, so host order only grows.
 pub const B_FB: ParamSpec = spec("fb", "Feedback", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_FB_FREQ: ParamSpec = spec("fb_freq", "Feedback Frequency", "Hz", mite_dsp::sat::FEEDBACK_HZ.0, mite_dsp::sat::FEEDBACK_HZ.1, 250.0, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::Frequency);
+/// Harmonic's recipe (2026-11-24): each band's 2nd…9th harmonics at full scale, dB against the
+/// fundamental (−72 is off); and Punch and Body, extra drive on the hits and on what sustains.
+/// Appended after the feedback.
+pub const B_HARM: [ParamSpec; 8] = {
+    const fn h(id: &'static str, name: &'static str, default: f32) -> ParamSpec {
+        spec(id, name, "dB", mite_dsp::sat::HARMONIC_FLOOR_DB, 0.0, default, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number)
+    }
+    let d = mite_dsp::sat::DEFAULT_HARMONICS_DB;
+    [h("h2", "Harmonic 2", d[0]), h("h3", "Harmonic 3", d[1]), h("h4", "Harmonic 4", d[2]), h("h5", "Harmonic 5", d[3]), h("h6", "Harmonic 6", d[4]), h("h7", "Harmonic 7", d[5]), h("h8", "Harmonic 8", d[6]), h("h9", "Harmonic 9", d[7])]
+};
+pub const B_PUNCH: ParamSpec = spec("punch", "Punch", "dB", -mite_dsp::sat::PUSH_MAX_DB, mite_dsp::sat::PUSH_MAX_DB, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+pub const B_BODY: ParamSpec = spec("body", "Body", "dB", -mite_dsp::sat::PUSH_MAX_DB, mite_dsp::sat::PUSH_MAX_DB, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const B_STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &["Stereo", "Mid", "Side", "M/S", "Left", "Right"], default: 0 };
 /// Clean, but still heard.
 pub const B_BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
@@ -268,7 +280,7 @@ pub fn band_id(band: usize, param: &str) -> String {
 /// The continuous band parameters, in host order.
 pub const BAND_SPECS: [ParamSpec; 9] = [B_DRIVE, B_BIAS, B_TONE, B_MIX, B_OUT, B_DYN, B_DYN_THR, B_DYN_ATT, B_DYN_REL];
 /// Every continuous band parameter (`BAND_SPECS` and the balance), for stand-in hosts.
-pub const BAND_ALL_SPECS: [ParamSpec; 13] = [B_DRIVE, B_BIAS, B_TONE, B_MIX, B_OUT, B_DYN, B_DYN_THR, B_DYN_ATT, B_DYN_REL, B_LR, B_MS, B_FB, B_FB_FREQ];
+pub const BAND_ALL_SPECS: [ParamSpec; 23] = [B_DRIVE, B_BIAS, B_TONE, B_MIX, B_OUT, B_DYN, B_DYN_THR, B_DYN_ATT, B_DYN_REL, B_LR, B_MS, B_FB, B_FB_FREQ, B_HARM[0], B_HARM[1], B_HARM[2], B_HARM[3], B_HARM[4], B_HARM[5], B_HARM[6], B_HARM[7], B_PUNCH, B_BODY];
 
 /// Every parameter's manifest line, in host order.
 pub fn manifest() -> String {
@@ -299,6 +311,9 @@ pub fn manifest() -> String {
     lines.push(PHASE.manifest_line());
     for b in 0..BANDS {
         lines.extend([B_FB, B_FB_FREQ].iter().map(|s| format!("b{}_{}", b + 1, s.manifest_line())));
+    }
+    for b in 0..BANDS {
+        lines.extend(B_HARM.iter().chain([&B_PUNCH, &B_BODY]).map(|s| format!("b{}_{}", b + 1, s.manifest_line())));
     }
     lines.join("\n") + "\n"
 }
@@ -348,6 +363,9 @@ pub struct BandParams {
     pub ms: FloatParam,
     pub fb: FloatParam,
     pub fb_freq: FloatParam,
+    pub harm: [FloatParam; 8],
+    pub punch: FloatParam,
+    pub body: FloatParam,
 }
 
 impl BandParams {
@@ -366,6 +384,9 @@ impl BandParams {
             ms: float_param_named(&B_MS, name("M/S Balance")),
             fb: float_param_named(&B_FB, name("Feedback")),
             fb_freq: float_param_named(&B_FB_FREQ, name("Feedback Frequency")),
+            harm: std::array::from_fn(|k| float_param_named(&B_HARM[k], name(B_HARM[k].name))),
+            punch: float_param_named(&B_PUNCH, name("Punch")),
+            body: float_param_named(&B_BODY, name("Body")),
         }
     }
 
@@ -390,6 +411,9 @@ impl BandParams {
             ms: self.ms.value() / 100.0,
             feedback: self.fb.value() / 100.0,
             feedback_hz: self.fb_freq.value(),
+            harmonics_db: std::array::from_fn(|k| self.harm[k].value()),
+            punch_db: self.punch.value(),
+            body_db: self.body.value(),
         }
     }
 }
@@ -506,6 +530,14 @@ unsafe impl Params for SatParams {
             let group = format!("Band {}", i + 1);
             map.push((band_id(i, B_FB.id), b.fb.as_ptr(), group.clone()));
             map.push((band_id(i, B_FB_FREQ.id), b.fb_freq.as_ptr(), group));
+        }
+        for (i, b) in self.bands.iter().enumerate() {
+            let group = format!("Band {}", i + 1);
+            for (spec, p) in B_HARM.iter().zip(&b.harm) {
+                map.push((band_id(i, spec.id), p.as_ptr(), group.clone()));
+            }
+            map.push((band_id(i, B_PUNCH.id), b.punch.as_ptr(), group.clone()));
+            map.push((band_id(i, B_BODY.id), b.body.as_ptr(), group));
         }
         map
     }

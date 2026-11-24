@@ -115,7 +115,7 @@ fn offered() -> Vec<Model> {
 
 /// The wide card's dials: drive large, then bias, tone, mix and output; under them the
 /// dynamics row (the threshold is automatic: no dial).
-const DIALS: [(ParamSpec, &str, KnobKind); 12] = [
+const DIALS: [(ParamSpec, &str, KnobKind); 14] = [
     (B_DRIVE, "DRIVE", KnobKind::Unipolar),
     (B_BIAS, "BIAS", KnobKind::Bipolar),
     (B_TONE, "TONE", KnobKind::Bipolar),
@@ -131,6 +131,9 @@ const DIALS: [(ParamSpec, &str, KnobKind); 12] = [
     // Feedback over its frequency (2026-11-24, as Saturn 2's).
     (B_FB, "FEEDBACK", KnobKind::Unipolar),
     (B_FB_FREQ, "FREQ", KnobKind::Unipolar),
+    // Extra drive on the hits and on what sustains (2026-11-24), beside DRIVE.
+    (B_PUNCH, "PUNCH", KnobKind::Bipolar),
+    (B_BODY, "BODY", KnobKind::Bipolar),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,6 +268,9 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::sat::SatSettings {
             ms: p(&band_id(b, B_MS.id)) / 100.0,
             feedback: p(&band_id(b, B_FB.id)) / 100.0,
             feedback_hz: p(&band_id(b, B_FB_FREQ.id)),
+            harmonics_db: std::array::from_fn(|k| p(&band_id(b, B_HARM[k].id))),
+            punch_db: p(&band_id(b, B_PUNCH.id)),
+            body_db: p(&band_id(b, B_BODY.id)),
         }),
         auto_gain: on(AUTO_GAIN.id),
     }
@@ -279,6 +285,8 @@ pub fn oversampling(host: &dyn ParamHost) -> usize {
 enum Drag {
     /// On a band's transfer square: drive up and down, bias across (Alt: tone).
     Curve { band: usize, start: Point, drive: f32, bias: f32, tone: f32, alt: bool },
+    /// On a band's bars: harmonic `k` (0 = H2) of its recipe, to where the pointer is.
+    Harmonic { band: usize, k: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -584,6 +592,16 @@ impl SatView {
         t * t * (3.0 - 2.0 * t) * Self::plain(host, &band_id(b, B_MIX.id)) / 100.0
     }
 
+    /// Band `b`'s Harmonic recipe, dB (2nd…9th).
+    fn harmonics_db(host: &dyn ParamHost, b: usize) -> [f32; 8] {
+        std::array::from_fn(|k| Self::plain(host, &band_id(b, B_HARM[k].id)))
+    }
+
+    /// What a drag on band `b`'s bars moves: its model and its recipe (one undo step).
+    fn harmonic_ids(b: usize) -> Vec<String> {
+        std::iter::once(band_id(b, B_MODEL.id)).chain(B_HARM.iter().map(|h| band_id(b, h.id))).collect()
+    }
+
     fn curve(&self, host: &dyn ParamHost, b: usize) -> curve::Curve {
         let model = Self::model(host, b);
         let bias = Self::plain(host, &band_id(b, B_BIAS.id)) / 100.0;
@@ -594,7 +612,8 @@ impl SatView {
         let freq = tone_pivot(&Layout::new(&x), &x, b);
         let acting = Self::plain(host, &band_id(b, B_DYN.id)) != 0.0 && !Self::on(host, &band_id(b, B_BYPASS.id));
         let threshold = (acting && self.threshold[b] > 0.0).then_some(self.threshold[b]);
-        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, bias, auto, dynamics: self.dynamics[b], threshold, peak: self.peak[b], freq }
+        let recipe = mite_dsp::sat::recipe(&Self::harmonics_db(host, b));
+        curve::Curve { model, drive_db: Self::plain(host, &band_id(b, B_DRIVE.id)), point, bias, auto, dynamics: self.dynamics[b], threshold, peak: self.peak[b], freq, recipe }
     }
 
     /// Re-measures the shown band's harmonics when what they depend on moved, and eases the bars.
@@ -634,16 +653,20 @@ impl SatView {
             let square = Rect::new(rect.x0 + 18.0, rect.y0 + 58.0, rect.x0 + 18.0 + side, rect.y0 + 58.0 + side);
             let bars = Rect::new(square.x1 + 16.0, square.y0, square.x1 + 16.0 + 320.0, square.y1);
             let (x0, x1) = (bars.x1 + 16.0, rect.x1 - 12.0);
-            // Six columns: drive, bias, tone, feedback, mix, output; under them the dynamics'
-            // three, the feedback's frequency, then L/R and M/S under mix and output.
-            let step = (x1 - x0) / 6.0;
+            // Seven columns: drive, punch over body, bias, tone, feedback over its frequency, mix,
+            // output; under bias and tone the dynamics' attack and release, under drive its amount,
+            // L/R and M/S under mix and output.
+            let step = (x1 - x0) / 7.0;
             let (row1, row2) = (square.y0 + 70.0, square.y0 + 200.0);
             let at = |col: usize, y: f64| Point::new(x0 + step * (col as f64 + 0.5), y);
-            let mut dials: Vec<(Point, f64)> = [0usize, 1, 2, 4, 5].iter().map(|&k| (at(k, row1), if k == 0 { 80.0 } else { 56.0 })).collect();
-            dials.extend((0..3).map(|k| (at(k, row2), if k == 0 { 56.0 } else { 50.0 })));
-            dials.extend([4usize, 5].iter().map(|&k| (at(k, row2), 50.0)));
-            dials.push((at(3, row1), 56.0));
-            dials.push((at(3, row2), 50.0));
+            // In DIALS order: drive, bias, tone, mix, output, dynamics, attack, release, L/R, M/S,
+            // feedback, frequency, punch, body.
+            let places: [(usize, f64, f64); 14] = [
+                (0, row1, 76.0), (2, row1, 54.0), (3, row1, 54.0), (5, row1, 54.0), (6, row1, 54.0),
+                (0, row2, 54.0), (2, row2, 48.0), (3, row2, 48.0), (5, row2, 48.0), (6, row2, 48.0),
+                (4, row1, 54.0), (4, row2, 48.0), (1, row1, 54.0), (1, row2, 54.0),
+            ];
+            let dials: Vec<(Point, f64)> = places.iter().map(|&(c, y, d)| (at(c, y), d)).collect();
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
             return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 132.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
         }
@@ -666,9 +689,9 @@ impl SatView {
                     // and the other four in a 2×2 grid, and the dynamics' three in a row below.
                     let (ax0, ax1) = (square.x1 + 12.0, rect.x1 - 8.0);
                     let bars = Rect::new(ax0, square.y0 + 18.0, ax1, square.y0 + 74.0);
-                    // Four columns: drive, then bias and tone over mix and output, then feedback
-                    // over its frequency.
-                    let col = (ax1 - ax0) / 4.0;
+                    // Five columns: drive, then bias and tone over mix and output, then feedback
+                    // over its frequency, then punch over body.
+                    let col = (ax1 - ax0) / 5.0;
                     let (top, step) = (bars.y1 + 28.0, 66.0);
                     let cy = top + step / 2.0;
                     let mut dials = vec![(Point::new(ax0 + col * 0.5, cy - 6.0), 72.0)];
@@ -684,16 +707,20 @@ impl SatView {
                     for k in 0..2 {
                         dials.push((Point::new(ax0 + col * 3.5, top + step * k as f64), 44.0));
                     }
+                    for k in 0..2 {
+                        dials.push((Point::new(ax0 + col * 4.5, top + step * k as f64), 44.0));
+                    }
                     Card {
                         band,
                         kind: CardKind::Wide,
                         rect,
                         square,
                         bars: Some(bars),
-                        models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 36.0, 32.0, 40.0),
+                        // Nine icons and the stereo pill share the row (2026-11-24: Harmonic added).
+                        models: icon(rect.x0 + 40.0, rect.y0 + 10.0, 32.0, 32.0, 36.0),
                         power: Some(button(1.0)),
                         // The stereo pill fills what the model icons and the buttons leave.
-                        stereo: Some(Rect::new(rect.x0 + 366.0, rect.y0 + 10.0, button(3.0).x0 - 8.0, rect.y0 + 42.0)),
+                        stereo: Some(Rect::new(rect.x0 + 44.0 + 36.0 * offered().len() as f64, rect.y0 + 10.0, button(3.0).x0 - 8.0, rect.y0 + 42.0)),
                         solo: Some(button(3.0)),
                         mute: Some(button(2.0)),
                         remove: Some(button(0.0)),
@@ -846,7 +873,12 @@ impl SatView {
                     Some(Hot::Harmonic(hb, i)) if hb == b => Some(i),
                     _ => None,
                 };
-                self.probe.draw(cx, r, focus, lit);
+                let focus = match self.drag {
+                    Some(Drag::Harmonic { band, k }) if band == b => Some(k),
+                    _ => focus,
+                };
+                let targets = (Self::model(cx.host, b) == Model::Harmonic).then(|| Self::harmonics_db(cx.host, b));
+                self.probe.draw(cx, r, focus, lit, targets);
             }
             if card.kind == CardKind::Narrow {
                 // Lit when the band is not plain stereo; dim (but there to click) when it is.
@@ -1189,6 +1221,14 @@ impl SatView {
         if alt { vec![band_id(band, B_TONE.id)] } else { vec![band_id(band, B_DRIVE.id), band_id(band, B_BIAS.id)] }
     }
 
+    /// Harmonic `k` of the dragged band's recipe to the pointer's height in its bars.
+    fn drag_harmonic(&mut self, host: &dyn ParamHost, pos: Point) {
+        let Some(Drag::Harmonic { band, k }) = self.drag else { return };
+        let layout = Self::layout(host);
+        let Some(r) = self.cards(&layout).into_iter().find(|c| c.band == band).and_then(|c| c.bars) else { return };
+        Self::set_raw(host, &band_id(band, B_HARM[k].id), bars::db_at(r, pos.y));
+    }
+
     fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers) -> bool {
         match self.hot_at(host, pos) {
             Some(Hot::Rail(_)) => self.rail.press(host, pos),
@@ -1204,6 +1244,22 @@ impl SatView {
             }
             Some(Hot::Model(b, m)) => {
                 Self::set(host, &band_id(b, B_MODEL.id), m.index() as f32);
+                true
+            }
+            Some(Hot::Harmonic(b, k)) => {
+                // Drawing: on another model the band becomes Harmonic, its recipe what the bars
+                // show it making now, so the sound carries on from where it was.
+                for id in Self::harmonic_ids(b) {
+                    host.begin_gesture(&id);
+                }
+                if Self::model(host, b) != Model::Harmonic {
+                    Self::set_raw(host, &band_id(b, B_MODEL.id), Model::Harmonic.index() as f32);
+                    for (i, (db, _)) in self.probe.shown().iter().enumerate() {
+                        Self::set_raw(host, &band_id(b, B_HARM[i].id), db.clamp(mite_dsp::sat::HARMONIC_FLOOR_DB, 0.0));
+                    }
+                }
+                self.drag = Some(Drag::Harmonic { band: b, k });
+                self.drag_harmonic(host, pos);
                 true
             }
             Some(Hot::Power(b)) => {
@@ -1329,6 +1385,10 @@ impl SatView {
                 if self.rail.drag_to(host, pos, mods) {
                     return true;
                 }
+                if let Some(Drag::Harmonic { .. }) = self.drag {
+                    self.drag_harmonic(host, pos);
+                    return true;
+                }
                 if let Some(Drag::Curve { band, start, drive, bias, tone, alt }) = self.drag {
                     let k = if mods.fine() { 0.2 } else { 1.0 };
                     let (dx, dy) = ((pos.x - start.x) as f32, (start.y - pos.y) as f32);
@@ -1365,6 +1425,12 @@ impl SatView {
                 match self.drag.take() {
                     Some(Drag::Curve { band, alt, .. }) => {
                         for id in Self::curve_ids(band, alt) {
+                            host.end_gesture(&id);
+                        }
+                        true
+                    }
+                    Some(Drag::Harmonic { band, .. }) => {
+                        for id in Self::harmonic_ids(band) {
                             host.end_gesture(&id);
                         }
                         true
@@ -1415,6 +1481,7 @@ fn model_words(m: Model) -> &'static str {
         Model::Rectify => "full-wave: the fundamental gives way to the octave above",
         Model::Tape => "magnetic hysteresis behind tape's emphasis: the highs saturate first, soft and loose, and the curve opens into a loop",
         Model::Transformer => "an iron core: the lows saturate first (its flux is the integral of the voltage), a narrow loop",
+        Model::Harmonic => "drawn: drag the markers over the bars to set each harmonic for a sine reaching full scale; quieter, the low ones lead",
     }
 }
 
@@ -1430,6 +1497,10 @@ fn knob_words(id: &str) -> &'static str {
         "dyn_rel" => " — how fast they let go",
         "lr" => " — this band's output panned: left takes the right away, right the left",
         "ms" => " — this band's output, mid against side: left narrows it to mono, right keeps only the sides",
+        "fb" => " — the saturated sound fed back through a resonance: the band rings at FREQ, never runs away",
+        "fb_freq" => " — where the feedback rings",
+        "punch" => " — more drive on the hits (less to the left): grit on the attack, not more level",
+        "body" => " — more drive on what sustains after the hits (less to the left): thicker tails, not more level",
         _ => "",
     }
 }

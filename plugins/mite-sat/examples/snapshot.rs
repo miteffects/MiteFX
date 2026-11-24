@@ -45,9 +45,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "rectify" => (Model::Rectify, 14.0, 0.0, 0.0),
         "tape" => (Model::Tape, 16.0, 0.0, 0.0),
         "transformer" => (Model::Transformer, 20.0, 0.0, 0.0),
+        "harmonic" => (Model::Harmonic, 30.0, 0.0, 0.0),
         _ => (Model::Tube, 12.0, 15.0, 0.0),
     };
     host.set_plain(&band_id(0, B_MODEL.id), model.index() as f32);
+    if model == Model::Harmonic {
+        // A drawn recipe: strong 2nd and 3rd, a 5th, a faint 7th.
+        for (k, db) in [-10.0f32, -18.0, -72.0, -28.0, -72.0, -38.0, -72.0, -72.0].into_iter().enumerate() {
+            host.set_plain(&band_id(0, B_HARM[k].id), db);
+        }
+    }
     host.set_plain(&band_id(0, B_DRIVE.id), drive);
     host.set_plain(&band_id(0, B_BIAS.id), bias);
     host.set_plain(&band_id(0, B_TONE.id), tone);

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use mite_dsp::sat::Model;
 use mite_sat::editor::{memory_host, SatView};
 use mite_dsp::sat::Layout;
-use mite_sat::params::{band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_DYN, B_DYN_ATT, B_DYN_THR, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
+use mite_sat::params::{B_HARM, band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_DYN, B_DYN_ATT, B_DYN_THR, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
 use mite_sat::SatShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -377,4 +377,24 @@ fn the_matrix_opens_and_routes_a_band() {
     assert_eq!((plain(&host, "m1_dst").round(), plain(&host, "m1_src"), plain(&host, "m1_amt")), (t as f32, 1.0, 25.0));
     view.event(&UiEvent::KeyDown { key: Key::Escape, mods: Modifiers::default() }, &host);
     assert!(view.matrix_panel().is_none());
+}
+
+#[test]
+fn drawing_on_the_bars_makes_the_band_harmonic_in_one_undo_step() {
+    // On Tube, a drag up the 3rd harmonic's column: the band becomes Harmonic, its recipe seeded
+    // from the bars, the 3rd where the drag ended (near the top: close to 0 dB); one undo takes
+    // the model and the recipe back.
+    let (mut view, host) = setup();
+    host.set_plain(&band_id(0, B_DRIVE.id), 30.0);
+    draw(&mut view, &host);
+    let r = view.bars(&host).expect("the single card has bars");
+    let col = |i: usize| r.x0 + 14.0 + (r.width() - 28.0) * (i as f64 + 0.5) / 8.0;
+    let (from, to) = (Point::new(col(1), r.y1 - 30.0), Point::new(col(1), r.y0 + 16.0));
+    drag(&mut view, &host, from, to, MODS);
+    assert_eq!(plain(&host, &band_id(0, B_MODEL.id)), Model::Harmonic.index() as f32);
+    let h3 = plain(&host, &band_id(0, B_HARM[1].id));
+    assert!(h3 > -6.0, "H3 dragged near the top: {h3} dB");
+    view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
+    assert_eq!(plain(&host, &band_id(0, B_MODEL.id)), Model::Tube.index() as f32, "one undo: the model");
+    assert_eq!(plain(&host, &band_id(0, B_HARM[1].id)), B_HARM[1].default, "and the recipe");
 }

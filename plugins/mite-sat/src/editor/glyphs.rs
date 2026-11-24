@@ -39,6 +39,9 @@ const HARD: &str = "M3 5.5 H21 V18.5 H3 Z M3 9.8 H21 M3 14.2 H21 M9 5.5 V9.8 M15
 /// Fold: a sheet folded in pleats.
 const FOLD: &str = "M3 8 L7.5 5 L12 8 L16.5 5 L21 8 M3 18 L7.5 15 L12 18 L16.5 15 L21 18 \
     M3 8 V18 M7.5 5 V15 M12 8 V18 M16.5 5 V15 M21 8 V18";
+/// Harmonic: a harmonic series, bars falling away, a pen's mark on the second (drawn).
+const HARMONIC: &str = "M3 21 H21 M5 21 V5 M9 21 V10 M13 21 V14 M17 21 V17 M3 5 H7";
+
 /// Rectify: a bridge rectifier, four diodes round a diamond.
 const RECTIFY: &str = "M12 3 L21 12 L12 21 L3 12 Z M12 1 V3 M12 21 V23 M1 12 H3 M21 12 H23 M7.71 9.97 L8.63 6.37 L5.03 7.29 Z M9.97 7.71 L7.29 5.03 M18.97 7.29 L15.37 6.37 L16.29 9.97 Z M16.71 5.03 L14.03 7.71 M9.97 16.29 L6.37 15.37 L7.29 18.97 Z M7.71 14.03 L5.03 16.71 M16.71 18.97 L17.63 15.37 L14.03 16.29 Z M18.97 16.71 L16.29 14.03";
 
@@ -78,6 +81,7 @@ pub fn draw_model(scene: &mut Scene, model: Model, c: Point, size: f64, color: C
         Model::Hard => HARD,
         Model::Fold => FOLD,
         Model::Rectify => RECTIFY,
+        Model::Harmonic => HARMONIC,
     };
     draw(scene, d, c, size, color, width);
 }

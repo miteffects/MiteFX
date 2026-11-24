@@ -51,6 +51,21 @@ harmonics hold through 36 dB of drive; nearer a square wave (48–60 dB) they fa
 Auto gain's level meter is 2 s (was 300 ms) and starts as a plain average, its gate 5 ms (was
 20): it no longer rides between loud and quiet stretches (±0.5 dB → ±0.03).
 
+**Drawn harmonics and Punch / Body (2026-11-24, state 8; user picked them from "more than
+Saturn"):** model 8, **Harmonic**: `P(x) = x + Σ aₖ·(Tₖ(x) − Tₖ(0) − Tₖ'(0)·x)` over the 2nd…9th
+Chebyshev polynomials, the input the identity to ±1 and landing on ±1.05 past it (value, slope,
+curvature matched). For a sine reaching ±1 each harmonic is its drawn level within 0.5 dB (the
+weights solved for the fundamental the odd ones add, `recipe()`); quieter, the low orders lead;
+slope 1 and 0 at 0. Per band `h2…h9`, dB against the fundamental, −72 off (default a warm one).
+The bars stay what the band makes; in Harmonic each carries a marker at its target, and dragging
+a bar's column sets it. On any other model a drag turns the band Harmonic, seeded from the bars
+as shown, so the sound carries on; model and recipe are one undo step. Feedback divides its loop
+by Harmonic's steepest slope (times the bias's widening), so a drawn curve cannot run away.
+**Punch / Body**: per band ±24 dB of extra drive on the hits and on what sustains, weighted by
+Mite Shape's transient detector (30 ms) on the band going in; like drive under 24 dB it moves the
+knee, not the level (the push comes back off after the curve). 0 / 0 is the band bit for bit.
+Tested: hits through Soft, Punch moves the first 20 ms 6 dB more than the tails, Body the reverse.
+
 **Minimum Phase is low latency (2026-11-24, user chose it over a third choice):** the Phase menu's
 Minimum Phase now also oversamples with minimum-phase allpass half-bands (`mite_dsp::oversample_iir`,
 HIIR's design; ≥ 100 dB against folding, flat within 0.01 dB to 0.9 × Nyquist): latency 4 / 5 / 6 /

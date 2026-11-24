@@ -137,10 +137,13 @@ pub enum Model {
     Hard,
     Fold,
     Rectify,
+    /// Drawn harmonics (2026-11-24): a Chebyshev mix with the 2nd…9th harmonics the band's
+    /// recipe asks for at full scale ([`recipe`]); appended, so saved indices keep their models.
+    Harmonic,
 }
 
 impl Model {
-    pub const ALL: [Model; 8] = [
+    pub const ALL: [Model; 9] = [
         Model::Tape,
         Model::Tube,
         Model::Transformer,
@@ -149,8 +152,9 @@ impl Model {
         Model::Hard,
         Model::Fold,
         Model::Rectify,
+        Model::Harmonic,
     ];
-    pub const NAMES: [&'static str; 8] = [
+    pub const NAMES: [&'static str; 9] = [
         "Tape",
         "Tube",
         "Transformer",
@@ -159,6 +163,7 @@ impl Model {
         "Hard",
         "Fold",
         "Rectify",
+        "Harmonic",
     ];
     pub const DEFAULT: Model = Model::Tube;
 
@@ -247,6 +252,9 @@ pub fn curve(model: Model, u: f32) -> f32 {
         }
         Model::Fold => u.sin(),
         Model::Rectify => ((u * u + 0.0025).sqrt() - 0.05).tanh(),
+        // Without a recipe: the clamp alone (what the gain tables measure; the band runs
+        // [`curve_with`]).
+        Model::Harmonic => harmonic(u, &[0.0; HARMONICS]),
     }
 }
 
@@ -276,6 +284,98 @@ pub fn out_scale(drive_db: f32) -> f32 {
 pub fn engagement(drive_db: f32) -> f32 {
     let t = (drive_db / ENGAGE_DB).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The harmonics a drawn recipe sets: the 2nd to the 9th.
+pub const HARMONICS: usize = 8;
+/// A recipe's levels run from here (off) to 0 dB against the fundamental.
+pub const HARMONIC_FLOOR_DB: f32 = -72.0;
+/// A drawn recipe as the curve uses it: the Chebyshev weight of each harmonic, 2nd to 9th.
+pub type Recipe = [f32; HARMONICS];
+/// Harmonic's input clamp: the identity to ±1 (so the recipe is exact for a sine reaching it),
+/// then onto ±(1 + this) with value, slope and curvature matched, so the curve is bounded past it.
+const HARMONIC_OVER: f32 = 0.05;
+
+/// The weights for target levels `db` (2nd…9th, dB against the fundamental at full scale):
+/// `P(x) = x + Σ aₖ·(Tₖ(x) − Tₖ(0) − Tₖ'(0)·x)` gives a full-scale sine harmonic k at `aₖ` and a
+/// fundamental `F = 1 + Σ cₖ·aₖ` (`cₖ = −Tₖ'(0)`: 3, −5, 7, −9 for the odd ones), so `aₖ = rₖ·F`
+/// with `F = 1/(1 − Σ cₖ·rₖ)` (scaled back where the odd ones would cancel the fundamental).
+pub fn recipe(db: &[f32; HARMONICS]) -> Recipe {
+    let mut r: [f64; HARMONICS] = std::array::from_fn(|i| {
+        if db[i] <= HARMONIC_FLOOR_DB + 0.5 {
+            0.0
+        } else {
+            10f64.powf(f64::from(db[i].min(0.0)) / 20.0)
+        }
+    });
+    let c = |i: usize| {
+        let k = i + 2;
+        if k % 2 == 0 { 0.0 } else { -(k as f64) * ((k as f64) * std::f64::consts::FRAC_PI_2).sin() }
+    };
+    let mut sum: f64 = (0..HARMONICS).map(|i| c(i) * r[i]).sum();
+    if sum > 0.75 {
+        for v in &mut r {
+            *v *= 0.75 / sum;
+        }
+        sum = 0.75;
+    }
+    let f = 1.0 / (1.0 - sum);
+    std::array::from_fn(|i| (r[i] * f) as f32)
+}
+
+/// Harmonic's curve for recipe `a`: the clamp, then the Chebyshev mix. Slope 1 and 0 at 0.
+#[inline]
+pub fn harmonic(u: f32, a: &Recipe) -> f32 {
+    let m = u.abs();
+    let x = if m <= 1.0 {
+        u
+    } else {
+        let h = HARMONIC_OVER;
+        let al = 1.0 / h;
+        let d = m - 1.0;
+        (1.0 + h - h * (-al * d - 0.5 * al * al * d * d).exp()).copysign(u)
+    };
+    // Tₖ by the recurrence; Tₖ(0) = cos(kπ/2), Tₖ'(0) = k·sin(kπ/2).
+    let (mut t0, mut t1) = (1.0f32, x);
+    let mut y = x;
+    for (i, &w) in a.iter().enumerate() {
+        let t2 = 2.0 * x * t1 - t0;
+        (t0, t1) = (t1, t2);
+        if w != 0.0 {
+            let k = i + 2;
+            let (at0, slope) = match k % 4 {
+                0 => (1.0, 0.0),
+                1 => (0.0, k as f32),
+                2 => (-1.0, 0.0),
+                _ => (0.0, -(k as f32)),
+            };
+            y += w * (t2 - at0 - slope * x);
+        }
+    }
+    y
+}
+
+/// The steepest Harmonic's curve gets for recipe `a` (sampled over ±1; past it the clamp only
+/// flattens it): feedback scales its loop by it, so a drawn curve cannot run away either.
+pub fn harmonic_max_slope(a: &Recipe) -> f32 {
+    let n = 128;
+    let h = 1.0 / n as f32;
+    (0..=2 * n)
+        .map(|i| {
+            let x = -1.0 + i as f32 * h;
+            ((harmonic((x + 0.5 * h).min(1.0), a) - harmonic((x - 0.5 * h).max(-1.0), a)) / h).abs()
+        })
+        .fold(1.0f32, f32::max)
+}
+
+/// [`curve`], with Harmonic's recipe.
+#[inline]
+pub fn curve_with(model: Model, u: f32, a: &Recipe) -> f32 {
+    if model == Model::Harmonic {
+        harmonic(u, a)
+    } else {
+        curve(model, u)
+    }
 }
 
 /// Tube's curve `(tanh(A·(u + C)) − T)·S`: `T = tanh(A·C)` puts it through 0, `S = 1/(A·(1 − T²))`
@@ -350,19 +450,26 @@ pub fn env_coefficients(rate: f64) -> (f32, f32) {
     (per(ENV_ATTACK_MS), per(ENV_RELEASE_MS))
 }
 
-/// A static model's `F` for the driven sample `u0` at bias `bias`: 0 at 0.
+/// A static model's `F` for the driven sample `u0` at bias `bias` (Harmonic with recipe `a`): 0
+/// at 0.
 #[inline]
-fn static_lane(model: Model, u0: f32, bias: f32) -> f32 {
-    (curve(model, u0 + operating_point(model, bias, u0)) - curve(model, bias_point(bias))) / CALIBRATION
+fn static_lane(model: Model, u0: f32, bias: f32, a: &Recipe) -> f32 {
+    (curve_with(model, u0 + operating_point(model, bias, u0), a) - curve_with(model, bias_point(bias), a)) / CALIBRATION
 }
 
 /// The band's static transfer at input `x`: `x + a·(F(x) − x)` with `a` = [`engagement`] (before
 /// tone, mix and gains), at bias `bias`.
 #[inline]
 pub fn transfer(model: Model, x: f32, drive_db: f32, bias: f32) -> f32 {
+    transfer_with(model, x, drive_db, bias, &[0.0; HARMONICS])
+}
+
+/// [`transfer`] with Harmonic's recipe.
+#[inline]
+pub fn transfer_with(model: Model, x: f32, drive_db: f32, bias: f32, recipe: &Recipe) -> f32 {
     let g = crate::db_to_gain(drive_db);
     let a = engagement(drive_db);
-    x + a * (static_lane(model, CALIBRATION * g * x, bias) * out_scale(drive_db) - x)
+    x + a * (static_lane(model, CALIBRATION * g * x, bias, recipe) * out_scale(drive_db) - x)
 }
 
 // ---- Auto gain ----------------------------------------------------------------------------
@@ -383,8 +490,8 @@ struct GainTable {
     c: [f32; TABLE_U * TABLE_B],
 }
 
-fn gain_tables() -> &'static [GainTable; 8] {
-    static TABLES: OnceLock<Box<[GainTable; 8]>> = OnceLock::new();
+fn gain_tables() -> &'static [GainTable; 9] {
+    static TABLES: OnceLock<Box<[GainTable; 9]>> = OnceLock::new();
     TABLES.get_or_init(|| {
         Box::new(Model::ALL.map(|m| {
             let mut t = GainTable {
@@ -543,6 +650,13 @@ pub struct BandSat {
     /// Feedback, 0…1, and the frequency it rings at, Hz.
     pub feedback: f32,
     pub feedback_hz: f32,
+    /// Harmonic's recipe: the 2nd…9th harmonics' levels at full scale, dB against the fundamental
+    /// ([`HARMONIC_FLOOR_DB`] is off).
+    pub harmonics_db: [f32; HARMONICS],
+    /// Extra drive on the hits and on what sustains, dB (the transient detector's weights): how
+    /// close to the knee each gets, not how loud it is.
+    pub punch_db: f32,
+    pub body_db: f32,
 }
 
 impl Default for BandSat {
@@ -566,9 +680,18 @@ impl Default for BandSat {
             solo: false,
             feedback: 0.0,
             feedback_hz: 250.0,
+            harmonics_db: DEFAULT_HARMONICS_DB,
+            punch_db: 0.0,
+            body_db: 0.0,
         }
     }
 }
+
+/// Harmonic's recipe until one is drawn: a warm one, the even ones first and falling away.
+pub const DEFAULT_HARMONICS_DB: [f32; HARMONICS] = [-18.0, -26.0, -32.0, -40.0, -72.0, -72.0, -72.0, -72.0];
+/// Punch and Body: their range, dB, and the detector's transient time, ms.
+pub const PUSH_MAX_DB: f32 = 24.0;
+const PUSH_TRANSIENT_MS: f64 = 30.0;
 
 /// The gain (dB) a band's dynamics settle at for an input peak of `level_db` against `threshold_db`
 /// (the engine's gain computer; there the threshold is the band's own average level).
@@ -909,6 +1032,8 @@ pub struct Probe {
     pub mix: f32,
     /// The base sample rate.
     pub fs: f32,
+    /// Harmonic's recipe ([`recipe`]).
+    pub recipe: Recipe,
 }
 
 /// What a probe measured: each partial's amplitude coming out of the band, before its gains.
@@ -974,7 +1099,7 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         last
     } else {
         (0..n)
-            .map(|i| static_lane(p.model, g * sine(i), p.bias) * out_scale(p.drive_db))
+            .map(|i| static_lane(p.model, g * sine(i), p.bias, &p.recipe) * out_scale(p.drive_db))
             .collect()
     };
     let tilt = Tilt::new(p.tone_db, p.pivot, p.fs);
@@ -1104,6 +1229,8 @@ struct BandCore {
     /// The feedback band-pass's state per channel, and the curve's last output (its units).
     fb: [[f32; 2]; 2],
     fb_last: [f32; 2],
+    /// Punch and Body's transient detector (Mite Shape's), on the band going in.
+    hit: crate::eq::ShapeDetector,
     /// The band's level (mean square, both channels), for auto gain.
     level: f64,
     /// The same through Tape's and Transformer's emphasis (what their cores are driven with), and
@@ -1143,6 +1270,7 @@ impl BandCore {
             hp: [(0.0, 0.0); 2],
             fb: [[0.0; 2]; 2],
             fb_last: [0.0; 2],
+            hit: crate::eq::ShapeDetector::new(48_000.0, PUSH_TRANSIENT_MS, 1.0),
             level: 0.0,
             level_emph: [0.0; 2],
             emph_state: [[0.0; 2]; 2],
@@ -1168,6 +1296,7 @@ impl BandCore {
         self.hp = [(0.0, 0.0); 2];
         self.fb = [[0.0; 2]; 2];
         self.fb_last = [0.0; 2];
+        self.hit.reset(0.0);
         self.idle = true;
     }
 
@@ -1180,6 +1309,7 @@ impl BandCore {
         self.hp = other.hp;
         self.fb = other.fb;
         self.fb_last = other.fb_last;
+        self.hit = other.hit;
         self.level = other.level;
         self.level_emph = other.level_emph;
         self.emph_state = other.emph_state;
@@ -1316,6 +1446,10 @@ struct Eased {
     /// Feedback, 0…1, and its frequency as it glides (ln Hz).
     feedback: f64,
     feedback_ln: f64,
+    /// Harmonic's recipe weights as they glide, and Punch and Body, dB.
+    recipe: [f64; HARMONICS],
+    punch: f64,
+    body: f64,
     /// The two curve lanes' models, the one heard, and the crossfade into the other (0…1).
     lanes: [Model; 2],
     lane: usize,
@@ -1337,6 +1471,9 @@ impl Eased {
             dyn_amount: f64::from(b.dyn_amount),
             feedback: f64::from(b.feedback.clamp(0.0, 1.0)),
             feedback_ln: f64::from(b.feedback_hz.clamp(FEEDBACK_HZ.0, FEEDBACK_HZ.1)).ln(),
+            recipe: recipe(&b.harmonics_db).map(f64::from),
+            punch: f64::from(b.punch_db.clamp(-PUSH_MAX_DB, PUSH_MAX_DB)),
+            body: f64::from(b.body_db.clamp(-PUSH_MAX_DB, PUSH_MAX_DB)),
             dyn_k: (0.0, 0.0),
             lanes: [b.model; 2],
             lane: 0,
@@ -1407,6 +1544,8 @@ struct Lanes {
     level: [[f32; CHUNK]; BANDS],
     /// The feedback's loop gain ([`FEEDBACK_LOOP`] times the amount).
     feedback: [[f32; CHUNK]; BANDS],
+    /// Punch and Body's push into the curve (1: none).
+    push: [[f32; CHUNK]; BANDS],
     /// The model crossfade's position (0: the heard lane only).
     blend: [[f32; CHUNK]; BANDS],
     tilt: [[Tilt; CHUNK]; BANDS],
@@ -1433,6 +1572,14 @@ pub struct Saturator {
     level_k: f64,
     /// Each band's feedback band-pass at the high rate: the state-variable gains and its damping.
     fb_tune: [[f32; 4]; BANDS],
+    /// Each band's Harmonic recipe as it glides, and Punch and Body's push now.
+    recipe_now: [Recipe; BANDS],
+    push: [f32; BANDS],
+    /// What the feedback's loop gain is divided by: 1, or for Harmonic its steepest slope with
+    /// the bias's widening (at least 1).
+    fb_scale: [f64; BANDS],
+    /// The recipe Harmonic's steepest slope was last measured for, and the slope.
+    slope_of: [(Recipe, f32); BANDS],
     trim_k: f64,
     short_k: f64,
     top_fall: f64,
@@ -1446,8 +1593,8 @@ pub struct Saturator {
     emph_base: [Tilt; 2],
     hp_k: f32,
     /// The values each control step ramps from and to, by band slot: gain, bias, share, post, fader.
-    from: [[f32; 7]; BANDS],
-    to: [[f32; 7]; BANDS],
+    from: [[f32; 8]; BANDS],
+    to: [[f32; 8]; BANDS],
     tilt_now: [Tilt; BANDS],
     /// The tone and pivot each band's tilt was designed for.
     tilt_key: [(f32, f32); BANDS],
@@ -1486,6 +1633,10 @@ impl Saturator {
             fade_step: 0.0,
             level_k: 0.0,
             fb_tune: [[0.0; 4]; BANDS],
+            recipe_now: [[0.0; HARMONICS]; BANDS],
+            push: [1.0; BANDS],
+            fb_scale: [1.0; BANDS],
+            slope_of: [([f32::NAN; HARMONICS], 1.0); BANDS],
             trim_k: 0.0,
             short_k: 0.0,
             top_fall: 1.0,
@@ -1495,8 +1646,8 @@ impl Saturator {
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
             hp_k: 0.0,
-            from: [[0.0; 7]; BANDS],
-            to: [[0.0; 7]; BANDS],
+            from: [[0.0; 8]; BANDS],
+            to: [[0.0; 8]; BANDS],
             tilt_now: [Tilt::IDENTITY; BANDS],
             tilt_key: [(0.0, 0.0); BANDS],
             live: [false; BANDS],
@@ -1508,6 +1659,7 @@ impl Saturator {
                 fader: [[0.0; CHUNK]; BANDS],
                 level: [[0.0; CHUNK]; BANDS],
                 feedback: [[0.0; CHUNK]; BANDS],
+                push: [[1.0; CHUNK]; BANDS],
                 blend: [[0.0; CHUNK]; BANDS],
                 tilt: [[Tilt::IDENTITY; CHUNK]; BANDS],
             }),
@@ -1531,6 +1683,11 @@ impl Saturator {
         self.model_step = 1000.0 / (MODEL_MS * self.fs);
         self.fade_step = 1000.0 / (STRUCTURE_MS * self.fs);
         self.level_k = per(LEVEL_MS);
+        for core in &mut self.cores {
+            for b in &mut core.bands {
+                b.hit.set_times(self.fs, PUSH_TRANSIENT_MS, 1.0);
+            }
+        }
         self.trim_k = per(TRIM_SECONDS * 1000.0);
         self.short_k = per(SHORT_MS);
         self.top_fall = 1.0 - per(TOP_RELEASE_MS);
@@ -1641,7 +1798,7 @@ impl Saturator {
     }
 
     /// Band slot `b`'s gain into the curve, bias, share, post gain and fader for its eased settings.
-    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 7] {
+    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 8] {
         let e = &self.eased[b];
         let share = e.share();
         let auto = if auto_gain {
@@ -1657,7 +1814,8 @@ impl Saturator {
             (auto * fader) as f32,
             fader as f32,
             out_scale(e.drive_db as f32),
-            (f64::from(FEEDBACK_LOOP) * e.feedback * smooth(e.engage)) as f32,
+            (f64::from(FEEDBACK_LOOP) * e.feedback * smooth(e.engage) / self.fb_scale[b]) as f32,
+            self.push[b],
         ]
     }
 
@@ -1779,6 +1937,31 @@ impl Saturator {
             let k = 1.0 / f64::from(FEEDBACK_Q);
             let a1 = 1.0 / (1.0 + g * (g + k));
             self.fb_tune[b] = [a1 as f32, (g * a1) as f32, (g * g * a1) as f32, k as f32];
+            let target = recipe(&t.harmonics_db);
+            for (w, &to) in e.recipe.iter_mut().zip(&target) {
+                ease(w, f64::from(to), self.glide);
+            }
+            self.recipe_now[b] = e.recipe.map(|w| w as f32);
+            self.fb_scale[b] = if e.feedback > 0.0 && e.lanes.contains(&Model::Harmonic) {
+                let widen = 1.0 + (e.bias.abs() * f64::from(BIAS_TRACK));
+                // Measured again only when the recipe has moved.
+                if self.slope_of[b].0 != self.recipe_now[b] {
+                    self.slope_of[b] = (self.recipe_now[b], harmonic_max_slope(&self.recipe_now[b]));
+                }
+                (f64::from(self.slope_of[b].1) * widen).max(1.0)
+            } else {
+                1.0
+            };
+            ease(&mut e.punch, f64::from(t.punch_db.clamp(-PUSH_MAX_DB, PUSH_MAX_DB)), self.glide);
+            ease(&mut e.body, f64::from(t.body_db.clamp(-PUSH_MAX_DB, PUSH_MAX_DB)), self.glide);
+            // Punch and Body: the detector's weights now, as a push into the curve (taken back
+            // off after it, so it moves the knee and not the level).
+            self.push[b] = if e.punch == 0.0 && e.body == 0.0 {
+                1.0
+            } else {
+                let hit = &mut self.cores[self.active].bands[b].hit;
+                crate::db_to_gain(hit.gain_db(e.punch, e.body) as f32)
+            };
             toward(
                 &mut e.engage,
                 if t.bypass { 0.0 } else { 1.0 },
@@ -1965,6 +2148,7 @@ impl Saturator {
                 self.lanes.fader[b][i] = r(4);
                 self.lanes.level[b][i] = r(5);
                 self.lanes.feedback[b][i] = r(6);
+                self.lanes.push[b][i] = r(7);
                 self.lanes.tilt[b][i] = self.tilt_now[b];
                 let e = &mut self.eased[b];
                 self.lanes.blend[b][i] = match e.lane_fade {
@@ -2107,6 +2291,7 @@ impl Saturator {
                             e.lanes[e.lane],
                             self.lanes.level[b][0],
                         );
+                        let recipe_now = self.recipe_now[b];
                         // The core and the envelope warm up on the past too.
                         for v in &mut self.hi[..past * f] {
                             *v = match model.magnet() {
@@ -2119,7 +2304,7 @@ impl Saturator {
                                         self.env_k,
                                     ) / CALIBRATION
                                 }
-                                None => static_lane(model, g * *v, bias),
+                                None => static_lane(model, g * *v, bias, &recipe_now),
                             } * level;
                         }
                         let mut sink = [0.0f32; PREROLL];
@@ -2140,6 +2325,7 @@ impl Saturator {
                     // Feedback's state, out of `band` while the lanes hold it.
                     let (mut fb, mut fb_last) = (band.fb, band.fb_last);
                     let [a1, a2, a3, damp] = self.fb_tune[b];
+                    let recipe_now = self.recipe_now[b];
                     let mut lane = |l: usize, c: usize, u0: f32, bias: f32| {
                         let model = models[l];
                         match model.magnet() {
@@ -2147,18 +2333,20 @@ impl Saturator {
                                 band.magnet[l][c].process(w, &emph[w], u0, bias, env_k)
                                     / CALIBRATION
                             }
-                            None => static_lane(model, u0, bias),
+                            None => static_lane(model, u0, bias, &recipe_now),
                         }
                     };
                     for k in 0..m {
                         let i = k / f;
                         let (g, bias, level) = (self.lanes.gain[b][i], self.lanes.bias[b][i], self.lanes.level[b][i]);
+                        // Punch and Body: further into the curve, and back off after it.
+                        let push = self.lanes.push[b][i];
                         for c in 0..n_ch {
                             if !driven[c] {
                                 continue;
                             }
                             let at = c * HI_CH + k;
-                            let mut u0 = g * self.hi[at];
+                            let mut u0 = g * push * self.hi[at];
                             let loop_gain = self.lanes.feedback[b][i];
                             if loop_gain > 0.0 {
                                 // The curve's last output through the band-pass (state-variable,
@@ -2181,7 +2369,7 @@ impl Saturator {
                                 lane(heard, c, u0, bias)
                             };
                             fb_last[c] = if loop_gain > 0.0 { y * CALIBRATION } else { 0.0 };
-                            self.hi[at] = level * y;
+                            self.hi[at] = if push == 1.0 { level * y } else { level * y / push };
                         }
                     }
                     band.fb = fb;
@@ -2226,6 +2414,7 @@ impl Saturator {
                     for c in (0..n_ch).filter(|&c| driven[c]) {
                         x = x.max(xde[c][i].abs());
                     }
+                    band.hit.process(f64::from(x));
                     band.dyn_peak = x.max(band.dyn_peak * self.dyn_fall);
                     loudest = loudest.max(band.dyn_peak);
                     if amount == 0.0 && band.dyn_db == 0.0 {
@@ -2508,6 +2697,7 @@ mod tests {
                     pivot: TONE_PIVOT,
                     mix,
                     fs: FS,
+                    recipe: recipe(&s.bands[0].harmonics_db),
                 });
                 let want: [f64; PARTIALS] = std::array::from_fn(|i| harmonic(&y, i + 1));
                 let top = want.iter().copied().fold(0.0, f64::max);
@@ -2548,6 +2738,7 @@ mod tests {
                         pivot: TONE_PIVOT,
                         mix: 1.0,
                         fs: FS,
+                        recipe: [0.0; HARMONICS],
                     });
                     let tail = &y[y.len() - N..];
                     let read = |h: usize| {
@@ -2603,6 +2794,7 @@ mod tests {
                     pivot: TONE_PIVOT,
                     mix: 1.0,
                     fs: FS,
+                    recipe: [0.0; HARMONICS],
                 };
                 let t = std::time::Instant::now();
                 for _ in 0..20 {
@@ -2849,6 +3041,7 @@ mod tests {
                 pivot: TONE_PIVOT,
                 mix: 1.0,
                 fs: FS,
+                recipe: [0.0; HARMONICS],
             });
             let gentle = at(6.0);
             for k in 1..6 {
@@ -2869,6 +3062,7 @@ mod tests {
                 pivot: TONE_PIVOT,
                 mix: 1.0,
                 fs: FS,
+                recipe: [0.0; HARMONICS],
             });
             assert!(h.db(1).max(h.db(2)) > -30.0, "{m:?}: H2 {:.1}, H3 {:.1} dB", h.db(1), h.db(2));
         }
@@ -2887,6 +3081,7 @@ mod tests {
             pivot: TONE_PIVOT,
             mix: 1.0,
             fs: FS,
+            recipe: [0.0; HARMONICS],
         };
         let h = probe_harmonics(&p);
         assert_eq!(&h.hollow[..3], &[false, false, true]);
@@ -2907,6 +3102,7 @@ mod tests {
                 pivot: TONE_PIVOT,
                 mix,
                 fs: FS,
+                recipe: [0.0; HARMONICS],
             });
             assert!((h.amp[0] - 0.5).abs() < 1e-6, "H1 {}", h.amp[0]);
             assert!(h.amp[1..].iter().all(|&a| a == 0.0));
@@ -2922,6 +3118,7 @@ mod tests {
             pivot: TONE_PIVOT,
             mix: 1.0,
             fs: FS,
+            recipe: [0.0; HARMONICS],
         });
         assert_eq!(h.db(1), 0.0);
     }
@@ -2960,6 +3157,68 @@ mod tests {
                 re * re + im * im
             })
             .sum()
+    }
+
+    #[test]
+    fn a_drawn_recipe_is_what_a_full_scale_sine_makes() {
+        // The curve alone, a sine reaching ±1: each harmonic within 0.5 dB of its target against
+        // the fundamental, the ones left off under −90 dB.
+        for db in [DEFAULT_HARMONICS_DB, [-6.0, -12.0, -72.0, -20.0, -72.0, -30.0, -72.0, -40.0], [-72.0, -10.0, -72.0, -16.0, -72.0, -22.0, -72.0, -28.0]] {
+            let a = recipe(&db);
+            let n = 4096;
+            let y: Vec<f64> = (0..n).map(|i| f64::from(super::harmonic((std::f64::consts::TAU * i as f64 / n as f64).sin() as f32, &a))).collect();
+            let amp = |k: usize| {
+                let w = std::f64::consts::TAU * k as f64 / n as f64;
+                let (re, im) = y.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, v)| (re + v * (w * i as f64).cos(), im + v * (w * i as f64).sin()));
+                2.0 * re.hypot(im) / n as f64
+            };
+            let f = amp(1);
+            for (i, &want) in db.iter().enumerate() {
+                let got = 20.0 * (amp(i + 2) / f).log10();
+                if want <= HARMONIC_FLOOR_DB {
+                    assert!(got < -90.0, "{db:?}: H{} {got:.1} dB, should be off", i + 2);
+                } else {
+                    assert!((got - f64::from(want)).abs() < 0.5, "{db:?}: H{} {got:.1} dB, wanted {want}", i + 2);
+                }
+            }
+            // Slope 1 at 0: quiet audio passes as it is.
+            let slope = (super::harmonic(1e-4, &a) - super::harmonic(-1e-4, &a)) / 2e-4;
+            assert!((slope - 1.0).abs() < 1e-3, "slope {slope}");
+        }
+    }
+
+    #[test]
+    fn punch_drives_the_hits_and_body_the_tails() {
+        // 60 Hz hits decaying over 80 ms through Soft: Punch adds its distortion in the first 20 ms
+        // of each hit, Body after it; both at 0 is the band bit for bit.
+        let fs = FS as usize;
+        let n = 2 * fs;
+        let x: Vec<f32> = (0..n).map(|i| {
+            let t = (i % (fs / 2)) as f64 / f64::from(FS);
+            (0.4 * (-t / 0.08).exp() * (std::f64::consts::TAU * 60.0 * t).sin()) as f32
+        }).collect();
+        let play = |punch: f32, body: f32| {
+            let mut s = band(Model::Soft, 30.0);
+            s.bands[0].punch_db = punch;
+            s.bands[0].body_db = body;
+            let mut sat = Saturator::new(FS, 4, &s);
+            run(&mut sat, &x, &s, 256).0
+        };
+        let plain = play(0.0, 0.0);
+        let (head, tail) = (|i: usize| i % (fs / 2) < fs / 50, |i: usize| { let k = i % (fs / 2); k > fs / 25 && k < fs / 5 });
+        let moved = |y: &[f32], part: &dyn Fn(usize) -> bool| {
+            let (mut d, mut e) = (0.0f64, 0.0f64);
+            for i in fs..n {
+                if part(i) { d += f64::from(y[i] - plain[i]).powi(2); e += f64::from(plain[i]).powi(2); }
+            }
+            10.0 * (d / e).log10()
+        };
+        let punch = play(12.0, 0.0);
+        let body = play(0.0, 12.0);
+        let (ph, pt, bh, bt) = (moved(&punch, &head), moved(&punch, &tail), moved(&body, &head), moved(&body, &tail));
+        assert!(ph > pt + 6.0, "punch: hits {ph:.1} dB, tails {pt:.1} dB");
+        assert!(bt > bh + 6.0, "body: tails {bt:.1} dB, hits {bh:.1} dB");
+        assert_eq!(play(0.0, 0.0), plain);
     }
 
     #[test]

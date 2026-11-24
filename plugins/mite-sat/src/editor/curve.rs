@@ -10,7 +10,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use mite_dsp::sat::{engagement, magnet_loop, transfer, Model};
+use mite_dsp::sat::{engagement, magnet_loop, Model};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
 use mite_ui::paint::{glow_fill, glow_stroke, panel};
 use mite_ui::peniko::Fill;
@@ -43,11 +43,13 @@ pub struct Curve {
     /// The band's centre, Hz (where a loop is traced: Tape's and Transformer's emphasis make it
     /// depend on the frequency).
     pub freq: f32,
+    /// Harmonic's recipe (`mite_dsp::sat::recipe`).
+    pub recipe: mite_dsp::sat::Recipe,
 }
 
 impl Curve {
     pub fn at(&self, x: f32) -> f32 {
-        transfer(self.model, x, self.drive_db, self.bias) * self.auto * self.dynamics
+        mite_dsp::sat::transfer_with(self.model, x, self.drive_db, self.bias, &self.recipe) * self.auto * self.dynamics
     }
 
     /// Tape and Transformer: the loop for a sine of amplitude `amp`, as the band plays it

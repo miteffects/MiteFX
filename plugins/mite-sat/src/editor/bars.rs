@@ -45,6 +45,7 @@ struct Key {
     tone_db: f32,
     mix: f32,
     fs: f32,
+    recipe: mite_dsp::sat::Recipe,
 }
 
 pub struct ProbeBars {
@@ -72,7 +73,7 @@ impl ProbeBars {
         let silent = c.peak < SILENT;
         let amp = if silent { REFERENCE } else { c.peak.min(4.0) };
         let peak = (20.0 * amp.log10() / PEAK_STEP_DB).round() as i32;
-        let key = Key { band, model: c.model, drive_db: c.drive_db, bias: c.bias, peak, freq: c.freq, tone_db, mix, fs };
+        let key = Key { band, model: c.model, drive_db: c.drive_db, bias: c.bias, peak, freq: c.freq, tone_db, mix, fs, recipe: c.recipe };
         let snap = self.key.is_none_or(|k| k.band != band || k.model != c.model);
         if self.key != Some(key) && (snap || self.last.elapsed().as_secs_f64() >= MIN_INTERVAL_S) {
             let h = measure(&key);
@@ -127,7 +128,9 @@ impl ProbeBars {
         })
     }
 
-    pub fn draw(&self, cx: &mut DrawCx<'_>, r: Rect, focus: Option<usize>, alpha: f32) {
+    /// `targets`: Harmonic's recipe, drawn as a marker over each bar (what a full-scale sine
+    /// would make; the bars are what the band makes at its level now).
+    pub fn draw(&self, cx: &mut DrawCx<'_>, r: Rect, focus: Option<usize>, alpha: f32, targets: Option<[f32; BARS]>) {
         let theme = cx.theme;
         panel(cx.scene, RoundedRect::from_rect(r, 10.0), theme.well, theme.well_border);
         let plot = plot(r);
@@ -149,6 +152,14 @@ impl ProbeBars {
                     glow_fill(cx, &bar, theme.accent.multiply_alpha(alpha), if lit { 8.0 } else { 3.0 });
                 }
             }
+            if let Some(t) = targets {
+                // The target: a bar-wide line with a grip, at the recipe's level (off: on the floor).
+                let ty = y(t[i]);
+                let half = (slot.width() * 0.4).min(18.0);
+                let line = mite_ui::kurbo::Line::new((cxm - half, ty), (cxm + half, ty));
+                cx.scene.stroke(&Stroke::new(if lit { 2.6 } else { 2.0 }), Affine::IDENTITY, theme.text_hi.multiply_alpha(if t[i] > FLOOR_DB + 0.5 { 0.95 } else { 0.4 }), None, &line);
+                cx.scene.fill(mite_ui::peniko::Fill::NonZero, Affine::IDENTITY, theme.text_hi, None, &mite_ui::kurbo::Circle::new((cxm, ty), if lit { 3.6 } else { 2.8 }));
+            }
             let ink = if lit { theme.text_hi } else { theme.text_lo };
             cx.text.draw(cx.scene, ["2", "3", "4", "5", "6", "7", "8", "9"][i], cxm, plot.y1 + 2.0, TextStyle { tabular: true, ..TextStyle::LABEL.sized(10.0) }, ink, Align::Center);
         }
@@ -162,6 +173,13 @@ fn plot(r: Rect) -> Rect {
 fn slot(plot: Rect, i: usize) -> Rect {
     let w = plot.width() / BARS as f64;
     Rect::new(plot.x0 + w * i as f64, plot.y0, plot.x0 + w * (i + 1) as f64, plot.y1)
+}
+
+/// The level (dB against the fundamental) at height `y` in bars `r`: the floor at the bottom,
+/// 0 dB at the top.
+pub fn db_at(r: Rect, y: f64) -> f32 {
+    let plot = plot(r);
+    (FLOOR_DB + ((plot.y1 - y) / plot.height()).clamp(0.0, 1.0) as f32 * -FLOOR_DB).min(0.0)
 }
 
 /// The partial under `p`, if any.
@@ -178,5 +196,5 @@ pub fn hit(r: Rect, p: Point) -> Option<usize> {
 
 fn measure(k: &Key) -> Harmonics {
     let amp = 10f32.powf(k.peak as f32 * PEAK_STEP_DB / 20.0);
-    probe_harmonics(&Probe { model: k.model, amp, drive_db: k.drive_db, bias: k.bias, freq: k.freq, tone_db: k.tone_db, pivot: k.freq, mix: k.mix, fs: k.fs })
+    probe_harmonics(&Probe { model: k.model, amp, drive_db: k.drive_db, bias: k.bias, freq: k.freq, tone_db: k.tone_db, pivot: k.freq, mix: k.mix, fs: k.fs, recipe: k.recipe })
 }

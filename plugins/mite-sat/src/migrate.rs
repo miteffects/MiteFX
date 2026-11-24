@@ -126,6 +126,20 @@ fn rescale_choice(json: &str, id: &str, old_last: f64, new_last: f64) -> Option<
     serde_json::to_string(&v).ok()
 }
 
+/// **7 → 8 (2026-11-24): Harmonic (drawn harmonics) appended to the models, each band's recipe,
+/// Punch and Body appended to the parameters.** A snapshot stores a band's model normalized over
+/// the list (`i/7` then, `i/8` now), so every `b{N}_model` is rescaled; the new parameters take
+/// their defaults (Punch and Body 0: the band as it was).
+pub fn v7_to_v8(state: &mut PluginState) {
+    if let Some(json) = state.fields.get_mut(SNAPSHOTS_KEY) {
+        for b in 1..=6 {
+            if let Some(lifted) = rescale_choice(json, &format!("b{b}_model"), 7.0, 8.0) {
+                *json = lifted;
+            }
+        }
+    }
+}
+
 const OLD_DRIVE_MAX: f32 = 36.0;
 const NEW_DRIVE_MAX: f32 = 60.0;
 /// The old fade-in's top, where the old and new laws join (old 6 dB = new 30 dB).
