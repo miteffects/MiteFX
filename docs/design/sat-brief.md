@@ -51,6 +51,15 @@ harmonics hold through 36 dB of drive; nearer a square wave (48–60 dB) they fa
 Auto gain's level meter is 2 s (was 300 ms) and starts as a plain average, its gate 5 ms (was
 20): it no longer rides between loud and quiet stretches (±0.5 dB → ±0.03).
 
+**The thump after loud passages is physics, kept (2026-11-24, measured):** an asymmetric curve
+(Bias, Tube) makes DC with its even harmonics, in a fixed ratio (a u² term: as much DC as H2), and
+that DC follows the level. Any DC removal (ours: the 5 Hz high-pass on the difference; analog: the
+coupling capacitors) turns a level drop into a low pulse as big as the DC step: after a −6 dBFS
+burst stops, −26 dB (Tube, 12 dB of drive) to −10 dB (Tube, bias 60 %, 48 dB) against the burst,
+nearly all of it above 30 Hz, so a steeper filter would not shrink it. Only knowing the level
+ahead would, and a remembered level is what muted quiet audio before. Saturn 2's styles show the
+same recovery (+0.3…+1.5 dB in the compare memory table).
+
 **Feedback (2026-11-24, state 6, user picked it from Saturn 2):** per band, `fb` 0–100 % and
 `fb_freq` 20 Hz–10 kHz (250 Hz). At the high rate, the curve's last output (its own units)
 through a state-variable band-pass (Q 2, unity at its peak) adds to `u`: `u = K·g·x + 0.9·fb·BP(f)`.
