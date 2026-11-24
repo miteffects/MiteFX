@@ -51,6 +51,14 @@ harmonics hold through 36 dB of drive; nearer a square wave (48–60 dB) they fa
 Auto gain's level meter is 2 s (was 300 ms) and starts as a plain average, its gate 5 ms (was
 20): it no longer rides between loud and quiet stretches (±0.5 dB → ±0.03).
 
+**Feedback (2026-11-24, state 6, user picked it from Saturn 2):** per band, `fb` 0–100 % and
+`fb_freq` 20 Hz–10 kHz (250 Hz). At the high rate, the curve's last output (its own units)
+through a state-variable band-pass (Q 2, unity at its peak) adds to `u`: `u = K·g·x + 0.9·fb·BP(f)`.
+Joining after the drive keeps the loop gain under 1 at any drive (curves are at most 1.05 steep),
+so it rings and never runs away; joined before it, the drive would multiply the loop. Noise
+through Soft at 30 dB: +1.8, +4.1, +7.2, +11.5 dB at 1 kHz for 25…100 %, 4 kHz untouched. 0 %
+clears its state: the band bit for bit. The harmonic bars and the transfer square do not show it.
+
 **Drive law (2026-11-24, state 5):** measured against Saturn 2 (`cargo xtask compare sat`,
 docs/compare/saturn-2.md): with knees 12 dB under full scale at drive 0, a −12 dBFS track already
 sat at them, and the first 6 dB faded a hard-driven sound in as a mix: untouched to 6 % THD+N in 3

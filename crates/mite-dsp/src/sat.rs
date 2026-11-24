@@ -48,6 +48,14 @@ pub const TUBE_DRIFT: f32 = 0.2;
 /// Where the smooth `|u|` the point grows with ([`operating_point`]) turns from `u²` to `|u|`.
 const POINT_KNEE: f32 = 1.0;
 pub const TONE_MAX_DB: f32 = 12.0;
+/// Feedback (as Saturn 2's): the band's saturated signal back into its own curve through a
+/// resonant band-pass, so it rings at the feedback frequency. It joins after the drive, in the
+/// curve's units, and 100 % is this loop gain at the resonance: under 1 even where a curve is
+/// steepest (Tube 1.05), so the loop rings but never runs away on its own, at any drive.
+pub const FEEDBACK_LOOP: f32 = 0.9;
+/// The feedback band-pass's Q (its own ring before the loop adds to it).
+pub const FEEDBACK_Q: f32 = 2.0;
+pub const FEEDBACK_HZ: (f32, f32) = (20.0, 10_000.0);
 /// The dynamics' knee (dB of input, centred on the threshold) and the most it lifts, dB.
 pub const DYN_KNEE_DB: f32 = 6.0;
 pub const DYN_LIFT_MAX_DB: f32 = 12.0;
@@ -531,6 +539,9 @@ pub struct BandSat {
     /// right (+), then mid (−, at −1 the side is gone: mono) or side (+, at +1 the mid is gone).
     pub lr: f32,
     pub ms: f32,
+    /// Feedback, 0…1, and the frequency it rings at, Hz.
+    pub feedback: f32,
+    pub feedback_hz: f32,
 }
 
 impl Default for BandSat {
@@ -552,6 +563,8 @@ impl Default for BandSat {
             bypass: false,
             mute: false,
             solo: false,
+            feedback: 0.0,
+            feedback_hz: 250.0,
         }
     }
 }
@@ -1083,6 +1096,9 @@ struct BandCore {
     tone: [f32; 2],
     /// The difference high-pass: last input and output per channel.
     hp: [(f32, f32); 2],
+    /// The feedback band-pass's state per channel, and the curve's last output (its units).
+    fb: [[f32; 2]; 2],
+    fb_last: [f32; 2],
     /// The band's level (mean square, both channels), for auto gain.
     level: f64,
     /// The same through Tape's and Transformer's emphasis (what their cores are driven with), and
@@ -1119,6 +1135,8 @@ impl BandCore {
             magnet: [[Magnet::default(); 2]; 2],
             tone: [0.0; 2],
             hp: [(0.0, 0.0); 2],
+            fb: [[0.0; 2]; 2],
+            fb_last: [0.0; 2],
             level: 0.0,
             level_emph: [0.0; 2],
             emph_state: [[0.0; 2]; 2],
@@ -1141,6 +1159,8 @@ impl BandCore {
         self.magnet = [[Magnet::default(); 2]; 2];
         self.tone = [0.0; 2];
         self.hp = [(0.0, 0.0); 2];
+        self.fb = [[0.0; 2]; 2];
+        self.fb_last = [0.0; 2];
         self.idle = true;
     }
 
@@ -1150,6 +1170,8 @@ impl BandCore {
         self.magnet = other.magnet;
         self.tone = other.tone;
         self.hp = other.hp;
+        self.fb = other.fb;
+        self.fb_last = other.fb_last;
         self.level = other.level;
         self.level_emph = other.level_emph;
         self.emph_state = other.emph_state;
@@ -1283,6 +1305,9 @@ struct Eased {
     /// sample.
     dyn_amount: f64,
     dyn_k: (f32, f32),
+    /// Feedback, 0…1, and its frequency as it glides (ln Hz).
+    feedback: f64,
+    feedback_ln: f64,
     /// The two curve lanes' models, the one heard, and the crossfade into the other (0…1).
     lanes: [Model; 2],
     lane: usize,
@@ -1302,6 +1327,8 @@ impl Eased {
             comp: 1.0,
             trim: 1.0,
             dyn_amount: f64::from(b.dyn_amount),
+            feedback: f64::from(b.feedback.clamp(0.0, 1.0)),
+            feedback_ln: f64::from(b.feedback_hz.clamp(FEEDBACK_HZ.0, FEEDBACK_HZ.1)).ln(),
             dyn_k: (0.0, 0.0),
             lanes: [b.model; 2],
             lane: 0,
@@ -1370,6 +1397,8 @@ struct Lanes {
     fader: [[f32; CHUNK]; BANDS],
     /// What the curve's output is scaled by ([`out_scale`]).
     level: [[f32; CHUNK]; BANDS],
+    /// The feedback's loop gain ([`FEEDBACK_LOOP`] times the amount).
+    feedback: [[f32; CHUNK]; BANDS],
     /// The model crossfade's position (0: the heard lane only).
     blend: [[f32; CHUNK]; BANDS],
     tilt: [[Tilt; CHUNK]; BANDS],
@@ -1394,6 +1423,8 @@ pub struct Saturator {
     model_step: f64,
     fade_step: f64,
     level_k: f64,
+    /// Each band's feedback band-pass at the high rate: the state-variable gains and its damping.
+    fb_tune: [[f32; 4]; BANDS],
     trim_k: f64,
     short_k: f64,
     top_fall: f64,
@@ -1407,8 +1438,8 @@ pub struct Saturator {
     emph_base: [Tilt; 2],
     hp_k: f32,
     /// The values each control step ramps from and to, by band slot: gain, bias, share, post, fader.
-    from: [[f32; 6]; BANDS],
-    to: [[f32; 6]; BANDS],
+    from: [[f32; 7]; BANDS],
+    to: [[f32; 7]; BANDS],
     tilt_now: [Tilt; BANDS],
     /// The tone and pivot each band's tilt was designed for.
     tilt_key: [(f32, f32); BANDS],
@@ -1442,6 +1473,7 @@ impl Saturator {
             model_step: 0.0,
             fade_step: 0.0,
             level_k: 0.0,
+            fb_tune: [[0.0; 4]; BANDS],
             trim_k: 0.0,
             short_k: 0.0,
             top_fall: 1.0,
@@ -1451,8 +1483,8 @@ impl Saturator {
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
             hp_k: 0.0,
-            from: [[0.0; 6]; BANDS],
-            to: [[0.0; 6]; BANDS],
+            from: [[0.0; 7]; BANDS],
+            to: [[0.0; 7]; BANDS],
             tilt_now: [Tilt::IDENTITY; BANDS],
             tilt_key: [(0.0, 0.0); BANDS],
             live: [false; BANDS],
@@ -1463,6 +1495,7 @@ impl Saturator {
                 post: [[0.0; CHUNK]; BANDS],
                 fader: [[0.0; CHUNK]; BANDS],
                 level: [[0.0; CHUNK]; BANDS],
+                feedback: [[0.0; CHUNK]; BANDS],
                 blend: [[0.0; CHUNK]; BANDS],
                 tilt: [[Tilt::IDENTITY; CHUNK]; BANDS],
             }),
@@ -1575,7 +1608,7 @@ impl Saturator {
     }
 
     /// Band slot `b`'s gain into the curve, bias, share, post gain and fader for its eased settings.
-    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 6] {
+    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 7] {
         let e = &self.eased[b];
         let share = e.share();
         let auto = if auto_gain {
@@ -1591,6 +1624,7 @@ impl Saturator {
             (auto * fader) as f32,
             fader as f32,
             out_scale(e.drive_db as f32),
+            (f64::from(FEEDBACK_LOOP) * e.feedback * smooth(e.engage)) as f32,
         ]
     }
 
@@ -1700,6 +1734,18 @@ impl Saturator {
                 f64::from(t.dyn_amount.clamp(-1.0, 1.0)),
                 self.glide,
             );
+            ease(&mut e.feedback, f64::from(t.feedback.clamp(0.0, 1.0)), self.glide);
+            ease(
+                &mut e.feedback_ln,
+                f64::from(t.feedback_hz.clamp(FEEDBACK_HZ.0, FEEDBACK_HZ.1)).ln(),
+                self.glide,
+            );
+            // The band-pass at the high rate the curves run at.
+            let hi = self.fs * self.factor as f64;
+            let g = (std::f64::consts::PI * e.feedback_ln.exp().min(0.45 * hi) / hi).tan();
+            let k = 1.0 / f64::from(FEEDBACK_Q);
+            let a1 = 1.0 / (1.0 + g * (g + k));
+            self.fb_tune[b] = [a1 as f32, (g * a1) as f32, (g * g * a1) as f32, k as f32];
             toward(
                 &mut e.engage,
                 if t.bypass { 0.0 } else { 1.0 },
@@ -1885,6 +1931,7 @@ impl Saturator {
                 self.lanes.post[b][i] = r(3);
                 self.lanes.fader[b][i] = r(4);
                 self.lanes.level[b][i] = r(5);
+                self.lanes.feedback[b][i] = r(6);
                 self.lanes.tilt[b][i] = self.tilt_now[b];
                 let e = &mut self.eased[b];
                 self.lanes.blend[b][i] = match e.lane_fade {
@@ -2052,6 +2099,9 @@ impl Saturator {
                     let heard = e.lane;
                     let env_k = self.env_k;
                     let emph = &self.emph;
+                    // Feedback's state, out of `band` while the lanes hold it.
+                    let (mut fb, mut fb_last) = (band.fb, band.fb_last);
+                    let [a1, a2, a3, damp] = self.fb_tune[b];
                     let mut lane = |l: usize, c: usize, u0: f32, bias: f32| {
                         let model = models[l];
                         match model.magnet() {
@@ -2070,17 +2120,34 @@ impl Saturator {
                                 continue;
                             }
                             let at = c * HI_CH + k;
-                            let u0 = g * self.hi[at];
-                            self.hi[at] = level
-                                * if lane_fading {
-                                    let (a, z) =
-                                        (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
-                                    a + (z - a) * self.lanes.blend[b][i]
-                                } else {
-                                    lane(heard, c, u0, bias)
-                                };
+                            let mut u0 = g * self.hi[at];
+                            let loop_gain = self.lanes.feedback[b][i];
+                            if loop_gain > 0.0 {
+                                // The curve's last output through the band-pass (state-variable,
+                                // unity at its peak), back into the curve.
+                                let st = &mut fb[c];
+                                let v3 = fb_last[c] - st[1];
+                                let v1 = a1 * st[0] + a2 * v3;
+                                let v2 = st[1] + a2 * st[0] + a3 * v3;
+                                st[0] = 2.0 * v1 - st[0];
+                                st[1] = 2.0 * v2 - st[1];
+                                u0 += loop_gain * damp * v1;
+                            } else {
+                                fb[c] = [0.0; 2];
+                            }
+                            let y = if lane_fading {
+                                let (a, z) =
+                                    (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
+                                a + (z - a) * self.lanes.blend[b][i]
+                            } else {
+                                lane(heard, c, u0, bias)
+                            };
+                            fb_last[c] = if loop_gain > 0.0 { y * CALIBRATION } else { 0.0 };
+                            self.hi[at] = level * y;
                         }
                     }
+                    band.fb = fb;
+                    band.fb_last = fb_last;
                     band.idle = false;
                 }
                 // C: back down, the tone and the difference each signal now carries.
@@ -2838,6 +2905,84 @@ mod tests {
         );
         assert!((h3 * k / (u.powi(3) / 27.0) - 1.0).abs() < 2e-3, "H3 {h3}");
         assert!(harmonic(&y, 2) < 1e-6 && harmonic(&y, 5) < 1e-6);
+    }
+
+    /// Band power (mean square) of `y` around `f` Hz (± a sixth of an octave), by DFT bins.
+    fn band_power(y: &[f32], f: f64) -> f64 {
+        let n = 16_384.min(y.len());
+        let tail = &y[y.len() - n..];
+        let bin = f64::from(FS) / n as f64;
+        let (lo, hi) = ((f * 0.89 / bin) as usize, (f * 1.12 / bin) as usize + 1);
+        (lo..hi)
+            .map(|k| {
+                let w = std::f64::consts::TAU * k as f64 / n as f64;
+                let (re, im) = tail.iter().enumerate().fold((0.0, 0.0), |(re, im), (i, &v)| {
+                    (re + f64::from(v) * (w * i as f64).cos(), im + f64::from(v) * (w * i as f64).sin())
+                });
+                re * re + im * im
+            })
+            .sum()
+    }
+
+    #[test]
+    fn feedback_rings_at_its_frequency() {
+        // Noise through a driven Soft band: feedback at 1 kHz lifts the band round 1 kHz, and
+        // leaves 4 kHz about where it was.
+        let x = noise(FS as usize, 3, 0.1);
+        let out = |fb: f32| {
+            let mut s = band(Model::Soft, 30.0);
+            s.bands[0].feedback = fb;
+            s.bands[0].feedback_hz = 1000.0;
+            let mut sat = Saturator::new(FS, 4, &s);
+            run(&mut sat, &x, &s, 256).0
+        };
+        let (dry, wet) = (out(0.0), out(1.0));
+        let lift = |f: f64| 10.0 * (band_power(&wet, f) / band_power(&dry, f)).log10();
+        let (at, away) = (lift(1000.0), lift(4000.0));
+        assert!(at > 6.0, "1 kHz lifted {at:.1} dB");
+        assert!(away.abs() < 3.0 && at > away + 6.0, "4 kHz {away:.1} dB against 1 kHz {at:.1} dB");
+    }
+
+    #[test]
+    fn feedback_never_runs_away() {
+        // Full feedback, every model, bias at both ends and none, driven gently to hard: a burst,
+        // then silence, dies away (the loop gain stays under 1 where the curves are steepest).
+        let n = 2 * FS as usize;
+        let mut x = noise(n, 9, 0.5);
+        for v in &mut x[FS as usize / 10..] {
+            *v = 0.0;
+        }
+        for m in Model::ALL {
+            for bias in [-1.0f32, 0.0, 1.0] {
+                for drive in [24.0f32, 42.0, 60.0] {
+                    for hz in [60.0f32, 1000.0, 8000.0] {
+                        let mut s = band(m, drive);
+                        s.bands[0].bias = bias;
+                        s.bands[0].feedback = 1.0;
+                        s.bands[0].feedback_hz = hz;
+                        let mut sat = Saturator::new(FS, 2, &s);
+                        let (y, _) = run(&mut sat, &x, &s, 512);
+                        let tail = y[n - FS as usize / 4..].iter().fold(0.0f32, |p, v| p.max(v.abs()));
+                        assert!(tail.is_finite() && tail < 1e-3, "{m:?} bias {bias} drive {drive} at {hz} Hz: {tail} after 1.65 s of silence");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn feedback_off_is_the_band_exactly() {
+        let x = noise(FS as usize / 2, 4, 0.3);
+        let play = |fb: Option<f32>| {
+            let mut s = band(Model::Tube, 36.0);
+            if let Some(fb) = fb {
+                s.bands[0].feedback = fb;
+                s.bands[0].feedback_hz = 3000.0;
+            }
+            let mut sat = Saturator::new(FS, 4, &s);
+            run(&mut sat, &x, &s, 256).0
+        };
+        assert_eq!(play(None), play(Some(0.0)));
     }
 
     #[test]

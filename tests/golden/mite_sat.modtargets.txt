@@ -42,3 +42,15 @@ x4_freq
 x5_freq
 mix
 out_gain
+b1_fb
+b1_fb_freq
+b2_fb
+b2_fb_freq
+b3_fb
+b3_fb_freq
+b4_fb
+b4_fb_freq
+b5_fb
+b5_fb_freq
+b6_fb
+b6_fb_freq

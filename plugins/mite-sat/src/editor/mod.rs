@@ -115,7 +115,7 @@ fn offered() -> Vec<Model> {
 
 /// The wide card's dials: drive large, then bias, tone, mix and output; under them the
 /// dynamics row (the threshold is automatic: no dial).
-const DIALS: [(ParamSpec, &str, KnobKind); 10] = [
+const DIALS: [(ParamSpec, &str, KnobKind); 12] = [
     (B_DRIVE, "DRIVE", KnobKind::Unipolar),
     (B_BIAS, "BIAS", KnobKind::Bipolar),
     (B_TONE, "TONE", KnobKind::Bipolar),
@@ -128,6 +128,9 @@ const DIALS: [(ParamSpec, &str, KnobKind); 10] = [
     // control... just like saturn 2").
     (B_LR, "L/R", KnobKind::Bipolar),
     (B_MS, "M/S", KnobKind::Bipolar),
+    // Feedback over its frequency (2026-11-24, as Saturn 2's).
+    (B_FB, "FEEDBACK", KnobKind::Unipolar),
+    (B_FB_FREQ, "FREQ", KnobKind::Unipolar),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +263,8 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::sat::SatSettings {
             solo: on(&band_id(b, B_SOLO.id)),
             lr: p(&band_id(b, B_LR.id)) / 100.0,
             ms: p(&band_id(b, B_MS.id)) / 100.0,
+            feedback: p(&band_id(b, B_FB.id)) / 100.0,
+            feedback_hz: p(&band_id(b, B_FB_FREQ.id)),
         }),
         auto_gain: on(AUTO_GAIN.id),
     }
@@ -629,13 +634,16 @@ impl SatView {
             let square = Rect::new(rect.x0 + 18.0, rect.y0 + 58.0, rect.x0 + 18.0 + side, rect.y0 + 58.0 + side);
             let bars = Rect::new(square.x1 + 16.0, square.y0, square.x1 + 16.0 + 320.0, square.y1);
             let (x0, x1) = (bars.x1 + 16.0, rect.x1 - 12.0);
-            // The saturation's five in a row, the dynamics' three under the first three.
-            let step = (x1 - x0) / 5.0;
+            // Six columns: drive, bias, tone, feedback, mix, output; under them the dynamics'
+            // three, the feedback's frequency, then L/R and M/S under mix and output.
+            let step = (x1 - x0) / 6.0;
             let (row1, row2) = (square.y0 + 70.0, square.y0 + 200.0);
-            let mut dials: Vec<(Point, f64)> = (0..5).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row1), if k == 0 { 84.0 } else { 60.0 })).collect();
-            dials.extend((0..3).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row2), if k == 0 { 60.0 } else { 52.0 })));
-            // L/R and M/S, beside the dynamics.
-            dials.extend((3..5).map(|k| (Point::new(x0 + step * (k as f64 + 0.5), row2), 52.0)));
+            let at = |col: usize, y: f64| Point::new(x0 + step * (col as f64 + 0.5), y);
+            let mut dials: Vec<(Point, f64)> = [0usize, 1, 2, 4, 5].iter().map(|&k| (at(k, row1), if k == 0 { 80.0 } else { 56.0 })).collect();
+            dials.extend((0..3).map(|k| (at(k, row2), if k == 0 { 56.0 } else { 50.0 })));
+            dials.extend([4usize, 5].iter().map(|&k| (at(k, row2), 50.0)));
+            dials.push((at(3, row1), 56.0));
+            dials.push((at(3, row2), 50.0));
             let power = Rect::new(rect.x1 - 54.0, rect.y0 + 12.0, rect.x1 - 18.0, rect.y0 + 48.0);
             return vec![Card { band: bands[0], kind: CardKind::Single, rect, square, bars: Some(bars), models: icon(rect.x0 + 18.0, rect.y0 + 12.0, 44.0, 36.0, 50.0), power: Some(power), stereo: Some(Rect::new(power.x0 - 132.0, power.y0, power.x0 - 8.0, power.y1)), solo: None, mute: None, remove: None, dials }];
         }
@@ -658,7 +666,9 @@ impl SatView {
                     // and the other four in a 2×2 grid, and the dynamics' three in a row below.
                     let (ax0, ax1) = (square.x1 + 12.0, rect.x1 - 8.0);
                     let bars = Rect::new(ax0, square.y0 + 18.0, ax1, square.y0 + 74.0);
-                    let col = (ax1 - ax0) / 3.0;
+                    // Four columns: drive, then bias and tone over mix and output, then feedback
+                    // over its frequency.
+                    let col = (ax1 - ax0) / 4.0;
                     let (top, step) = (bars.y1 + 28.0, 66.0);
                     let cy = top + step / 2.0;
                     let mut dials = vec![(Point::new(ax0 + col * 0.5, cy - 6.0), 72.0)];
@@ -670,6 +680,9 @@ impl SatView {
                     let col5 = (ax1 - ax0) / 5.0;
                     for k in 0..5 {
                         dials.push((Point::new(ax0 + col5 * (k as f64 + 0.5), row), 40.0));
+                    }
+                    for k in 0..2 {
+                        dials.push((Point::new(ax0 + col * 3.5, top + step * k as f64), 44.0));
                     }
                     Card {
                         band,

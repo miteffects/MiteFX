@@ -23,7 +23,7 @@ use nih_plug::prelude::*;
 ///   version 2 state gets them centred, what it was.
 /// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
 ///   version 3 state gets Minimum Phase, what it was.
-pub const STATE_VERSION: u32 = 5;
+pub const STATE_VERSION: u32 = 6;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -77,6 +77,10 @@ pub const B_DYN_REL: ParamSpec = spec("dyn_rel", "Dynamics Release", "ms", 10.0,
 /// the right only; and −100 % the mid only (mono) … +100 % the side only.
 pub const B_LR: ParamSpec = spec("lr", "L/R Balance", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const B_MS: ParamSpec = spec("ms", "M/S Balance", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
+/// Feedback (2026-11-24, as Saturn 2's): the band's saturated signal back into its curve through a
+/// resonant band-pass, ringing at the frequency. Appended after `phase`, so host order only grows.
+pub const B_FB: ParamSpec = spec("fb", "Feedback", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
+pub const B_FB_FREQ: ParamSpec = spec("fb_freq", "Feedback Frequency", "Hz", mite_dsp::sat::FEEDBACK_HZ.0, mite_dsp::sat::FEEDBACK_HZ.1, 250.0, ParamScale::Log, 0, (0.25, 1.0 / 16.0), ParamDisplay::Frequency);
 pub const B_STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &["Stereo", "Mid", "Side", "M/S", "Left", "Right"], default: 0 };
 /// Clean, but still heard.
 pub const B_BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
@@ -95,7 +99,7 @@ pub use mite_core::modmatrix::{lfo_id, mod_id, ENV_ATT, ENV_GAIN, ENV_REL, ENV_S
 /// growing the list never moves host automation).
 pub const M_DST: ChoiceSpec = ChoiceSpec { id: "dst", name: "Target", choices: &MOD_TARGETS, default: 0 };
 
-pub static MOD_TARGETS: [&str; 44] = [
+pub static MOD_TARGETS: [&str; 56] = [
     "None",
     "Band 1 Drive",
     "Band 1 Bias",
@@ -140,9 +144,21 @@ pub static MOD_TARGETS: [&str; 44] = [
     "Crossover 5",
     "Mix",
     "Output",
+    "Band 1 Feedback",
+    "Band 1 Feedback Frequency",
+    "Band 2 Feedback",
+    "Band 2 Feedback Frequency",
+    "Band 3 Feedback",
+    "Band 3 Feedback Frequency",
+    "Band 4 Feedback",
+    "Band 4 Feedback Frequency",
+    "Band 5 Feedback",
+    "Band 5 Feedback Frequency",
+    "Band 6 Feedback",
+    "Band 6 Feedback Frequency",
 ];
 /// The parameter each modulation target moves (`none` for the first).
-pub static MOD_TARGET_IDS: [&str; 44] = [
+pub static MOD_TARGET_IDS: [&str; 56] = [
     "none",
     "b1_drive",
     "b1_bias",
@@ -187,6 +203,18 @@ pub static MOD_TARGET_IDS: [&str; 44] = [
     "x5_freq",
     "mix",
     "out_gain",
+    "b1_fb",
+    "b1_fb_freq",
+    "b2_fb",
+    "b2_fb_freq",
+    "b3_fb",
+    "b3_fb_freq",
+    "b4_fb",
+    "b4_fb_freq",
+    "b5_fb",
+    "b5_fb_freq",
+    "b6_fb",
+    "b6_fb_freq",
 ];
 
 pub const TARGETS: mite_core::modmatrix::Targets = mite_core::modmatrix::Targets { names: &MOD_TARGETS, ids: &MOD_TARGET_IDS };
@@ -217,6 +245,12 @@ pub fn modulate_settings(s: &mut SatSettings, out: &mut crate::dsp::Output, offs
     let t = 1 + BANDS * 6 + CROSSOVERS;
     out.mix = modulate(&MIX, out.mix * 100.0, off(t)) / 100.0;
     out.gain_db = modulate(&OUT_GAIN, out.gain_db, off(t + 1));
+    // Appended (2026-11-24): each band's feedback and its frequency.
+    for (b, band) in s.bands.iter_mut().enumerate() {
+        let t = t + 2 + b * 2;
+        band.feedback = modulate(&B_FB, band.feedback * 100.0, off(t)) / 100.0;
+        band.feedback_hz = modulate(&B_FB_FREQ, band.feedback_hz, off(t + 1));
+    }
 }
 
 /// A crossover parameter's host id, e.g. `x2_freq` (`slot` from 0).
@@ -232,7 +266,7 @@ pub fn band_id(band: usize, param: &str) -> String {
 /// The continuous band parameters, in host order.
 pub const BAND_SPECS: [ParamSpec; 9] = [B_DRIVE, B_BIAS, B_TONE, B_MIX, B_OUT, B_DYN, B_DYN_THR, B_DYN_ATT, B_DYN_REL];
 /// Every continuous band parameter (`BAND_SPECS` and the balance), for stand-in hosts.
-pub const BAND_ALL_SPECS: [ParamSpec; 11] = [B_DRIVE, B_BIAS, B_TONE, B_MIX, B_OUT, B_DYN, B_DYN_THR, B_DYN_ATT, B_DYN_REL, B_LR, B_MS];
+pub const BAND_ALL_SPECS: [ParamSpec; 13] = [B_DRIVE, B_BIAS, B_TONE, B_MIX, B_OUT, B_DYN, B_DYN_THR, B_DYN_ATT, B_DYN_REL, B_LR, B_MS, B_FB, B_FB_FREQ];
 
 /// Every parameter's manifest line, in host order.
 pub fn manifest() -> String {
@@ -261,6 +295,9 @@ pub fn manifest() -> String {
         lines.extend([B_LR, B_MS].iter().map(|s| format!("b{}_{}", b + 1, s.manifest_line())));
     }
     lines.push(PHASE.manifest_line());
+    for b in 0..BANDS {
+        lines.extend([B_FB, B_FB_FREQ].iter().map(|s| format!("b{}_{}", b + 1, s.manifest_line())));
+    }
     lines.join("\n") + "\n"
 }
 
@@ -307,6 +344,8 @@ pub struct BandParams {
     pub solo: BoolParam,
     pub lr: FloatParam,
     pub ms: FloatParam,
+    pub fb: FloatParam,
+    pub fb_freq: FloatParam,
 }
 
 impl BandParams {
@@ -323,6 +362,8 @@ impl BandParams {
             solo: bool_param(&B_SOLO, name("Solo")),
             lr: float_param_named(&B_LR, name("L/R Balance")),
             ms: float_param_named(&B_MS, name("M/S Balance")),
+            fb: float_param_named(&B_FB, name("Feedback")),
+            fb_freq: float_param_named(&B_FB_FREQ, name("Feedback Frequency")),
         }
     }
 
@@ -345,6 +386,8 @@ impl BandParams {
             solo: self.solo.value(),
             lr: self.lr.value() / 100.0,
             ms: self.ms.value() / 100.0,
+            feedback: self.fb.value() / 100.0,
+            feedback_hz: self.fb_freq.value(),
         }
     }
 }
@@ -457,6 +500,11 @@ unsafe impl Params for SatParams {
             map.push((band_id(i, B_MS.id), b.ms.as_ptr(), group));
         }
         map.push(global(PHASE.id, self.phase.as_ptr()));
+        for (i, b) in self.bands.iter().enumerate() {
+            let group = format!("Band {}", i + 1);
+            map.push((band_id(i, B_FB.id), b.fb.as_ptr(), group.clone()));
+            map.push((band_id(i, B_FB_FREQ.id), b.fb_freq.as_ptr(), group));
+        }
         map
     }
 }

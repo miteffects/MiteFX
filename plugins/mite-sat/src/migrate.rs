@@ -77,6 +77,33 @@ pub fn v4_to_v5(state: &mut PluginState) {
     }
 }
 
+/// **5 → 6 (2026-11-24): feedback.** Each band's `fb` and `fb_freq` are appended (a state 5
+/// gets 0 %, as it had), and so are their twelve modulation targets. A snapshot stores a slot's
+/// target normalized over the list (`i/43` then, `i/55` now), so every `m{N}_dst` in every slot
+/// is rescaled; the plain index in the parameters means the same.
+pub fn v5_to_v6(state: &mut PluginState) {
+    if let Some(json) = state.fields.get_mut(SNAPSHOTS_KEY) {
+        if let Some(lifted) = rescale_targets(json, 43.0, 55.0) {
+            *json = lifted;
+        }
+    }
+}
+
+fn rescale_targets(json: &str, old_last: f64, new_last: f64) -> Option<String> {
+    let mut v: serde_json::Value = serde_json::from_str(json).ok()?;
+    for slot in v.get_mut("slots")?.as_array_mut()?.iter_mut() {
+        let Some(values) = slot.as_object_mut() else { continue };
+        for (id, x) in values.iter_mut() {
+            if id.starts_with('m') && id.ends_with("_dst") {
+                if let Some(n) = x.as_f64() {
+                    *x = serde_json::json!(((n * old_last).round() / new_last) as f32);
+                }
+            }
+        }
+    }
+    serde_json::to_string(&v).ok()
+}
+
 const OLD_DRIVE_MAX: f32 = 36.0;
 const NEW_DRIVE_MAX: f32 = 60.0;
 /// The old fade-in's top, where the old and new laws join (old 6 dB = new 30 dB).
@@ -144,6 +171,18 @@ pub fn lift_preset(values: &mut mite_core::presets::PresetValues, from: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snapshots_modulation_targets_keep_their_meaning() {
+        // Band 1 Drive (1 of 43) and Output (43 of 43) in a version 5 snapshot.
+        let old = r#"{"active":0,"slots":[{"m1_dst":0.023255814,"m2_dst":1.0,"b1_drive":0.5},null,null,null]}"#;
+        let new: serde_json::Value = serde_json::from_str(&rescale_targets(old, 43.0, 55.0).expect("lifted")).expect("JSON");
+        let slot = &new["slots"][0];
+        let last = (crate::params::TARGETS.names.len() - 1) as f64;
+        assert_eq!(crate::params::TARGETS.names[(slot["m1_dst"].as_f64().unwrap() * last).round() as usize], "Band 1 Drive");
+        assert_eq!(crate::params::TARGETS.names[(slot["m2_dst"].as_f64().unwrap() * last).round() as usize], "Output");
+        assert_eq!(slot["b1_drive"].as_f64(), Some(0.5), "the rest untouched");
+    }
 
     #[test]
     fn the_drive_law_keeps_off_off_and_a_push_its_push() {
