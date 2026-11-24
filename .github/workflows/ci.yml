@@ -77,14 +77,16 @@ jobs:
       - name: clap-validator
         shell: bash
         run: |
-          IFS=';'; for b in $BUNDLES; do clap-validator validate "target/bundled/$b.clap"; done
+          IFS=';'; failed=""; for b in $BUNDLES; do clap-validator validate "target/bundled/$b.clap" || failed="$failed $b;"; done; [ -z "$failed" ] || { echo "clap-validator failed:$failed"; exit 1; }
 
       - name: Install pluginval
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/${{ matrix.pluginval }}"
           7z x -opluginval pluginval.zip > /dev/null
       - name: pluginval (strictness 10)
+        if: ${{ !cancelled() }}
         shell: bash
         # GUI tests need a GPU; hosted runners have none. Editor coverage runs locally for now.
         run: |
@@ -94,9 +96,11 @@ jobs:
             *)       PV=pluginval/pluginval ;;
           esac
           chmod +x "$PV" || true
-          IFS=';'; for b in $BUNDLES; do
-            "$PV" --strictness-level 10 --skip-gui-tests --validate-in-process --validate "target/bundled/$b.vst3"
+          IFS=';'; failed=""
+          for b in $BUNDLES; do
+            "$PV" --strictness-level 10 --skip-gui-tests --validate-in-process --validate "target/bundled/$b.vst3" || failed="$failed $b;"
           done
+          [ -z "$failed" ] || { echo "pluginval failed:$failed"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:

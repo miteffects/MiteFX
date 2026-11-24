@@ -80,7 +80,9 @@ impl ParamSpec {
     /// Formats a plain value as (number, unit), e.g. `("−0.8", "dB")` or `("2.80", "kHz")`.
     pub fn format_parts(&self, plain: f32) -> (String, &'static str) {
         match self.display {
-            ParamDisplay::Frequency if plain >= 1000.0 => (format!("{:.2}", plain / 1000.0), "kHz"),
+            // Follows the rounded value too: 999.97 Hz reads "1.00 kHz", not "1000 Hz" (which
+            // would read back as 1000 and then show as kHz: not a stable round trip).
+            ParamDisplay::Frequency if plain.round() >= 1000.0 => (format!("{:.2}", plain / 1000.0), "kHz"),
             ParamDisplay::Frequency => (format!("{:.0}", plain), "Hz"),
             // The format follows the *rounded* value, so a time just under a boundary (9.97 ms)
             // reads like the boundary does ("10 ms") and survives a text round trip.
@@ -353,6 +355,10 @@ mod tests {
     fn frequencies_read_like_the_design() {
         assert_eq!(FREQ.format(160.0), "160 Hz");
         assert_eq!(FREQ.format(2800.0), "2.80 kHz");
+        // Just under the unit boundary: shown as it reads back, so text round-trips.
+        assert_eq!(FREQ.format(999.97), "1.00 kHz");
+        let back = FREQ.parse(&FREQ.format(999.97)).expect("parses");
+        assert_eq!(FREQ.format(back), FREQ.format(999.97));
         assert_eq!(FREQ.parse("3.5k"), Some(3500.0));
         assert_eq!(FREQ.parse("350 Hz"), Some(350.0));
     }
