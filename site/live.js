@@ -129,8 +129,8 @@
   const rnd = (a, b) => a + Math.random() * (b - a);
   const mites = [];
   function spawn(m, edge) {
-    m.size = m.size || rnd(18, 34);
-    m.depth = (m.size - 14) / 20; // bigger = nearer = rides the scroll more
+    m.size = m.size || rnd(26, 46);
+    m.depth = (m.size - 22) / 24; // bigger = nearer = rides the scroll more
     if (edge) {
       const side = Math.floor(rnd(0, 4));
       m.x = side === 0 ? -30 : side === 1 ? W + 30 : rnd(0, W);
@@ -145,7 +145,7 @@
     return m;
   }
   function populate() {
-    const want = Math.round(Math.min(18, Math.max(6, (W * H) / 85000)));
+    const want = Math.round(Math.min(22, Math.max(8, (W * H) / 70000)));
     while (mites.length < want) mites.push(spawn({}, false));
     mites.length = want;
   }
@@ -163,8 +163,8 @@
     ctx.rotate(m.h + Math.PI / 2);
     ctx.translate(-16, -18);
     ctx.lineCap = "round";
-    ctx.globalAlpha = 0.45 + m.depth * 0.5;
-    ctx.strokeStyle = "#6f7887"; ctx.lineWidth = 1.4;
+    ctx.globalAlpha = 0.75 + m.depth * 0.25;
+    ctx.strokeStyle = "#a3abb8"; ctx.lineWidth = 1.5;
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
       const [x0, y0, x1, y1] = LEGS[i];
@@ -180,7 +180,7 @@
     ctx.fillStyle = "#0b0d11";
     ctx.fill(BODY); ctx.stroke(BODY); ctx.fill(HEAD); ctx.stroke(HEAD);
     ctx.strokeStyle = m.col; ctx.lineWidth = 1.8;
-    ctx.shadowColor = m.col; ctx.shadowBlur = 8 * k;
+    ctx.shadowColor = m.col; ctx.shadowBlur = 12 * k;
     ctx.stroke(SIG);
     ctx.shadowBlur = 0;
   }
