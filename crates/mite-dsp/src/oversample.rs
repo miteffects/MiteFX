@@ -204,8 +204,22 @@ impl Stage {
 
 /// Up to two channels oversampled by `factor` (1, 2, 4 or 8), round trip a pure delay of
 /// [`Oversampler::latency`] base-rate samples.
+/// The oversampler's filters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Filter {
+    /// Linear-phase FIR half-bands: the round trip is a pure delay (69–79 base samples).
+    #[default]
+    LinearPhase,
+    /// Minimum-phase allpass half-bands ([`crate::oversample_iir`]): a few samples of delay,
+    /// phase shift near the top of the band.
+    MinimumPhase,
+}
+
 pub struct Oversampler {
     factor: usize,
+    filter: Filter,
+    /// Per channel, the minimum-phase stages (2×, 4×, 8×, 16×).
+    iir: [[crate::oversample_iir::IirStage; 4]; 2],
     /// Per channel, the 2× stage, the 4× one, the 8× one and the 16× one.
     stages: [[Stage; 4]; 2],
     /// Per channel, the half-sample pad that makes the latency whole: one sample at the 2× rate
@@ -217,8 +231,14 @@ impl Oversampler {
     /// Allocates; `factor` can change later without allocating.
     pub fn new(factor: usize) -> Self {
         let stage = |i: usize| Stage::new(PAIRS[i], BETA[i]);
+        let iir = std::array::from_fn(|i| {
+            let (n, t) = crate::oversample_iir::STAGES[i];
+            crate::oversample_iir::IirStage::new(&crate::oversample_iir::design(n, t))
+        });
         let mut o = Self {
             factor: 1,
+            filter: Filter::LinearPhase,
+            iir: [iir, iir],
             stages: [
                 [stage(0), stage(1), stage(2), stage(3)],
                 [stage(0), stage(1), stage(2), stage(3)],
@@ -245,8 +265,21 @@ impl Oversampler {
         self.factor
     }
 
+    /// Linear or minimum phase. Clears the state.
+    pub fn set_filter(&mut self, filter: Filter) {
+        self.filter = filter;
+        self.reset();
+    }
+
+    pub fn filter(&self) -> Filter {
+        self.filter
+    }
+
     pub fn reset(&mut self) {
         for s in self.stages.iter_mut().flatten() {
+            s.clear();
+        }
+        for s in self.iir.iter_mut().flatten() {
             s.clear();
         }
         for p in &mut self.pad {
@@ -257,6 +290,8 @@ impl Oversampler {
     /// Becomes a copy of `other`'s factor and state, without allocating.
     pub fn copy_from(&mut self, other: &Self) {
         self.factor = other.factor;
+        self.filter = other.filter;
+        self.iir = other.iir;
         for (a, b) in self
             .stages
             .iter_mut()
@@ -272,7 +307,51 @@ impl Oversampler {
 
     /// The round trip's delay, base-rate samples.
     pub fn latency(&self) -> usize {
-        Self::latency_for(self.factor)
+        Self::latency_of(self.factor, self.filter)
+    }
+
+    /// The round trip's delay at `factor` with `filter`, base-rate samples: for minimum phase its
+    /// group delay at low frequencies (measured once, rounded), what a host compensates.
+    pub fn latency_of(factor: usize, filter: Filter) -> usize {
+        match filter {
+            Filter::LinearPhase => Self::latency_for(factor),
+            Filter::MinimumPhase => {
+                static TABLE: std::sync::OnceLock<[usize; 5]> = std::sync::OnceLock::new();
+                let i = match factor {
+                    0 | 1 => 0,
+                    2 | 3 => 1,
+                    4..=7 => 2,
+                    8..=15 => 3,
+                    _ => 4,
+                };
+                TABLE.get_or_init(|| std::array::from_fn(|i| Self::measured_delay(1 << i)))[i]
+            }
+        }
+    }
+
+    /// The minimum-phase round trip's group delay at 1 % of the base rate, from its impulse
+    /// response (rounded to whole samples). Allocates.
+    fn measured_delay(factor: usize) -> usize {
+        if factor == 1 {
+            return 0;
+        }
+        let mut o = Self::new(factor);
+        o.set_filter(Filter::MinimumPhase);
+        let n = 4096;
+        let mut hi = vec![0.0f32; n * factor];
+        let mut x = vec![0.0f32; n];
+        x[0] = 1.0;
+        o.up(0, &x, &mut hi);
+        let mut y = vec![0.0f32; n];
+        o.down(0, &hi, &mut y);
+        let phase = |f: f64| {
+            let w = std::f64::consts::TAU * f;
+            let (re, im) = y.iter().enumerate().fold((0.0, 0.0), |(re, im), (k, &v)| (re + f64::from(v) * (w * k as f64).cos(), im - f64::from(v) * (w * k as f64).sin()));
+            im.atan2(re)
+        };
+        let (f0, df) = (0.01, 0.0005);
+        let gd = -(phase(f0 + df) - phase(f0 - df)) / (std::f64::consts::TAU * 2.0 * df);
+        gd.round().max(0.0) as usize
     }
 
     /// The round trip's delay at `factor`, base-rate samples: each stage's interpolator and
@@ -292,8 +371,53 @@ impl Oversampler {
         }
     }
 
+    /// [`Self::up`] through the minimum-phase stages: each base sample doubled `log₂ factor`
+    /// times, the stages in order.
+    fn up_iir(&mut self, ch: usize, input: &[f32], out: &mut [f32]) {
+        let f = self.factor;
+        let stages = &mut self.iir[ch];
+        for (x, o) in input.iter().zip(out.chunks_exact_mut(f)) {
+            let mut buf = [0.0f32; MAX_FACTOR];
+            buf[0] = *x;
+            let mut len = 1;
+            for st in stages.iter_mut().take(f.trailing_zeros() as usize) {
+                // In time order: each stage carries state from one sample to the next.
+                let src = buf;
+                for j in 0..len {
+                    let [a, b] = st.interpolate(src[j]);
+                    buf[2 * j] = a;
+                    buf[2 * j + 1] = b;
+                }
+                len *= 2;
+            }
+            o.copy_from_slice(&buf[..f]);
+        }
+    }
+
+    /// [`Self::down`] through the minimum-phase stages, the last one first.
+    fn down_iir(&mut self, ch: usize, input: &[f32], out: &mut [f32]) {
+        let f = self.factor;
+        let n = f.trailing_zeros() as usize;
+        let stages = &mut self.iir[ch];
+        for (o, x) in out.iter_mut().zip(input.chunks_exact(f)) {
+            let mut buf = [0.0f32; MAX_FACTOR];
+            buf[..f].copy_from_slice(x);
+            let mut len = f;
+            for st in stages[..n].iter_mut().rev() {
+                for j in 0..len / 2 {
+                    buf[j] = st.decimate([buf[2 * j], buf[2 * j + 1]]);
+                }
+                len /= 2;
+            }
+            *o = buf[0];
+        }
+    }
+
     /// `input` (base rate) of channel `ch` into `out` (`factor` × as long).
     pub fn up(&mut self, ch: usize, input: &[f32], out: &mut [f32]) {
+        if self.filter == Filter::MinimumPhase && self.factor > 1 {
+            return self.up_iir(ch, input, out);
+        }
         let [first, second, third, fourth] = &mut self.stages[ch];
         match self.factor {
             1 => out[..input.len()].copy_from_slice(input),
@@ -336,6 +460,9 @@ impl Oversampler {
 
     /// `input` (`factor` × the base rate) of channel `ch` into `out` (base rate).
     pub fn down(&mut self, ch: usize, input: &[f32], out: &mut [f32]) {
+        if self.filter == Filter::MinimumPhase && self.factor > 1 {
+            return self.down_iir(ch, input, out);
+        }
         let [first, second, third, fourth] = &mut self.stages[ch];
         let pad = &mut self.pad[ch];
         match self.factor {
@@ -401,6 +528,53 @@ impl Oversampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_minimum_phase_latency_is_where_a_low_burst_comes_out() {
+        // Reported latency equals the measured delay (BLUEPRINT §5): a 10 ms Hann burst (its
+        // energy under 200 Hz) through the round trip, its centroid within half a sample.
+        for factor in [2usize, 4, 8, 16] {
+            let mut o = Oversampler::new(factor);
+            o.set_filter(Filter::MinimumPhase);
+            let (n, len) = (4096, 480);
+            let mut x = vec![0.0f32; n];
+            for i in 0..len {
+                x[1000 + i] = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / len as f32).cos();
+            }
+            let mut hi = vec![0.0f32; n * factor];
+            o.up(0, &x, &mut hi);
+            let mut y = vec![0.0f32; n];
+            o.down(0, &hi, &mut y);
+            let centroid = |v: &[f32]| v.iter().enumerate().fold((0.0, 0.0), |(a, b), (i, s)| (a + f64::from(*s) * i as f64, b + f64::from(*s)));
+            let ((a, b), (c, d)) = (centroid(&y), centroid(&x));
+            let measured = a / b - c / d;
+            let reported = o.latency() as f64;
+            assert!((measured - reported).abs() <= 0.5, "{factor}×: reported {reported}, measured {measured:.2}");
+        }
+    }
+
+    #[test]
+    fn the_minimum_phase_round_trip_is_flat_quick_and_keeps_images_out() {
+        // A sine through up and down at every factor: its level within 0.01 dB to 0.9 of the base
+        // Nyquist; the delay a few samples; and a tone near the top, aliased by nothing above.
+        for factor in [2usize, 4, 8, 16] {
+            let lat = Oversampler::latency_of(factor, Filter::MinimumPhase);
+            assert!(lat <= 8, "{factor}×: {lat} samples");
+            for f in [0.01f64, 0.1, 0.2, 0.225] {
+                let mut o = Oversampler::new(factor);
+                o.set_filter(Filter::MinimumPhase);
+                let n = 8192;
+                let x: Vec<f32> = (0..n).map(|i| (std::f64::consts::TAU * f * i as f64).sin() as f32).collect();
+                let mut hi = vec![0.0f32; n * factor];
+                o.up(0, &x, &mut hi);
+                let mut y = vec![0.0f32; n];
+                o.down(0, &hi, &mut y);
+                let rms = |v: &[f32]| (v.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+                let db = 20.0 * (rms(&y[n / 2..]) / rms(&x[n / 2..])).log10();
+                assert!(db.abs() < 0.01, "{factor}× at {f}: {db:.4} dB");
+            }
+        }
+    }
 
     /// The round trip of a sine at `f` (fraction of the base rate) at `factor`: gain (dB) after
     /// the latency, and the worst sample error against the delayed sine.

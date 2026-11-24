@@ -33,6 +33,17 @@ fn rate_ratio(sample_rate: f64) -> usize {
 }
 
 /// Linear Phase's added latency at `sample_rate`, samples.
+/// The oversamplers' filters for a phase mode: Linear Phase keeps the round trip a pure delay;
+/// Minimum Phase (2026-11-24, user: as Saturn 2's) takes minimum-phase ones, 5 samples at 4×
+/// against 76.
+pub fn filter_for(linear: bool) -> mite_dsp::oversample::Filter {
+    if linear {
+        mite_dsp::oversample::Filter::LinearPhase
+    } else {
+        mite_dsp::oversample::Filter::MinimumPhase
+    }
+}
+
 pub fn linear_phase_latency(sample_rate: f32) -> usize {
     let r = rate_ratio(f64::from(sample_rate));
     LP_BLOCK_48K * r + LP_LEN_48K * r / 2
@@ -253,6 +264,7 @@ impl SatEngine {
             sm.set_ramp(sample_rate, GLIDE_MS);
         }
         self.sat.prepare(sample_rate, factor, s);
+        self.sat.set_filter(filter_for(linear), s);
         self.reset(s, out);
     }
 
@@ -427,6 +439,9 @@ impl SatEngine {
                         // Still designing: stay muted.
                     } else {
                         self.linear = linear;
+                        if self.sat.filter() != filter_for(linear) {
+                            self.sat.set_filter(filter_for(linear), s);
+                        }
                         if factor != self.sat.oversampling() {
                             self.sat.set_oversampling(factor, s);
                         } else {
@@ -668,7 +683,9 @@ mod tests {
         let mut e = SatEngine::new(FS, 2, &s);
         let input = noise(4800, 5);
         run(&mut e, &input, &s, 2, &Output::default(), 480);
-        assert_eq!(e.latency(), 69);
+        // Minimum Phase: minimum-phase oversampling, a few samples.
+        let min = Oversampler::latency_of(2, mite_dsp::oversample::Filter::MinimumPhase);
+        assert_eq!(e.latency(), min);
         // Into Linear Phase once the designer has handed its kernels over.
         for _ in 0..200 {
             run_phase(&mut e, &input, &s, 2, true, &Output::default(), 480);
@@ -680,22 +697,33 @@ mod tests {
         assert!(e.linear());
         assert_eq!(e.latency(), 69 + linear_phase_latency(FS));
         run_phase(&mut e, &input, &s, 2, false, &Output::default(), 480);
-        assert_eq!(e.latency(), 69);
+        assert_eq!(e.latency(), min);
     }
 
     #[test]
-    fn bypass_and_mix_zero_null_against_the_delayed_input() {
+    fn bypass_nulls_and_mix_zero_is_the_dry() {
+        // Bypass is the input delayed, bit for bit, at every factor. Mix 0 is the band's dry: in
+        // Minimum Phase the input through the oversamplers' round trip, at its level though not
+        // its phase near the top (white noise's RMS within 0.05 dB: its top tenth, above 0.9 of
+        // Nyquist, is where every oversampling filter rolls off; the band is flat within 0.01 dB,
+        // `oversample`'s test); at 1× (no round trip) bit for bit.
         let s = driven();
-        let input = noise(9600, 1);
-        for factor in [1, 2, 4, 8] {
+        let input = noise(19_200, 1);
+        for factor in [1, 2, 4, 8, 16] {
             for out in [Output { bypass: true, ..Output::default() }, Output { mix: 0.0, ..Output::default() }] {
                 let mut e = SatEngine::new(FS, factor, &s);
                 e.prepare(FS, factor, &s, &out, false);
                 let y = run(&mut e, &input, &s, factor, &out, 256);
                 let latency = e.latency();
-                assert_eq!(latency, Oversampler::latency_for(factor));
-                for i in latency..input.len() {
-                    assert_eq!(y[i], input[i - latency], "{factor}× {out:?} at {i}");
+                assert_eq!(latency, Oversampler::latency_of(factor, mite_dsp::oversample::Filter::MinimumPhase));
+                if out.bypass || factor == 1 {
+                    for i in latency..input.len() {
+                        assert_eq!(y[i], input[i - latency], "{factor}× {out:?} at {i}");
+                    }
+                } else {
+                    let rms = |v: &[f32]| (v.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+                    let db = 20.0 * (rms(&y[4800..]) / rms(&input[4800 - latency..input.len() - latency])).log10();
+                    assert!(db.abs() < 0.05, "{factor}× mix 0: {db:.4} dB");
                 }
             }
         }
@@ -703,17 +731,22 @@ mod tests {
 
     #[test]
     fn delta_plus_dry_is_the_wet_signal() {
+        // Delta is what the saturation adds: with the dry (mix 0's output) it is the wet, in
+        // Minimum Phase too, where the dry is the round trip.
         let s = driven();
         let input = noise(9600, 2);
-        let mut wet_engine = SatEngine::new(FS, 2, &s);
-        let wet = run(&mut wet_engine, &input, &s, 2, &Output::default(), 480);
-        let delta_out = Output { delta: true, ..Output::default() };
-        let mut delta_engine = SatEngine::new(FS, 2, &s);
-        delta_engine.prepare(FS, 2, &s, &delta_out, false);
-        let delta = run(&mut delta_engine, &input, &s, 2, &delta_out, 480);
-        let lat = wet_engine.latency();
-        for i in lat..input.len() {
-            assert!((delta[i] + input[i - lat] - wet[i]).abs() < 1e-6, "at {i}");
+        for factor in [2, 4] {
+            let play = |out: Output| {
+                let mut e = SatEngine::new(FS, factor, &s);
+                e.prepare(FS, factor, &s, &out, false);
+                run(&mut e, &input, &s, factor, &out, 480)
+            };
+            let wet = play(Output::default());
+            let delta = play(Output { delta: true, ..Output::default() });
+            let dry = play(Output { mix: 0.0, ..Output::default() });
+            for i in 0..input.len() {
+                assert!((delta[i] + dry[i] - wet[i]).abs() < 1e-5, "{factor}× at {i}");
+            }
         }
     }
 
@@ -739,10 +772,11 @@ mod tests {
         let s = driven();
         let mut e = SatEngine::new(FS, 2, &s);
         let input = noise(4800, 5);
+        let min = |f: usize| Oversampler::latency_of(f, mite_dsp::oversample::Filter::MinimumPhase);
         run(&mut e, &input, &s, 2, &Output::default(), 480);
-        assert_eq!(e.latency(), 69);
+        assert_eq!(e.latency(), min(2));
         run(&mut e, &input, &s, 8, &Output::default(), 480);
-        assert_eq!((e.latency(), e.oversampling()), (78, 8));
+        assert_eq!((e.latency(), e.oversampling()), (min(8), 8));
     }
 
     #[test]

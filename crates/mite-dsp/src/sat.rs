@@ -27,7 +27,7 @@ use std::sync::OnceLock;
 use crate::crossover::{Cross, Split};
 use crate::dynamics::{soft_above, soft_cap};
 use crate::hysteresis::{self, Ja, JaParams, anhysteretic};
-use crate::oversample::Oversampler;
+use crate::oversample::{Filter, Oversampler};
 
 pub use crate::crossover::{FREQ_MAX, FREQ_MIN, MIN_GAP_OCT};
 
@@ -1090,6 +1090,10 @@ pub fn distortion(
 /// One band slot's state in one core, per channel.
 struct BandCore {
     os: Oversampler,
+    /// Minimum phase: the band's dry through the same round trip with no curve in it, so every
+    /// blend of dry and wet lines up (a plain delay against the minimum-phase wet combed −4…−15
+    /// dB at 15–18 kHz in a 50 % blend).
+    dry_os: Oversampler,
     /// The static models' envelope (for the operating point) per lane and channel.
     env: [[f32; 2]; 2],
     /// Tape's or Transformer's core per lane and channel.
@@ -1132,6 +1136,7 @@ impl BandCore {
     fn new(factor: usize) -> Self {
         Self {
             os: Oversampler::new(factor),
+            dry_os: Oversampler::new(factor),
             env: [[0.0; 2]; 2],
             magnet: [[Magnet::default(); 2]; 2],
             tone: [0.0; 2],
@@ -1156,6 +1161,7 @@ impl BandCore {
 
     fn clear(&mut self) {
         self.os.reset();
+        self.dry_os.reset();
         self.env = [[0.0; 2]; 2];
         self.magnet = [[Magnet::default(); 2]; 2];
         self.tone = [0.0; 2];
@@ -1167,6 +1173,7 @@ impl BandCore {
 
     fn copy_from(&mut self, other: &BandCore) {
         self.os.copy_from(&other.os);
+        self.dry_os.copy_from(&other.dry_os);
         self.env = other.env;
         self.magnet = other.magnet;
         self.tone = other.tone;
@@ -1450,6 +1457,10 @@ pub struct Saturator {
     /// Scratch: the split per core, position and channel; the high rate; a band's wet.
     split: Vec<f32>,
     hi: Vec<f32>,
+    /// One channel's dry at the high rate on its way through `dry_os`.
+    dry_hi: Vec<f32>,
+    /// Linear or minimum phase, for every band's oversamplers.
+    filter: Filter,
     wet: Vec<f32>,
 }
 
@@ -1502,6 +1513,8 @@ impl Saturator {
             }),
             split: vec![0.0; 2 * BANDS * 2 * CHUNK],
             hi: vec![0.0; (PREROLL * 16).max(2 * HI_CH)],
+            dry_hi: vec![0.0; HI_CH],
+            filter: Filter::LinearPhase,
             wet: vec![0.0; CHUNK],
         };
         sat.prepare(sample_rate, factor, s);
@@ -1533,6 +1546,7 @@ impl Saturator {
         for core in &mut self.cores {
             for b in &mut core.bands {
                 b.os.set_factor(factor);
+                b.dry_os.set_factor(factor);
             }
         }
         self.factor = self.cores[0].bands[0].os.factor();
@@ -1547,9 +1561,27 @@ impl Saturator {
         self.factor
     }
 
+    /// The oversamplers' filters: linear phase (the round trip a pure delay; the band's dry a
+    /// delayed copy, so neutral settings null) or minimum phase (a few samples of latency; the dry
+    /// goes the same way, so it is the input's level but not its phase above ~10 kHz).
+    pub fn set_filter(&mut self, filter: Filter, s: &SatSettings) {
+        for core in &mut self.cores {
+            for b in &mut core.bands {
+                b.os.set_filter(filter);
+                b.dry_os.set_filter(filter);
+            }
+        }
+        self.filter = filter;
+        self.reset(s);
+    }
+
+    pub fn filter(&self) -> Filter {
+        self.filter
+    }
+
     /// The round trip of the oversampling in force, samples (the latency).
     pub fn latency(&self) -> usize {
-        Oversampler::latency_for(self.factor)
+        Oversampler::latency_of(self.factor, self.filter)
     }
 
     /// The split playing now (it follows a change once its crossfade is done).
@@ -2027,6 +2059,11 @@ impl Saturator {
                             xd[i] = core.rings[r + (w + core.ring_len - latency) % core.ring_len];
                         }
                         w = (w + 1) % core.ring_len;
+                    }
+                    if self.filter == Filter::MinimumPhase && f > 1 {
+                        // The dry the minimum-phase wet lines up with: the same round trip.
+                        band.dry_os.up(c, &input[c][..n], &mut self.dry_hi[..m]);
+                        band.dry_os.down(c, &self.dry_hi[..m], &mut xd[..n]);
                     }
                 }
                 let mut xde = xds;

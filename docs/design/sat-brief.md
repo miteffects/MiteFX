@@ -51,6 +51,17 @@ harmonics hold through 36 dB of drive; nearer a square wave (48–60 dB) they fa
 Auto gain's level meter is 2 s (was 300 ms) and starts as a plain average, its gate 5 ms (was
 20): it no longer rides between loud and quiet stretches (±0.5 dB → ±0.03).
 
+**Minimum Phase is low latency (2026-11-24, user chose it over a third choice):** the Phase menu's
+Minimum Phase now also oversamples with minimum-phase allpass half-bands (`mite_dsp::oversample_iir`,
+HIIR's design; ≥ 100 dB against folding, flat within 0.01 dB to 0.9 × Nyquist): latency 4 / 5 / 6 /
+6 samples at 2 / 4 / 8 / 16× (was 69 / 76 / 78 / 79; Saturn 2's Good: 8), aliasing identical to
+the linear-phase filters. Each band's dry goes through the same round trip (`dry_os`): against a
+plain delay the minimum-phase wet combed −4…−15 dB at 15–18 kHz in a 50 % blend. So in Minimum
+Phase, mix 0 and neutral settings are the input's level but not its phase above ~10 kHz; bypass
+still nulls, and Linear Phase keeps the bit-exact null and no phase shift anywhere (the BLUEPRINT
+§5 null rule, with this exception the user chose). Reported latency is the round trip's measured
+low-frequency delay, within half a sample (tested).
+
 **Aliasing (2026-11-24, state 7):** measured in 20 Hz–20 kHz on a 4987 Hz tone at −6 dBFS (as the
 Saturn 2 comparison reads it), the hard curves were the limit at 4×: Hard −54.5 dB at 24 dB of
 drive, −38.6 at 36. A smoother join on Hard's knee changed nothing (its sharpness, not its

@@ -979,11 +979,12 @@ impl SatView {
             let hovered = self.pointer.and_then(|p| list.item_rects().iter().position(|r| r.contains(p)));
             if let (Some(i), true) = (hovered, self.phase_menu) {
                 let ms = crate::dsp::linear_phase_latency(fs as f32) as f64 / fs * 1000.0;
-                return Help::default().text(format!("{} — ", PHASE.choices[i])).text(if i == 0 { "LR4 crossovers: no latency; each band's phase turns around its crossovers".to_owned() } else { format!("the same bands without any phase shift, so they add back to the input exactly; adds {ms:.0} ms of latency") });
+                return Help::default().text(format!("{} — ", PHASE.choices[i])).text(if i == 0 { "the lowest latency: LR4 crossovers and minimum-phase oversampling; the phase turns around the crossovers and near the top".to_owned() } else { format!("no phase shift anywhere: the bands add back to the input exactly and neutral settings null; adds {ms:.0} ms of latency") });
             }
             if let Some(i) = hovered {
-                let f = [1usize, 2, 4, 8][i];
-                let ms = mite_dsp::oversample::Oversampler::latency_for(f) as f64 / fs * 1000.0;
+                let f = mite_dsp::sat::FACTORS[i.min(mite_dsp::sat::FACTORS.len() - 1)];
+                let linear = Self::plain(host, PHASE.id).round() >= 1.0;
+                let ms = mite_dsp::oversample::Oversampler::latency_of(f, crate::dsp::filter_for(linear)) as f64 / fs * 1000.0;
                 return Help::default().text(format!("{} — ", OVERSAMPLING.choices[i])).text(if f == 1 { "no oversampling: no latency, the most aliasing".to_owned() } else { format!("the curves run {f} times faster, so their harmonics fold back far less; adds {ms:.2} ms of latency") });
             }
         }

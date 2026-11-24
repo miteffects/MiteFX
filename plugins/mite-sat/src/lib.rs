@@ -45,7 +45,7 @@ impl SatShared {
             spectrum: SpectrumTap::new(editor::ANALYZER_SIZE),
             post: SpectrumTap::new(editor::ANALYZER_SIZE),
             sample_rate: AtomicF32::new(48_000.0),
-            latency: AtomicF32::new(mite_dsp::oversample::Oversampler::latency_for(2) as f32),
+            latency: AtomicF32::new(mite_dsp::oversample::Oversampler::latency_of(4, mite_dsp::oversample::Filter::MinimumPhase) as f32),
             snapshots,
             preset,
             matrix: mite_core::modmatrix::MatrixTap::new(),

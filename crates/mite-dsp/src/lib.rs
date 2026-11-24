@@ -30,6 +30,7 @@ pub mod multiband;
 pub mod natural_phase;
 pub mod output;
 pub mod oversample;
+pub mod oversample_iir;
 pub mod pitch;
 pub mod resample;
 pub mod reverb;
