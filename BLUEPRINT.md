@@ -461,7 +461,7 @@ to, chains found from the signals, levels, each chain's share of the master, mas
 audition) was built the same day and dropped by the user ("drop this plugin it's too buggy"),
 after its editor froze REAPER (a name-shortening loop that never ended on long track names). None
 of it is in the code; the plugins report to nothing. The nih-plug fork keeps the track-info hook
-it added (ansabic/nih-plug 75780dc), unused: MiteFX stays pinned to 2d0eca3.
+it added (miteffects/nih-plug 75780dc), unused: MiteFX stays pinned to 2d0eca3.
 
 ### 14e. Mite Pitch (2026-11-05)
 
@@ -830,7 +830,7 @@ Done and verified on Linux:
   - **Windows were never shown.** Fixed by calling `show()` after creating them.
   - **Presentation:** frames go straight from the GPU to the window (wgpu surface, mailbox mode, synced to the display without blocking). Measured inside Reaper: 0.8 ms per frame for the full EQ at 2560×1520. A softbuffer CPU path remains only as a fallback when no GPU surface can be created. An earlier diagnosis that Vulkan could not present into host child windows under XWayland was wrong: the windows were simply never shown or redrawn.
   - **baseview's Present-extension redraw pacing never fires inside Reaper.** Frames are now driven by our own 60 Hz UI timer.
-- **nih-plug fork:** we pin the fork `ansabic/nih-plug`, branch `mitefx`, which fixes two CLAP state bugs:
+- **nih-plug fork:** we pin the fork `miteffects/nih-plug`, branch `mitefx`, which fixes two CLAP state bugs:
   - the untrusted state length could abort the host;
   - parameter values were not rescanned after a state load.
 - **Design:** third-pass tokens (`mitefx-tokens/3`) and `docs/design/interaction.md` are wired in.
