@@ -140,7 +140,7 @@
       m.x = rnd(0, W); m.y = rnd(0, H); m.h = rnd(0, Math.PI * 2);
     }
     m.base = rnd(22, 46); m.speed = 0; m.turn = 0; m.gait = rnd(0, 6.28);
-    m.rest = rnd(0, 2); m.walk = rnd(2, 6);
+    m.rest = rnd(0, 2); m.walk = rnd(2, 6); m.fade = 1;
     m.col = ACCENTS[Math.floor(rnd(0, ACCENTS.length))];
     return m;
   }
@@ -163,7 +163,8 @@
     ctx.rotate(m.h + Math.PI / 2);
     ctx.translate(-16, -18);
     ctx.lineCap = "round";
-    ctx.globalAlpha = 0.75 + m.depth * 0.25;
+    ctx.globalAlpha = (0.75 + m.depth * 0.25) * m.fade;
+    if (m.fade < 0.02) return;
     ctx.strokeStyle = "#a3abb8"; ctx.lineWidth = 1.5;
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
@@ -183,6 +184,39 @@
     ctx.shadowColor = m.col; ctx.shadowBlur = 12 * k;
     ctx.stroke(SIG);
     ctx.shadowBlur = 0;
+  }
+
+  // Where the words are: mites keep out of these (and fade if they end up inside one).
+  const WORDS = ".hero .eyebrow, .hero h1, .hero .lede, .hero .cta, .hero .fine, h2, .sub, .open p";
+  let blocks = [], blocksAt = -1;
+  function wordBlocks() {
+    if (blocksAt === scrollY) return blocks;
+    blocksAt = scrollY;
+    blocks = [];
+    for (const el of document.querySelectorAll(WORDS)) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < -40 || r.top > H + 40 || !r.width) continue;
+      blocks.push(r);
+    }
+    return blocks;
+  }
+  const PAD = 18;
+  function inside(m) {
+    let depth = 0, ax = 0, ay = 0;
+    for (const r of wordBlocks()) {
+      const dx = Math.min(m.x - (r.left - PAD), r.right + PAD - m.x);
+      const dy = Math.min(m.y - (r.top - PAD), r.bottom + PAD - m.y);
+      if (dx <= 0 || dy <= 0) continue;
+      const d = Math.min(dx, dy);
+      if (d > depth) {
+        depth = d;
+        // Out by the nearest edge.
+        const ex = [r.left - PAD - m.x, r.right + PAD - m.x], ey = [r.top - PAD - m.y, r.bottom + PAD - m.y];
+        const bx = Math.abs(ex[0]) < Math.abs(ex[1]) ? ex[0] : ex[1], by = Math.abs(ey[0]) < Math.abs(ey[1]) ? ey[0] : ey[1];
+        if (Math.abs(bx) < Math.abs(by)) { ax = Math.sign(bx); ay = 0; } else { ax = 0; ay = Math.sign(by); }
+      }
+    }
+    return { depth, ax, ay };
   }
 
   let t0 = performance.now(), time = 0;
@@ -220,6 +254,17 @@
           m.rest = 0;
         }
       }
+      // Words: look ahead and turn away before reaching a text block; already inside, head out.
+      const ahead = inside({ x: m.x + Math.cos(m.h) * m.size, y: m.y + Math.sin(m.h) * m.size });
+      const here = inside(m);
+      if (here.depth > 0) {
+        steer += Math.sin(Math.atan2(here.ay, here.ax) - m.h) * 10;
+        target = Math.max(target, m.base * 2);
+        m.rest = 0;
+      } else if (ahead.depth > 0) {
+        steer += Math.sin(Math.atan2(ahead.ay, ahead.ax) - m.h) * 8;
+      }
+      m.fade += ((here.depth > 0 ? 0 : 1) - m.fade) * Math.min(1, dt * (here.depth > 0 ? 8 : 3));
       m.h += steer * dt;
       m.speed += (target - m.speed) * Math.min(1, dt * 6);
       const step = m.speed * dt;
