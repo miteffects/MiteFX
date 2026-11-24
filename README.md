@@ -33,8 +33,9 @@ plugins: [`docs/compare/`](docs/compare/).
 
 ## Releases
 
-Every push to `main` builds every plugin on Windows, macOS (universal) and Linux and replaces the
-downloads of the current version's GitHub Release (`v` + the workspace version in `Cargo.toml`);
+Every push to `main` builds every plugin on Windows, macOS (universal) and Linux, packs installers
+(Windows Setup.exe, macOS .pkg, Linux install.sh and .deb; `packaging/`) and replaces the downloads
+of the current version's GitHub Release (`v` + the workspace version in `Cargo.toml`);
 a newer push cancels a build still running (`.github/workflows/release.yml`). Bump the version
 for a new release. The website in `site/` is deployed with GitHub
 Pages (`.github/workflows/pages.yml`).

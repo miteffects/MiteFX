@@ -4,18 +4,13 @@
   <title>MiteFX</title>
   <welcome file="welcome.html" mime-type="text/html"/>
   <license file="LICENSE.txt"/>
-  <options customize="allow" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+  <options customize="never" require-scripts="true" hostArchitectures="x86_64,arm64"/>
   <domains enable_localSystem="true"/>
   <choices-outline>
-    <line choice="vst3"/>
-    <line choice="clap"/>
+    <line choice="mitefx"/>
   </choices-outline>
-  <choice id="vst3" title="VST3 plugins" description="The 18 Mite plugins as VST3, in /Library/Audio/Plug-Ins/VST3.">
-    <pkg-ref id="io.github.miteffects.mitefx.vst3"/>
+  <choice id="mitefx" title="MiteFX" description="The 18 Mite plugins, VST3 and CLAP, in /Library/Audio/Plug-Ins.">
+    <pkg-ref id="io.github.miteffects.mitefx"/>
   </choice>
-  <choice id="clap" title="CLAP plugins" description="The 18 Mite plugins as CLAP, in /Library/Audio/Plug-Ins/CLAP.">
-    <pkg-ref id="io.github.miteffects.mitefx.clap"/>
-  </choice>
-  <pkg-ref id="io.github.miteffects.mitefx.vst3" version="__VERSION__" onConclusion="none">vst3.pkg</pkg-ref>
-  <pkg-ref id="io.github.miteffects.mitefx.clap" version="__VERSION__" onConclusion="none">clap.pkg</pkg-ref>
+  <pkg-ref id="io.github.miteffects.mitefx" version="__VERSION__" onConclusion="none">mitefx.pkg</pkg-ref>
 </installer-gui-script>

@@ -36,8 +36,8 @@
     <a class="btn" data-platform="macOS" href="#">Download for macOS</a>
     <a class="btn" data-platform="Linux" href="#">Download for Linux</a>
   </div>
-  <p class="fine">Version 0.1, an early release · 64-bit · needs a GPU (the editors are GPU drawn)<br>
-  Also: <a data-platform="Windows-zip" href="#">Windows .zip</a> · <a data-platform="macOS-zip" href="#">macOS .zip</a> ·
+  <p class="fine">Version 0.1, an early release · about 20 MB · 64-bit · needs a GPU (the editors are GPU drawn)<br>
+  Also: <a data-platform="Windows-7z" href="#">Windows .7z</a> · <a data-platform="macOS-txz" href="#">macOS .tar.xz</a> ·
   <a data-platform="Linux-deb" href="#">Linux .deb</a> · <a data-releases-link href="#">all releases</a></p>
   <figure class="hero-shot">
     <img src="img/mite-eq.webp?v=__V__" alt="Mite EQ: a spectrum with EQ bands drawn over it" width="1280" height="760">
@@ -78,7 +78,7 @@
     </article>
     <article>
       <h3>Linux</h3>
-      <p>Unpack <code>MiteFX-Linux.tar.gz</code> and run the installer, for you or for every user:</p>
+      <p>Unpack <code>MiteFX-Linux.tar.xz</code> and run the installer, for you or for every user:</p>
       <pre><code>./MiteFX/install.sh
 sudo ./MiteFX/install.sh --system</code></pre>
       <p>On Debian or Ubuntu, the <code>.deb</code> works too: <code>sudo apt install ./MiteFX-Linux.deb</code>.</p>
@@ -107,7 +107,7 @@ const FALLBACK = { owner: "miteffects", repo: "MiteFX" };
 const host = location.hostname.endsWith(".github.io") ? location.hostname.split(".")[0] : FALLBACK.owner;
 const repo = location.hostname.endsWith(".github.io") && location.pathname.split("/")[1] ? location.pathname.split("/")[1] : FALLBACK.repo;
 const base = `https://github.com/${host}/${repo}`;
-const files = { Windows: "MiteFX-Windows-Setup.exe", macOS: "MiteFX-macOS.pkg", Linux: "MiteFX-Linux.tar.gz", "Windows-zip": "MiteFX-Windows.zip", "macOS-zip": "MiteFX-macOS.zip", "Linux-deb": "MiteFX-Linux.deb" };
+const files = { Windows: "MiteFX-Windows-Setup.exe", macOS: "MiteFX-macOS.pkg", Linux: "MiteFX-Linux.tar.xz", "Windows-7z": "MiteFX-Windows.7z", "macOS-txz": "MiteFX-macOS.tar.xz", "Linux-deb": "MiteFX-Linux.deb" };
 for (const a of document.querySelectorAll("[data-platform]")) a.href = `${base}/releases/latest/download/${files[a.dataset.platform]}`;
 for (const a of document.querySelectorAll("[data-repo-link]")) a.href = base;
 for (const a of document.querySelectorAll("[data-releases-link]")) a.href = `${base}/releases`;

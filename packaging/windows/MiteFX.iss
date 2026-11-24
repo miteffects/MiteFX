@@ -24,7 +24,12 @@ SetupIconFile=mite.ico
 UninstallDisplayIcon={app}\mite.ico
 UninstallDisplayName=MiteFX (audio plugins)
 OutputBaseFilename=MiteFX-Windows-Setup
-Compression=lzma2/max
+; One 512 MB window over everything: the 18 plugins share most of their code, so it is stored
+; about once (decompressing needs that much memory, compressing ~6 GB in islzma64).
+Compression=lzma2/ultra64
+LZMADictionarySize=524288
+LZMANumFastBytes=273
+LZMAUseSeparateProcess=yes
 SolidCompression=yes
 WizardStyle=modern
 
@@ -38,7 +43,9 @@ Name: "clap"; Description: "CLAP plugins (C:\Program Files\Common Files\CLAP)"; 
 
 [Files]
 Source: "{#Src}\VST3\*"; DestDir: "{commoncf64}\VST3"; Components: vst3; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "{#Src}\CLAP\*"; DestDir: "{commoncf64}\CLAP"; Components: clap; Flags: recursesubdirs createallsubdirs ignoreversion
+; Each CLAP is the same binary as its VST3: clap-files.iss (written by the release workflow)
+; installs the VST3's file under the .clap name, so the installer holds it once.
+#include "clap-files.iss"
 Source: "{#Src}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "mite.ico"; DestDir: "{app}"; Flags: ignoreversion
 

@@ -64,13 +64,12 @@ jobs:
           cp -R target/bundled/*.clap "MiteFX/CLAP/"
           cp "packaging/INSTALL-${{ matrix.platform }}.txt" "MiteFX/INSTALL.txt"
           cp LICENSE "MiteFX/LICENSE.txt"
+          [ "${{ matrix.platform }}" = Linux ] && cp packaging/linux/install.sh MiteFX/ && chmod +x MiteFX/install.sh
+          # The plugins share most of their code: one 512 MB LZMA window stores it about once
+          # (~200 MB with gzip, ~20 MB like this).
           case "${{ matrix.platform }}" in
-            Windows) 7z a -tzip "MiteFX-Windows.zip" MiteFX > /dev/null ;;
-            macOS)   ditto -c -k --keepParent MiteFX "MiteFX-macOS.zip" ;;
-            Linux)
-              cp packaging/linux/install.sh MiteFX/
-              chmod +x MiteFX/install.sh
-              tar -czf "MiteFX-Linux.tar.gz" MiteFX ;;
+            Windows) 7z a -t7z -m0=lzma2 -mx=9 -md=512m -ms=on "MiteFX-Windows.7z" MiteFX > /dev/null ;;
+            *) tar -cf - MiteFX | xz -9e --lzma2=preset=9e,dict=512MiB -T1 > "MiteFX-${{ matrix.platform }}.tar.xz" ;;
           esac
 
       # Windows: an installer (Inno Setup) that puts VST3 and CLAP in Common Files, with an uninstaller.
@@ -79,38 +78,47 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress | Out-Null
+          # Each CLAP is its VST3's binary: install that file under the .clap name (stored once).
+          $lines = Get-ChildItem MiteFX\CLAP\*.clap | ForEach-Object {
+            $n = $_.BaseName
+            $dll = "$PWD\MiteFX\VST3\$n.vst3\Contents\x86_64-win\$n.vst3"
+            $src = if ((Test-Path $dll) -and ((Get-FileHash $dll).Hash -eq (Get-FileHash $_.FullName).Hash)) { $dll } else { $_.FullName }
+            "Source: ""$src""; DestDir: ""{commoncf64}\CLAP""; DestName: ""$n.clap""; Components: clap; Flags: ignoreversion"
+          }
+          Set-Content packaging\windows\clap-files.iss $lines
+          Get-Content packaging\windows\clap-files.iss | Select-Object -First 2
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DSrc=$PWD\MiteFX" "/DVersion=$env:VERSION" "/O$PWD" packaging\windows\MiteFX.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # macOS: a .pkg into /Library/Audio/Plug-Ins. Files the Installer puts in place carry no
-      # quarantine, so nothing to clear by hand. Bundles are pinned (not relocatable) so an update
-      # never lands in a copy elsewhere.
+      # macOS: a .pkg whose script unpacks the plugins (one xz archive) into /Library/Audio/Plug-Ins.
+      # Files the installer writes carry no quarantine, so nothing to clear by hand.
       - name: Installer (macOS)
         if: runner.os == 'macOS'
         run: |
-          for kind in vst3 clap; do
-            dir=$([ $kind = vst3 ] && echo VST3 || echo CLAP)
-            pkgbuild --analyze --root "MiteFX/$dir" "$kind.plist"
-            n=$(/usr/libexec/PlistBuddy -c "Print" "$kind.plist" | grep -c "RootRelativeBundlePath" || true)
-            for ((i = 0; i < n; i++)); do /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$kind.plist"; done
-            pkgbuild --root "MiteFX/$dir" --component-plist "$kind.plist" --install-location "/Library/Audio/Plug-Ins/$dir" \
-              --identifier "io.github.miteffects.mitefx.$kind" --version "$VERSION" "$kind.pkg"
-          done
-          mkdir -p res
+          mkdir -p scripts res
+          tar -cf - -C MiteFX VST3 CLAP | xz -9e --lzma2=preset=9e,dict=512MiB -T1 > scripts/payload.tar.xz
+          cp packaging/macos/postinstall scripts/postinstall
+          chmod +x scripts/postinstall
+          pkgbuild --nopayload --scripts scripts --identifier io.github.miteffects.mitefx --version "$VERSION" mitefx.pkg
           cp LICENSE res/LICENSE.txt
           sed "s/__VERSION__/$VERSION/g" packaging/macos/welcome.html > res/welcome.html
           sed "s/__VERSION__/$VERSION/g" packaging/macos/distribution.xml > distribution.xml
           productbuild --distribution distribution.xml --resources res --package-path . MiteFX-macOS.pkg
-          pkgutil --payload-files MiteFX-macOS.pkg | grep -c "\.clap$\|\.vst3$" || true
+          ls -la MiteFX-macOS.pkg scripts/payload.tar.xz
 
-      # Linux: a .deb for Debian and Ubuntu, into /usr/lib/vst3 and /usr/lib/clap.
+      # Linux: a .deb for Debian and Ubuntu, into /usr/lib/vst3 and /usr/lib/clap; each CLAP is a
+      # link to its VST3's binary (the same file).
       - name: Package (.deb)
         if: runner.os == 'Linux'
         run: |
           root=deb/mitefx
           mkdir -p "$root/DEBIAN" "$root/usr/lib/vst3" "$root/usr/lib/clap" "$root/usr/share/doc/mitefx"
           cp -R MiteFX/VST3/* "$root/usr/lib/vst3/"
-          cp MiteFX/CLAP/* "$root/usr/lib/clap/"
+          for c in MiteFX/CLAP/*.clap; do
+            n="$(basename "$c" .clap)"
+            so="$n.vst3/Contents/x86_64-linux/$n.so"
+            if cmp -s "$c" "MiteFX/VST3/$so"; then ln -s "../vst3/$so" "$root/usr/lib/clap/$n.clap"; else cp "$c" "$root/usr/lib/clap/"; fi
+          done
           cp LICENSE "$root/usr/share/doc/mitefx/copyright"
           cat > "$root/DEBIAN/control" <<CONTROL
           Package: mitefx
@@ -127,8 +135,8 @@ jobs:
            saturation, reverb, delay, pitch editor, tuner, analyzer and a guitar rig.
           CONTROL
           sed -i 's/^          //' "$root/DEBIAN/control"
-          dpkg-deb --root-owner-group --build "$root" MiteFX-Linux.deb
-          dpkg-deb --info MiteFX-Linux.deb | head -8
+          dpkg-deb -Zxz -z9 --root-owner-group --build "$root" MiteFX-Linux.deb
+          ls -la MiteFX-Linux.deb
 
       - uses: actions/upload-artifact@v4
         with:
@@ -161,6 +169,8 @@ jobs:
           git tag -f "$TAG" "$GITHUB_SHA"
           git push -f origin "refs/tags/$TAG"
           if gh release view "$TAG" > /dev/null 2>&1; then
+            # Formats no longer built (the zips, the .tar.gz) leave the release.
+            for old in MiteFX-Windows.zip MiteFX-macOS.zip MiteFX-Linux.tar.gz; do gh release delete-asset "$TAG" "$old" -y 2>/dev/null || true; done
             gh release upload "$TAG" MiteFX-* --clobber
             gh release edit "$TAG" --notes-file packaging/RELEASE_NOTES.md
           else

@@ -364,7 +364,14 @@ impl TestHost {
         call!(self.restoreObjectsFromArchive((&v as *const Vec<u8> as *mut Vec<u8>).cast(), std::ptr::null())) != 0
     }
 
-    pub fn destroy(self) {
+    /// Destroys the document controller (also done on drop).
+    pub fn destroy(self) {}
+}
+
+impl Drop for TestHost {
+    /// The document goes before the audio it reads: destroying it stops its reader threads,
+    /// which would otherwise read the host's audio after it is freed.
+    fn drop(&mut self) {
         call!(self.destroyDocumentController());
     }
 }

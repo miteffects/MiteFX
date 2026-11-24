@@ -2646,7 +2646,9 @@ mod tests {
     #[test]
     fn every_curve_is_zero_at_zero_smooth_and_has_slope_one() {
         for m in Model::ALL {
-            assert_eq!(curve(m, 0.0), 0.0, "{m:?}");
+            // Zero to rounding (−156 dB in an unoptimised build, where Tube's offset sums round
+            // differently): no DC from silence.
+            assert!(curve(m, 0.0).abs() < 1e-6, "{m:?}: {}", curve(m, 0.0));
             let slope = (curve(m, 1e-3) - curve(m, -1e-3)) / 2e-3;
             let want = if m == Model::Rectify { 0.0 } else { 1.0 };
             assert!((slope - want).abs() < 2e-3, "{m:?}: slope {slope}");

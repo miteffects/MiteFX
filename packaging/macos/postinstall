@@ -1,0 +1,13 @@
+#!/bin/sh
+# MiteFX's macOS installer: unpacks the plugins (one xz archive: they share most of their code,
+# so it is a fraction of their size) into /Library/Audio/Plug-Ins, replacing older copies.
+# Files written here carry no quarantine.
+set -e
+here="$(dirname "$0")"
+dest=/Library/Audio/Plug-Ins
+mkdir -p "$dest/VST3" "$dest/CLAP"
+tar -tJf "$here/payload.tar.xz" | cut -d/ -f1-2 | sort -u | while read -r p; do
+  case "$p" in VST3/?*|CLAP/?*) rm -rf "$dest/$p" ;; esac
+done
+tar -xJf "$here/payload.tar.xz" -C "$dest"
+exit 0
