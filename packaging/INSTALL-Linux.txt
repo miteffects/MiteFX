@@ -1,0 +1,10 @@
+MiteFX for Linux (x86-64): 18 plugins, VST3 and CLAP.
+
+Install
+  mkdir -p ~/.vst3 ~/.clap
+  cp -r VST3/* ~/.vst3/
+  cp -r CLAP/* ~/.clap/
+Then rescan plugins in your DAW (REAPER, Bitwig, Ardour, ...).
+
+Needs X11 (or XWayland) and a GPU with Vulkan.
+MiteFX is free software under the GNU GPL v3 (LICENSE.txt). Source: see the website.

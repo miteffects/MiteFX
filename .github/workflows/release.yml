@@ -1,0 +1,93 @@
+name: Release
+
+# A tag `v*` (or a manual run with a tag name) builds every plugin on Windows, macOS (universal)
+# and Linux and publishes them as a GitHub Release: one archive per platform, CLAP and VST3,
+# which the website links to through releases/latest/download/.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (created on the current commit if missing), e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PACKAGES: -p mite_gain -p mite_eq -p mite_comp -p mite_shape -p mite_sat -p mite_limit -p mite_gate -p mite_multiband -p mite_verb -p mite_delay -p mite_tuner -p mite_double -p mite_deess -p mite_denoise -p mite_analyzer -p mite_rig -p mite_mod -p mite_pitch
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: Windows
+          - os: macos-latest
+            platform: macOS
+          - os: ubuntu-24.04
+            platform: Linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-xcb-dev libxcursor-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl-dev libasound2-dev libjack-jackd2-dev
+      - name: Bundle (macOS universal)
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          cargo xtask bundle-universal $PACKAGES --release
+          # Apple Silicon loads no unsigned code: an ad-hoc signature (no developer ID).
+          for b in target/bundled/*.vst3 target/bundled/*.clap; do codesign --force --deep --sign - "$b"; done
+      - name: Bundle
+        if: runner.os != 'macOS'
+        shell: bash
+        run: cargo xtask bundle $PACKAGES --release
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p "MiteFX/VST3" "MiteFX/CLAP"
+          cp -R target/bundled/*.vst3 "MiteFX/VST3/"
+          cp -R target/bundled/*.clap "MiteFX/CLAP/"
+          cp "packaging/INSTALL-${{ matrix.platform }}.txt" "MiteFX/INSTALL.txt"
+          cp LICENSE "MiteFX/LICENSE.txt"
+          case "${{ matrix.platform }}" in
+            Windows) 7z a -tzip "MiteFX-Windows.zip" MiteFX > /dev/null ;;
+            macOS)   ditto -c -k --keepParent MiteFX "MiteFX-macOS.zip" ;;
+            Linux)   tar -czf "MiteFX-Linux.tar.gz" MiteFX ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: MiteFX-${{ matrix.platform }}.*
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          ls -la MiteFX-*
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" MiteFX-* --clobber
+          else
+            gh release create "$TAG" MiteFX-* --title "MiteFX $TAG" --target "$GITHUB_SHA" --notes-file packaging/RELEASE_NOTES.md
+          fi

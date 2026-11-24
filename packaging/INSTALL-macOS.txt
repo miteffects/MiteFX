@@ -1,0 +1,13 @@
+MiteFX for macOS (Apple Silicon and Intel): 18 plugins, VST3 and CLAP.
+
+Install
+  Copy everything in VST3/ to   ~/Library/Audio/Plug-Ins/VST3/
+  Copy everything in CLAP/ to   ~/Library/Audio/Plug-Ins/CLAP/
+
+The plugins are not notarized by Apple (they are free and unsigned), so macOS quarantines them.
+Clear that once, in Terminal:
+  xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Mite*.vst3 ~/Library/Audio/Plug-Ins/CLAP/Mite*.clap
+Then rescan plugins in your DAW.
+
+Audio Unit (AU, for Logic Pro) is not included yet.
+MiteFX is free software under the GNU GPL v3 (LICENSE.txt). Source: see the website.

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiteFX: free, open-source audio plugins</title>
+<meta name="description" content="18 free, open-source audio plugins (VST3 and CLAP) for Windows, macOS and Linux: EQ, compressor, limiter, saturation, reverb, delay, guitar rig and more.">
+<meta property="og:title" content="MiteFX: free, open-source audio plugins">
+<meta property="og:description" content="18 free plugins, VST3 and CLAP, for Windows, macOS and Linux.">
+<meta property="og:image" content="img/mite-sat.webp">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101217'/%3E%3Cpath d='M7 22 C11 6 13 6 16 16 S21 26 25 10' fill='none' stroke='%23F0284A' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#"><span class="mark" aria-hidden="true"></span><span>Mite<b>FX</b></span></a>
+  <nav>
+    <a href="#plugins">Plugins</a>
+    <a href="#download">Download</a>
+    <a href="#install">Install</a>
+    <a class="gh" data-repo-link href="https://github.com/">Source</a>
+  </nav>
+</header>
+
+<main>
+<section class="hero">
+  <p class="eyebrow">Free · open source · VST3 &amp; CLAP</p>
+  <h1>Studio-grade audio plugins,<br>free for everyone.</h1>
+  <p class="lede">Eighteen plugins for mixing, mastering and guitar: an EQ, compressors, a limiter, saturation,
+  reverb, delay, a pitch editor and a full guitar rig. For Windows, macOS and Linux, under the GNU GPL.</p>
+  <div class="cta" id="download">
+    <a class="btn" data-platform="Windows" href="#">Download for Windows</a>
+    <a class="btn" data-platform="macOS" href="#">Download for macOS</a>
+    <a class="btn" data-platform="Linux" href="#">Download for Linux</a>
+  </div>
+  <p class="fine">Version 0.1, an early release · <a data-releases-link href="#">all releases</a> · 64-bit · needs a GPU (the editors are GPU drawn)</p>
+  <figure class="hero-shot">
+    <img src="img/mite-eq.webp" alt="Mite EQ: a spectrum with EQ bands drawn over it" width="1280" height="760">
+  </figure>
+</section>
+
+<section class="facts">
+  <div><b>18</b><span>plugins</span></div>
+  <div><b>3</b><span>platforms</span></div>
+  <div><b>VST3 · CLAP</b><span>formats</span></div>
+  <div><b>GPL-3.0</b><span>free software</span></div>
+</section>
+
+<section id="plugins">
+  <h2>The plugins</h2>
+  <p class="sub">Every control is something you can see and grab: curves you drag, histories you read, honest meters.</p>
+  <div class="grid" id="grid"></div>
+</section>
+
+<section id="install" class="install">
+  <h2>Install</h2>
+  <div class="cols">
+    <article>
+      <h3>Windows</h3>
+      <p>Unzip, then copy <code>VST3\*</code> to <code>C:\Program Files\Common Files\VST3\</code> and
+      <code>CLAP\*</code> to <code>C:\Program Files\Common Files\CLAP\</code>. Rescan in your DAW.</p>
+    </article>
+    <article>
+      <h3>macOS</h3>
+      <p>Copy <code>VST3/*</code> to <code>~/Library/Audio/Plug-Ins/VST3/</code> and <code>CLAP/*</code> to
+      <code>~/Library/Audio/Plug-Ins/CLAP/</code>. The plugins are free and not notarized, so clear the quarantine once:</p>
+      <pre><code>xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Mite*.vst3 ~/Library/Audio/Plug-Ins/CLAP/Mite*.clap</code></pre>
+      <p class="note">Universal (Apple Silicon and Intel). No Audio Unit yet, so not for Logic Pro.</p>
+    </article>
+    <article>
+      <h3>Linux</h3>
+      <pre><code>mkdir -p ~/.vst3 ~/.clap
+cp -r VST3/* ~/.vst3/
+cp -r CLAP/* ~/.clap/</code></pre>
+      <p class="note">X11 or XWayland and a Vulkan GPU. Tested in REAPER.</p>
+    </article>
+  </div>
+</section>
+
+<section class="open">
+  <h2>Open source</h2>
+  <p>MiteFX is written in Rust and licensed under the GNU General Public License v3: use it in any
+  project, commercial or not, read every line, change it and share it under the same license.</p>
+  <p><a class="btn ghost" data-repo-link href="https://github.com/">Source code on GitHub</a></p>
+</section>
+</main>
+
+<footer>
+  <p>MiteFX · GPL-3.0-or-later · VST is a trademark of Steinberg Media Technologies GmbH.</p>
+</footer>
+
+<script>
+// The owner and repository, from the Pages address (owner.github.io/repo); set here as a fallback.
+const FALLBACK = { owner: "OWNER", repo: "MiteFX" };
+const host = location.hostname.endsWith(".github.io") ? location.hostname.split(".")[0] : FALLBACK.owner;
+const repo = location.hostname.endsWith(".github.io") && location.pathname.split("/")[1] ? location.pathname.split("/")[1] : FALLBACK.repo;
+const base = `https://github.com/${host}/${repo}`;
+const files = { Windows: "MiteFX-Windows.zip", macOS: "MiteFX-macOS.zip", Linux: "MiteFX-Linux.tar.gz" };
+for (const a of document.querySelectorAll("[data-platform]")) a.href = `${base}/releases/latest/download/${files[a.dataset.platform]}`;
+for (const a of document.querySelectorAll("[data-repo-link]")) a.href = base;
+for (const a of document.querySelectorAll("[data-releases-link]")) a.href = `${base}/releases`;
+// The visitor's own system first.
+const ua = navigator.userAgent;
+const mine = /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "macOS" : /Linux|X11/.test(ua) ? "Linux" : null;
+if (mine) document.querySelector(`[data-platform="${mine}"]`).classList.add("primary");
+else document.querySelector("[data-platform]").classList.add("primary");
+
+const plugins = [
+  ["mite-eq", "Mite EQ", "#0ED4F6", "Parametric EQ: dynamic bands, linear phase, a live spectrum, masking you can see and an auto shape that suggests a curve."],
+  ["mite-comp", "Mite Comp", "#E44A08", "Compressor with an honest history of what it did, styles from clean to vocal, and auto makeup that holds through phrases."],
+  ["mite-limit", "Mite Limit", "#A4ACB4", "Mastering limiter: true-peak ceiling, loudness meters, a preview of what streaming platforms will do, clipper and transient protection."],
+  ["mite-multiband", "Mite Multiband", "#59FCE1", "Multiband compressor: up to five bands, sidechain and lookahead, each band's history drawn over the spectrum."],
+  ["mite-shape", "Mite Shape", "#6BA208", "Transient shaper, per band: more or less attack and sustain, with a clip stage and a focus view of every hit."],
+  ["mite-sat", "Mite Sat", "#F0284A", "Multiband saturation: tape and transformer magnetics, tube, drawn harmonics, punch and body drive, feedback, up to 16× oversampling."],
+  ["mite-gate", "Mite Gate", "#C2ECB9", "Gate and expander with sidechain, lookahead and a MIDI trigger out for drum replacement."],
+  ["mite-deess", "Mite DeEss", "#16B3EB", "De-esser that listens relative to the voice, with four ways to reduce, spectral included, and a heat map of what it caught."],
+  ["mite-denoise", "Mite DeNoise", "#EDE3D2", "Noise reduction that learns the noise from the gaps between words and takes it out without the swirl."],
+  ["mite-verb", "Mite Verb", "#BADBFE", "Reverb: rooms, halls and plates with long modulated tails, shimmer, and cuts to keep the decay out of the mix."],
+  ["mite-delay", "Mite Delay", "#FACCFC", "Four-tap delay: digital, tape or bucket-brigade, with an EQ in the loop and the echoes drawn as they fall."],
+  ["mite-mod", "Mite Mod", "#D9C6FE", "Chorus, flanger, phaser, tremolo, a rotary speaker and micro pitch shift, with a modulation matrix."],
+  ["mite-double", "Mite Double", "#FBB5B1", "Doubler: a convincing second take from one performance, timing and pitch drifting like a player's."],
+  ["mite-pitch", "Mite Pitch", "#FFD1E3", "Pitch and timing editor: drag notes, snap to the scale and the grid. ARA in VST3 hosts."],
+  ["mite-tuner", "Mite Tuner", "#C8FCF4", "Tuner with a big note, a sub-cent strip and a pitch trace."],
+  ["mite-analyzer", "Mite Analyzer", "#B7BFC7", "Loudness, true peak, spectrum, spectrogram, stereo image, and the phase response of a whole chain."],
+  ["mite-rig", "Mite Rig", "#FFD4BF", "Guitar and bass rig: a pedalboard with parallel lanes, Neural Amp Modeler captures, cabinets and our own pedals."],
+  ["mite-gain", "Mite Gain", "#95A0AB", "Gain with a meter: the smallest plugin, for trimming levels anywhere in a chain."],
+];
+const grid = document.getElementById("grid");
+for (const [slug, name, accent, words] of plugins) {
+  const card = document.createElement("article");
+  card.className = "card";
+  card.style.setProperty("--accent", accent);
+  card.innerHTML = `<div class="shot"><img loading="lazy" src="img/${slug}.webp" alt="${name}" width="1280" height="760"></div>
+    <h3><span class="dot"></span>${name}</h3><p>${words}</p>`;
+  grid.appendChild(card);
+}
+</script>
+</body>
+</html>
