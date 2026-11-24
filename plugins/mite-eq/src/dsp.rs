@@ -1138,6 +1138,24 @@ mod tests {
         }
     }
 
+    /// Plays a 200 Hz sine (half-second chunks; whole cycles, so they join) until `done` holds
+    /// for the engine and the last chunk, or 10 s: a kernel comes from a worker thread, which on
+    /// a slow machine (an unoptimised CI build) can take longer than any fixed wait. Returns all
+    /// of the left output.
+    fn settle(eq: &mut EqEngine, settings: &[BandSettings; BANDS], done: impl Fn(&EqEngine, &[f32]) -> bool) -> Vec<f32> {
+        let start = std::time::Instant::now();
+        let mut all = Vec::new();
+        loop {
+            let input = sine(200.0, 24_000);
+            let (mut l, mut r) = (input.clone(), input);
+            run(eq, settings, &mut l, &mut r, true);
+            all.extend_from_slice(&l);
+            if done(eq, &l[18_000..]) || start.elapsed() > Duration::from_secs(10) {
+                return all;
+            }
+        }
+    }
+
     #[test]
     fn linear_phase_with_no_bands_is_a_pure_delay() {
         let mut eq = linear(&flat(), 0);
@@ -1289,14 +1307,13 @@ mod tests {
             (PhaseMode::NaturalPhase, natural_phase_latency(f64::from(SR))),
             (PhaseMode::ZeroLatency, 0),
         ] {
-            let input = sine(200.0, 24_000);
-            let (mut l, mut r) = (input.clone(), input.clone());
             eq.set_mode(mode, 2);
-            run(&mut eq, &settings, &mut l, &mut r, true);
+            let playing = |tail: &[f32]| tail.iter().any(|v| v.abs() > 0.3);
+            let l = settle(&mut eq, &settings, |eq, tail| eq.latency() == latency && playing(tail));
             assert_eq!(eq.latency(), latency, "{mode:?}");
             let jump = l.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
             assert!(jump < 0.04, "{mode:?}: step {jump}");
-            assert!(l[18_000..].iter().any(|v| v.abs() > 0.3), "{mode:?}: still muted");
+            assert!(playing(&l[l.len() - 6_000..]), "{mode:?}: still muted");
         }
     }
 
@@ -1308,10 +1325,9 @@ mod tests {
         let mut eq = EqEngine::new(SR, &settings, 0.0);
         for mode in [PhaseMode::LinearPhase, PhaseMode::ZeroLatency, PhaseMode::LinearPhase, PhaseMode::NaturalPhase, PhaseMode::ZeroLatency, PhaseMode::NaturalPhase] {
             eq.set_mode(mode, 2);
-            let input = sine(200.0, 24_000);
-            let (mut l, mut r) = (input.clone(), input.clone());
-            run(&mut eq, &settings, &mut l, &mut r, true);
-            assert!(l[18_000..].iter().any(|v| v.abs() > 0.3), "{mode:?}: stuck muted");
+            let playing = |tail: &[f32]| tail.iter().any(|v| v.abs() > 0.3);
+            let l = settle(&mut eq, &settings, |_, tail| playing(tail));
+            assert!(playing(&l[l.len() - 6_000..]), "{mode:?}: stuck muted");
         }
     }
 
