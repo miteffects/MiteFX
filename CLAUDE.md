@@ -31,7 +31,7 @@ cargo run -p mite_gain --example snapshot -- out.png 2   # editor → PNG (GPU, 
 - `crates/mite-ui`: tokens (from `docs/design/tokens.json`), text (embedded Manrope), widgets, the header `Session`, effects (bloom, glass), window, offscreen render.
 - `crates/mite-ara`: ARA 2's C API (bindgen output, regenerate with `crates/mite-ara/gen`), the plug-in side of an ARA document, a test host.
 - `crates/mite-plugin`: the only nih-plug glue; `state` (versions, migrations) and `testing` (CLAP test host, golden states).
-- `plugins/<name>`: the plugin crates; an embeddable one keeps its engine, params and editor in `plugins/<name>/core` (`mite_<name>_core`), which Mite Rig links.
+- `plugins/<name>`: the plugin crates; an embeddable one keeps its engine, params and editor in `plugins/<name>/core` (`mite_<name>_core`), which Mite Rig links. A test that needs two plugins' engines links their cores (Limit's core is its engine only): two plugin crates in one binary clash on the entry points.
 - `tests/golden/`: frozen parameter manifests and golden states (`<plugin>.state.v<N>.json`; bless a new version with `MITEFX_BLESS=1`).
 
 A new plugin reuses these instead of copying from the EQ: see BLUEPRINT.md §3, "What a new plugin reuses".

@@ -1,0 +1,13 @@
+[package]
+name = "mite_limit_core"
+description = "Mite Limit's engine (no plugin entry points), so other crates and tests can run it next to another plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+mite-core.workspace = true
+mite-dsp.workspace = true

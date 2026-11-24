@@ -855,10 +855,6 @@ mod tests {
         // Custom takes the dial; nothing measured yet, nothing done.
         assert!((platform_gain_db(&platform(8, -9.0), -8.0, -1.0) + 1.0).abs() < 1e-6);
         assert_eq!(platform_gain_db(&spotify, SILENCE_LUFS, MINUS_INFINITY_DB), 0.0);
-        assert_eq!(PLATFORMS.len(), crate::params::TARGETS.len());
-        for (p, name) in PLATFORMS.iter().zip(crate::params::TARGETS) {
-            assert_eq!(p.name, name);
-        }
     }
 
     #[test]

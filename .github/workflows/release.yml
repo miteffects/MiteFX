@@ -140,6 +140,9 @@ jobs:
   publish:
     name: Publish the release
     needs: build
+    # Publish what built: a platform GitHub had no machine for (macOS runners queue for long)
+    # keeps its previous download. A newer push cancels the run, and then nothing is published.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -151,7 +154,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ls -la MiteFX-*
+          ls -la MiteFX-* || { echo "nothing built"; exit 1; }
           TAG="v$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
           echo "release $TAG at $GITHUB_SHA"
           # The tag follows main (a push made with GITHUB_TOKEN starts no workflow).

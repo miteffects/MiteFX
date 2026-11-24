@@ -4,7 +4,7 @@
 use mite_analyzer::dsp::{AnalyzerEngine, Telemetry};
 use mite_core::HistoryTap;
 use mite_dsp::db_to_gain;
-use mite_limit::dsp::{record, LimitEngine, LimitSettings, LoudnessTap};
+use mite_limit_core::{record, LimitEngine, LimitSettings, LoudnessTap};
 
 fn material(n: usize, db: f32) -> (Vec<f32>, Vec<f32>) {
     let a = db_to_gain(db);

@@ -1585,7 +1585,7 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
- "mite_limit",
+ "mite_limit_core",
  "nih_plug",
  "png",
  "realfft",
@@ -1772,10 +1772,19 @@ dependencies = [
  "mite-dsp",
  "mite-plugin",
  "mite-ui",
+ "mite_limit_core",
  "nih_plug",
  "png",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mite_limit_core"
+version = "0.1.0"
+dependencies = [
+ "mite-core",
+ "mite-dsp",
 ]
 
 [[package]]

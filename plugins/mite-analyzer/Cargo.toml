@@ -28,4 +28,4 @@ assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.g
 baseview.workspace = true
 png = "0.18"
 # Cross-check: the Analyzer after Mite Limit reads what Limit's column reads.
-mite_limit = { path = "../mite-limit" }
+mite_limit_core = { path = "../mite-limit/core" }

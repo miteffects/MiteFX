@@ -10,7 +10,8 @@ use mite_core::snapshots::Snapshots;
 use mite_core::{AtomicF32, HistoryTap};
 use nih_plug::prelude::*;
 
-pub mod dsp;
+/// The engine lives in `mite_limit_core` (no entry points), so tests elsewhere can link it beside another plugin.
+pub use mite_limit_core as dsp;
 pub mod editor;
 pub mod params;
 pub mod presets;
@@ -149,3 +150,14 @@ impl Vst3Plugin for MiteLimit {
 
 nih_export_clap!(MiteLimit);
 nih_export_vst3!(MiteLimit);
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_target_is_a_platform_with_its_name() {
+        assert_eq!(crate::dsp::PLATFORMS.len(), crate::params::TARGETS.len());
+        for (p, name) in crate::dsp::PLATFORMS.iter().zip(crate::params::TARGETS) {
+            assert_eq!(p.name, name);
+        }
+    }
+}
