@@ -10,6 +10,7 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -201,14 +202,17 @@ pub fn render(cases: &[Case], work: &Path) -> Result<std::collections::BTreeMap<
     } else {
         Command::new("reaper")
     };
-    let mut child = command
+    command
         .args(["-newinst", "-nosplash", "-cfgfile"])
         .arg(res.join("reaper.ini"))
         .arg("-new")
         .arg(&lua)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .process_group(0)
+        .stderr(std::process::Stdio::null());
+    // Its own process group, so the kill below takes REAPER's children too (Unix only).
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
         .spawn()
         .map_err(|e| format!("reaper: {e}"))?;
     let start = Instant::now();
