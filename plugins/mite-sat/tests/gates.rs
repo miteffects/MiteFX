@@ -2,9 +2,8 @@
 //! (`mite_plugin::gates`). `cargo test --release -p mite_sat --test gates -- --nocapture` prints
 //! every figure.
 
-mite_plugin::gate_tests!(mite_sat, MiteSat, "mite_sat", block_tolerance = 0.0, skip = [
-    // Crossovers: an LR4 split swept across the test tone. The rest: OPEN (2026-11-23) — level rises
-    // over 60–100 ms with no discontinuity in the dumps, cause not found yet.
-    "Crossover 1 Frequency", "Crossover 2 Frequency", "Crossover 3 Frequency", "Crossover 4 Frequency", "Crossover 5 Frequency",
-    "Mod 1 Amount", "Band 1 Output", "Band 1 Drive", "Band 1 Tone",
+mite_plugin::gate_tests!(mite_sat, MiteSat, "mite_sat", block_tolerance = 0.0, skip = [], hold = [
+    // The golden state runs LFO 1 at 1 Hz into Band 1 Drive: held near still, so each step is
+    // judged on its own (at 1 Hz the LFO's swell read as a +10–17 dB "click" on every band 1 step).
+    ("LFO 1 Rate", 0.02), ("LFO 2 Rate", 0.02),
 ]);

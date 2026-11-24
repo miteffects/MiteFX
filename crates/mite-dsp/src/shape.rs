@@ -959,7 +959,8 @@ mod tests {
     /// A fixed render through splits, a band made, an M/S switch and lookahead, hashed bit for bit:
     /// the crossover's extraction into `crate::crossover` must leave Shape's output unchanged.
     /// (Re-blessed 2026-10-26: with lookahead, a new band now starts with an empty delay and a
-    /// merged band's delay joins the band below. Re-blessed 2026-10-30: the differential detector.)
+    /// merged band's delay joins the band below. Re-blessed 2026-10-30: the differential detector.
+    /// Re-blessed 2026-11-24: the split on state-variable sections, within −250 dB of the biquads.)
     #[test]
     fn render_checksum_is_unchanged() {
         let n = 20_000;
@@ -1004,7 +1005,7 @@ mod tests {
         for v in yl.iter().chain(&yr).chain(&dl).chain(&dr) {
             hash = (hash ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
-        assert_eq!(hash, 0xe325_8116_7523_17e5, "checksum {hash:#x}");
+        assert_eq!(hash, 0x2fee_34bc_a624_81ed, "checksum {hash:#x}");
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub struct Gates {
     entry: &'static clap_plugin_entry,
     id: String,
     state: Option<Vec<u8>>,
+    /// Parameters the step test sets first (by name, CLAP units), unless it steps them.
+    hold: Vec<(String, f64)>,
     pub sample_rate: f64,
 }
 
@@ -61,7 +63,7 @@ pub fn test_signal(rate: f64, n: usize) -> [Vec<f32>; 2] {
 
 impl Gates {
     pub fn new(entry: &'static clap_plugin_entry, id: &str) -> Self {
-        Self { entry, id: id.to_owned(), state: None, sample_rate: 48_000.0 }
+        Self { entry, id: id.to_owned(), state: None, hold: Vec::new(), sample_rate: 48_000.0 }
     }
 
     /// Loads the newest golden state `<dir>/<prefix>.state.v<N>.json` (a state that switches the
@@ -82,6 +84,14 @@ impl Gates {
     /// Loads `state` (a saved state's JSON) into every instance first.
     pub fn with_state(mut self, state: Vec<u8>) -> Self {
         self.state = Some(state);
+        self
+    }
+
+    /// The step test sets parameter `name` to `value` (CLAP units) first, unless it is the one
+    /// stepped: a free-running modulator (an LFO) moves the sound by itself, and the test, which
+    /// compares the sound before, during and after a step, would hear that as a click.
+    pub fn holding(mut self, name: &str, value: f64) -> Self {
+        self.hold.push((name.to_owned(), value));
         self
     }
 
@@ -193,6 +203,16 @@ impl Gates {
         let jump = (0.4 * rate) as usize + 37;
         let window = (0.1 * rate) as usize;
         let input = test_signal(rate, n);
+        let params = self.instance(rate).params();
+        let held: Vec<ParamChange> = self
+            .hold
+            .iter()
+            .filter(|(name, _)| *name != param.name)
+            .map(|(name, value)| {
+                let id = params.iter().find(|i| i.name == *name).unwrap_or_else(|| panic!("no parameter {name:?} to hold")).id;
+                ParamChange { offset: 0, id, value: *value }
+            })
+            .collect();
         let measure = |from: f64, to: f64| -> f64 {
             let mut p = self.instance(rate);
             let mut out: [Vec<f32>; 2] = [Vec::with_capacity(n), Vec::with_capacity(n)];
@@ -203,6 +223,7 @@ impl Gates {
                 let len = block.min(n - at);
                 let mut changes = Vec::new();
                 if first {
+                    changes.extend_from_slice(&held);
                     changes.push(ParamChange { offset: 0, id: param.id, value: from });
                     first = false;
                 }
@@ -240,14 +261,20 @@ impl Gates {
 /// ```
 ///
 /// `block_tolerance` is the largest difference allowed between block sizes (0: bit-identical);
-/// `skip` names parameters left out of the ramp test (each with its reason beside it).
+/// `skip` names parameters left out of the ramp test (each with its reason beside it); the
+/// optional `hold = [("LFO 1 Rate", 0.02)]` sets parameters first in it (see [`Gates::holding`]).
 #[macro_export]
 macro_rules! gate_tests {
     ($krate:ident, $plugin:ident, $prefix:literal, block_tolerance = $tol:expr, skip = [$($skip:literal),* $(,)?]) => {
+        $crate::gate_tests!($krate, $plugin, $prefix, block_tolerance = $tol, skip = [$($skip),*], hold = []);
+    };
+    ($krate:ident, $plugin:ident, $prefix:literal, block_tolerance = $tol:expr, skip = [$($skip:literal),* $(,)?], hold = [$(($hold:literal, $value:expr)),* $(,)?]) => {
         fn gates() -> $crate::gates::Gates {
             use nih_plug::prelude::ClapPlugin;
             let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden");
-            $crate::gates::Gates::new(&$krate::clap_entry, $krate::$plugin::CLAP_ID).with_golden_state(&dir, $prefix)
+            let g = $crate::gates::Gates::new(&$krate::clap_entry, $krate::$plugin::CLAP_ID).with_golden_state(&dir, $prefix);
+            $(let g = g.holding($hold, $value);)*
+            g
         }
 
         #[test]

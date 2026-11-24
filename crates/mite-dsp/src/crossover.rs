@@ -6,19 +6,31 @@
 //! splits into (`B − 1` crossover slots); arrays are sized `B` and the last crossover entry is
 //! unused.
 
-use std::f64::consts::{FRAC_1_SQRT_2, PI};
+use std::f64::consts::{FRAC_1_SQRT_2, PI, SQRT_2};
 
-use crate::filter::{Coeffs, Tdf2};
+use crate::filter::Coeffs;
 
 pub const FREQ_MIN: f32 = 20.0;
 pub const FREQ_MAX: f32 = 20_000.0;
 /// Neighbouring crossovers stay at least this far apart, octaves (they are pushed, never cross).
 pub const MIN_GAP_OCT: f32 = 1.0 / 3.0;
+/// Between the caller's updates a moving crossover glides there sample by sample (one pole, this
+/// long, ms): a filter retuned in steps clicks on every step.
+const GLIDE_MS: f64 = 0.5;
 
-/// One crossover's sections: Butterworth low- and high-pass (each run twice, LR4), and the
-/// allpass their sum makes (for the bands below it).
+/// One crossover: a Butterworth pair (LR4: each half run twice) and the allpass their sum makes
+/// (for the bands below it), all on state-variable sections (TPT), whose state stays valid while
+/// the frequency moves. Direct-form biquads retuned every 16 samples while swept clicked 25–55 dB
+/// over the music (2026-11-24); these stay within a few dB. Same responses as the bilinear biquads.
 #[derive(Debug, Clone, Copy)]
 pub struct Cross {
+    /// `tan(π f / fs)`, the sections' tuning.
+    pub g: f64,
+    /// The per-sample glide toward `g`, and the sections' gains at `g`.
+    glide: f64,
+    tune: Tune,
+    /// The same Butterworth halves and allpass as direct-form coefficients (for a fixed filter
+    /// elsewhere, e.g. a DC high-pass).
     pub lp: Coeffs,
     pub hp: Coeffs,
     pub ap: Coeffs,
@@ -52,7 +64,58 @@ impl Cross {
             a1,
             a2,
         };
-        Self { lp, hp, ap }
+        let glide = 1.0 - (-1000.0 / (GLIDE_MS * fs)).exp();
+        Self { g: k, glide, tune: Tune::at(k), lp, hp, ap }
+    }
+}
+
+/// A state-variable section's gains at tuning `g` (Butterworth damping, k = √2).
+#[derive(Debug, Clone, Copy, Default)]
+struct Tune {
+    a1: f64,
+    a2: f64,
+    a3: f64,
+}
+
+impl Tune {
+    #[inline]
+    fn at(g: f64) -> Self {
+        let a1 = 1.0 / (1.0 + g * (g + SQRT_2));
+        let a2 = g * a1;
+        Self { a1, a2, a3: g * a2 }
+    }
+}
+
+/// A state-variable (TPT) section's state.
+#[derive(Debug, Clone, Copy, Default)]
+struct Svf {
+    s1: f64,
+    s2: f64,
+}
+
+impl Svf {
+    /// One sample: (low-pass, band-pass, high-pass).
+    #[inline]
+    fn tick(&mut self, t: &Tune, x: f64) -> (f64, f64, f64) {
+        let v3 = x - self.s2;
+        let v1 = t.a1 * self.s1 + t.a2 * v3;
+        let v2 = self.s2 + t.a2 * self.s1 + t.a3 * v3;
+        self.s1 = 2.0 * v1 - self.s1;
+        self.s2 = 2.0 * v2 - self.s2;
+        (v2, v1, x - SQRT_2 * v1 - v2)
+    }
+
+    #[inline]
+    fn allpass(&mut self, t: &Tune, x: f64) -> f64 {
+        let (_, bp, _) = self.tick(t, x);
+        x - 2.0 * SQRT_2 * bp
+    }
+
+    fn combine(&self, other: &Self, ka: f64, kb: f64) -> Self {
+        Self {
+            s1: ka * self.s1 + kb * other.s1,
+            s2: ka * self.s2 + kb * other.s2,
+        }
     }
 }
 
@@ -141,17 +204,22 @@ impl<const B: usize> Layout<B> {
 /// The filter states of a split, for two channels. Allocation-free.
 #[derive(Debug, Clone, Copy)]
 pub struct Split<const B: usize> {
-    /// Crossover sections by channel and crossover slot: low-pass ×2, high-pass ×2.
-    cross: [[[Tdf2; 4]; B]; 2],
+    /// Crossover sections by channel and crossover slot: the first stage (its low- and high-pass
+    /// both), then the second low-pass and the second high-pass.
+    cross: [[[Svf; 3]; B]; 2],
     /// Allpass compensation by channel, band slot and the crossover slot above it.
-    ap: [[[Tdf2; B]; B]; 2],
+    ap: [[[Svf; B]; B]; 2],
+    /// Each crossover's tuning now, by channel and slot, gliding to its section's (0: not yet
+    /// heard, it starts there).
+    g: [[f64; B]; 2],
 }
 
 impl<const B: usize> Default for Split<B> {
     fn default() -> Self {
         Self {
-            cross: [[[Tdf2::default(); 4]; B]; 2],
-            ap: [[[Tdf2::default(); B]; B]; 2],
+            cross: [[[Svf::default(); 3]; B]; 2],
+            ap: [[[Svf::default(); B]; B]; 2],
+            g: [[0.0; B]; 2],
         }
     }
 }
@@ -173,22 +241,34 @@ impl<const B: usize> Split<B> {
         sections: &[Cross],
         out: &mut [f64; B],
     ) {
+        let mut tunes = [Tune::default(); B];
+        for p in 0..layout.n {
+            let k = layout.crossovers[p];
+            let x = &sections[k];
+            let g = &mut self.g[c][k];
+            tunes[k] = if *g == 0.0 || (x.g - *g).abs() <= 1e-9 * x.g {
+                *g = x.g;
+                x.tune
+            } else {
+                *g += x.glide * (x.g - *g);
+                Tune::at(*g)
+            };
+        }
         let mut rest = x;
         for p in 0..layout.n {
             let k = layout.crossovers[p];
             let st = &mut self.cross[c][k];
-            let xc = &sections[k];
-            let lo = st[0].process(&xc.lp, rest);
-            out[p] = st[1].process(&xc.lp, lo);
-            let hi = st[2].process(&xc.hp, rest);
-            rest = st[3].process(&xc.hp, hi);
+            let t = &tunes[k];
+            let (lo, _, hi) = st[0].tick(t, rest);
+            out[p] = st[1].tick(t, lo).0;
+            rest = st[2].tick(t, hi).2;
         }
         out[layout.n] = rest;
         for p in 0..layout.n {
             let owner = layout.owners[p];
             for q in p + 1..layout.n {
                 let k = layout.crossovers[q];
-                out[p] = self.ap[c][owner][k].process(&sections[k].ap, out[p]);
+                out[p] = self.ap[c][owner][k].allpass(&tunes[k], out[p]);
             }
         }
     }
@@ -197,7 +277,7 @@ impl<const B: usize> Split<B> {
     /// channels become (L + R)/2 and (L − R)/2, back they become M + S and M − S.
     pub fn switch_mid_side(&mut self, to_mid_side: bool) {
         let (ka, kb) = if to_mid_side { (0.5, 0.5) } else { (1.0, 1.0) };
-        let mix = |a: &mut Tdf2, b: &mut Tdf2| {
+        let mix = |a: &mut Svf, b: &mut Svf| {
             let (x, y) = (*a, *b);
             *a = x.combine(&y, ka, kb);
             *b = x.combine(&y, ka, -kb);
@@ -231,11 +311,12 @@ impl<const B: usize> Split<B> {
             let f = crossovers[k].unwrap_or(FREQ_MIN);
             parents[k + 1] = Some(old.band_at(crossovers, f));
             for c in 0..2 {
-                self.cross[c][k] = [Tdf2::default(); 4];
+                self.cross[c][k] = [Svf::default(); 3];
+                self.g[c][k] = 0.0;
                 for b in 0..B {
-                    self.ap[c][b][k] = Tdf2::default();
+                    self.ap[c][b][k] = Svf::default();
                 }
-                self.ap[c][k + 1] = [Tdf2::default(); B];
+                self.ap[c][k + 1] = [Svf::default(); B];
             }
         }
         parents
@@ -337,6 +418,47 @@ mod tests {
             });
             let db = 10.0 * (re * re + im * im).log10();
             assert!(db.abs() < 0.01, "{f} Hz: {db:.4} dB");
+        }
+    }
+
+    /// A crossover swept 20 kHz → 20 Hz (and back, and across a few octaves) over a 220 Hz tone,
+    /// retuned every 16 samples on a 20 ms glide (as the plugins drive it): no band and not the sum
+    /// may have a sharper edge (largest second difference) during the sweep than the tone itself
+    /// has, by more than 6 dB. The direct-form biquads it replaced reached +25…+55 dB.
+    #[test]
+    fn a_swept_crossover_does_not_click() {
+        let fs = 48_000.0f64;
+        let n = (0.9 * fs) as usize;
+        let jump = (0.4 * fs) as usize + 37;
+        let w = (0.1 * fs) as usize;
+        let glide = 1.0 - (-16.0 * 1000.0 / (20.0 * fs)).exp();
+        let edge = |y: &[f64], r: std::ops::Range<usize>| r.map(|i| (y[i] - 2.0 * y[i - 1] + y[i - 2]).abs()).fold(0.0, f64::max);
+        for (from, to) in [(20_000.0f64, 20.0f64), (20.0, 20_000.0), (2000.0, 60.0), (60.0, 2000.0)] {
+            let layout = Layout::<3>::new(&[Some(1000.0), None]);
+            let mut split = Split::<3>::default();
+            let mut lf = from.ln();
+            let mut sections = [Cross::new(from, fs); 3];
+            let mut bands = [vec![0.0; n], vec![0.0; n], vec![0.0; n]];
+            let mut tone = vec![0.0; n];
+            for i in 0..n {
+                let x = 0.25 * (2.0 * PI * 220.0 * i as f64 / fs).sin();
+                tone[i] = x;
+                let target = if i >= jump { to.ln() } else { from.ln() };
+                if i % 16 == 0 {
+                    lf += glide * (target - lf);
+                    sections[0] = Cross::new(lf.exp(), fs);
+                }
+                let mut out = [0.0; 3];
+                split.process(0, x, &layout, &sections, &mut out);
+                bands[0][i] = out[0];
+                bands[1][i] = out[1];
+                bands[2][i] = out[0] + out[1];
+            }
+            let floor = edge(&tone, jump - w..jump);
+            for (name, y) in ["low", "high", "sum"].iter().zip(&bands) {
+                let db = 20.0 * (edge(y, jump..jump + w) / floor).log10();
+                assert!(db < 6.0, "{from} → {to} Hz, {name}: {db:+.1} dB");
+            }
         }
     }
 

@@ -3,6 +3,8 @@
 //! every figure.
 
 mite_plugin::gate_tests!(mite_shape, MiteShape, "mite_shape", block_tolerance = 0.0, skip = [
-    // An LR4 split swept across the 220 Hz test tone in 20 ms spins it through the allpass's 360°.
-    "Crossover 1 Frequency", "Crossover 2 Frequency", "Crossover 3 Frequency", "Crossover 4 Frequency",
+    // OPEN (2026-11-24): the golden state's Crossover 3 jumps past Crossover 1, and the bands
+    // re-sort at once while the filters glide (+9–19 dB for 2 ms). Mite Sat crossfades a structure
+    // change; this needs the same. Without a neighbour to cross it steps clean (−0.6 dB).
+    "Crossover 3 Frequency",
 ]);
