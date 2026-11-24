@@ -131,7 +131,9 @@ impl DeEssSettings {
     /// The band, ordered and inside the audio range at `fs`.
     fn band(&self, fs: f32) -> (f32, f32) {
         let top = 0.45 * fs;
-        let lo = self.lo_hz.clamp(1000.0, top * 0.9);
+        // The 1 kHz floor gives way at rates too low to hold it (a host may try 1 kHz).
+        let lo_max = top * 0.9;
+        let lo = self.lo_hz.clamp(1000.0f32.min(lo_max), lo_max);
         let hi = self.hi_hz.clamp(lo * 1.2, top.max(lo * 1.2));
         (lo, hi)
     }
@@ -877,5 +879,13 @@ mod tests {
         assert!((response_db(&band, 10.0, (5000.0f64 * 12_000.0).sqrt(), fs) + 10.0).abs() < 0.5);
         assert!(response_db(&band, 10.0, 16_000.0, fs) > -1.5);
         assert!(response_db(&band, 10.0, 3000.0, fs) > -1.5);
+    }
+
+    #[test]
+    fn the_band_stays_ordered_and_finite_at_very_low_sample_rates() {
+        for fs in [1000.0f32, 2000.0, 4000.0, 8000.0] {
+            let (lo, hi) = DeEssSettings::default().band(fs);
+            assert!(lo.is_finite() && hi.is_finite() && 0.0 < lo && lo < hi && hi < 0.5 * fs, "{fs} Hz: {lo}..{hi}");
+        }
     }
 }
