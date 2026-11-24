@@ -104,6 +104,13 @@ impl Gates {
         p
     }
 
+    /// Creates an instance (golden state loaded), activates it and plays a few blocks: what a
+    /// host's main and audio threads do first. Run on a small stack by the gate below.
+    pub fn smoke(&self) {
+        let input = test_signal(self.sample_rate, 4 * 512);
+        self.run(self.sample_rate, &input, &mut || 512);
+    }
+
     /// Runs `input` through a fresh instance in blocks of the sizes `blocks` yields (cycled).
     fn run(&self, rate: f64, input: &[Vec<f32>; 2], blocks: &mut dyn FnMut() -> usize) -> Vec<Vec<f32>> {
         let mut p = self.instance(rate);
@@ -282,6 +289,19 @@ macro_rules! gate_tests {
             let g = $crate::gates::Gates::new(&$krate::clap_entry, $krate::$plugin::CLAP_ID).with_golden_state(&dir, $prefix);
             $(let g = g.holding($hold, $value);)*
             g
+        }
+
+        /// Windows gives a thread 1 MB of stack (Linux 8 MB), and a host creates and runs a plugin
+        /// on such threads: nothing may need more (Sat once overflowed it on Windows only).
+        #[test]
+        fn it_runs_on_a_one_megabyte_stack() {
+            let g = gates();
+            std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn(move || g.smoke())
+                .expect("a thread")
+                .join()
+                .expect("the plugin panicked on a 1 MB stack");
         }
 
         #[test]

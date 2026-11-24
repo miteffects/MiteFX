@@ -1556,7 +1556,9 @@ pub struct Saturator {
     factor: usize,
     /// One channel: no mid or side to speak of.
     mono: bool,
-    cores: [Core; 2],
+    /// Boxed (about 100 KB): a host builds and moves the plugin on its own thread's stack, which
+    /// is 1 MB on Windows, and every move of an inline copy costs that much stack.
+    cores: Box<[Core; 2]>,
     active: usize,
     fade: Option<f64>,
     eased: [Eased; BANDS],
@@ -1619,7 +1621,7 @@ impl Saturator {
             fs: f64::from(sample_rate),
             factor: 1,
             mono: false,
-            cores: [Core::new(factor), Core::new(factor)],
+            cores: Box::new([Core::new(factor), Core::new(factor)]),
             active: 0,
             fade: None,
             eased: [Eased::at(&BandSat::default(), true); BANDS],
@@ -1676,7 +1678,7 @@ impl Saturator {
     /// Sizes everything for `sample_rate`. Allocates.
     pub fn prepare(&mut self, sample_rate: f32, factor: usize, s: &SatSettings) {
         self.fs = f64::from(sample_rate);
-        self.cores = [Core::new(factor), Core::new(factor)];
+        *self.cores = [Core::new(factor), Core::new(factor)];
         let per = |ms: f64| 1.0 - (-1000.0 / (ms * self.fs)).exp();
         self.glide = 1.0 - (-(CONTROL as f64) * 1000.0 / (GLIDE_MS * self.fs)).exp();
         self.switch_step = CONTROL as f64 * 1000.0 / (SWITCH_MS * self.fs);

@@ -54,3 +54,11 @@ fn no_continuous_parameter_clicks_when_it_jumps_end_to_end() {
     let clicks: Vec<_> = worst.iter().filter(|s| s.worst_db() > 6.0).map(|s| format!("{} ({:+.1} dB)", s.param, s.worst_db())).collect();
     assert!(clicks.is_empty(), "{} of {} click: {}", clicks.len(), worst.len(), clicks.join(", "));
 }
+
+/// Windows gives a thread 1 MB of stack (Linux 8 MB), and a host creates and runs a plugin on
+/// such threads: nothing may need more.
+#[test]
+fn it_runs_on_a_one_megabyte_stack() {
+    let g = gates();
+    std::thread::Builder::new().stack_size(1 << 20).spawn(move || g.smoke()).expect("a thread").join().expect("the plugin panicked on a 1 MB stack");
+}

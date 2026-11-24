@@ -40,7 +40,9 @@ impl Default for Output {
 }
 
 pub struct VerbEngine {
-    reverb: Reverb,
+    /// Boxed (about 150 KB): a host builds and moves the plugin on its own thread's stack, 1 MB
+    /// on Windows, and every move of an inline copy costs that much.
+    reverb: Box<Reverb>,
     wet: [Vec<f32>; 2],
     mix: LinearSmoother,
     gain: LinearSmoother,
@@ -53,7 +55,7 @@ pub struct VerbEngine {
 impl VerbEngine {
     pub fn new(sample_rate: f32, s: &ReverbSettings, out: &Output) -> Self {
         let mut e = Self {
-            reverb: Reverb::new(sample_rate, s),
+            reverb: Box::new(Reverb::new(sample_rate, s)),
             wet: [vec![0.0; CHUNK], vec![0.0; CHUNK]],
             mix: LinearSmoother::new(out.mix),
             gain: LinearSmoother::new(1.0),
@@ -69,7 +71,7 @@ impl VerbEngine {
     /// Sizes everything for `sample_rate`. Allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &ReverbSettings, out: &Output) {
         if self.reverb.sample_rate() != sample_rate {
-            self.reverb = Reverb::new(sample_rate, s);
+            *self.reverb = Reverb::new(sample_rate, s);
         }
         self.slice_len = ((HISTORY_SLICE_MS * 0.001 * sample_rate).round() as usize).max(1);
         self.bypass.set_ramp(sample_rate, SWITCH_MS);
