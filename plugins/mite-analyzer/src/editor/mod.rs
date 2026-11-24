@@ -579,7 +579,7 @@ impl AnalyzerView {
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HEADER - 0.5), (VIEW_W, HEADER - 0.5)));
         draw_mark(cx, 16.0, 15.0, 26.0);
         draw_title(cx, 52.0, 18.0, "Analyzer");
-        self.session.draw(cx);
+        // No preset header: a measuring tool has nothing to recall (user, 2026-11-24).
     }
 
     fn draw_spectrum(&self, cx: &mut DrawCx<'_>) {
@@ -923,11 +923,8 @@ impl AnalyzerView {
     }
 
     fn handle_event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
-        if let UiEvent::KeyDown { key, mods } = *event {
-            return self.session.key(key, mods, host).unwrap_or(false);
-        }
-        if let Some(answer) = self.session.event(event, host) {
-            return answer;
+        if let UiEvent::KeyDown { .. } = *event {
+            return false;
         }
         if let Some((m, list)) = &mut self.menu {
             if let UiEvent::PointerMove { pos, .. } = *event {
@@ -1056,7 +1053,6 @@ impl View for AnalyzerView {
         if let Some((_, list)) = &self.menu {
             list.draw(cx, cx.theme.accent, |_, _, _, _| {});
         }
-        self.session.draw_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {

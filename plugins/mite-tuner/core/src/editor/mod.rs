@@ -252,7 +252,7 @@ impl TunerView {
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HEADER - 0.5), (VIEW_W, HEADER - 0.5)));
         draw_mark(cx, 16.0, 15.0, 26.0);
         draw_title(cx, 52.0, 18.0, "Tuner");
-        self.session.draw(cx);
+        // No preset header: a measuring tool has nothing to recall (user, 2026-11-24).
     }
 
     /// How present the reading is: 1 while heard, fading over the hold.
@@ -477,9 +477,6 @@ impl TunerView {
         if let Some(h) = self.footer.help(host) {
             return h;
         }
-        if let Some(h) = self.session.help() {
-            return h;
-        }
         if self.reading().is_some_and(|r| r.cents.abs() < IN_TUNE) {
             return Help::default().text("In tune (within ±2 cents).");
         }
@@ -510,11 +507,8 @@ impl TunerView {
             }
             return true;
         }
-        if let UiEvent::KeyDown { key, mods } = *event {
-            return self.session.key(key, mods, host).unwrap_or(false);
-        }
-        if let Some(answer) = self.session.event(event, host) {
-            return answer;
+        if let UiEvent::KeyDown { .. } = *event {
+            return false;
         }
         if self.footer.event(event, host) {
             return true;
@@ -576,7 +570,6 @@ impl View for TunerView {
         if let Some(menu) = &self.menu {
             menu.draw(cx, cx.theme.accent, |_, _, _, _| {});
         }
-        self.session.draw_menu(cx);
     }
 
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
