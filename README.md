@@ -2,7 +2,7 @@
 
 Free, open-source audio plugins: 18 of them, VST3 and CLAP, for Windows, macOS and Linux.
 
-**Website and downloads:** https://OWNER.github.io/MiteFX/ · **Releases:** [latest](https://github.com/OWNER/MiteFX/releases/latest)
+**Website and downloads:** https://miteffects.github.io/MiteFX/ · **Releases:** [latest](https://github.com/miteffects/MiteFX/releases/latest)
 
 | Mixing | Dynamics | Space and time | Tools |
 |---|---|---|---|
