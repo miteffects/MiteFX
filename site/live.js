@@ -115,9 +115,11 @@
     sctx.globalAlpha = 1;
   }
 
-  // The mites: the logo's mite, walking on a tripod gait, legs keeping pace with the ground they cover.
-  const LEGS = [[10.5, 15, 5, 12], [10, 19, 4, 19], [10.5, 23, 5, 26], [21.5, 15, 27, 12], [22, 19, 28, 19], [21.5, 23, 27, 26]];
-  const TRIPOD = [0, 1, 0, 1, 0, 1]; // left front, right middle, left back move together
+  // The mites: the logo's mite, eight legs walking on alternating tetrapods, legs keeping pace with the ground they cover.
+  const LEGS = [[11.2, 14, 6.5, 9.5], [10.4, 17, 4.5, 15], [10.2, 20.5, 4.5, 21.5], [10.8, 24, 6, 28],
+    [20.8, 14, 25.5, 9.5], [21.6, 17, 27.5, 15], [21.8, 20.5, 27.5, 21.5], [21.2, 24, 26, 28]];
+  // Eight legs, alternating tetrapods: left 1 and 3 with right 2 and 4, then the others.
+  const TRIPOD = [0, 1, 0, 1, 1, 0, 1, 0];
   const BODY = new Path2D("M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z");
   const HEAD = new Path2D("M18.6 7.4 A2.6 2.6 0 1 1 13.4 7.4 A2.6 2.6 0 1 1 18.6 7.4 Z");
   const SIG = new Path2D("M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21");
@@ -167,7 +169,7 @@
     if (m.fade < 0.02) return;
     ctx.strokeStyle = "#a3abb8"; ctx.lineWidth = 1.5;
     ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       const [x0, y0, x1, y1] = LEGS[i];
       const a = Math.sin(m.gait + TRIPOD[i] * Math.PI) * 0.45 * Math.min(1, m.speed / 20);
       const lift = 1 - 0.18 * Math.max(0, Math.cos(m.gait + TRIPOD[i] * Math.PI)) * Math.min(1, m.speed / 20);
