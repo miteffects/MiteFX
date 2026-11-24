@@ -116,6 +116,9 @@ impl Plugin for MiteRig {
         let s = self.params.settings();
         self.engine.prepare(config.sample_rate, &s);
         let core = &self.loader.core;
+        // The loader thread waits while the board is built here, or it could build a copy too
+        // and crossfade to it a few blocks in.
+        let _hold = core.exclusive();
         core.set_rate(config.sample_rate);
         // The board, built now: the first block already plays it.
         core.build_files();

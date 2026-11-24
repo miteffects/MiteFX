@@ -127,7 +127,14 @@ impl Gates {
         let input = test_signal(self.sample_rate, (seconds * self.sample_rate) as usize);
         let reference = self.run(self.sample_rate, &input, &mut || 512);
         let diff = |o: &[Vec<f32>]| o.iter().zip(&reference).flat_map(|(a, b)| a.iter().zip(b).map(|(x, y)| (x - y).abs())).fold(0.0f32, f32::max);
-        let mut out: Vec<(String, f32)> = BLOCK_SIZES.iter().map(|&b| (format!("{b}"), diff(&self.run(self.sample_rate, &input, &mut || b)))).collect();
+        // Where the outputs first part (> 1e-6), for the report: a time that moves between runs
+        // points at something arriving from another thread.
+        let first = |o: &[Vec<f32>]| o.iter().zip(&reference).filter_map(|(a, b)| a.iter().zip(b).position(|(x, y)| (x - y).abs() > 1e-6)).min();
+        let named = |b: String, o: &[Vec<f32>]| match first(o) {
+            Some(at) => (format!("{b} (from sample {at})"), diff(o)),
+            None => (b, diff(o)),
+        };
+        let mut out: Vec<(String, f32)> = BLOCK_SIZES.iter().map(|&b| named(format!("{b}"), &self.run(self.sample_rate, &input, &mut || b))).collect();
         let mut seed = 0x9e37_79b9u32;
         let random = self.run(self.sample_rate, &input, &mut || {
             seed ^= seed << 13;
@@ -135,7 +142,7 @@ impl Gates {
             seed ^= seed << 5;
             1 + (seed % 3000) as usize
         });
-        out.push(("random".to_owned(), diff(&random)));
+        out.push(named("random".to_owned(), &random));
         out
     }
 
@@ -280,10 +287,12 @@ macro_rules! gate_tests {
         #[test]
         fn the_output_is_the_same_at_every_block_size() {
             let tol: f32 = $tol;
-            for (blocks, diff) in gates().block_sizes(1.0) {
+            let all = gates().block_sizes(1.0);
+            for (blocks, diff) in &all {
                 println!("blocks {blocks}: max difference {diff:e}");
-                assert!(diff <= tol, "blocks {blocks}: max difference {diff} (allowed {tol})");
             }
+            let bad: Vec<String> = all.iter().filter(|(_, d)| *d > tol).map(|(b, d)| format!("{b}: {d:e}")).collect();
+            assert!(bad.is_empty(), "allowed {tol}; over it: {}", bad.join(", "));
         }
 
         #[test]

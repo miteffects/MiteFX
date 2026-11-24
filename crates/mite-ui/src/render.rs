@@ -41,7 +41,7 @@ pub fn render_view(view: &mut dyn View, host: &dyn ParamHost, theme: &Theme, sca
     // Windows without a GPU offers WARP, its software renderer, which crashes on Vello's
     // compute shaders (CI machines): treated as no GPU, so GPU tests skip there.
     if cfg!(windows) && cx.devices[dev_id].adapter().get_info().device_type == wgpu::DeviceType::Cpu {
-        return Err("only a software renderer (WARP)".into());
+        return Err("no GPU (only WARP, the software renderer)".into());
     }
     let device = &cx.devices[dev_id].device;
     let queue = &cx.devices[dev_id].queue;

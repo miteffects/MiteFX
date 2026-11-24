@@ -51,11 +51,20 @@ pub struct LoaderCore {
     tempo: AtomicF32,
     /// The board and mapping versions the macro table was last compiled at.
     macros_built: Mutex<Option<(u64, u64)>>,
+    /// Held by a loader round and by `initialize` while it builds the board itself: the loader
+    /// thread must not build (and later crossfade to) a second copy of the same board at a time
+    /// that depends on scheduling.
+    round: Mutex<()>,
 }
 
 impl LoaderCore {
     pub fn new(board: Arc<Board>, shared: Arc<RigShared>, params: Arc<RigParams>) -> Self {
-        Self { board, shared, params, rate: AtomicF32::new(0.0), built: Mutex::new(Built::default()), tempo: AtomicF32::new(crate::embed::tempo()), macros_built: Mutex::new(None) }
+        Self { board, shared, params, rate: AtomicF32::new(0.0), built: Mutex::new(Built::default()), tempo: AtomicF32::new(crate::embed::tempo()), macros_built: Mutex::new(None), round: Mutex::new(()) }
+    }
+
+    /// Keeps the loader thread out until the guard drops (`initialize` building the board).
+    pub fn exclusive(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.round.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn set_rate(&self, rate: f32) {
@@ -255,6 +264,7 @@ impl LoaderCore {
 
     /// One round: the graph (sent), the files, the collection of retired objects.
     pub fn step(&self) -> bool {
+        let _round = self.exclusive();
         self.shared.graph.collect();
         self.shared.macros.collect();
         self.board.macros.take_learned();
