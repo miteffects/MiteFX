@@ -36,7 +36,9 @@
     <a class="btn" data-platform="macOS" href="#">Download for macOS</a>
     <a class="btn" data-platform="Linux" href="#">Download for Linux</a>
   </div>
-  <p class="fine">Version 0.1, an early release · <a data-releases-link href="#">all releases</a> · 64-bit · needs a GPU (the editors are GPU drawn)</p>
+  <p class="fine">Version 0.1, an early release · 64-bit · needs a GPU (the editors are GPU drawn)<br>
+  Also: <a data-platform="Windows-zip" href="#">Windows .zip</a> · <a data-platform="macOS-zip" href="#">macOS .zip</a> ·
+  <a data-platform="Linux-deb" href="#">Linux .deb</a> · <a data-releases-link href="#">all releases</a></p>
   <figure class="hero-shot">
     <img src="img/mite-eq.webp?v=__V__" alt="Mite EQ: a spectrum with EQ bands drawn over it" width="1280" height="760">
   </figure>
@@ -60,21 +62,26 @@
   <div class="cols">
     <article>
       <h3>Windows</h3>
-      <p>Unzip, then copy <code>VST3\*</code> to <code>C:\Program Files\Common Files\VST3\</code> and
-      <code>CLAP\*</code> to <code>C:\Program Files\Common Files\CLAP\</code>. Rescan in your DAW.</p>
+      <p>Run <code>MiteFX-Windows-Setup.exe</code> and pick VST3, CLAP or both. The plugins go to
+      <code>C:\Program Files\Common Files\VST3</code> and <code>…\CLAP</code>; rescan in your DAW.
+      Remove them under Settings → Apps.</p>
+      <p class="note">The installer isn't signed yet, so Windows may say it protected your PC: click
+      <b>More info</b> → <b>Run anyway</b>.</p>
     </article>
     <article>
       <h3>macOS</h3>
-      <p>Copy <code>VST3/*</code> to <code>~/Library/Audio/Plug-Ins/VST3/</code> and <code>CLAP/*</code> to
-      <code>~/Library/Audio/Plug-Ins/CLAP/</code>. The plugins are free and not notarized, so clear the quarantine once:</p>
-      <pre><code>xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Mite*.vst3 ~/Library/Audio/Plug-Ins/CLAP/Mite*.clap</code></pre>
-      <p class="note">Universal (Apple Silicon and Intel). No Audio Unit yet, so not for Logic Pro.</p>
+      <p>Open <code>MiteFX-macOS.pkg</code> and follow the installer. The plugins go to
+      <code>/Library/Audio/Plug-Ins</code>; rescan in your DAW.</p>
+      <p class="note">The package isn't notarized by Apple yet: if macOS won't open it, go to System Settings →
+      Privacy &amp; Security and click <b>Open Anyway</b>. Universal (Apple Silicon and Intel). No Audio Unit yet,
+      so not for Logic Pro.</p>
     </article>
     <article>
       <h3>Linux</h3>
-      <pre><code>mkdir -p ~/.vst3 ~/.clap
-cp -r VST3/* ~/.vst3/
-cp -r CLAP/* ~/.clap/</code></pre>
+      <p>Unpack <code>MiteFX-Linux.tar.gz</code> and run the installer, for you or for every user:</p>
+      <pre><code>./MiteFX/install.sh
+sudo ./MiteFX/install.sh --system</code></pre>
+      <p>On Debian or Ubuntu, the <code>.deb</code> works too: <code>sudo apt install ./MiteFX-Linux.deb</code>.</p>
       <p class="note">X11 or XWayland and a Vulkan GPU. Tested in REAPER.</p>
     </article>
   </div>
@@ -100,15 +107,15 @@ const FALLBACK = { owner: "miteffects", repo: "MiteFX" };
 const host = location.hostname.endsWith(".github.io") ? location.hostname.split(".")[0] : FALLBACK.owner;
 const repo = location.hostname.endsWith(".github.io") && location.pathname.split("/")[1] ? location.pathname.split("/")[1] : FALLBACK.repo;
 const base = `https://github.com/${host}/${repo}`;
-const files = { Windows: "MiteFX-Windows.zip", macOS: "MiteFX-macOS.zip", Linux: "MiteFX-Linux.tar.gz" };
+const files = { Windows: "MiteFX-Windows-Setup.exe", macOS: "MiteFX-macOS.pkg", Linux: "MiteFX-Linux.tar.gz", "Windows-zip": "MiteFX-Windows.zip", "macOS-zip": "MiteFX-macOS.zip", "Linux-deb": "MiteFX-Linux.deb" };
 for (const a of document.querySelectorAll("[data-platform]")) a.href = `${base}/releases/latest/download/${files[a.dataset.platform]}`;
 for (const a of document.querySelectorAll("[data-repo-link]")) a.href = base;
 for (const a of document.querySelectorAll("[data-releases-link]")) a.href = `${base}/releases`;
 // The visitor's own system first.
 const ua = navigator.userAgent;
 const mine = /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "macOS" : /Linux|X11/.test(ua) ? "Linux" : null;
-if (mine) document.querySelector(`[data-platform="${mine}"]`).classList.add("primary");
-else document.querySelector("[data-platform]").classList.add("primary");
+if (mine) document.querySelector(`.cta [data-platform="${mine}"]`).classList.add("primary");
+else document.querySelector(".cta [data-platform]").classList.add("primary");
 
 const plugins = [
   ["mite-eq", "Mite EQ", "#0ED4F6", "Parametric EQ: dynamic bands, linear phase, a live spectrum, masking you can see and an auto shape that suggests a curve."],

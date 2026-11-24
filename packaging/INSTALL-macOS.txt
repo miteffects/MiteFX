@@ -1,3 +1,6 @@
+The easy way: MiteFX-macOS.pkg (from the website) installs them, with nothing to clear by hand.
+What follows is the manual way, from this folder.
+
 MiteFX for macOS (Apple Silicon and Intel): 18 plugins, VST3 and CLAP.
 
 Install

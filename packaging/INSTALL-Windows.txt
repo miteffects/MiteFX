@@ -1,9 +1,11 @@
 MiteFX for Windows (64-bit): 18 plugins, VST3 and CLAP.
 
-Install
+The easy way: MiteFX-Windows-Setup.exe (from the website) installs and uninstalls them for you.
+
+By hand, from this folder
   Copy everything in VST3\ to   C:\Program Files\Common Files\VST3\
   Copy everything in CLAP\ to   C:\Program Files\Common Files\CLAP\
   Then rescan plugins in your DAW.
 
 Needs a GPU with DirectX 12 or Vulkan (the editors are GPU drawn).
-MiteFX is free software under the GNU GPL v3 (LICENSE.txt). Source: see the website.
+MiteFX is free software under the GNU GPL v3 (LICENSE.txt). https://miteffects.github.io/MiteFX/

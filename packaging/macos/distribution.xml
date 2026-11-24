@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MiteFX for macOS: the installer's layout (productbuild; .github/workflows/release.yml fills __VERSION__). -->
+<installer-gui-script minSpecVersion="2">
+  <title>MiteFX</title>
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <license file="LICENSE.txt"/>
+  <options customize="allow" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+  <domains enable_localSystem="true"/>
+  <choices-outline>
+    <line choice="vst3"/>
+    <line choice="clap"/>
+  </choices-outline>
+  <choice id="vst3" title="VST3 plugins" description="The 18 Mite plugins as VST3, in /Library/Audio/Plug-Ins/VST3.">
+    <pkg-ref id="io.github.miteffects.mitefx.vst3"/>
+  </choice>
+  <choice id="clap" title="CLAP plugins" description="The 18 Mite plugins as CLAP, in /Library/Audio/Plug-Ins/CLAP.">
+    <pkg-ref id="io.github.miteffects.mitefx.clap"/>
+  </choice>
+  <pkg-ref id="io.github.miteffects.mitefx.vst3" version="__VERSION__" onConclusion="none">vst3.pkg</pkg-ref>
+  <pkg-ref id="io.github.miteffects.mitefx.clap" version="__VERSION__" onConclusion="none">clap.pkg</pkg-ref>
+</installer-gui-script>

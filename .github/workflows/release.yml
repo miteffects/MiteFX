@@ -57,6 +57,8 @@ jobs:
       - name: Package
         shell: bash
         run: |
+          VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           mkdir -p "MiteFX/VST3" "MiteFX/CLAP"
           cp -R target/bundled/*.vst3 "MiteFX/VST3/"
           cp -R target/bundled/*.clap "MiteFX/CLAP/"
@@ -65,12 +67,75 @@ jobs:
           case "${{ matrix.platform }}" in
             Windows) 7z a -tzip "MiteFX-Windows.zip" MiteFX > /dev/null ;;
             macOS)   ditto -c -k --keepParent MiteFX "MiteFX-macOS.zip" ;;
-            Linux)   tar -czf "MiteFX-Linux.tar.gz" MiteFX ;;
+            Linux)
+              cp packaging/linux/install.sh MiteFX/
+              chmod +x MiteFX/install.sh
+              tar -czf "MiteFX-Linux.tar.gz" MiteFX ;;
           esac
+
+      # Windows: an installer (Inno Setup) that puts VST3 and CLAP in Common Files, with an uninstaller.
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress | Out-Null
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DSrc=$PWD\MiteFX" "/DVersion=$env:VERSION" "/O$PWD" packaging\windows\MiteFX.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # macOS: a .pkg into /Library/Audio/Plug-Ins. Files the Installer puts in place carry no
+      # quarantine, so nothing to clear by hand. Bundles are pinned (not relocatable) so an update
+      # never lands in a copy elsewhere.
+      - name: Installer (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for kind in vst3 clap; do
+            dir=$([ $kind = vst3 ] && echo VST3 || echo CLAP)
+            pkgbuild --analyze --root "MiteFX/$dir" "$kind.plist"
+            n=$(/usr/libexec/PlistBuddy -c "Print" "$kind.plist" | grep -c "RootRelativeBundlePath" || true)
+            for ((i = 0; i < n; i++)); do /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$kind.plist"; done
+            pkgbuild --root "MiteFX/$dir" --component-plist "$kind.plist" --install-location "/Library/Audio/Plug-Ins/$dir" \
+              --identifier "io.github.miteffects.mitefx.$kind" --version "$VERSION" "$kind.pkg"
+          done
+          mkdir -p res
+          cp LICENSE res/LICENSE.txt
+          sed "s/__VERSION__/$VERSION/g" packaging/macos/welcome.html > res/welcome.html
+          sed "s/__VERSION__/$VERSION/g" packaging/macos/distribution.xml > distribution.xml
+          productbuild --distribution distribution.xml --resources res --package-path . MiteFX-macOS.pkg
+          pkgutil --payload-files MiteFX-macOS.pkg | grep -c "\.clap$\|\.vst3$" || true
+
+      # Linux: a .deb for Debian and Ubuntu, into /usr/lib/vst3 and /usr/lib/clap.
+      - name: Package (.deb)
+        if: runner.os == 'Linux'
+        run: |
+          root=deb/mitefx
+          mkdir -p "$root/DEBIAN" "$root/usr/lib/vst3" "$root/usr/lib/clap" "$root/usr/share/doc/mitefx"
+          cp -R MiteFX/VST3/* "$root/usr/lib/vst3/"
+          cp MiteFX/CLAP/* "$root/usr/lib/clap/"
+          cp LICENSE "$root/usr/share/doc/mitefx/copyright"
+          cat > "$root/DEBIAN/control" <<CONTROL
+          Package: mitefx
+          Version: $VERSION
+          Section: sound
+          Priority: optional
+          Architecture: amd64
+          Maintainer: MiteFX <https://github.com/miteffects/MiteFX/issues>
+          Homepage: https://miteffects.github.io/MiteFX/
+          Depends: libc6, libx11-6, libx11-xcb1, libxcb1, libxcursor1, libgl1
+          Recommends: libvulkan1
+          Description: free, open-source audio plugins (VST3 and CLAP)
+           Eighteen plugins for mixing, mastering and guitar: EQ, compressors, limiter,
+           saturation, reverb, delay, pitch editor, tuner, analyzer and a guitar rig.
+          CONTROL
+          sed -i 's/^          //' "$root/DEBIAN/control"
+          dpkg-deb --root-owner-group --build "$root" MiteFX-Linux.deb
+          dpkg-deb --info MiteFX-Linux.deb | head -8
+
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
-          path: MiteFX-${{ matrix.platform }}.*
+          path: |
+            MiteFX-${{ matrix.platform }}.*
+            MiteFX-${{ matrix.platform }}-Setup.exe
 
   publish:
     name: Publish the release
