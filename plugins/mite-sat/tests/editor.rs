@@ -60,7 +60,7 @@ fn dragging_the_curve_sets_drive_and_bias_as_one_undo_step() {
     let c = view.square(&host).center();
     drag(&mut view, &host, c, c + (50.0, -100.0), MODS);
     let (drive, bias) = (plain(&host, &band_id(0, B_DRIVE.id)), plain(&host, &band_id(0, B_BIAS.id)));
-    assert!((drive - 12.0).abs() < 0.5, "drive {drive}");
+    assert!((drive - 20.0).abs() < 0.5, "drive {drive}");
     assert!((bias - 35.0).abs() < 1.0, "bias {bias}");
     view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
     assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), 0.0, "one undo takes the whole drag back");
@@ -75,7 +75,7 @@ fn alt_drag_sets_tone_and_shift_is_fine() {
     assert!((plain(&host, &band_id(0, B_TONE.id)) - 6.0).abs() < 0.3);
     assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), 0.0, "Alt leaves drive alone");
     drag(&mut view, &host, c, c + (0.0, -100.0), Modifiers { shift: true, ..MODS });
-    assert!((plain(&host, &band_id(0, B_DRIVE.id)) - 2.4).abs() < 0.2);
+    assert!((plain(&host, &band_id(0, B_DRIVE.id)) - 4.0).abs() < 0.2);
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn a_narrow_card_s_curve_drives_its_own_band_and_selects_it() {
     let sq = view.band_square(&host, 2).expect("band 3 has a card");
     assert!(sq.width() < view.square(&host).width(), "a narrow card's square: {sq:?}");
     drag(&mut view, &host, sq.center(), sq.center() + (0.0, -50.0), MODS);
-    assert!((plain(&host, &band_id(2, B_DRIVE.id)) - 6.0).abs() < 0.3);
+    assert!((plain(&host, &band_id(2, B_DRIVE.id)) - 10.0).abs() < 0.3);
     assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), 0.0, "the others stay clean");
     assert_eq!(view.selected(), 2);
     // Now wide, its model icons are on offer.
@@ -283,7 +283,7 @@ fn the_bars_show_what_the_band_does() {
     assert!(settle_bars(&mut view, &host).iter().all(|&(db, _)| db < -71.0), "drive 0 makes nothing");
     // Soft is symmetric: odd harmonics only.
     host.set_plain(&band_id(0, B_MODEL.id), Model::Soft.index() as f32);
-    host.set_plain(&band_id(0, B_DRIVE.id), 18.0);
+    host.set_plain(&band_id(0, B_DRIVE.id), 42.0);
     let bars = settle_bars(&mut view, &host);
     assert!(bars[1].0 > -40.0, "H3 {}", bars[1].0);
     assert!(bars[0].0 < -71.0 && bars[2].0 < -71.0, "H2 {} H4 {}", bars[0].0, bars[2].0);

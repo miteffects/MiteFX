@@ -2,5 +2,6 @@
   "plugin": "Mite Sat",
   "version": 1,
   "name": "Init",
-  "params": {}
+  "params": {},
+  "state": 5
 }

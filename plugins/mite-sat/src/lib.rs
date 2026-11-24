@@ -102,7 +102,7 @@ impl Plugin for MiteSat {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3, migrate::v3_to_v4]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2, migrate::v2_to_v3, migrate::v3_to_v4, migrate::v4_to_v5]);
     }
 
     fn params(&self) -> Arc<dyn Params> {

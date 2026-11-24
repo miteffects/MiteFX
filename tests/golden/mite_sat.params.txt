@@ -16,7 +16,7 @@ x4_freq | Hz | 20 | 20000 | 6000 | Log
 x5_on | bool | false
 x5_freq | Hz | 20 | 20000 | 12000 | Log
 b1_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
-b1_drive | dB | 0 | 36 | 0 | Linear
+b1_drive | dB | 0 | 60 | 0 | Linear
 b1_bias | % | -100 | 100 | 0 | Linear
 b1_tone | dB | -12 | 12 | 0 | Linear
 b1_mix | % | 0 | 100 | 100 | Linear
@@ -30,7 +30,7 @@ b1_bypass | bool | false
 b1_mute | bool | false
 b1_solo | bool | false
 b2_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
-b2_drive | dB | 0 | 36 | 0 | Linear
+b2_drive | dB | 0 | 60 | 0 | Linear
 b2_bias | % | -100 | 100 | 0 | Linear
 b2_tone | dB | -12 | 12 | 0 | Linear
 b2_mix | % | 0 | 100 | 100 | Linear
@@ -44,7 +44,7 @@ b2_bypass | bool | false
 b2_mute | bool | false
 b2_solo | bool | false
 b3_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
-b3_drive | dB | 0 | 36 | 0 | Linear
+b3_drive | dB | 0 | 60 | 0 | Linear
 b3_bias | % | -100 | 100 | 0 | Linear
 b3_tone | dB | -12 | 12 | 0 | Linear
 b3_mix | % | 0 | 100 | 100 | Linear
@@ -58,7 +58,7 @@ b3_bypass | bool | false
 b3_mute | bool | false
 b3_solo | bool | false
 b4_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
-b4_drive | dB | 0 | 36 | 0 | Linear
+b4_drive | dB | 0 | 60 | 0 | Linear
 b4_bias | % | -100 | 100 | 0 | Linear
 b4_tone | dB | -12 | 12 | 0 | Linear
 b4_mix | % | 0 | 100 | 100 | Linear
@@ -72,7 +72,7 @@ b4_bypass | bool | false
 b4_mute | bool | false
 b4_solo | bool | false
 b5_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
-b5_drive | dB | 0 | 36 | 0 | Linear
+b5_drive | dB | 0 | 60 | 0 | Linear
 b5_bias | % | -100 | 100 | 0 | Linear
 b5_tone | dB | -12 | 12 | 0 | Linear
 b5_mix | % | 0 | 100 | 100 | Linear
@@ -86,7 +86,7 @@ b5_bypass | bool | false
 b5_mute | bool | false
 b5_solo | bool | false
 b6_model | choice | Tape, Tube, Transformer, Diode, Soft, Hard, Fold, Rectify | 1
-b6_drive | dB | 0 | 36 | 0 | Linear
+b6_drive | dB | 0 | 60 | 0 | Linear
 b6_bias | % | -100 | 100 | 0 | Linear
 b6_tone | dB | -12 | 12 | 0 | Linear
 b6_mix | % | 0 | 100 | 100 | Linear

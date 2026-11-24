@@ -23,9 +23,9 @@ Neutral settings null: drive 0 dB, band bypass, band mix 0 or global mix 0 are t
 ### 1.1 The band signal path (what the visuals draw)
 
 ```
-u      = K·g·x + b          g = drive (0…36 dB), K = +12 dB calibration, b = operating point
+u      = K·g·x + b          g = drive (0…60 dB), K = −12 dB calibration, b = operating point
 b      = β·(0.5 + 0.5·e) [− 0.2·e Tube]   β = bias (−1…1), e = envelope of what enters f (10/150 ms)
-F(x)   = (f(u) − f(b)) / K  so silence stays silence, and quiet signals keep slope g
+F(x)   = (f(u) − f(b)) / K · L   L = 10^(−min(drive, 24 dB)/20): quiet signals keep slope g·L
 wet    = Tone( down( F( up(x) ) ) )
 y      = x_d + a·HP₅(wet − x_d)      a = smoothstep(drive / 6 dB) · engaged · band mix
 out    = y · auto gain · D(e_in) · band output      D: the band's dynamics (below)
@@ -33,14 +33,24 @@ out    = y · auto gain · D(e_in) · band output      D: the band's dynamics (b
 
 `x_d` is the band delayed by the oversampler's round trip, so `a = 0` is the band exactly.
 The 5 Hz high-pass acts on the difference only: it removes the DC a bias makes and leaves the
-band's own lows alone. Drive is input gain into the curve (louder, as hardware); auto gain (on
-by default) brings the level back.
+band's own lows alone. Under 24 dB drive only moves the knees towards the signal (quiet signals
+pass at unity, `g·L = 1`); from 24 dB up each dB is a dB of gain too (louder, as hardware); auto
+gain (on by default) brings the level back.
 
 The editor's transfer curve is `x + a·(F(x) − x)` times the auto gain, from the same functions.
 
 **Calibration (2026-11-01):** user report: drive had to reach 36 dB to be heard on a kick. Measured:
 the knees sat near 0 dBFS, so a kick peaking at −18 dBFS only started to distort past +18 dB, and
 auto gain hid the level change too. `K` puts the knees 12 dB under full scale at drive 0.
+
+**Drive law (2026-11-24, state 5):** measured against Saturn 2 (`cargo xtask compare sat`,
+docs/compare/saturn-2.md): with knees 12 dB under full scale at drive 0, a −12 dBFS track already
+sat at them, and the first 6 dB faded a hard-driven sound in as a mix: untouched to 6 % THD+N in 3
+dB of drive, no gentle range, and the light settings full of upper harmonics. `K` is now −12 dB
+and the range 0…60 dB: a −12 dBFS track starts about 24 dB under the knees (Tube under 1 %) and
+meets them near 24 dB. `L` keeps the level: an old setting `d ≥ 6` is `d + 24` with the same push
+and the same output, auto gain on or off (the old fade-in 0…6 spreads over 0…30; migrated
+sessions, snapshots, modulation amounts on drive and presets, `migrate::v4_to_v5`).
 
 **Auto gain matches the hits (2026-11-02):** user report, after the calibration: 36 dB still did not
 sound like much. Measured on the user's kick stem (peak −12 dBFS, RMS −39): the engine clipped it
@@ -95,7 +105,7 @@ so both null bit for bit. Cost: six bands of Tube at 4×, 8.9 → 9.2 % of a cor
 | # | Model | Curve `f(u)` (`f(0) = 0`, `f'(0) = 1` but Rectify's 0, smooth: no corners) | Character |
 |---|---|---|---|
 | 0 | Tape | +18 dB shelf above ~2 kHz → Jiles–Atherton core (wide loop) → its exact inverse | Soft, loose, HF saturates first (and comes out compressed, little added distortion) |
-| 1 | **Tube** (default) | `u > 0`: `0.8·tanh(u/0.8)`; `u < 0`: `−1.25·(1 − e^{u/1.25})`; the point drifts down by 0.2 of the envelope (blocking) | Asymmetric: even harmonics, more as it is pushed, held at any drive |
+| 1 | **Tube** (default) | `(tanh(A(u + C)) − T)·S`, one off-centre tanh: ceilings +0.8 and −1.25, slope 1 at 0; the point drifts down by 0.2 of the envelope (blocking) | Asymmetric: even-led (H2 first) when gentle, more as it is pushed, held at any drive. Analytic: the two-piece curve it replaced (tanh above 0, exponential below, 2026-11-24) jumped in curvature at 0 and kept the 5th harmonic and up at −30 dB at any level |
 | 2 | Transformer | +18 dB shelf below ~120 Hz (the flux integrates) → JA core (narrow loop) → its exact inverse | Low end saturates first |
 | 3 | Diode | `k·asinh(u/k)`, `k` 0.3 above 0, 0.6 below (one diode against two) | Hard knee, log growth, never a ceiling; halves unlike, so even harmonics |
 | 4 | Soft | `u − 4u³/27` to ±1.5, then ±1 | Classic cubic: odd harmonics, gentle |
@@ -107,8 +117,10 @@ so both null bit for bit. Cost: six bands of Tube at 4×, 8.9 → 9.2 % of a cor
 
 A Jiles–Atherton core in normalised units (`mite_dsp::hysteresis`): `m_an = L(h + A·m)` with the
 Langevin function, an irreversible part that relaxes `m` towards `m_an` over a field distance of
-about `K` (the loop's width), a reversible share `c`. Tape: `A` 0.1, `K` 0.3, `c` 0.82; Transformer:
-`K` 0.12, `c` 0.9. A high reversible share keeps quiet signals clean (an unbiased core's gain grows
+about `K` (the loop's width), a reversible share `c`. Tape: `A` 0.1, `K` 0.3, `c` 0.97 (was 0.82);
+Transformer: `K` 0.12, `c` 0.95 (was 0.9). At 0.82 the loop alone made 1 % THD+N at a tenth of
+full field, rich in upper harmonics; a biased tape machine is clean there, so tape keeps only a
+little loop (2026-11-24); a transformer, unbiased, keeps more. A high reversible share keeps quiet signals clean (an unbiased core's gain grows
 with level at the bottom of its loop, what AC bias hides on tape): within 1.5 dB below the knee,
 H3 of a quiet sine under −40 dB. Output scaled to slope 1 for a quiet sine, so the blend with the
 dry band has no level step; the rest magnetisation at the operating point is taken off, so silence

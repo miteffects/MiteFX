@@ -23,7 +23,7 @@ use nih_plug::prelude::*;
 ///   version 2 state gets them centred, what it was.
 /// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
 ///   version 3 state gets Minimum Phase, what it was.
-pub const STATE_VERSION: u32 = 4;
+pub const STATE_VERSION: u32 = 5;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -86,7 +86,7 @@ pub const B_MUTE: BoolSpec = BoolSpec { id: "mute", name: "Mute", default: false
 pub const B_SOLO: BoolSpec = BoolSpec { id: "solo", name: "Solo", default: false };
 
 /// Drive: 0–12 dB takes half the travel.
-pub const DRIVE_DIAL: DialCurve = DialCurve(&[(0.0, 0.0), (0.5, 12.0), (0.8, 24.0), (1.0, DRIVE_MAX_DB)]);
+pub const DRIVE_DIAL: DialCurve = DialCurve(&[(0.0, 0.0), (0.5, 30.0), (0.8, 45.0), (1.0, DRIVE_MAX_DB)]);
 
 // ---- Modulation (slice 7) -----------------------------------------------------------------
 

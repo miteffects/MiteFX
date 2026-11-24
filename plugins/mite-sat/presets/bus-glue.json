@@ -8,22 +8,23 @@
     "x2_on": 1.0,
     "x2_freq": 2500.0,
     "b1_model": 2.0,
-    "b1_drive": 4.0,
+    "b1_drive": 20.0,
     "b1_dyn": -30.0,
     "b1_dyn_att": 20.0,
     "b1_dyn_rel": 200.0,
     "b2_model": 1.0,
-    "b2_drive": 3.0,
+    "b2_drive": 15.0,
     "b2_dyn": -30.0,
     "b2_dyn_att": 10.0,
     "b2_dyn_rel": 150.0,
     "b3_model": 0.0,
-    "b3_drive": 4.0,
+    "b3_drive": 20.0,
     "b3_dyn": -20.0,
     "b3_dyn_att": 5.0,
     "b3_dyn_rel": 100.0,
     "b1_out": 2.0,
     "b2_out": 2.0,
     "b3_out": 2.0
-  }
+  },
+  "state": 5
 }

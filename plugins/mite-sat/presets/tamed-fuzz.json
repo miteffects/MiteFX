@@ -4,12 +4,13 @@
   "name": "Tamed Fuzz",
   "params": {
     "b1_model": 6.0,
-    "b1_drive": 14.0,
+    "b1_drive": 38.0,
     "b1_mix": 60.0,
     "b1_tone": -3.0,
     "b1_dyn": -70.0,
     "b1_dyn_att": 2.0,
     "b1_dyn_rel": 80.0,
     "b1_out": -1.0
-  }
+  },
+  "state": 5
 }

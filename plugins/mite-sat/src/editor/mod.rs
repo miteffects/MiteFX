@@ -67,7 +67,7 @@ const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 const PEAK_RISE_S: f64 = 0.06;
 const PEAK_FALL_S: f64 = 0.3;
 /// Drag on a curve: drive per px up, bias per px across (Shift: a fifth), tone per px (Alt).
-const DRIVE_PER_PX: f32 = 0.12;
+const DRIVE_PER_PX: f32 = 0.2;
 const BIAS_PER_PX: f32 = 0.7;
 const TONE_PER_PX: f32 = 0.06;
 /// The layout grows from one band to several (base motion, 220 ms).
@@ -360,7 +360,7 @@ impl SatView {
         rail.tint = (0.18, 0.10);
         rail.labels = false;
         Self {
-            session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, shared.snapshots.clone(), shared.preset.clone()),
+            session: Session::new(SessionConfig { plugin: PLUGIN, factory: FACTORY, sound_ids: preset_ids(), snapshot_ids: preset_ids() }, shared.snapshots.clone(), shared.preset.clone()).with_preset_state(crate::params::STATE_VERSION, crate::migrate::lift_preset),
             footer,
             rail,
             pointer: None,

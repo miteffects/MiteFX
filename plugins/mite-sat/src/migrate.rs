@@ -6,7 +6,7 @@
 //! (i/3 then, i/5 now), so every `b{N}_stereo` in every slot is rescaled.
 
 use mite_plugin::state::SNAPSHOTS_KEY;
-use nih_plug::wrapper::state::PluginState;
+use nih_plug::wrapper::state::{ParamValue, PluginState};
 
 /// The stereo list's last index, before and after.
 const OLD_LAST: f64 = 3.0;
@@ -41,9 +41,125 @@ fn rescale_stereo(json: &str) -> Option<String> {
 /// **3 → 4 (2026-11-10):** `phase` appended; a version 3 state gets Minimum Phase, what it had.
 pub fn v3_to_v4(_state: &mut PluginState) {}
 
+/// **4 → 5 (2026-11-24): the drive law.** Drive 0 dB used to put a −12 dBFS signal right at the
+/// curves' knee, and the first 6 dB faded the saturation in as a mix: no gentle range (measured
+/// against Saturn 2, docs/compare/saturn-2.md). The curves now take 24 dB less at the same
+/// drive and the range runs to 60 dB, so a setting keeps its push at `d + 24` from 6 dB up; the
+/// old fade-in, 0…6, spreads over 0…30 (0 stays 0, the band untouched). A modulation of drive
+/// moves a share of the knob's travel, so its amount scales by the old range over the new.
+pub fn v4_to_v5(state: &mut PluginState) {
+    let drive_targets = drive_target_indices();
+    for (id, v) in state.params.iter_mut() {
+        if is_drive(id) {
+            if let ParamValue::F32(d) = v {
+                *d = lift_drive(*d);
+            }
+        }
+    }
+    let ids: Vec<String> = state.params.keys().cloned().collect();
+    for id in ids.iter().filter(|id| id.starts_with('m') && id.ends_with("_dst")) {
+        let target = match state.params.get(id) {
+            Some(ParamValue::I32(i)) => *i as usize,
+            Some(ParamValue::F32(f)) => f.round() as usize,
+            _ => continue,
+        };
+        if drive_targets.contains(&target) {
+            let amt = id.replace("_dst", "_amt");
+            if let Some(ParamValue::F32(a)) = state.params.get_mut(&amt) {
+                *a *= OLD_DRIVE_MAX / NEW_DRIVE_MAX;
+            }
+        }
+    }
+    if let Some(json) = state.fields.get_mut(SNAPSHOTS_KEY) {
+        if let Some(lifted) = lift_snapshots(json, &drive_targets) {
+            *json = lifted;
+        }
+    }
+}
+
+const OLD_DRIVE_MAX: f32 = 36.0;
+const NEW_DRIVE_MAX: f32 = 60.0;
+/// The old fade-in's top, where the old and new laws join (old 6 dB = new 30 dB).
+const OLD_ENGAGE: f32 = 6.0;
+const OFFSET: f32 = 24.0;
+
+fn is_drive(id: &str) -> bool {
+    id.starts_with('b') && id.ends_with("_drive")
+}
+
+/// A drive (dB) saved under the old law, under the new one.
+pub fn lift_drive(d: f32) -> f32 {
+    let d = d.clamp(0.0, OLD_DRIVE_MAX);
+    if d < OLD_ENGAGE { d * (OLD_ENGAGE + OFFSET) / OLD_ENGAGE } else { d + OFFSET }.min(NEW_DRIVE_MAX)
+}
+
+/// The modulation targets that are a band's drive (indices into the `dst` list).
+fn drive_target_indices() -> Vec<usize> {
+    crate::params::TARGETS.ids.iter().enumerate().filter(|(_, id)| is_drive(id)).map(|(i, _)| i).collect()
+}
+
+fn lift_snapshots(json: &str, drive_targets: &[usize]) -> Option<String> {
+    let mut v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let last = (crate::params::TARGETS.names.len() - 1) as f64;
+    for slot in v.get_mut("slots")?.as_array_mut()?.iter_mut() {
+        let Some(values) = slot.as_object_mut() else { continue };
+        let modulated: Vec<String> = values
+            .iter()
+            .filter(|(id, x)| id.starts_with('m') && id.ends_with("_dst") && x.as_f64().is_some_and(|n| drive_targets.contains(&((n * last).round() as usize))))
+            .map(|(id, _)| id.replace("_dst", "_amt"))
+            .collect();
+        for (id, x) in values.iter_mut() {
+            let Some(n) = x.as_f64() else { continue };
+            if is_drive(id) {
+                *x = serde_json::json!(lift_drive(n as f32 * OLD_DRIVE_MAX) / NEW_DRIVE_MAX);
+            } else if modulated.contains(id) {
+                // −100…100 % over 0…1: scaled about its centre.
+                *x = serde_json::json!(0.5 + (n as f32 - 0.5) * OLD_DRIVE_MAX / NEW_DRIVE_MAX);
+            }
+        }
+    }
+    serde_json::to_string(&v).ok()
+}
+
+/// A preset saved before state 5 (its values are plain), under the drive law of state 5.
+pub fn lift_preset(values: &mut mite_core::presets::PresetValues, from: u32) {
+    if from >= 5 {
+        return;
+    }
+    let drive_targets = drive_target_indices();
+    let modulated: Vec<String> = values
+        .iter()
+        .filter(|(id, v)| id.starts_with('m') && id.ends_with("_dst") && drive_targets.contains(&(v.round() as usize)))
+        .map(|(id, _)| id.replace("_dst", "_amt"))
+        .collect();
+    for (id, v) in values.iter_mut() {
+        if is_drive(id) {
+            *v = lift_drive(*v);
+        } else if modulated.contains(id) {
+            *v *= OLD_DRIVE_MAX / NEW_DRIVE_MAX;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_drive_law_keeps_off_off_and_a_push_its_push() {
+        assert_eq!(lift_drive(0.0), 0.0);
+        assert_eq!(lift_drive(3.0), 15.0);
+        assert_eq!(lift_drive(6.0), 30.0);
+        assert_eq!(lift_drive(14.0), 38.0);
+        assert_eq!(lift_drive(36.0), 60.0);
+        let old = r#"{"active":0,"slots":[{"b1_drive":0.5,"b2_drive":0.0,"m1_dst":0.023255814,"m1_amt":1.0,"m2_dst":0.04651163,"m2_amt":1.0},null,null,null]}"#;
+        let new: serde_json::Value = serde_json::from_str(&lift_snapshots(old, &drive_target_indices()).expect("lifted")).expect("JSON");
+        let slot = &new["slots"][0];
+        assert!((slot["b1_drive"].as_f64().unwrap() - 42.0 / 60.0).abs() < 1e-6, "18 dB → 42 dB");
+        assert_eq!(slot["b2_drive"].as_f64(), Some(0.0));
+        assert!((slot["m1_amt"].as_f64().unwrap() - 0.8).abs() < 1e-6, "+100 % on Band 1 Drive → +60 %");
+        assert_eq!(slot["m2_amt"].as_f64(), Some(1.0), "Band 1 Bias untouched");
+    }
 
     #[test]
     fn a_snapshots_stereo_modes_keep_their_meaning() {

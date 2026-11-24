@@ -27,7 +27,13 @@ pub struct Preset {
     pub factory: bool,
     /// State beyond the parameters, as the plugin writes it (Mite Rig's board).
     pub extra: Option<String>,
+    /// The plugin's state version the values were saved under (`None`: before presets recorded
+    /// it). A library given a lift ([`PresetLibrary::with_state`]) brings older ones up to date.
+    pub state: Option<u32>,
 }
+
+/// Brings a preset's values saved under state version `from` (0: unrecorded) up to the current.
+pub type Lift = fn(&mut PresetValues, u32);
 
 #[derive(Serialize, Deserialize)]
 struct File {
@@ -37,6 +43,8 @@ struct File {
     params: PresetValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     extra: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state: Option<u32>,
 }
 
 /// A preset file of `plugin` (its display name, "Mite EQ").
@@ -46,14 +54,19 @@ pub fn to_json(plugin: &str, name: &str, values: &PresetValues) -> String {
 
 /// A preset file with state beyond the parameters (`Preset::extra`).
 pub fn to_json_with(plugin: &str, name: &str, values: &PresetValues, extra: Option<&str>) -> String {
-    let file = File { plugin: plugin.to_owned(), version: VERSION, name: name.to_owned(), params: values.clone(), extra: extra.map(str::to_owned) };
+    to_json_state(plugin, name, values, extra, None)
+}
+
+/// A preset file recording the plugin's state version (`Preset::state`).
+pub fn to_json_state(plugin: &str, name: &str, values: &PresetValues, extra: Option<&str>, state: Option<u32>) -> String {
+    let file = File { plugin: plugin.to_owned(), version: VERSION, name: name.to_owned(), params: values.clone(), extra: extra.map(str::to_owned), state };
     serde_json::to_string_pretty(&file).unwrap_or_default()
 }
 
 /// A preset file's contents, if it is one of `plugin`'s that this version can read.
 pub fn from_json(plugin: &str, json: &str, factory: bool) -> Option<Preset> {
     let file: File = serde_json::from_str(json).ok()?;
-    (file.plugin == plugin && file.version <= VERSION).then_some(Preset { name: file.name, values: file.params, factory, extra: file.extra })
+    (file.plugin == plugin && file.version <= VERSION).then_some(Preset { name: file.name, values: file.params, factory, extra: file.extra, state: file.state })
 }
 
 /// Where `plugin`'s user presets live: the OS's settings folder (`~/.config/MiteFX/<plugin>/Presets`,
@@ -94,9 +107,13 @@ pub fn save_in(plugin: &str, dir: &Path, name: &str, values: &PresetValues) -> s
 
 /// [`save_in`] with state beyond the parameters (`Preset::extra`).
 pub fn save_in_with(plugin: &str, dir: &Path, name: &str, values: &PresetValues, extra: Option<&str>) -> std::io::Result<PathBuf> {
+    save_in_state(plugin, dir, name, values, extra, None)
+}
+
+fn save_in_state(plugin: &str, dir: &Path, name: &str, values: &PresetValues, extra: Option<&str>, state: Option<u32>) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(file_name(name));
-    std::fs::write(&path, to_json_with(plugin, name.trim(), values, extra))?;
+    std::fs::write(&path, to_json_state(plugin, name.trim(), values, extra, state))?;
     Ok(path)
 }
 
@@ -107,6 +124,8 @@ pub struct PresetLibrary {
     factory: Vec<Preset>,
     user: Vec<Preset>,
     dir: Option<PathBuf>,
+    /// The plugin's state version and how to lift an older preset to it.
+    state: Option<(u32, Lift)>,
 }
 
 impl PresetLibrary {
@@ -118,9 +137,35 @@ impl PresetLibrary {
             factory: factory.iter().filter_map(|json| from_json(plugin, json, true)).collect(),
             user: Vec::new(),
             dir: user_dir(plugin),
+            state: None,
         };
         library.reload();
         library
+    }
+
+    /// Presets record state version `current`; one saved under an older version (or before
+    /// presets recorded one) has its values brought up to date by `lift` as it is read.
+    pub fn with_state(mut self, current: u32, lift: Lift) -> Self {
+        self.set_state(current, lift);
+        self
+    }
+
+    pub fn set_state(&mut self, current: u32, lift: Lift) {
+        self.state = Some((current, lift));
+        for p in &mut self.factory {
+            Self::lift(self.state, p);
+        }
+        self.reload();
+    }
+
+    fn lift(state: Option<(u32, Lift)>, p: &mut Preset) {
+        if let Some((current, lift)) = state {
+            let from = p.state.unwrap_or(0);
+            if from < current {
+                lift(&mut p.values, from);
+                p.state = Some(current);
+            }
+        }
     }
 
     /// Keeps the user's presets in `dir` instead (tests, a portable setup).
@@ -141,6 +186,9 @@ impl PresetLibrary {
     /// Reads the user's folder again (another instance may have saved).
     pub fn reload(&mut self) {
         self.user = self.dir.as_deref().map(|d| user_in(self.plugin, d)).unwrap_or_default();
+        for p in &mut self.user {
+            Self::lift(self.state, p);
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -181,7 +229,7 @@ impl PresetLibrary {
     /// [`PresetLibrary::save`] with state beyond the parameters (`Preset::extra`).
     pub fn save_with(&mut self, name: &str, values: &PresetValues, extra: Option<&str>) -> std::io::Result<PathBuf> {
         let dir = self.dir.clone().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no preset folder"))?;
-        let path = save_in_with(self.plugin, &dir, name, values, extra)?;
+        let path = save_in_state(self.plugin, &dir, name, values, extra, self.state.map(|s| s.0))?;
         self.reload();
         Ok(path)
     }
@@ -206,6 +254,27 @@ mod tests {
     use super::*;
 
     const INIT: &str = r#"{"plugin":"Test","version":1,"name":"Init","params":{}}"#;
+
+    #[test]
+    fn an_older_preset_is_lifted_as_it_is_read_and_a_new_one_records_its_state() {
+        fn double(values: &mut PresetValues, from: u32) {
+            assert!(from < 3);
+            for v in values.values_mut() {
+                *v *= 2.0;
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("mite-presets-lift-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Old.json"), r#"{"plugin":"Test","version":1,"name":"Old","params":{"gain":3.0}}"#).unwrap();
+        let mut lib = PresetLibrary::new("Test", &[INIT, r#"{"plugin":"Test","version":1,"name":"New","params":{"gain":3.0},"state":3}"#]).with_dir(dir.clone()).with_state(3, double);
+        assert_eq!(lib.find("Old").unwrap().values["gain"], 6.0, "a user preset from before states");
+        assert_eq!(lib.find("New").unwrap().values["gain"], 3.0, "a factory preset at the current state");
+        lib.save("Saved", &[("gain".to_owned(), 1.0)].into_iter().collect()).unwrap();
+        assert_eq!(lib.find("Saved").unwrap().values["gain"], 1.0, "saved now: not lifted again");
+        assert!(std::fs::read_to_string(dir.join("Saved.json")).unwrap().contains("\"state\": 3"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     const LOUD: &str = r#"{"plugin":"Test","version":1,"name":"Loud","params":{"gain":6.0}}"#;
 
     fn temp(tag: &str) -> PathBuf {
@@ -219,7 +288,7 @@ mod tests {
         let path = save_in("Test", &dir, "My: bright/vocal", &values).expect("saved");
         assert!(path.file_name().is_some_and(|f| f == "My_ bright_vocal.json"));
         let read = user_in("Test", &dir);
-        assert_eq!(read, vec![Preset { name: "My: bright/vocal".into(), values, factory: false, extra: None }]);
+        assert_eq!(read, vec![Preset { name: "My: bright/vocal".into(), values, factory: false, extra: None, state: None }]);
         // Another plugin's file is not ours.
         assert!(user_in("Other", &dir).is_empty());
         assert!(from_json("Test", r#"{"plugin":"Other","version":1,"name":"x","params":{}}"#, false).is_none());

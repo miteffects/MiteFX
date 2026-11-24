@@ -33,7 +33,7 @@ pub use crate::crossover::{FREQ_MAX, FREQ_MIN, MIN_GAP_OCT};
 
 pub const BANDS: usize = 6;
 pub const CROSSOVERS: usize = BANDS - 1;
-pub const DRIVE_MAX_DB: f32 = 36.0;
+pub const DRIVE_MAX_DB: f32 = 60.0;
 /// The saturation fades in over the first this many dB of drive.
 pub const ENGAGE_DB: f32 = 6.0;
 /// Bias ±1 (±100 %) moves the operating point this far, plus [`BIAS_TRACK`] of the signal's peak.
@@ -193,13 +193,12 @@ pub fn curve(model: Model, u: f32) -> f32 {
         return anhysteretic(p, p.h_in * u) * (3.0 - p.coupling) / p.h_in;
     }
     match model {
-        Model::Tube => {
-            if u > 0.0 {
-                0.8 * (u / 0.8).tanh()
-            } else {
-                -1.25 * (1.0 - (u / 1.25).exp())
-            }
-        }
+        // One tanh, off centre: analytic, so its harmonics fall away fast at any level. The
+        // two-piece curve it replaced (tanh above zero, an exponential below) jumped in
+        // curvature at zero: like a slight rectifier, it kept the 5th harmonic and up at −30 dB
+        // against the 2nd–4th even at a whisper (Saturn 2's Warm Tube: −68 dB; 2026-11-24).
+        // Same ceilings (+0.8, −1.25) and slope 1 at zero.
+        Model::Tube => ((TUBE_A * (u + TUBE_C)).tanh() - TUBE_T) * TUBE_S,
         // An unmatched pair: one diode conducts the top, two in series the bottom, so the halves
         // differ in shape at any level (even harmonics without bias).
         Model::Diode => {
@@ -210,6 +209,9 @@ pub fn curve(model: Model, u: f32) -> f32 {
             };
             k * (u / k).asinh()
         }
+        // A pure cubic up to its clip: only the 3rd harmonic until the swing reaches ±1.5
+        // (measured purer than Saturn 2's Gentle Saturation up to 10 % THD+N; a tanh-smoothed
+        // limit added a 5th-order term everywhere and was 60 dB harsher at moderate levels).
         Model::Tape | Model::Transformer | Model::Soft => {
             if u.abs() < 1.5 {
                 u - 4.0 / 27.0 * u * u * u
@@ -233,10 +235,26 @@ pub fn curve(model: Model, u: f32) -> f32 {
     }
 }
 
-/// Where drive 0 dB puts the curves' knees: this far (12 dB) under full scale, so a track at a
-/// sensible level reaches them within the first few dB of drive rather than past +18 dB. It goes in
-/// before the curve and comes off after it, so quiet signals keep slope `g` and only the knees move.
-pub const CALIBRATION: f32 = 3.981_071_7;
+/// Where drive puts the curves' knees: 0 dB drive takes a signal in at −12 dB, so a −12 dBFS
+/// track starts about 24 dB under them, gently (Tube under 1 % THD+N), and reaches them near
+/// 24 dB (2026-11-24, state 5). It goes in before the curve and comes off after it, so quiet
+/// signals keep slope `g` and only the knees move. It used to be +12 dB: a −12 dBFS track met
+/// the knees at 0 dB and the first 6 dB faded a hard-driven sound in as a mix, so there was no
+/// gentle range (docs/compare/saturn-2.md).
+pub const CALIBRATION: f32 = 0.251_188_64;
+
+/// Drive below this (dB) moves only the knee, not the level: the curve's output comes off by the
+/// drive it took in, so quiet signals pass at unity and drive is how close to saturation. From
+/// here up each dB of drive is a dB of gain as well, as every setting was under the old law (old
+/// 0 dB is new 24), so a migrated session keeps its level with auto gain off too.
+pub const LEVEL_DB: f32 = 24.0;
+
+/// What the curve's output (after `/ CALIBRATION`) is scaled by at `drive_db`: the drive under
+/// [`LEVEL_DB`] taken back off.
+#[inline]
+pub fn out_scale(drive_db: f32) -> f32 {
+    crate::db_to_gain(-drive_db.clamp(0.0, LEVEL_DB))
+}
 
 /// The share of the saturation heard at `drive_db` (0 at 0 dB, 1 from [`ENGAGE_DB`], S-shaped).
 #[inline]
@@ -244,6 +262,14 @@ pub fn engagement(drive_db: f32) -> f32 {
     let t = (drive_db / ENGAGE_DB).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
+
+/// Tube's curve `(tanh(A·(u + C)) − T)·S`: `T = tanh(A·C)` puts it through 0, `S = 1/(A·(1 − T²))`
+/// gives slope 1 there, and `T = 0.5625/2.5625`, `A = 1/(0.8·(1 + T))` set the ceilings to +0.8
+/// and −1.25 (the two-piece curve's).
+const TUBE_T: f32 = 0.219_512_2;
+const TUBE_A: f32 = 1.025;
+const TUBE_C: f32 = 0.217_701_03;
+const TUBE_S: f32 = 1.025;
 
 /// Diode: the knees of its top and bottom halves (one diode against two).
 const DIODE_KNEES: (f32, f32) = (0.3, 0.6);
@@ -322,7 +348,7 @@ fn static_lane(model: Model, env: &mut f32, u0: f32, bias: f32, k: (f32, f32)) -
 pub fn transfer(model: Model, x: f32, drive_db: f32, point: f32) -> f32 {
     let g = crate::db_to_gain(drive_db);
     let a = engagement(drive_db);
-    x + a * ((curve(model, CALIBRATION * g * x + point) - curve(model, point)) / CALIBRATION - x)
+    x + a * ((curve(model, CALIBRATION * g * x + point) - curve(model, point)) / CALIBRATION * out_scale(drive_db) - x)
 }
 
 // ---- Auto gain ----------------------------------------------------------------------------
@@ -407,6 +433,8 @@ pub fn predicted_gain(model: Model, amplitude: f32, drive_db: f32, bias: f32, a:
     };
     let (p, c) = (at(&t.p), at(&t.c));
     let a = f64::from(a);
+    // The curve's quiet slope: the drive, less what [`out_scale`] takes back.
+    let g = g * f64::from(out_scale(drive_db));
     let g2 = (1.0 - a) * (1.0 - a) + 2.0 * a * (1.0 - a) * g * c + a * a * g * g * p;
     g2.max(0.0).sqrt() as f32
 }
@@ -799,7 +827,7 @@ fn respond(
         Magnet::steady(&em, g * amp, n, fs, k)
     });
     x.iter()
-        .map(|&v| magnet.process(w, &em, g * v, bias, k) / CALIBRATION)
+        .map(|&v| magnet.process(w, &em, g * v, bias, k) / CALIBRATION * out_scale(drive_db))
         .collect()
 }
 
@@ -907,7 +935,7 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         let mut cycle = vec![0.0f32; n];
         for c in 0..PROBE_CYCLES {
             for (i, y) in cycle.iter_mut().enumerate() {
-                *y = magnet.process(w, &em, g * sine(i), p.bias, k) / CALIBRATION;
+                *y = magnet.process(w, &em, g * sine(i), p.bias, k) / CALIBRATION * out_scale(p.drive_db);
             }
             let swing = cycle.iter().fold(0.0f32, |m, v| m.max(v.abs()));
             let moved = cycle
@@ -926,7 +954,7 @@ pub fn probe_harmonics(p: &Probe) -> Harmonics {
         let moves = p.model.tracks() && (p.bias != 0.0 || p.model == Model::Tube);
         let mut env = if moves { settled_env(&u, k) } else { 0.0 };
         u.iter()
-            .map(|&v| static_lane(p.model, &mut env, v, p.bias, k))
+            .map(|&v| static_lane(p.model, &mut env, v, p.bias, k) * out_scale(p.drive_db))
             .collect()
     };
     let tilt = Tilt::new(p.tone_db, p.pivot, p.fs);
@@ -1328,6 +1356,8 @@ struct Lanes {
     post: [[f32; CHUNK]; BANDS],
     /// The band's fader alone, without auto gain (what a part left clean gets).
     fader: [[f32; CHUNK]; BANDS],
+    /// What the curve's output is scaled by ([`out_scale`]).
+    level: [[f32; CHUNK]; BANDS],
     /// The model crossfade's position (0: the heard lane only).
     blend: [[f32; CHUNK]; BANDS],
     tilt: [[Tilt; CHUNK]; BANDS],
@@ -1365,8 +1395,8 @@ pub struct Saturator {
     emph_base: [Tilt; 2],
     hp_k: f32,
     /// The values each control step ramps from and to, by band slot: gain, bias, share, post, fader.
-    from: [[f32; 5]; BANDS],
-    to: [[f32; 5]; BANDS],
+    from: [[f32; 6]; BANDS],
+    to: [[f32; 6]; BANDS],
     tilt_now: [Tilt; BANDS],
     /// The tone and pivot each band's tilt was designed for.
     tilt_key: [(f32, f32); BANDS],
@@ -1409,8 +1439,8 @@ impl Saturator {
             emph: [(Tilt::IDENTITY, Tilt::IDENTITY); 2],
             emph_base: [Tilt::IDENTITY; 2],
             hp_k: 0.0,
-            from: [[0.0; 5]; BANDS],
-            to: [[0.0; 5]; BANDS],
+            from: [[0.0; 6]; BANDS],
+            to: [[0.0; 6]; BANDS],
             tilt_now: [Tilt::IDENTITY; BANDS],
             tilt_key: [(0.0, 0.0); BANDS],
             live: [false; BANDS],
@@ -1420,6 +1450,7 @@ impl Saturator {
                 share: [[0.0; CHUNK]; BANDS],
                 post: [[0.0; CHUNK]; BANDS],
                 fader: [[0.0; CHUNK]; BANDS],
+                level: [[0.0; CHUNK]; BANDS],
                 blend: [[0.0; CHUNK]; BANDS],
                 tilt: [[Tilt::IDENTITY; CHUNK]; BANDS],
             }),
@@ -1532,7 +1563,7 @@ impl Saturator {
     }
 
     /// Band slot `b`'s gain into the curve, bias, share, post gain and fader for its eased settings.
-    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 5] {
+    fn targets(&self, b: usize, auto_gain: bool) -> [f32; 6] {
         let e = &self.eased[b];
         let share = e.share();
         let auto = if auto_gain {
@@ -1547,6 +1578,7 @@ impl Saturator {
             share as f32,
             (auto * fader) as f32,
             fader as f32,
+            out_scale(e.drive_db as f32),
         ]
     }
 
@@ -1840,6 +1872,7 @@ impl Saturator {
                 self.lanes.share[b][i] = r(2);
                 self.lanes.post[b][i] = r(3);
                 self.lanes.fader[b][i] = r(4);
+                self.lanes.level[b][i] = r(5);
                 self.lanes.tilt[b][i] = self.tilt_now[b];
                 let e = &mut self.eased[b];
                 self.lanes.blend[b][i] = match e.lane_fade {
@@ -1971,10 +2004,11 @@ impl Saturator {
                             };
                         }
                         band.os.up(c, &tmp[..past], &mut self.hi[..past * f]);
-                        let (g, bias, model) = (
+                        let (g, bias, model, level) = (
                             self.lanes.gain[b][0],
                             self.lanes.bias[b][0],
                             e.lanes[e.lane],
+                            self.lanes.level[b][0],
                         );
                         // The core and the envelope warm up on the past too.
                         for v in &mut self.hi[..past * f] {
@@ -1995,7 +2029,7 @@ impl Saturator {
                                     bias,
                                     self.env_k,
                                 ),
-                            };
+                            } * level;
                         }
                         let mut sink = [0.0f32; PREROLL];
                         band.os.down(c, &self.hi[..past * f], &mut sink[..past]);
@@ -2024,20 +2058,21 @@ impl Saturator {
                     };
                     for k in 0..m {
                         let i = k / f;
-                        let (g, bias) = (self.lanes.gain[b][i], self.lanes.bias[b][i]);
+                        let (g, bias, level) = (self.lanes.gain[b][i], self.lanes.bias[b][i], self.lanes.level[b][i]);
                         for c in 0..n_ch {
                             if !driven[c] {
                                 continue;
                             }
                             let at = c * HI_CH + k;
                             let u0 = g * self.hi[at];
-                            self.hi[at] = if lane_fading {
-                                let (a, z) =
-                                    (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
-                                a + (z - a) * self.lanes.blend[b][i]
-                            } else {
-                                lane(heard, c, u0, bias)
-                            };
+                            self.hi[at] = level
+                                * if lane_fading {
+                                    let (a, z) =
+                                        (lane(heard, c, u0, bias), lane(1 - heard, c, u0, bias));
+                                    a + (z - a) * self.lanes.blend[b][i]
+                                } else {
+                                    lane(heard, c, u0, bias)
+                                };
                         }
                     }
                     band.idle = false;
@@ -2087,11 +2122,12 @@ impl Saturator {
                     }
                     let level = 20.0 * band.dyn_peak.max(1e-6).log10();
                     let target = dynamics_gain_db(amount, threshold, level);
-                    let k = if target.abs() > band.dyn_db.abs() {
-                        att
-                    } else {
-                        rel
-                    };
+                    // Attack while the gain moves away from 0 dB, release while it comes back,
+                    // blended over 2 dB: a switch from one to the other put a corner in a moving
+                    // gain (an amount stepped from lift to cut glides through 0, where release
+                    // took over, then attack: +10 dB in the §10 step test, 2026-11-24).
+                    let w = ((target.abs() - band.dyn_db.abs()) * 0.5 + 0.5).clamp(0.0, 1.0);
+                    let k = rel + (att - rel) * w * w * (3.0 - 2.0 * w);
                     band.dyn_db += k * (target - band.dyn_db);
                     if amount == 0.0 && band.dyn_db.abs() < 1e-4 {
                         band.dyn_db = 0.0;
@@ -2341,10 +2377,10 @@ mod tests {
         let freq = K as f32 / N as f32 * FS;
         for m in Model::ALL {
             for (amp, drive, bias, tilt, mix) in [
-                (0.25f32, 12.0f32, 0.0f32, 0.0f32, 1.0f32),
-                (0.1, 24.0, 0.4, 6.0, 1.0),
-                (0.3, 9.0, -0.3, -8.0, 0.6),
-                (0.2, 3.0, 0.0, 0.0, 1.0),
+                (0.25f32, 36.0f32, 0.0f32, 0.0f32, 1.0f32),
+                (0.1, 48.0, 0.4, 6.0, 1.0),
+                (0.3, 33.0, -0.3, -8.0, 0.6),
+                (0.2, 27.0, 0.0, 0.0, 1.0),
             ] {
                 let mut s = band(m, drive);
                 s.bands[0].bias = bias;
@@ -2687,15 +2723,16 @@ mod tests {
     }
 
     #[test]
-    fn a_track_at_minus_18_reaches_the_knee_within_a_little_drive() {
-        // The calibration: a −18 dBFS sine at 12 dB of drive has audible harmonics on the curves
-        // a kick would be heard through; at drive 0 nothing has changed.
+    fn a_track_at_minus_18_is_gentle_low_and_reaches_the_knee_by_36() {
+        // The calibration (state 5): a −18 dBFS sine at 36 dB of drive has audible harmonics on
+        // the curves a kick would be heard through; at 6 dB it is gently coloured, every harmonic
+        // under −40 dB (the old law had no such range: 3 dB already gave 6 % THD+N).
         let amp = 10f32.powf(-18.0 / 20.0);
-        for m in [Model::Tube, Model::Soft, Model::Hard, Model::Diode] {
-            let h = probe_harmonics(&Probe {
+        for m in [Model::Tube, Model::Soft, Model::Hard, Model::Diode, Model::Tape, Model::Transformer] {
+            let at = |drive_db: f32| probe_harmonics(&Probe {
                 model: m,
                 amp,
-                drive_db: 12.0,
+                drive_db,
                 bias: 0.0,
                 freq: 1000.0,
                 tone_db: 0.0,
@@ -2703,7 +2740,25 @@ mod tests {
                 mix: 1.0,
                 fs: FS,
             });
-            assert!(h.db(2) > -30.0, "{m:?}: H3 {:.1} dB", h.db(2));
+            let gentle = at(6.0);
+            for k in 1..6 {
+                assert!(gentle.db(k) < -40.0, "{m:?} at 6 dB: H{} {:.1} dB", k + 1, gentle.db(k));
+            }
+            if matches!(m, Model::Tape | Model::Transformer) {
+                continue;
+            }
+            let h = probe_harmonics(&Probe {
+                model: m,
+                amp,
+                drive_db: 36.0,
+                bias: 0.0,
+                freq: 1000.0,
+                tone_db: 0.0,
+                pivot: TONE_PIVOT,
+                mix: 1.0,
+                fs: FS,
+            });
+            assert!(h.db(1).max(h.db(2)) > -30.0, "{m:?}: H2 {:.1}, H3 {:.1} dB", h.db(1), h.db(2));
         }
     }
 
@@ -2713,7 +2768,7 @@ mod tests {
         let p = Probe {
             model: Model::Soft,
             amp: 0.5,
-            drive_db: 12.0,
+            drive_db: 36.0,
             bias: 0.0,
             freq: 9000.0,
             tone_db: 0.0,
@@ -2762,10 +2817,10 @@ mod tests {
     #[test]
     fn soft_matches_its_closed_form_harmonics() {
         // f(u) = u − 4u³/27: a sine of amplitude U gives H1 = U − U³/9 and H3 = U³/27, and the
-        // calibration comes off afterwards.
-        let (amp, drive) = (0.1f32, 8.0f32);
-        let k = f64::from(CALIBRATION);
-        let u = f64::from(amp * crate::db_to_gain(drive)) * k;
+        // calibration and the drive under `LEVEL_DB` come off afterwards.
+        let (amp, drive) = (0.1f32, 32.0f32);
+        let k = f64::from(CALIBRATION / out_scale(drive));
+        let u = f64::from(amp * crate::db_to_gain(drive) * CALIBRATION);
         let s = band(Model::Soft, drive);
         let mut sat = Saturator::new(FS, 8, &s);
         let (y, _) = run(&mut sat, &tone(4 * N, amp, K), &s, 512);
@@ -2813,8 +2868,11 @@ mod tests {
                     }
                     let got = harmonic(&y, h);
                     let db = 20.0 * (got / want).log10();
+                    // Or within −60 dB of the input: in the fade-in a partial can be the dry and the
+                    // wet nearly cancelling (Rectify's fundamental at 3 dB: −28 dB of the input),
+                    // where the difference's 5 Hz high-pass shows.
                     assert!(
-                        db.abs() < 0.05,
+                        db.abs() < 0.05 || (got - want).abs() < 1e-3 * f64::from(amp),
                         "{m:?} amp {amp} drive {drive} bias {bias}: H{h} {db:.3} dB off"
                     );
                 }
@@ -2916,13 +2974,16 @@ mod tests {
     #[test]
     fn tape_and_transformer_pass_quiet_signals_at_unity() {
         for m in [Model::Tape, Model::Transformer] {
-            let s = band(m, 12.0);
-            let mut sat = Saturator::new(FS, 2, &s);
-            let (y, _) = run(&mut sat, &tone(4 * N, 0.002, K), &s, 256);
-            // Drive is gain into the curve (auto gain off): 12 dB louder, as the static curves.
-            let db = 20.0 * (harmonic(&y, 1) / 0.002).log10() - 12.0;
-            assert!(db.abs() < 1.0, "{m:?}: {db:.2} dB");
-            assert!(harmonic(&y, 3) < harmonic(&y, 1) * 0.01, "{m:?}: H3");
+            // Auto gain off. Under `LEVEL_DB` drive moves only the knee: unity. Above it drive is
+            // gain as well: 36 dB is 12 dB louder, as the static curves.
+            for (drive, gain) in [(12.0f32, 0.0f64), (36.0, 12.0)] {
+                let s = band(m, drive);
+                let mut sat = Saturator::new(FS, 2, &s);
+                let (y, _) = run(&mut sat, &tone(4 * N, 0.002, K), &s, 256);
+                let db = 20.0 * (harmonic(&y, 1) / 0.002).log10() - gain;
+                assert!(db.abs() < 1.0, "{m:?} at {drive} dB: {db:.2} dB");
+                assert!(harmonic(&y, 3) < harmonic(&y, 1) * 0.01, "{m:?}: H3");
+            }
         }
     }
 
@@ -3233,7 +3294,7 @@ mod tests {
             })
             .collect();
         for m in [Model::Tube, Model::Hard, Model::Tape] {
-            let mut s = band(m, 36.0);
+            let mut s = band(m, 60.0);
             s.auto_gain = true;
             let mut sat = Saturator::new(FS, 2, &s);
             let lat = sat.latency();

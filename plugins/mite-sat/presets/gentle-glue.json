@@ -4,6 +4,7 @@
   "name": "Gentle Glue",
   "params": {
     "b1_model": 1.0,
-    "b1_drive": 3.0
-  }
+    "b1_drive": 15.0
+  },
+  "state": 5
 }

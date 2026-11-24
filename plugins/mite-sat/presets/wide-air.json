@@ -7,9 +7,10 @@
     "x1_freq": 6000.0,
     "b1_drive": 0.0,
     "b2_model": 4.0,
-    "b2_drive": 8.0,
+    "b2_drive": 32.0,
     "b2_tone": 2.0,
     "b2_stereo": 2.0,
     "b2_mix": 70.0
-  }
+  },
+  "state": 5
 }

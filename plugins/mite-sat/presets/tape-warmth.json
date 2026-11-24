@@ -4,7 +4,8 @@
   "name": "Tape Warmth",
   "params": {
     "b1_model": 0.0,
-    "b1_drive": 6.0,
+    "b1_drive": 30.0,
     "b1_tone": -1.0
-  }
+  },
+  "state": 5
 }

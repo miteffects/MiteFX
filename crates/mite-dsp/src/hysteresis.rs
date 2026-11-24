@@ -43,23 +43,25 @@ pub struct JaParams {
     pub h_in: f32,
 }
 
-/// Tape: a wide loop, soft and loose.
+/// Tape: a wide loop, soft and loose, mostly reversible as a biased machine's is (0.82 left 1 %
+/// THD at a tenth of full field, all of it from the loop and rich in upper harmonics; a tape
+/// machine's AC bias keeps that region clean, 2026-11-24).
 pub const TAPE: JaParams = JaParams {
     coupling: 0.1,
     pinning: 0.3,
-    reversible: 0.82,
+    reversible: 0.97,
     h_in: 2.5,
 };
-/// Transformer: a narrow loop on a stiffer core.
+/// Transformer: a narrow loop on a stiffer core. No bias, so more of its loop stays than tape's.
 pub const TRANSFORMER: JaParams = JaParams {
     coupling: 0.1,
     pinning: 0.12,
-    reversible: 0.9,
+    reversible: 0.95,
     h_in: 2.0,
 };
 
 /// Substeps: at most this far apart in `w = asinh(h / H_S)`, and at most this many a sample.
-const MAX_DW: f32 = 0.5;
+const MAX_DW: f32 = 0.35;
 const H_S: f32 = 1.0;
 const MAX_SUBSTEPS: usize = 64;
 
@@ -286,8 +288,9 @@ mod tests {
             assert!(g_hot < 0.7 * g_mid, "{p:?}: {g_mid} → {g_hot}");
             assert!(h3 > -30.0, "{p:?}: H3 {h3:.1} dB");
         }
-        // Tape's loop is the wider.
-        assert!(sine(&TAPE, 0.3).1 < sine(&TRANSFORMER, 0.3).1);
+        println!("lag at 0.3: tape {:.2}°, transformer {:.2}°", sine(&TAPE, 0.3).1, sine(&TRANSFORMER, 0.3).1);
+        // The transformer keeps more of its loop: unbiased, it lags the more.
+        assert!(sine(&TRANSFORMER, 0.3).1 < sine(&TAPE, 0.3).1);
     }
 
     #[test]

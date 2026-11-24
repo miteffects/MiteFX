@@ -157,6 +157,13 @@ pub struct Session {
 impl Session {
     /// A session over the plugin's snapshot and current-preset stores (the ones its parameters
     /// save with the state).
+    /// Presets record the plugin's state version, and older ones are lifted as they are read
+    /// (`PresetLibrary::with_state`).
+    pub fn with_preset_state(mut self, current: u32, lift: mite_core::presets::Lift) -> Self {
+        self.library.set_state(current, lift);
+        self
+    }
+
     pub fn new(config: SessionConfig, snapshots: Arc<Snapshots>, current: Arc<CurrentPreset>) -> Self {
         Self {
             snapshots,

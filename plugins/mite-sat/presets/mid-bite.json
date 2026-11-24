@@ -4,10 +4,11 @@
   "name": "Mid Bite",
   "params": {
     "b1_model": 3.0,
-    "b1_drive": 10.0,
+    "b1_drive": 34.0,
     "b1_stereo": 1.0,
     "b1_dyn": -40.0,
     "b1_dyn_att": 10.0,
     "b1_dyn_rel": 150.0
-  }
+  },
+  "state": 5
 }

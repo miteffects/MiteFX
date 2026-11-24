@@ -88,9 +88,9 @@ const ALIAS_PAIRS: &[(&str, &str)] = &[
 /// (dB) for every signal.
 const FAB_SINE: [f64; 11] = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0];
 const FAB_REST: [f64; 6] = [0.0, 20.0, 40.0, 60.0, 80.0, 100.0];
-const MITE_ALL: [f64; 13] = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 30.0, 33.0, 36.0];
+const MITE_ALL: [f64; 16] = [0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0, 44.0, 48.0, 52.0, 56.0, 60.0];
 const FAB_ALIAS: [f64; 5] = [0.0, 25.0, 50.0, 75.0, 100.0];
-const MITE_ALIAS: [f64; 8] = [0.0, 3.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0];
+const MITE_ALIAS: [f64; 9] = [0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 44.0, 52.0, 60.0];
 
 /// One setting: a style (Saturn) or model (Mite), a drive in that plugin's units, and whether
 /// to oversample (Saturn "Good" / Mite 4×) or not.
@@ -211,7 +211,7 @@ fn plan() -> Vec<(Vendor, &'static str, Setting)> {
     for k in 0..CPU_RUNS {
         for hq in [false, true] {
             p.push((Vendor::Fab, if k == 0 { "cpu" } else { leak(format!("cpu{k}")) }, set("Warm Tube", 50.0, hq)));
-            p.push((Vendor::Mite, if k == 0 { "cpu" } else { leak(format!("cpu{k}")) }, set("Tube", 18.0, hq)));
+            p.push((Vendor::Mite, if k == 0 { "cpu" } else { leak(format!("cpu{k}")) }, set("Tube", 42.0, hq)));
         }
     }
     p
@@ -446,7 +446,7 @@ pub fn tables(work: &Path, rendered: &BTreeMap<String, Rendered>) -> Result<Vec<
     // Reach: how much distortion each drive range covers.
     let mut reach = Table::new(
         "Reach: THD+N of a 100 Hz sine at −12 dBFS across the whole drive range",
-        "dB re the fundamental at the lowest and highest drive (Saturn 2 0–100 %, Mite Sat 0–36 dB): how clean a style starts and how far it goes. A figure below is read only where both sweeps reach that distortion.",
+        "dB re the fundamental at the lowest and highest drive (Saturn 2 0–100 %, Mite Sat 0–60 dB): how clean a style starts and how far it goes. A figure below is read only where both sweeps reach that distortion.",
         &["Saturn 2 style ↔ Mite Sat model", "Saturn min", "Saturn max", "Mite min", "Mite max"],
     );
     for (style, model) in STYLES {
@@ -575,10 +575,10 @@ pub fn tables(work: &Path, rendered: &BTreeMap<String, Rendered>) -> Result<Vec<
                 .map(|r| r.seconds)
                 .fold(f64::NAN, f64::min)
         };
-        let (f, m) = (s(Vendor::Fab, "Warm Tube", 50.0), s(Vendor::Mite, "Tube", 18.0));
+        let (f, m) = (s(Vendor::Fab, "Warm Tube", 50.0), s(Vendor::Mite, "Tube", 42.0));
         cpu.push(Row::lower(if hq { "seconds, Good ↔ 4×" } else { "seconds, Off ↔ 1×" }, f, m, 0.1 * f, 2));
         let lat = |v: Vendor, style: &str, d: f64| rendered.get(&id(v, "cpu", style, d, hq)).map_or(0, |r| r.latency);
-        cpu.rows.push(Row { cells: vec![format!("latency, {}", if hq { "Good ↔ 4×" } else { "Off ↔ 1×" }), format!("{} smp", lat(Vendor::Fab, "Warm Tube", 50.0)), format!("{} smp", lat(Vendor::Mite, "Tube", 18.0))], verdict: Verdict::None });
+        cpu.rows.push(Row { cells: vec![format!("latency, {}", if hq { "Good ↔ 4×" } else { "Off ↔ 1×" }), format!("{} smp", lat(Vendor::Fab, "Warm Tube", 50.0)), format!("{} smp", lat(Vendor::Mite, "Tube", 42.0))], verdict: Verdict::None });
     }
     tables.push(cpu);
     Ok(tables)

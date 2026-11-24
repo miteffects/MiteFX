@@ -4,7 +4,8 @@
   "name": "Octave Up",
   "params": {
     "b1_model": 7.0,
-    "b1_drive": 8.0,
+    "b1_drive": 32.0,
     "b1_mix": 50.0
-  }
+  },
+  "state": 5
 }

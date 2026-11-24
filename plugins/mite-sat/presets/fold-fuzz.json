@@ -4,8 +4,9 @@
   "name": "Fold Fuzz",
   "params": {
     "b1_model": 6.0,
-    "b1_drive": 10.0,
+    "b1_drive": 34.0,
     "b1_mix": 70.0,
     "b1_tone": -4.0
-  }
+  },
+  "state": 5
 }
