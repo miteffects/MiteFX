@@ -1,5 +1,5 @@
 //! The transfer square: input −1…1 across, output −1…1 up, the band's curve as the DSP plays it
-//! (`mite_dsp::sat::transfer` at the live operating point, times auto gain), lit where the music
+//! (`mite_dsp::sat::transfer` at the band's bias, times auto gain), lit where the music
 //! is, with a dot riding the curve at the band's peak either way. Tape and Transformer: the faint
 //! curve is their core's anhysteretic curve (what the loop closes onto), and the lit part is the
 //! loop the band's music makes (`mite_dsp::sat::magnet_loop`: a sine at the band's peak through
@@ -28,7 +28,7 @@ const LOOP_POINTS: usize = 144;
 pub struct Curve {
     pub model: Model,
     pub drive_db: f32,
-    /// The operating point the engine reports (it follows the music's envelope).
+    /// The operating point in silence (the bias's; the curve itself bends with the signal).
     pub point: f32,
     /// The band's bias, −1…1 (a traced loop works its own point out from it).
     pub bias: f32,
@@ -47,7 +47,7 @@ pub struct Curve {
 
 impl Curve {
     pub fn at(&self, x: f32) -> f32 {
-        transfer(self.model, x, self.drive_db, self.point) * self.auto * self.dynamics
+        transfer(self.model, x, self.drive_db, self.bias) * self.auto * self.dynamics
     }
 
     /// Tape and Transformer: the loop for a sine of amplitude `amp`, as the band plays it

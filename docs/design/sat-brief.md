@@ -24,8 +24,8 @@ Neutral settings null: drive 0 dB, band bypass, band mix 0 or global mix 0 are t
 
 ```
 u      = K·g·x + b          g = drive (0…60 dB), K = −12 dB calibration, b = operating point
-b      = β·(0.5 + 0.5·e) [− 0.2·e Tube]   β = bias (−1…1), e = envelope of what enters f (10/150 ms)
-F(x)   = (f(u) − f(b)) / K · L   L = 10^(−min(drive, 24 dB)/20): quiet signals keep slope g·L
+b      = 0.5·β + (0.5·β [− 0.2 Tube])·(√(u² + 1) − 1)   β = bias (−1…1): grows with the sample, no memory
+F(x)   = (f(u + b) − f(0.5·β)) / K · L   L = 10^(−min(drive, 24 dB)/20): quiet signals keep slope g·L
 wet    = Tone( down( F( up(x) ) ) )
 y      = x_d + a·HP₅(wet − x_d)      a = smoothstep(drive / 6 dB) · engaged · band mix
 out    = y · auto gain · D(e_in) · band output      D: the band's dynamics (below)
@@ -42,6 +42,14 @@ The editor's transfer curve is `x + a·(F(x) − x)` times the auto gain, from t
 **Calibration (2026-11-01):** user report: drive had to reach 36 dB to be heard on a kick. Measured:
 the knees sat near 0 dBFS, so a kick peaking at −18 dBFS only started to distort past +18 dB, and
 auto gain hid the level change too. `K` puts the knees 12 dB under full scale at drive 0.
+
+**Static operating point (2026-11-24, user chose static):** the point used to follow the envelope
+of what enters the curve (10/150 ms) so asymmetry held at any drive; after a loud passage it held
+the point where the quiet audio after fell on the curve's flat part: muted 15–25 dB for 150 ms,
+with a thump. Now it grows with the sample itself: no memory, no muting (swing ≤ 0.2 dB). Even
+harmonics hold through 36 dB of drive; nearer a square wave (48–60 dB) they fade, except Diode's.
+Auto gain's level meter is 2 s (was 300 ms) and starts as a plain average, its gate 5 ms (was
+20): it no longer rides between loud and quiet stretches (±0.5 dB → ±0.03).
 
 **Drive law (2026-11-24, state 5):** measured against Saturn 2 (`cargo xtask compare sat`,
 docs/compare/saturn-2.md): with knees 12 dB under full scale at drive 0, a −12 dBFS track already

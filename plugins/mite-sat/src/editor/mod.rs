@@ -582,7 +582,7 @@ impl SatView {
     fn curve(&self, host: &dyn ParamHost, b: usize) -> curve::Curve {
         let model = Self::model(host, b);
         let bias = Self::plain(host, &band_id(b, B_BIAS.id)) / 100.0;
-        // The point follows the music's envelope: the engine reports where it sits.
+        // The point in silence: the engine reports it (the bias's, eased).
         let point = if self.history.back().is_some() { self.point[b] } else { bias_point(bias) };
         let auto = if Self::on(host, AUTO_GAIN.id) { self.auto[b] } else { 1.0 };
         let x = settings(host).crossovers;
