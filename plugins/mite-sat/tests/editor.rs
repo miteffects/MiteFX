@@ -119,9 +119,9 @@ fn the_oversampling_list_sets_the_factor() {
     let (mut view, host) = setup();
     click(&mut view, &host, Point::new(60.0, 704.0 + 28.0));
     let rows = view.oversampling_rows();
-    assert_eq!(rows.len(), 4, "the list is open");
-    click(&mut view, &host, rows[3].center());
-    assert_eq!(plain(&host, OVERSAMPLING.id), 3.0, "8×");
+    assert_eq!(rows.len(), 5, "the list is open, 1× to 16×");
+    click(&mut view, &host, rows[4].center());
+    assert_eq!(plain(&host, OVERSAMPLING.id), 4.0, "16×");
     assert!(view.oversampling_rows().is_empty(), "and closed");
 }
 

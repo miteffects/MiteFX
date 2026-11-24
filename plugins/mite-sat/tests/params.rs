@@ -50,5 +50,5 @@ fn the_default_state_is_one_clean_band() {
     let s = p.settings();
     assert!(s.crossovers.iter().all(Option::is_none));
     assert!(s.bands.iter().all(|b| b.drive_db == 0.0));
-    assert_eq!(p.factor(), 2);
+    assert_eq!(p.factor(), 4, "4× by default (2× aliased audibly on Hard)");
 }

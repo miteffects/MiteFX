@@ -1,4 +1,4 @@
-oversampling | choice | 1×, 2×, 4×, 8× | 1
+oversampling | choice | 1×, 2×, 4×, 8×, 16× | 2
 auto_gain | bool | true
 mix | % | 0 | 100 | 100 | Linear
 out_pan | % | -100 | 100 | 0 | Linear

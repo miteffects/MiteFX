@@ -23,7 +23,7 @@ use nih_plug::prelude::*;
 ///   version 2 state gets them centred, what it was.
 /// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
 ///   version 3 state gets Minimum Phase, what it was.
-pub const STATE_VERSION: u32 = 6;
+pub const STATE_VERSION: u32 = 7;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -32,7 +32,9 @@ const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32
 
 // ---- Global -------------------------------------------------------------------------------
 
-pub const OVERSAMPLING: ChoiceSpec = ChoiceSpec { id: "oversampling", name: "Oversampling", choices: &["1×", "2×", "4×", "8×"], default: 1 };
+/// 16× appended (2026-11-24: hard clipping aliased at −54 dB at 4×, −90 at 16×); the default is 4×
+/// (was 2×: −40 dB on Hard at moderate drive).
+pub const OVERSAMPLING: ChoiceSpec = ChoiceSpec { id: "oversampling", name: "Oversampling", choices: &["1×", "2×", "4×", "8×", "16×"], default: 2 };
 /// How the bands are split: LR4 crossovers (no latency; each band's phase turns around its
 /// crossovers) or linear-phase FIR bands (the same magnitudes, no phase shift; ~91 ms latency).
 pub const PHASE: ChoiceSpec = ChoiceSpec { id: "phase", name: "Phase", choices: &["Minimum Phase", "Linear Phase"], default: 0 };

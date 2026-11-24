@@ -1,6 +1,6 @@
 //! Mite Sat's engine (BLUEPRINT §6.7, `docs/design/sat-brief.md`): saturation on one band or
 //! split into up to six by the shared LR4 crossover (`crate::crossover`), each band with its own
-//! model, drive, bias, tone, mix and output, oversampled 1/2/4/8×.
+//! model, drive, bias, tone, mix and output, oversampled 1/2/4/8/16× (4× by default).
 //!
 //! A band's path: `u = g·x + b`, `F(x) = f(u) − f(b)` at the high rate, back down, through the
 //! tone tilt, then `y = x_d + a·HP₅(wet − x_d)` with `x_d` the band delayed by the oversampler's
@@ -71,7 +71,7 @@ pub const DEFAULT_CROSSOVERS: [f32; CROSSOVERS] = [120.0, 500.0, 2000.0, 6000.0,
 /// The tone tilt's pivot with one band, Hz (with several, each band's geometric centre).
 pub const TONE_PIVOT: f32 = 800.0;
 /// Oversampling factors offered (the `oversampling` parameter's choices).
-pub const FACTORS: [usize; 4] = [1, 2, 4, 8];
+pub const FACTORS: [usize; 5] = [1, 2, 4, 8, 16];
 
 /// Samples between control updates (values ramp linearly in between).
 const CONTROL: usize = 16;
@@ -123,7 +123,8 @@ const CHUNK: usize = CONTROL;
 /// the longest half-band's history).
 const PREROLL: usize = 80;
 /// Each channel's stretch at the high rate in the scratch: a chunk at 8×.
-const HI_CH: usize = CHUNK * 8;
+/// A channel's room at the high rate: a chunk at the largest factor (16×, added 2026-11-24).
+const HI_CH: usize = CHUNK * 16;
 
 /// The saturation models, in their frozen parameter order (append only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1500,7 +1501,7 @@ impl Saturator {
                 tilt: [[Tilt::IDENTITY; CHUNK]; BANDS],
             }),
             split: vec![0.0; 2 * BANDS * 2 * CHUNK],
-            hi: vec![0.0; (PREROLL * 8).max(2 * HI_CH)],
+            hi: vec![0.0; (PREROLL * 16).max(2 * HI_CH)],
             wet: vec![0.0; CHUNK],
         };
         sat.prepare(sample_rate, factor, s);

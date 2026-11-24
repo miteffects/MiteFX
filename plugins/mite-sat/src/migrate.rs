@@ -104,6 +104,28 @@ fn rescale_targets(json: &str, old_last: f64, new_last: f64) -> Option<String> {
     serde_json::to_string(&v).ok()
 }
 
+/// **6 → 7 (2026-11-24): 16× oversampling appended.** The saved plain index means the same; a
+/// snapshot stores it normalized over the list (`i/3` then, `i/4` now), so it is rescaled.
+pub fn v6_to_v7(state: &mut PluginState) {
+    if let Some(json) = state.fields.get_mut(SNAPSHOTS_KEY) {
+        if let Some(lifted) = rescale_choice(json, "oversampling", 3.0, 4.0) {
+            *json = lifted;
+        }
+    }
+}
+
+fn rescale_choice(json: &str, id: &str, old_last: f64, new_last: f64) -> Option<String> {
+    let mut v: serde_json::Value = serde_json::from_str(json).ok()?;
+    for slot in v.get_mut("slots")?.as_array_mut()?.iter_mut() {
+        if let Some(x) = slot.as_object_mut().and_then(|o| o.get_mut(id)) {
+            if let Some(n) = x.as_f64() {
+                *x = serde_json::json!(((n * old_last).round() / new_last) as f32);
+            }
+        }
+    }
+    serde_json::to_string(&v).ok()
+}
+
 const OLD_DRIVE_MAX: f32 = 36.0;
 const NEW_DRIVE_MAX: f32 = 60.0;
 /// The old fade-in's top, where the old and new laws join (old 6 dB = new 30 dB).
@@ -171,6 +193,15 @@ pub fn lift_preset(values: &mut mite_core::presets::PresetValues, from: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snapshots_oversampling_keeps_its_factor() {
+        // 4× (2 of 3) in a version 6 snapshot is 2 of 4.
+        let old = r#"{"active":0,"slots":[{"oversampling":0.6666667,"b1_drive":0.5},null,null,null]}"#;
+        let new: serde_json::Value = serde_json::from_str(&rescale_choice(old, "oversampling", 3.0, 4.0).expect("lifted")).expect("JSON");
+        assert!((new["slots"][0]["oversampling"].as_f64().unwrap() - 0.5).abs() < 1e-6);
+        assert_eq!(new["slots"][0]["b1_drive"].as_f64(), Some(0.5));
+    }
 
     #[test]
     fn a_snapshots_modulation_targets_keep_their_meaning() {

@@ -1,4 +1,4 @@
-//! CPU of the engine on 20 s of stereo music at 48 kHz: one band per model and oversampling
+//! CPU of the engine on 20 s of stereo music at 48 kHz: one band per model and oversampling (1–16×)
 //! factor, and six bands of Tube or Tape at 4× (Tube also with every band's dynamics on).
 //!
 //!     cargo run --release -p mite_sat --example bench
@@ -27,7 +27,7 @@ fn main() {
     six.bands = [six.bands[0]; 6];
     let mut cases: Vec<(String, SatSettings, usize)> = Vec::new();
     for m in [Model::Tape, Model::Tube, Model::Transformer, Model::Soft, Model::Fold] {
-        for f in [1, 2, 4, 8] {
+        for f in [1, 2, 4, 8, 16] {
             cases.push((format!("{} {f}×", m.name()), one(m), f));
         }
     }

@@ -51,6 +51,15 @@ harmonics hold through 36 dB of drive; nearer a square wave (48–60 dB) they fa
 Auto gain's level meter is 2 s (was 300 ms) and starts as a plain average, its gate 5 ms (was
 20): it no longer rides between loud and quiet stretches (±0.5 dB → ±0.03).
 
+**Aliasing (2026-11-24, state 7):** measured in 20 Hz–20 kHz on a 4987 Hz tone at −6 dBFS (as the
+Saturn 2 comparison reads it), the hard curves were the limit at 4×: Hard −54.5 dB at 24 dB of
+drive, −38.6 at 36. A smoother join on Hard's knee changed nothing (its sharpness, not its
+corner, is the cause; a wider knee would make it softer), so 16× is offered: Hard −90.5 and
+−65.4, Soft at 36 dB −50.3 → −89.9, Tape at 36 dB −27.7 → −54.8. The default is 4× (was 2×: Hard
+−40 at moderate drive). CPU, one band, 4× → 16×: Soft 1.1 → 3.2 %, Tube 1.4 → 4.5 %, Tape 4.3 →
+11.5 % of a core. `distortion()`'s alias figure also counts what folds into 20–24 kHz near
+Nyquist (inaudible), so it plateaus with the factor; read the audible band.
+
 **The thump after loud passages is physics, kept (2026-11-24, measured):** an asymmetric curve
 (Bias, Tube) makes DC with its even harmonics, in a fixed ratio (a u² term: as much DC as H2), and
 that DC follows the level. Any DC removal (ours: the 5 Hz high-pass on the difference; analog: the

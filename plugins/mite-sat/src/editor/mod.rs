@@ -916,12 +916,13 @@ impl SatView {
             list.draw(cx, theme.accent, |_, _, _, _| {});
         } else if let Some(list) = &self.os_menu {
             list.draw(cx, theme.accent, |scene, i, at, ink| {
-                // Each factor's icon: as many waves as it oversamples.
-                let n = [1usize, 2, 4, 8][i];
+                // Each factor's icon: as many waves as it oversamples (16×: twelve, what reads
+                // in 20 px).
+                let n = [1usize, 2, 4, 8, 12][i.min(4)];
                 let mut p = BezPath::new();
-                for k in 0..=32 {
-                    let x = at.x + 1.0 + 20.0 * k as f64 / 32.0;
-                    let y = at.y + 12.0 - 5.0 * (std::f64::consts::TAU * n as f64 * k as f64 / 32.0 / 2.0).sin();
+                for k in 0..=64 {
+                    let x = at.x + 1.0 + 20.0 * k as f64 / 64.0;
+                    let y = at.y + 12.0 - 5.0 * (std::f64::consts::TAU * n as f64 * k as f64 / 64.0 / 2.0).sin();
                     if k == 0 {
                         p.move_to((x, y));
                     } else {
