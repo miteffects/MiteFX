@@ -254,7 +254,7 @@ x 1180–1280, as in Shape.
   (the bars 56 px tall to make room).
 
 ### 3.3 Footer
-Oversampling (dropdown button: 1×, 2×, 4×, 8×; the help strip says each one's latency), the
+Oversampling (dropdown button: 1×, 2×, 4×, 8×, 16×; the help strip says each one's latency), the
 latency readout, auto gain, Δ, bypass, MIX, PAN, OUTPUT, all as in Shape.
 
 ---
