@@ -225,6 +225,30 @@ pub fn render(cases: &[Case], work: &Path) -> Result<std::collections::BTreeMap<
     parse_log(&std::fs::read_to_string(&log).map_err(|e| e.to_string())?)
 }
 
+/// Puts back into the render log the cases of `old` (an earlier log) the last render did not
+/// redo, so a partial render adds to the results instead of replacing them.
+pub fn merge_log(work: &Path, old: &str) -> Result<(), String> {
+    let path = work.join("render.log");
+    let new = std::fs::read_to_string(&path).unwrap_or_default();
+    let blocks = |text: &str| -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        for line in text.lines() {
+            if let Some(id) = line.strip_prefix("case ") {
+                out.push((id.to_owned(), String::new()));
+            }
+            if let Some(last) = out.last_mut() {
+                last.1.push_str(line);
+                last.1.push('\n');
+            }
+        }
+        out
+    };
+    let redone: std::collections::BTreeSet<String> = blocks(&new).into_iter().map(|b| b.0).collect();
+    let mut merged: String = blocks(old).into_iter().filter(|b| !redone.contains(&b.0)).map(|b| b.1).collect();
+    merged.push_str(&new);
+    std::fs::write(&path, merged).map_err(|e| e.to_string())
+}
+
 /// What the last render left (`--analyze-only`).
 pub fn load_log(work: &Path) -> Result<std::collections::BTreeMap<String, Rendered>, String> {
     let log = work.join("render.log");
