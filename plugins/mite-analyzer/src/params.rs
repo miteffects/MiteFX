@@ -15,6 +15,10 @@ use nih_plug::prelude::*;
 /// 2 (2026-11-21): the phase page (`page`, `psmooth`, `pavg`).
 pub const STATE_VERSION: u32 = 2;
 
+/// 1 → 2: the phase page's parameters are new, so an older state simply has none and they take
+/// their defaults; nothing to change.
+pub fn v1_to_v2(_state: &mut nih_plug::prelude::PluginState) {}
+
 /// The loudness target the integrated reading is held against (LUFS in [`TARGET_LUFS`]).
 pub const TARGET: ChoiceSpec = ChoiceSpec { id: "target", name: "Target", choices: &["Streaming −14", "Apple Music −16", "EBU R128 −23", "ATSC A/85 −24", "Club −9"], default: 0 };
 pub const TARGET_LUFS: [f32; 5] = [-14.0, -16.0, -23.0, -24.0, -9.0];

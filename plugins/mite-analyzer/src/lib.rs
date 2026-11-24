@@ -98,7 +98,7 @@ impl Plugin for MiteAnalyzer {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[params::v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {

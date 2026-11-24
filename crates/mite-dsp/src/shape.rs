@@ -982,6 +982,9 @@ mod tests {
     /// merged band's delay joins the band below. Re-blessed 2026-10-30: the differential detector.
     /// Re-blessed 2026-11-24: the split on state-variable sections, within −250 dB of the biquads;
     /// then the structure crossfade at 30 ms (was 10).)
+    // A refactor guard, bit for bit: only where it was recorded (each OS's libm rounds sin/exp
+    // differently in the last bit; Windows differs).
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn render_checksum_is_unchanged() {
         let n = 20_000;
