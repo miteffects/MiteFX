@@ -23,7 +23,8 @@ use nih_plug::prelude::*;
 ///   version 2 state gets them centred, what it was.
 /// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
 ///   version 3 state gets Minimum Phase, what it was.
-pub const STATE_VERSION: u32 = 8;
+/// - 9 (2026-11-25): the tape machine (`tape_*`) appended; a version 8 state gets it off.
+pub const STATE_VERSION: u32 = 9;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -45,6 +46,24 @@ pub const OUT_PAN: ParamSpec = spec("out_pan", "Output Pan", "%", -100.0, 100.0,
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const DELTA: BoolSpec = BoolSpec { id: "delta", name: "Delta", default: false };
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
+
+// ---- Tape machine (2026-11-25, sat-brief §1.4) ---------------------------------------------
+
+/// One deck after the bands are summed: off by default (a version 8 state gets it off).
+pub const TAPE_ON: BoolSpec = BoolSpec { id: "tape_on", name: "Tape", default: false };
+/// Record level: 0 dB puts a −18 dBFS tone at the deck's operating level; it comes back off after
+/// the tape, so it moves the saturation, not the volume.
+pub const TAPE_DRIVE: ParamSpec = spec("tape_drive", "Tape Level", "dB", mite_dsp::tape::DRIVE_DB.0, mite_dsp::tape::DRIVE_DB.1, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
+/// −100 % under-biased (brighter, grittier) … 0 calibrated … +100 % over-biased (darker, cleaner).
+pub const TAPE_BIAS: ParamSpec = spec("tape_bias", "Tape Bias", "%", -100.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
+/// By `mite_dsp::tape::Speed` index (append only).
+pub const TAPE_SPEED: ChoiceSpec = ChoiceSpec { id: "tape_speed", name: "Tape Speed", choices: &mite_dsp::tape::Speed::NAMES, default: 2 };
+/// By `mite_dsp::tape::Standard` index (append only).
+pub const TAPE_EQ: ChoiceSpec = ChoiceSpec { id: "tape_eq", name: "Tape EQ", choices: &mite_dsp::tape::Standard::NAMES, default: 0 };
+pub const TAPE_WOW: ParamSpec = spec("tape_wow", "Tape Wow", "%", 0.0, 100.0, 10.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
+pub const TAPE_FLUTTER: ParamSpec = spec("tape_flutter", "Tape Flutter", "%", 0.0, 100.0, 10.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
+/// 100 %: the deck's own noise for its speed.
+pub const TAPE_HISS: ParamSpec = spec("tape_hiss", "Tape Hiss", "%", 0.0, 100.0, 0.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 
 // ---- Crossovers ---------------------------------------------------------------------------
 
@@ -315,6 +334,11 @@ pub fn manifest() -> String {
     for b in 0..BANDS {
         lines.extend(B_HARM.iter().chain([&B_PUNCH, &B_BODY]).map(|s| format!("b{}_{}", b + 1, s.manifest_line())));
     }
+    lines.push(TAPE_ON.manifest_line());
+    lines.extend([TAPE_DRIVE, TAPE_BIAS].iter().map(ParamSpec::manifest_line));
+    lines.push(TAPE_SPEED.manifest_line());
+    lines.push(TAPE_EQ.manifest_line());
+    lines.extend([TAPE_WOW, TAPE_FLUTTER, TAPE_HISS].iter().map(ParamSpec::manifest_line));
     lines.join("\n") + "\n"
 }
 
@@ -418,6 +442,48 @@ impl BandParams {
     }
 }
 
+/// The tape machine's parameters.
+pub struct TapeParams {
+    pub on: BoolParam,
+    pub drive: FloatParam,
+    pub bias: FloatParam,
+    pub speed: IntParam,
+    pub eq: IntParam,
+    pub wow: FloatParam,
+    pub flutter: FloatParam,
+    pub hiss: FloatParam,
+}
+
+impl Default for TapeParams {
+    fn default() -> Self {
+        Self {
+            on: bool_param(&TAPE_ON, TAPE_ON.name.to_owned()),
+            drive: float_param(&TAPE_DRIVE),
+            bias: float_param(&TAPE_BIAS),
+            speed: choice_param(&TAPE_SPEED, TAPE_SPEED.name.to_owned()),
+            eq: choice_param(&TAPE_EQ, TAPE_EQ.name.to_owned()),
+            wow: float_param(&TAPE_WOW),
+            flutter: float_param(&TAPE_FLUTTER),
+            hiss: float_param(&TAPE_HISS),
+        }
+    }
+}
+
+impl TapeParams {
+    pub fn settings(&self) -> mite_dsp::tape::MachineSettings {
+        mite_dsp::tape::MachineSettings {
+            on: self.on.value(),
+            drive_db: self.drive.value(),
+            bias: self.bias.value() / 100.0,
+            speed: mite_dsp::tape::Speed::from_index(self.speed.value().max(0) as usize),
+            standard: mite_dsp::tape::Standard::from_index(self.eq.value().max(0) as usize),
+            wow: self.wow.value() / 100.0,
+            flutter: self.flutter.value() / 100.0,
+            hiss: self.hiss.value() / 100.0,
+        }
+    }
+}
+
 pub struct SatParams {
     pub oversampling: IntParam,
     pub phase: IntParam,
@@ -429,6 +495,7 @@ pub struct SatParams {
     pub bypass: BoolParam,
     pub crossovers: [CrossParams; CROSSOVERS],
     pub bands: [BandParams; BANDS],
+    pub tape: TapeParams,
     /// The modulation matrix (`mite_plugin::matrix`).
     pub matrix: mite_plugin::matrix::MatrixParams,
     /// Snapshots A–D and the current preset's name (not parameters: saved with the state through
@@ -454,6 +521,7 @@ impl Default for SatParams {
             bypass: flag(&BYPASS),
             crossovers: std::array::from_fn(CrossParams::new),
             bands: std::array::from_fn(BandParams::new),
+            tape: TapeParams::default(),
             matrix: mite_plugin::matrix::MatrixParams::new(&M_DST, true),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
@@ -539,6 +607,18 @@ unsafe impl Params for SatParams {
             map.push((String::from(band_id(i, B_PUNCH.id)), b.punch.as_ptr(), group.clone()));
             map.push((String::from(band_id(i, B_BODY.id)), b.body.as_ptr(), group));
         }
+        let t = &self.tape;
+        let tape = |id: &str, ptr: ParamPtr| (id.to_owned(), ptr, "Tape".to_owned());
+        map.extend([
+            tape(TAPE_ON.id, t.on.as_ptr()),
+            tape(TAPE_DRIVE.id, t.drive.as_ptr()),
+            tape(TAPE_BIAS.id, t.bias.as_ptr()),
+            tape(TAPE_SPEED.id, t.speed.as_ptr()),
+            tape(TAPE_EQ.id, t.eq.as_ptr()),
+            tape(TAPE_WOW.id, t.wow.as_ptr()),
+            tape(TAPE_FLUTTER.id, t.flutter.as_ptr()),
+            tape(TAPE_HISS.id, t.hiss.as_ptr()),
+        ]);
         map
     }
 }

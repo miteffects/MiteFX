@@ -18,6 +18,7 @@ use mite_dsp::conv::{Convolver, KernelLayout, KernelSet};
 use mite_dsp::output::{balance, DryDelay};
 use mite_dsp::oversample::Oversampler;
 use mite_dsp::sat::{Layout, SatSettings, SatTelemetry, Saturator, BANDS, CROSSOVERS};
+use mite_dsp::tape::{Machine, MachineSettings, MachineTelemetry};
 use mite_dsp::{db_to_gain, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Linear Phase's kernel length and convolution block at 48 kHz (both scale with the sample
@@ -153,6 +154,11 @@ pub struct SatEngine {
     dry: DryDelay,
     wet: [Vec<f32>; 2],
     band_sum: [Vec<f32>; 2],
+    /// The tape machine after the band sum (sat-brief §1.4), whether it runs (it follows its
+    /// switch behind the dip, as it moves the latency), and the band sum delayed to meet it.
+    machine: Machine,
+    machine_on: bool,
+    bands_delay: DryDelay,
     mix: LinearSmoother,
     delta: LinearSmoother,
     bypass: LinearSmoother,
@@ -205,6 +211,9 @@ impl SatEngine {
             dry: DryDelay::new(1, 1),
             wet: [Vec::new(), Vec::new()],
             band_sum: [Vec::new(), Vec::new()],
+            machine: Machine::new(sample_rate, factor, &MachineSettings::default()),
+            machine_on: false,
+            bands_delay: DryDelay::new(1, 1),
             mix: LinearSmoother::new(1.0),
             delta: LinearSmoother::new(0.0),
             bypass: LinearSmoother::new(0.0),
@@ -226,15 +235,19 @@ impl SatEngine {
             stop,
             designer,
         };
-        e.prepare(sample_rate, factor, s, &Output::default(), false);
+        e.prepare(sample_rate, factor, s, &Output::default(), false, &MachineSettings::default());
         e
     }
 
     /// Sizes everything for `sample_rate`; with `linear`, designs Linear Phase's kernels here (so a
     /// render starts with them). Allocates.
-    pub fn prepare(&mut self, sample_rate: f32, factor: usize, s: &SatSettings, out: &Output, linear: bool) {
+    pub fn prepare(&mut self, sample_rate: f32, factor: usize, s: &SatSettings, out: &Output, linear: bool, tape: &MachineSettings) {
         self.sample_rate = sample_rate;
-        self.dry = DryDelay::new(Oversampler::latency_for(8) + linear_phase_latency(sample_rate) + 1, CHUNK);
+        let machine_max = Machine::latency_of(16, f64::from(sample_rate));
+        self.dry = DryDelay::new(Oversampler::latency_for(16) + linear_phase_latency(sample_rate) + machine_max + 1, CHUNK);
+        self.bands_delay = DryDelay::new(machine_max + 1, CHUNK);
+        self.machine.prepare(sample_rate, factor, tape);
+        self.machine_on = tape.on;
         let req = SplitRequest::new(s.crossovers, sample_rate);
         let fade = (KERNEL_FADE_MS * 0.001 * f64::from(sample_rate)) as usize;
         self.convs = (0..BANDS).map(|_| Convolver::new(req.block, req.len, fade)).collect();
@@ -265,14 +278,17 @@ impl SatEngine {
         }
         self.sat.prepare(sample_rate, factor, s);
         self.sat.set_filter(filter_for(linear), s);
-        self.reset(s, out);
+        self.reset(s, out, tape);
     }
 
-    /// Clears the state and snaps every glide to `s` and `out`.
-    pub fn reset(&mut self, s: &SatSettings, out: &Output) {
+    /// Clears the state and snaps every glide to `s`, `out` and `tape`.
+    pub fn reset(&mut self, s: &SatSettings, out: &Output, tape: &MachineSettings) {
         self.sat.reset(s);
+        self.machine.reset(tape);
         self.dry.reset();
         self.dry.set_delay(self.latency());
+        self.bands_delay.reset();
+        self.bands_delay.set_delay(self.machine.latency());
         self.mix.reset(out.mix);
         self.delta.reset(if out.delta { 1.0 } else { 0.0 });
         self.bypass.reset(if out.bypass { 1.0 } else { 0.0 });
@@ -290,7 +306,12 @@ impl SatEngine {
     /// The latency in force, samples: the oversampling's round trip, plus Linear Phase's split
     /// (each follows a change once the dip has faded out).
     pub fn latency(&self) -> usize {
-        self.sat.latency() + if self.linear { linear_phase_latency(self.sample_rate) } else { 0 }
+        self.sat.latency() + if self.linear { linear_phase_latency(self.sample_rate) } else { 0 } + if self.machine_on { self.machine.latency() } else { 0 }
+    }
+
+    /// The tape machine's last block, if it runs.
+    pub fn machine(&self) -> Option<MachineTelemetry> {
+        self.machine_on.then(|| self.machine.telemetry())
     }
 
     /// Whether Linear Phase is running.
@@ -405,7 +426,7 @@ impl SatEngine {
     /// completes, and the input and the output to `spectra` (mono each).
     #[allow(clippy::needless_range_loop)] // channels and scratch buffers indexed together
     #[allow(clippy::too_many_arguments)] // the block, the settings the plugin reads, and the taps
-    pub fn process(&mut self, channels: &mut [&mut [f32]], s: &SatSettings, factor: usize, linear: bool, out: &Output, history: &HistoryTap<{ record::WIDTH }>, spectra: Option<[&SpectrumTap; 2]>) {
+    pub fn process(&mut self, channels: &mut [&mut [f32]], s: &SatSettings, factor: usize, linear: bool, out: &Output, tape: &MachineSettings, history: &HistoryTap<{ record::WIDTH }>, spectra: Option<[&SpectrumTap; 2]>) {
         let n_ch = channels.len().min(2);
         if n_ch == 0 {
             return;
@@ -428,7 +449,7 @@ impl SatEngine {
                 self.update_kernels(s);
             }
             match self.switch {
-                Switch::Steady if factor != self.sat.oversampling() || linear != self.linear => {
+                Switch::Steady if factor != self.sat.oversampling() || linear != self.linear || tape.on != self.machine_on => {
                     self.dip.set_target(0.0);
                     if self.dip.current() == 0.0 {
                         self.switch = Switch::Waiting;
@@ -447,6 +468,15 @@ impl SatEngine {
                         } else {
                             self.sat.reset(s);
                         }
+                        // The machine follows the oversampling, and its switch (each moves the latency).
+                        self.machine_on = tape.on;
+                        if factor != self.machine.oversampling() {
+                            self.machine.set_oversampling(factor, tape);
+                        } else {
+                            self.machine.reset(tape);
+                        }
+                        self.bands_delay.reset();
+                        self.bands_delay.set_delay(self.machine.latency());
                         self.dry.set_delay(self.latency());
                         self.switch = Switch::Filling(self.latency());
                     }
@@ -493,6 +523,12 @@ impl SatEngine {
             if let Switch::Filling(left) = self.switch {
                 self.switch = Switch::Filling(left.saturating_sub(n));
             }
+            if self.machine_on {
+                let [a, b] = &mut self.wet;
+                let mut wet: [&mut [f32]; 2] = [&mut a[..n], &mut b[..n]];
+                self.machine.process(&mut wet[..n_ch], tape);
+                self.bands_delay.write(&self.band_sum[0][..n], (n_ch == 2).then(|| &self.band_sum[1][..n]));
+            }
             let mut out_peak = [0.0f32; 2];
             for i in 0..n {
                 let (mix, delta, bypass) = (self.mix.next_value(), self.delta.next_value(), self.bypass.next_value());
@@ -500,7 +536,7 @@ impl SatEngine {
                 let (pl, pr) = balance(self.pan.next_value());
                 for c in 0..n_ch {
                     let wet = self.wet[c][i];
-                    let bands = self.band_sum[c][i];
+                    let bands = if self.machine_on { self.bands_delay.read(c, i) } else { self.band_sum[c][i] };
                     let dry = self.dry.read(c, i);
                     // Each blend as a·(1 − t) + b·t, so its ends are exact (mix 0 and bypass null).
                     let mixed = bands * (1.0 - mix) + wet * mix;
@@ -512,6 +548,9 @@ impl SatEngine {
                 }
             }
             self.dry.advance(n);
+            if self.machine_on {
+                self.bands_delay.advance(n);
+            }
             if n_ch == 1 {
                 in_peak[1] = in_peak[0];
                 out_peak[1] = out_peak[0];
@@ -602,7 +641,7 @@ mod tests {
         let tap = HistoryTap::new(1024);
         let mut y = input.to_vec();
         for chunk in y.chunks_mut(block) {
-            e.process(&mut [chunk], s, factor, linear, out, &tap, None);
+            e.process(&mut [chunk], s, factor, linear, out, &MachineSettings::default(), &tap, None);
         }
         y
     }
@@ -616,7 +655,7 @@ mod tests {
         let input = noise(48_000, 11);
         let out = Output { mix: 0.0, ..Output::default() };
         let mut e = SatEngine::new(FS, 2, &s);
-        e.prepare(FS, 2, &s, &out, true);
+        e.prepare(FS, 2, &s, &out, true, &MachineSettings::default());
         let y = run_phase(&mut e, &input, &s, 2, true, &out, 300);
         let latency = e.latency();
         assert_eq!(latency, Oversampler::latency_for(2) + linear_phase_latency(FS));
@@ -634,7 +673,7 @@ mod tests {
         let mut heard = 0.0f32;
         for k in 0..3000 {
             let mut y = input.clone();
-            e.process(&mut [&mut y[..]], &s, 2, true, &Output::default(), &tap, None);
+            e.process(&mut [&mut y[..]], &s, 2, true, &Output::default(), &MachineSettings::default(), &tap, None);
             if k == 0 {
                 // The dip has begun (64 of its 480 samples); the kernels arrive before it ends.
                 std::thread::sleep(std::time::Duration::from_millis(300));
@@ -664,7 +703,7 @@ mod tests {
             let mut heard = 0.0f32;
             for k in 0..2000 {
                 let mut y = input.clone();
-                e.process(&mut [&mut y[..]], &s, 2, linear, &Output::default(), &tap, None);
+                e.process(&mut [&mut y[..]], &s, 2, linear, &Output::default(), &MachineSettings::default(), &tap, None);
                 if k % 50 == 0 {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
@@ -712,7 +751,7 @@ mod tests {
         for factor in [1, 2, 4, 8, 16] {
             for out in [Output { bypass: true, ..Output::default() }, Output { mix: 0.0, ..Output::default() }] {
                 let mut e = SatEngine::new(FS, factor, &s);
-                e.prepare(FS, factor, &s, &out, false);
+                e.prepare(FS, factor, &s, &out, false, &MachineSettings::default());
                 let y = run(&mut e, &input, &s, factor, &out, 256);
                 let latency = e.latency();
                 assert_eq!(latency, Oversampler::latency_of(factor, mite_dsp::oversample::Filter::MinimumPhase));
@@ -729,6 +768,55 @@ mod tests {
         }
     }
 
+    fn run_tape(e: &mut SatEngine, input: &[f32], s: &SatSettings, factor: usize, out: &Output, tape: &MachineSettings, block: usize) -> Vec<f32> {
+        let tap = HistoryTap::new(1024);
+        let mut y = input.to_vec();
+        for chunk in y.chunks_mut(block) {
+            e.process(&mut [chunk], s, factor, false, out, tape, &tap, None);
+        }
+        y
+    }
+
+    #[test]
+    fn the_tape_machine_adds_its_latency_and_mix_zero_meets_it() {
+        // With the deck on, bypass is still the input delayed bit for bit, by a latency that now
+        // holds the deck's; mix 0 is the band sum delayed to meet the deck (at 1×, the input).
+        let s = driven();
+        let tape = MachineSettings { on: true, ..MachineSettings::default() };
+        let input = noise(19_200, 5);
+        for out in [Output { bypass: true, ..Output::default() }, Output { mix: 0.0, ..Output::default() }] {
+            let mut e = SatEngine::new(FS, 1, &s);
+            e.prepare(FS, 1, &s, &out, false, &tape);
+            let y = run_tape(&mut e, &input, &s, 1, &out, &tape, 256);
+            let latency = e.latency();
+            assert_eq!(latency, Machine::latency_of(1, f64::from(FS)));
+            for i in latency..input.len() {
+                assert_eq!(y[i], input[i - latency], "{out:?} at {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn switching_the_tape_on_moves_the_latency_after_a_dip() {
+        let s = driven();
+        let out = Output::default();
+        let mut e = SatEngine::new(FS, 2, &s);
+        let input = noise(9600, 6);
+        let off = MachineSettings::default();
+        let on = MachineSettings { on: true, ..off };
+        run_tape(&mut e, &input, &s, 2, &out, &off, 256);
+        let before = e.latency();
+        let y = run_tape(&mut e, &input, &s, 2, &out, &on, 256);
+        assert_eq!(e.latency(), before + Machine::latency_of(2, f64::from(FS)));
+        assert!(e.machine().is_some());
+        // It comes back with sound.
+        let tail = &y[y.len() - 2400..];
+        assert!(tail.iter().map(|v| v.abs()).fold(0.0f32, f32::max) > 0.05);
+        run_tape(&mut e, &input, &s, 2, &out, &off, 256);
+        assert_eq!(e.latency(), before);
+        assert!(e.machine().is_none());
+    }
+
     #[test]
     fn delta_plus_dry_is_the_wet_signal() {
         // Delta is what the saturation adds: with the dry (mix 0's output) it is the wet, in
@@ -738,7 +826,7 @@ mod tests {
         for factor in [2, 4] {
             let play = |out: Output| {
                 let mut e = SatEngine::new(FS, factor, &s);
-                e.prepare(FS, factor, &s, &out, false);
+                e.prepare(FS, factor, &s, &out, false, &MachineSettings::default());
                 run(&mut e, &input, &s, factor, &out, 480)
             };
             let wet = play(Output::default());
@@ -786,7 +874,7 @@ mod tests {
         let tap = HistoryTap::new(1024);
         let mut y = noise(48_000, 4);
         for chunk in y.chunks_mut(333) {
-            e.process(&mut [chunk], &s, 2, false, &Output::default(), &tap, None);
+            e.process(&mut [chunk], &s, 2, false, &Output::default(), &MachineSettings::default(), &tap, None);
         }
         assert_eq!(tap.count(), 200);
         let (mut seen, mut band_in) = (0, f32::MIN);

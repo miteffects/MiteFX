@@ -222,3 +222,11 @@ b6_h8 | dB | -72 | 0 | -72 | Linear
 b6_h9 | dB | -72 | 0 | -72 | Linear
 b6_punch | dB | -24 | 24 | 0 | Linear
 b6_body | dB | -24 | 24 | 0 | Linear
+tape_on | bool | false
+tape_drive | dB | -12 | 24 | 0 | Linear
+tape_bias | % | -100 | 100 | 0 | Linear
+tape_speed | choice | 3.75 ips, 7.5 ips, 15 ips, 30 ips | 2
+tape_eq | choice | NAB, CCIR | 0
+tape_wow | % | 0 | 100 | 10 | Linear
+tape_flutter | % | 0 | 100 | 10 | Linear
+tape_hiss | % | 0 | 100 | 0 | Linear

@@ -140,6 +140,9 @@ pub fn v7_to_v8(state: &mut PluginState) {
     }
 }
 
+/// **8 → 9 (2026-11-25): the tape machine appended**, off (the sound as it was).
+pub fn v8_to_v9(_state: &mut PluginState) {}
+
 const OLD_DRIVE_MAX: f32 = 36.0;
 const NEW_DRIVE_MAX: f32 = 60.0;
 /// The old fade-in's top, where the old and new laws join (old 6 dB = new 30 dB).

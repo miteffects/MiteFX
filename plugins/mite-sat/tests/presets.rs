@@ -47,7 +47,7 @@ fn every_factory_preset_plays_finite_and_near_the_input_level() {
         let mut y = x.clone();
         let [l, r] = &mut y;
         for (a, b) in l.chunks_mut(512).zip(r.chunks_mut(512)) {
-            engine.process(&mut [a, b], &s, factor, false, &out, &history, None);
+            engine.process(&mut [a, b], &s, factor, false, &out, &mite_dsp::tape::MachineSettings::default(), &history, None);
         }
         assert!(y.iter().flatten().all(|v| v.is_finite()), "{}", preset.name);
         let tail = fs as usize..;

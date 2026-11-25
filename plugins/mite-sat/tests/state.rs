@@ -38,6 +38,12 @@ fn configured_state() -> Vec<u8> {
         ("m1_src", json!({"i32": 1})),
         ("m1_dst", json!({"i32": 1})),
         ("m1_amt", json!({"f32": 25.0})),
+        // The deck on (state 9), so the gates, which run on the newest golden state, hear it.
+        ("tape_on", json!({"bool": true})),
+        ("tape_drive", json!({"f32": 4.0})),
+        ("tape_speed", json!({"i32": 1})),
+        ("tape_hiss", json!({"f32": 30.0})),
+        ("tape_wow", json!({"f32": 20.0})),
     ] {
         assert!(params.contains_key(id), "no parameter {id}");
         params.insert(id.into(), v);

@@ -201,6 +201,57 @@ On the whole curve, it delays the wet by half a sample against the dry, so mix a
 6 dB would comb. Every curve is instead smooth (C¹), and the oversampler does the
 anti-aliasing. Aliasing is measured per factor (`docs/dsp/sat-aliasing.md`).
 
+### 1.4 The tape machine (2026-11-25, state 9; user: "a real tape machine", as a stage)
+
+One deck after the bands are summed, as a mix goes to tape (`mite_dsp::tape`): it acts on the
+whole signal, as speed, head bump and wow do on a real machine (per band, the bands would wobble
+apart). Off by default; on, it is part of the wet signal (mix and delta read it; the band sum is
+delayed to meet it), and switching it moves the latency behind the oversampling dip.
+
+```
+x → R(s) → up → ·g → core → ·1/g → down → + hiss → R⁻¹(s) → bias shelf → head loss → bump → transport
+```
+
+- **Record level** `g` (−12…+24 dB), applied around the core alone at the high rate and ramped per
+  sample over each control step, so nothing with memory but the tape sits between it and its
+  undoing (applied before the record EQ, a jump end to end clicked +42.7 dB through the
+  filters). At 0 dB a −18 dBFS tone is the operating level and −8 dBFS the maximum output level:
+  3 % THD at 1 kHz on 15 ips (tested); −18 dBFS stays under 0.6 %.
+- **Core:** Tape's Jiles–Atherton loop (`hysteresis`) with `FIELD = 4.4`, scaled to unity for a
+  quiet sine at every bias (tabulated).
+- **Record EQ** `R`: the standard's treble shelf from τ₁ (NAB 50 µs, 90 at 3.75 ips; CCIR 35 µs at
+  15, 70 at 7.5; AES 17.5 µs at 30) to a depth that grows as the tape slows (9…18 dB), NAB's bass
+  cut under τ₂ = 3180 µs (to −10 dB), and the record-loss compensation (a second shelf from
+  4 kHz × speed/7.5 ips, +12 dB). Playback is its exact inverse, so a quiet signal comes out flat
+  but for the head. Slow tape saturates its highs first (10 kHz at −20 dBFS: compressed more at
+  7.5 ips than at 30, tested).
+- **Bias** (−100…+100 %): under-biased keeps more loop (reversible share 0.97 → 0.85, a 40 % wider
+  loop) and lifts the top 2.5 dB; over-biased is cleaner (0.99) and loses its highs (−8 dB at
+  the top, bias erasure). The shelf is `x + (g − 1)·HP(x)` with the high-pass fixed (3 kHz ×
+  √(speed/7.5 ips)): only the gain moves, per sample (switching its coefficients every control
+  step clicked +23 dB). Tested: THD at −26 dBFS more than doubles from 0 to −100 %; 12 kHz drops
+  more than 3 dB at +100 %.
+- **Head:** gap 2 µm and spacing 0.5 µm against the wavelength `λ = v/f`:
+  `|sinc(π·g/λ)|·e^(−2π·d/λ)`, a 32-tap minimum-phase FIR per speed (−1.6 dB at 20 kHz on 15 ips,
+  −3.5 on 7.5, −8.4 on 3.75); the head bump (16 / 30 / 52 / 105 Hz, +3 / 2.5 / 2 / 1.5 dB, Q 1.4),
+  a −1 dB dip at 2.2× it, and the fringing loss under it (second-order high-pass at bump / 2.5).
+  Tested: quiet tones within 0.6 dB of the head's loss at 200 Hz, 1 kHz and 5 kHz on every speed.
+- **Hiss:** white on the tape (after the core), through playback; at 100 % the deck's own noise,
+  −58 / −63 / −66 / −68 dB under the operating level for 3.75…30 ips (within 1 dB, tested). One
+  source per channel, so the output is the same at every block size.
+- **Transport:** one for both channels: a 32-tap sinc reading of a delay line around a 3 ms centre.
+  Wow (0.6 % peak at 100 %: 0.55 Hz and a smoothed random drift) and flutter (0.25 % at 100 %:
+  7.3 and 12.9 Hz). Both at 0: an exact delay. Default 10 % each.
+- **Speed or standard change:** two heads crossfade over 30 ms (each with its own state), the
+  transport after them shared.
+- **Latency:** the minimum-phase oversampler's round trip plus the transport's centre (164
+  samples at 48 kHz, 174 with Sat's own at 4×), an impulse lands there (tested at every factor).
+- **CPU** (`examples/bench`, music, stereo, hiss and wow on): the deck adds 5.1 % of a core at 1×,
+  8.9 % at 4×, 19 % at 16× (the core on both channels is the cost).
+- **Gates:** the newest golden state (v9) has the deck on (+4 dB, 7.5 ips, hiss 30 %, wow 20 %),
+  so every gate runs through it. Running it found two older Sat clicks the step test's window had
+  missed (Crossover 1 and Band 2 Tone, skipped with the reason in `tests/gates.rs`).
+
 ---
 
 ## 2. Colour
@@ -284,6 +335,19 @@ Oversampling (dropdown button: 1×, 2×, 4×, 8×, 16×; the help strip says eac
 latency readout, auto gain, Δ, bypass, MIX, PAN, OUTPUT, all as in Shape.
 
 ---
+
+
+### 3.4 The tape deck's panel
+
+The footer's TAPE button (two small reels, lit while the deck runs or the panel is open) opens
+the deck over the cards, where the matrix opens; one of the two at a time, Esc or × closes it
+(the deck keeps running). Power beside the title. A deck drawn from the machine: the reels turn
+at the tape's speed (0.35 turns a second at 7.5 ips, scaled with the speed and the transport's
+reported deviation); the tape runs over three heads, the playback head lit; the trace under them
+is the transport's speed against nominal, block by block, ±0.3 % full height; the meter beside
+it is the peak going into the tape against the operating level (0) and the maximum output level
+(+10, above which it turns `warn`), falling 20 dB/s. Speed chips (3¾, 7½, 15, 30 ips) and NAB /
+CCIR, then LEVEL (large), BIAS, WOW, FLUTTER, HISS. The help strip names each.
 
 ## 4. Parameters (frozen with the first release; `tests/golden/mite_sat.params.txt`)
 

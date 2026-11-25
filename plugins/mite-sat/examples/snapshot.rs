@@ -5,7 +5,7 @@
 //!
 //! SNAPSHOT_VARIANT picks the state: default, clean, fold, hard, rectify, tape, transformer,
 //! bypass, delta, dynamics,
-//! oversampling, presets, ghost; several bands: bands (three), six, solo, mute, menu, pull (a
+//! oversampling, presets, ghost, deck (the tape machine's panel open, the deck running); several bands: bands (three), six, solo, mute, menu, pull (a
 //! crossover being pulled in), merge (one dragged onto its neighbour), hollow (a band whose
 //! harmonics all lie above Nyquist), stereo (a Mid and an M/S band). SNAPSHOT_HOVER=x,y moves
 //! the pointer there.
@@ -91,6 +91,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("delta") {
         host.set_plain(DELTA.id, 1.0);
     }
+    if v("deck") {
+        host.set_plain(TAPE_ON.id, 1.0);
+        host.set_plain(TAPE_DRIVE.id, 8.0);
+        host.set_plain(TAPE_BIAS.id, -20.0);
+        host.set_plain(TAPE_WOW.id, 60.0);
+        host.set_plain(TAPE_FLUTTER.id, 40.0);
+        host.set_plain(TAPE_HISS.id, 50.0);
+        host.set_plain(TAPE_SPEED.id, 1.0);
+    }
+    let tape = mite_sat::editor::tape_settings(&host);
 
     // Run the real engine over the music so the telemetry is genuine.
     let shared = Arc::new(SatShared::new());
@@ -102,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = SatEngine::new(sample_rate, factor, &settings);
     let [mut l, mut r] = music::music(4.0, sample_rate);
     for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-        engine.process(&mut [a, b], &settings, factor, false, &out, &shared.history, Some([&shared.spectrum, &shared.post]));
+        engine.process(&mut [a, b], &settings, factor, false, &out, &tape, &shared.history, Some([&shared.spectrum, &shared.post]));
     }
     shared.latency.store(engine.latency() as f32);
 
@@ -135,6 +145,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             view.event(&UiEvent::PointerDown { pos: from, button: MouseButton::Left, mods }, &host);
             for k in 1..=8 {
                 view.event(&UiEvent::PointerMove { pos: from.lerp(to, f64::from(k) / 8.0), mods }, &host);
+            }
+        }
+        "deck" => {
+            let at = Point::new(604.0, 732.0);
+            view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods }, &host);
+            view.event(&UiEvent::PointerUp { pos: at, button: MouseButton::Left, mods }, &host);
+            view.event(&UiEvent::PointerMove { pos: Point::new(900.0, 470.0), mods }, &host);
+            // Play on, a frame at a time, so the trace and the reels are the engine's.
+            let [mut l, mut r] = music::music(3.0, sample_rate);
+            for (a, b) in l.chunks_mut(800).zip(r.chunks_mut(800)) {
+                for (a, b) in a.chunks_mut(400).zip(b.chunks_mut(400)) {
+                    engine.process(&mut [a, b], &settings, factor, false, &out, &tape, &shared.history, Some([&shared.spectrum, &shared.post]));
+                }
+                if let Some(t) = engine.machine() {
+                    shared.tape_running.store(1.0);
+                    shared.tape_dev.store(t.speed_dev);
+                    shared.tape_field.store(t.field_peak);
+                }
+                view.tick(&host);
+                std::thread::sleep(std::time::Duration::from_millis(16));
             }
         }
         "ghost" => {
