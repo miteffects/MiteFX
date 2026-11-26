@@ -482,6 +482,13 @@ impl ShapeEngine {
             if out.linear || self.linear {
                 self.update_kernels(s);
             }
+            // A lookahead that keeps the latency (constant while lookahead is on) is taken at
+            // once: only the detectors' key moves, gliding.
+            let rate = self.sample_rate;
+            let latency_of = |ms: f32| ShapeSettings { lookahead_ms: ms, ..ShapeSettings::default() }.latency(rate);
+            if s.lookahead_ms != self.lookahead_ms && latency_of(s.lookahead_ms) == latency_of(self.lookahead_ms) {
+                self.lookahead_ms = s.lookahead_ms;
+            }
             match self.switch {
                 Switch::Steady if s.lookahead_ms != self.lookahead_ms || clip != self.clip_on || out.linear != self.linear => {
                     self.dip.set_target(0.0);

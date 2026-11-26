@@ -115,7 +115,8 @@ fn one_neutral_band_is_bit_exact_at_every_rate_with_or_without_lookahead() {
             let s = ShapeSettings { lookahead_ms: lookahead, ..ShapeSettings::default() };
             let x = noise(8192, 1, 0.5);
             let (y, latency) = run_at(fs, &s, &Output::default(), vec![x.clone(), x.iter().map(|v| -v).collect()]);
-            assert_eq!(latency, (lookahead * 0.001 * fs).round() as usize);
+            // The longest lookahead (5 ms) whenever lookahead is on.
+            assert_eq!(latency, if lookahead > 0.0 { (mite_dsp::shape::MAX_LOOKAHEAD_MS as f32 * 0.001 * fs).round() as usize } else { 0 });
             for i in latency..x.len() {
                 assert_eq!(y[0][i], x[i - latency], "{fs} Hz, {lookahead} ms, sample {i}");
                 assert_eq!(y[1][i], -x[i - latency]);
@@ -425,10 +426,10 @@ fn sample_rate_does_not_change_the_shape_in_time() {
 // ---- timing, stereo and the output stage -----------------------------------------------------
 
 #[test]
-fn lookahead_moves_the_gain_ahead_of_the_audio_by_exactly_its_latency() {
-    // The detector hears the hit undelayed and the audio is delayed: so the delayed audio meets
-    // exactly the gain the undelayed run applied that many samples later... the same gain curve,
-    // on audio L samples late.
+fn lookahead_moves_the_gain_ahead_of_the_audio_by_exactly_its_lookahead() {
+    // The audio is delayed by the latency (the longest lookahead) and the detector by the latency
+    // less the lookahead: the run is the undelayed one moved that much later, with the audio the
+    // lookahead later still, so on a held step the gain meets it the lookahead early.
     let s0 = shaped(6.0, -6.0);
     let s1 = ShapeSettings { lookahead_ms: 2.0, ..s0 };
     let pre = 4800;
@@ -436,10 +437,12 @@ fn lookahead_moves_the_gain_ahead_of_the_audio_by_exactly_its_latency() {
     let y0 = run(&s0, &Output::default(), x.clone());
     let (y1, latency) = run_at(FS, &s1, &Output::default(), vec![x.clone()]);
     let y1 = &y1[0];
-    assert_eq!(latency, 96);
+    assert_eq!(latency, 240);
+    let key_lag = latency - 96;
     assert!(y1[..pre + latency].iter().all(|v| *v == 0.0), "nothing before the delayed hit");
     for i in pre + latency..x.len() {
-        assert_eq!(y1[i], y0[i], "at {i}: the same gain at the same moment");
+        // The key passes through the bands' f32 delay rings: equal to rounding.
+        assert!((y1[i] - y0[i - key_lag]).abs() < 1e-6, "at {i}: {} against {}", y1[i], y0[i - key_lag]);
     }
 }
 

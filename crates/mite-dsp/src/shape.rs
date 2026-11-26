@@ -124,7 +124,14 @@ impl Default for ShapeSettings {
 }
 
 impl ShapeSettings {
+    /// The latency, samples: the longest lookahead whenever lookahead is on, however far it is
+    /// turned (`crate::lookahead`), else none.
     pub fn latency(&self, sample_rate: f32) -> usize {
+        crate::lookahead::constant_latency(self.lookahead(sample_rate), lookahead_samples(MAX_LOOKAHEAD_MS, sample_rate))
+    }
+
+    /// The lookahead, samples: how far ahead of the audio the detectors hear.
+    pub fn lookahead(&self, sample_rate: f32) -> usize {
         lookahead_samples(self.lookahead_ms, sample_rate)
     }
 }
@@ -178,6 +185,11 @@ struct Core {
     bands: [BandState; BANDS],
     /// Lookahead delays: band slot × channel rings, then the Listen ring per channel.
     rings: Vec<f32>,
+    /// What the detectors hear, laid out as `rings` (they read it the latency less the lookahead
+    /// behind): kept apart because a new band starts with its parent's history here (its detector
+    /// carries on as the parent heard) but with an empty audio ring (the parent plays the region
+    /// out; a new band's empty key read as a hit out of silence: +6 dB on a crossover's jump).
+    key_rings: Vec<f32>,
     ring_len: usize,
 }
 
@@ -192,6 +204,7 @@ impl Core {
             det_filter: [[Tdf2::default(); 4]; 2],
             bands: [BandState::new(fs); BANDS],
             rings: vec![0.0; (BANDS + 1) * 2 * ring_len],
+            key_rings: vec![0.0; (BANDS + 1) * 2 * ring_len],
             ring_len,
         }
     }
@@ -208,6 +221,7 @@ impl Core {
             b.reported = true;
         }
         self.rings.fill(0.0);
+        self.key_rings.fill(0.0);
     }
 
     /// Becomes a copy of `other` (no allocation: both are sized alike).
@@ -217,6 +231,7 @@ impl Core {
         self.det_filter = other.det_filter;
         self.bands = other.bands;
         self.rings.copy_from_slice(&other.rings);
+        self.key_rings.copy_from_slice(&other.key_rings);
     }
 
     fn ring(&self, slot: usize, c: usize) -> std::ops::Range<usize> {
@@ -241,13 +256,12 @@ impl Core {
             }
             for slot in 0..=BANDS {
                 let (a, b) = (self.ring(slot, 0), self.ring(slot, 1));
-                for i in 0..self.ring_len {
-                    let (x, y) = (
-                        f64::from(self.rings[a.start + i]),
-                        f64::from(self.rings[b.start + i]),
-                    );
-                    self.rings[a.start + i] = (ka * x + kb * y) as f32;
-                    self.rings[b.start + i] = (ka * x - kb * y) as f32;
+                for rings in [&mut self.rings, &mut self.key_rings] {
+                    for i in 0..self.ring_len {
+                        let (x, y) = (f64::from(rings[a.start + i]), f64::from(rings[b.start + i]));
+                        rings[a.start + i] = (ka * x + kb * y) as f32;
+                        rings[b.start + i] = (ka * x - kb * y) as f32;
+                    }
                 }
             }
         }
@@ -267,6 +281,7 @@ impl Core {
                 let (from, to) = (self.ring(gone, c), self.ring(into, c));
                 for i in 0..self.ring_len {
                     self.rings[to.start + i] += self.rings[from.start + i];
+                    self.key_rings[to.start + i] += self.key_rings[from.start + i];
                 }
             }
         }
@@ -277,8 +292,9 @@ impl Core {
             let Some(parent) = *parent else { continue };
             self.bands[slot] = self.bands[parent];
             for c in 0..2 {
-                let r = self.ring(slot, c);
-                self.rings[r].fill(0.0);
+                let (r, from) = (self.ring(slot, c), self.ring(parent, c));
+                self.rings[r.clone()].fill(0.0);
+                self.key_rings.copy_within(from, r.start);
             }
         }
         self.key = key;
@@ -378,6 +394,9 @@ pub struct Shaper {
     det_lp: (Coeffs, bool, f32),
     countdown: usize,
     write: usize,
+    /// How far the detectors hear behind the input: the latency less the lookahead, gliding
+    /// (read from the bands' delay rings), samples.
+    key_lag: f64,
     /// Scratch for one sample's band signals.
     glide: f64,
     /// Each of two cascaded glides, for half the time each.
@@ -412,6 +431,7 @@ impl Shaper {
             det_lp: (Coeffs::IDENTITY, false, 0.0),
             countdown: 0,
             write: 0,
+            key_lag: 0.0,
             glide: 0.0,
             glide2: 0.0,
             solo_step: 0.0,
@@ -469,6 +489,7 @@ impl Shaper {
         self.fade = None;
         self.countdown = 0;
         self.write = 0;
+        self.key_lag = (s.latency(self.fs as f32) - s.lookahead(self.fs as f32)) as f64;
     }
 
     /// The structure playing now (it follows a change once its crossfade is done).
@@ -537,7 +558,12 @@ impl Shaper {
                 }
                 to.split.retune();
             }
-            self.fade = Some(0.0);
+            // The new structure's bands reach the far end of their delay one lookahead later
+            // (a new band starts with an empty ring; its parent plays the region out): only then
+            // is it whole, so the fade waits that long. From at once, the seam where a new band's
+            // first sound met its parent's last landed inside the fade (+6 dB on a crossover's
+            // jump at 5 ms of lookahead, the §10 step test, 2026-11-26).
+            self.fade = Some(-(s.latency(self.fs as f32) as f64) * self.fade_step);
             // Every detector takes its band's times again (a new band came from another).
             for e in &mut self.eased {
                 e.times = (-1.0, -1.0);
@@ -673,7 +699,7 @@ impl Shaper {
         }
     }
 
-    /// The lookahead in force, samples (the latency).
+    /// The latency for `s`, samples.
     pub fn latency(&self, s: &ShapeSettings) -> usize {
         s.latency(self.fs as f32)
     }
@@ -727,6 +753,9 @@ impl Shaper {
                 self.countdown = CONTROL;
             }
             self.countdown -= 1;
+            let lag_to = delay.saturating_sub(s.lookahead(self.fs as f32)) as f64;
+            self.key_lag += (lag_to - self.key_lag).clamp(-0.5, 0.5);
+            let kd = self.key_lag;
             for e in &mut self.eased {
                 if self.countdown == 0 {
                     (e.mix, e.out, e.audible) = (e.goal[0], e.goal[1], e.goal[2]);
@@ -808,10 +837,38 @@ impl Shaper {
                 let mut d_sum = [0.0f64; 2];
                 for p in 0..=layout.n {
                     let b = layout.owners[p];
-                    let heard_now = if layout.n == 0 {
-                        listen
+                    // Written even with no lookahead: a lookahead switched on later reads the last
+                    // moments from here (unwritten, they were stale, and the sound jumped back in a
+                    // lookahead after the latency dip: the §10 ramp test). The single band's
+                    // detector input too: the detector may read it behind.
+                    for c in 0..n_ch {
+                        let r = ring(core.ring_len, b, c);
+                        core.rings[r.start + w] = sig[c][p] as f32;
+                        core.key_rings[r.start + w] = sig[c][p] as f32;
+                        if layout.n == 0 {
+                            let r = ring(core.ring_len, BANDS, c);
+                            core.rings[r.start + w] = listen[c] as f32;
+                            core.key_rings[r.start + w] = listen[c] as f32;
+                        }
+                    }
+                    let heard_now = if kd <= 0.0 {
+                        if layout.n == 0 {
+                            listen
+                        } else {
+                            [sig[0][p], sig[n_ch - 1][p]]
+                        }
                     } else {
-                        [sig[0][p], sig[n_ch - 1][p]]
+                        // The lookahead short of the longest: the key, that far behind.
+                        let slot = if layout.n == 0 { BANDS } else { b };
+                        let len = core.ring_len;
+                        let (i, f) = (kd.floor() as usize, kd - kd.floor());
+                        let rd = |c: usize| {
+                            let r = ring(len, slot, c);
+                            let a = f64::from(core.key_rings[r.start + (w + len - i) % len]);
+                            let z = f64::from(core.key_rings[r.start + (w + 2 * len - i - 1) % len]);
+                            a + (z - a) * f
+                        };
+                        [rd(0), rd(n_ch - 1)]
                     };
                     let lv = [heard_now[0].abs(), heard_now[n_ch - 1].abs()];
                     let both = lv[0].max(lv[1]);
@@ -827,10 +884,6 @@ impl Shaper {
                     for c in 0..n_ch {
                         band.gain[c] += band.step[c];
                         let r = ring(core.ring_len, b, c);
-                        // Written even with no lookahead: a lookahead switched on later reads
-                        // the last moments from here (unwritten, they were stale, and the sound
-                        // jumped back in a lookahead after the latency dip: the §10 ramp test).
-                        core.rings[r.start + w] = sig[c][p] as f32;
                         let delayed = if delay == 0 { sig[c][p] } else { f64::from(core.rings[r.start + read]) };
                         let g = band.gain[c];
                         y[c] += delayed * ((1.0 - e.mix) + e.mix * g) * e.out * e.audible;
@@ -841,8 +894,8 @@ impl Shaper {
                     // What the detector hears, delayed like the result.
                     for c in 0..n_ch {
                         y[c] = if layout.n == 0 {
+                            // Written with the bands above.
                             let r = ring(core.ring_len, BANDS, c);
-                            core.rings[r.start + w] = listen[c] as f32;
                             if delay == 0 { listen[c] } else { f64::from(core.rings[r.start + read]) }
                         } else {
                             // Several bands: the bands as they are heard, unshaped.
@@ -871,7 +924,9 @@ impl Shaper {
             self.write = (self.write + 1) % self.cores[0].ring_len;
             let (y, d) = match fading {
                 Some(t) => {
-                    // An S-shaped crossfade into the new structure.
+                    // An S-shaped crossfade into the new structure (held at the old one while the
+                    // new one's delay fills).
+                    let t = t.max(0.0);
                     let u = t * t * (3.0 - 2.0 * t);
                     let (a, b) = (self.active, 1 - self.active);
                     let mix = |o: &[[f64; 2]; 2], c: usize| o[a][c] * (1.0 - u) + o[b][c] * u;
@@ -1060,7 +1115,9 @@ mod tests {
 
     /// A fixed render through splits, a band made, an M/S switch and lookahead, hashed bit for bit:
     /// the crossover's extraction into `crate::crossover` must leave Shape's output unchanged.
-    /// (Re-blessed 2026-10-26: with lookahead, a new band now starts with an empty delay and a
+    /// (Re-blessed 2026-11-26: the lookahead at a constant latency, and a new structure faded in only
+    /// once its delay has filled; without lookahead the render is
+    /// bit-identical to before. Re-blessed 2026-10-26: with lookahead, a new band now starts with an empty delay and a
     /// merged band's delay joins the band below. Re-blessed 2026-10-30: the differential detector.
     /// Re-blessed 2026-11-24: the split on state-variable sections, within −250 dB of the biquads;
     /// then the structure crossfade at 30 ms (was 10).)
@@ -1111,7 +1168,7 @@ mod tests {
         for v in yl.iter().chain(&yr).chain(&dl).chain(&dr) {
             hash = (hash ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
         }
-        assert_eq!(hash, 0x6431_46d5_0787_27d6, "checksum {hash:#x}");
+        assert_eq!(hash, 0x7690_f3d5_a039_32f9, "checksum {hash:#x}");
     }
 
     #[test]
@@ -1243,8 +1300,9 @@ mod tests {
         let input = noise(4800, 3);
         let mut sh = Shaper::new(FS, &s);
         let (y, _) = run(&mut sh, &input, &s, 128);
+        // The longest lookahead (5 ms) whenever lookahead is on.
         let lat = s.latency(FS);
-        assert_eq!(lat, 96);
+        assert_eq!(lat, 240);
         for i in lat..input.len() {
             assert_eq!(y[i], input[i - lat]);
         }
