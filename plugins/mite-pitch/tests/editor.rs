@@ -454,8 +454,8 @@ fn bound_to_ara_the_whole_track_shows_and_a_click_edits_another_clip() {
     s.set_edit(0, NoteEdit { shift_cents: 100.0, ..NoteEdit::default() });
     assert!(s.wait_idle(Duration::from_secs(30)));
     // Zoom out over both and click the second clip's first note.
-    let ctrl = Modifiers { ctrl: true, ..MODS };
-    view.event(&UiEvent::Wheel { pos: Point::new(700.0, 300.0), lines: -8.0, mods: ctrl }, &host);
+    // The plain wheel zooms (as REAPER's).
+    view.event(&UiEvent::Wheel { pos: Point::new(700.0, 300.0), lines: -8.0, mods: MODS }, &host);
     let o = &others[0];
     let n = &o.analysis.notes[0];
     let t = o.song_s - 1.0 + (n.start + n.end) as f64 / 2.0 / FS;
@@ -642,5 +642,26 @@ fn the_attack_tool_sharpens_and_softens_a_notes_start() {
     assert!(json.contains("-1.0]") || json.contains("-1]"), "kept: {json}");
     view.event(&UiEvent::DoubleClick { pos: r.center(), mods: MODS }, &host);
     assert_eq!(s.edits()[2].attack, 0.0);
+    settle(&shared);
+}
+
+/// The wheel as in REAPER: plain zooms in time around the pointer, Alt scrolls in time, Ctrl
+/// (or Shift) scrolls in pitch.
+#[test]
+fn the_wheel_zooms_and_alt_scrolls_as_in_reaper() {
+    let (mut view, host, shared) = ready("ed-wheel");
+    let at = Point::new(640.0, 300.0);
+    let (t_at, x0) = (view.t_of(at.x), view.x_of(0.5));
+    view.event(&UiEvent::Wheel { pos: at, lines: 2.0, mods: MODS }, &host);
+    assert!((view.t_of(at.x) - t_at).abs() < 1e-6, "zoomed around the pointer");
+    assert!((view.x_of(0.5) - at.x).abs() > (x0 - at.x).abs(), "zoomed in");
+    let (t0, y0) = (view.t_of(at.x), view.y_of(6000.0));
+    view.event(&UiEvent::Wheel { pos: at, lines: -1.0, mods: Modifiers { alt: true, ..MODS } }, &host);
+    assert!(view.t_of(at.x) > t0, "Alt: later in time");
+    assert_eq!(view.y_of(6000.0), y0, "Alt leaves the pitch");
+    let t1 = view.t_of(at.x);
+    view.event(&UiEvent::Wheel { pos: at, lines: 1.0, mods: Modifiers { ctrl: true, ..MODS } }, &host);
+    assert_ne!(view.y_of(6000.0), y0, "Ctrl: pitch scrolled");
+    assert_eq!(view.t_of(at.x), t1, "Ctrl leaves the time");
     settle(&shared);
 }

@@ -405,7 +405,7 @@ impl PitchView {
         ROLL.y1 - (cents - self.pitch.0) / (self.pitch.1 - self.pitch.0) * ROLL.height()
     }
 
-    fn t_of(&self, x: f64) -> f64 {
+    pub fn t_of(&self, x: f64) -> f64 {
         self.t0 + (x - ROLL.x0) / ROLL.width() * self.span
     }
 
@@ -1726,17 +1726,20 @@ impl PitchView {
                 _ => false,
             },
             UiEvent::Wheel { pos, lines, mods } if ROLL.contains(pos) || RULER.contains(pos) || KEYS.contains(pos) || LANE.contains(pos) => {
+                // As REAPER's arrange view (user, 2026-11-26): the wheel zooms in time around the
+                // pointer, Alt+wheel scrolls in time, Ctrl or Shift+wheel (or over the keys)
+                // scrolls in pitch.
                 let (lo, hi) = self.extent();
-                if mods.ctrl {
+                if mods.ctrl || mods.shift || KEYS.contains(pos) {
+                    let d = f64::from(lines) * 100.0;
+                    self.pitch = (self.pitch.0 + d, self.pitch.1 + d);
+                } else if mods.alt {
+                    self.t0 = (self.t0 - f64::from(lines) * 0.1 * self.span).clamp(lo, (hi - 0.5 * self.span).max(lo));
+                } else {
                     let at = self.t_of(pos.x);
                     let span = (self.span * 0.85f64.powf(f64::from(lines))).clamp(SPAN_RANGE_S.0, SPAN_RANGE_S.1.max(hi - lo));
                     self.t0 = (at - (pos.x - ROLL.x0) / ROLL.width() * span).max(lo);
                     self.span = span;
-                } else if mods.shift || KEYS.contains(pos) {
-                    let d = f64::from(lines) * 100.0;
-                    self.pitch = (self.pitch.0 + d, self.pitch.1 + d);
-                } else {
-                    self.t0 = (self.t0 - f64::from(lines) * 0.1 * self.span).clamp(lo, (hi - 0.5 * self.span).max(lo));
                 }
                 true
             }
