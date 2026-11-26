@@ -49,7 +49,16 @@ const DELAY_TAU_S: f64 = 1.0;
 /// The points across 20 Hz…20 kHz (1/60 octave).
 pub const POINTS: usize = 600;
 /// The curves ease towards each reading (s).
-const EASE_S: f64 = 0.08;
+const EASE_S: f64 = 0.6;
+/// Fixed scales (user, 2026-11-26: "it moves too often with audio… centered constantly at 0 ms
+/// and no zoom ins and outs"): magnitude ±dB, group delay ms before and after the chain delay,
+/// the impulse ms either side of 0. Nothing rescales with the music.
+const MAG_RANGE_DB: f64 = 24.0;
+const GD_SPAN_MS: (f64, f64) = (10.0, 30.0);
+const IR_SPAN_MS: f64 = 10.0;
+/// The impulse's height: its peak, held, letting go this slowly (s per halving), so the trace
+/// does not grow and shrink with each reading.
+const IR_PEAK_HALF_S: f64 = 4.0;
 /// The menu's items: Auto, Sidechain, then Analyzer 1…16 (only those that exist are shown).
 pub const SOURCE_ITEMS: &[&str] = &[
     "Auto", "Sidechain", "Analyzer 1", "Analyzer 2", "Analyzer 3", "Analyzer 4", "Analyzer 5", "Analyzer 6", "Analyzer 7", "Analyzer 8", "Analyzer 9", "Analyzer 10", "Analyzer 11", "Analyzer 12", "Analyzer 13",
@@ -162,6 +171,9 @@ pub struct PhaseLab {
     eased_coh: Vec<f64>,
     eased_gd: Vec<f64>,
     ir: Vec<f64>,
+    /// The impulse as drawn (eased like the curves) and its held peak (the drawing's scale).
+    eased_ir: Vec<f64>,
+    ir_peak: f64,
     /// The impulse window shown, ms before and after the delay (eased).
     ir_span: (f64, f64),
     ir_target: (f64, f64),
@@ -211,12 +223,14 @@ impl PhaseLab {
             eased_h: vec![Complex::new(0.0, 0.0); POINTS],
             eased_coh: vec![0.0; POINTS],
             eased_gd: vec![0.0; POINTS],
-            ir_span: (2.0, 10.0),
-            ir_target: (2.0, 10.0),
-            mag_range: 12.0,
-            gd_range: (-1.0, 4.0),
-            mag_target: 12.0,
-            gd_target: (-1.0, 4.0),
+            ir_span: (IR_SPAN_MS, IR_SPAN_MS),
+            ir_target: (IR_SPAN_MS, IR_SPAN_MS),
+            mag_range: MAG_RANGE_DB,
+            gd_range: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
+            mag_target: MAG_RANGE_DB,
+            gd_target: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
+            eased_ir: Vec::new(),
+            ir_peak: 0.0,
             reference: None,
             downstream: Vec::new(),
             delta: None,
@@ -506,45 +520,24 @@ impl PhaseLab {
         }
     }
 
-    /// The plots' ranges from what is trusted.
+    /// The mean coherence, and the plots' fixed ranges: magnitude ±24 dB, the impulse ±10 ms
+    /// around 0, group delay a fixed span around the chain delay (moving only when the delay
+    /// itself moves by a whole ms).
     fn measure_ranges(&mut self, fs: f64) {
-        let (mut max_db, mut lo, mut hi, mut wsum, mut csum) = (0.0f64, f64::MAX, f64::MIN, 0.0, 0.0);
-        for p in &self.points {
-            let t = trust(p.coherence);
-            csum += p.coherence;
-            wsum += 1.0;
-            if t > 0.5 {
-                max_db = max_db.max(p.magnitude_db.abs());
-                let gd = (p.group_delay + self.delay / fs) * 1000.0;
-                lo = lo.min(gd);
-                hi = hi.max(gd);
-            }
-        }
-        self.mean_coherence = if wsum > 0.0 { csum / wsum } else { 0.0 };
-        self.mag_target = (((max_db + 1.5) / 6.0).ceil() * 6.0).clamp(6.0, 36.0);
-        if lo <= hi {
-            let (lo, hi) = (lo.clamp(-100.0, 400.0), hi.clamp(-100.0, 400.0));
-            let pad = ((hi - lo) * 0.15).max(0.5);
-            self.gd_target = (lo - pad, hi + pad);
-        }
-        // The impulse: from where it first reaches 1 % of its peak to where it last does,
-        // around lag 0 (the reference is aligned by the integer delay).
-        let n = self.ir.len();
-        let peak = self.ir.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        if peak > 0.0 {
-            let limit = (0.1 * fs) as usize;
-            let floor = 0.01 * peak;
-            let pre = (1..limit.min(n / 2)).rev().find(|&k| self.ir[n - k].abs() > floor).unwrap_or(0);
-            let post = (1..limit.min(n / 2)).rev().find(|&k| self.ir[k].abs() > floor).unwrap_or(0);
-            let ms = |k: usize| k as f64 / fs * 1000.0;
-            self.ir_target = ((ms(pre) * 1.2).max(1.0), (ms(post) * 1.2).max(4.0));
-        }
+        let n = self.points.len().max(1) as f64;
+        self.mean_coherence = self.points.iter().map(|p| p.coherence).sum::<f64>() / n;
+        self.mag_target = MAG_RANGE_DB;
+        let d = (self.delay / fs * 1000.0).round();
+        self.gd_target = (d - GD_SPAN_MS.0, d + GD_SPAN_MS.1);
+        self.ir_target = (IR_SPAN_MS, IR_SPAN_MS);
     }
 
     /// Each frame: measure, then ease what is drawn.
     pub fn tick(&mut self, me: &Arc<AnalyzerShared>, host: &dyn ParamHost, dt: f64) {
         self.run(me, host, 3);
         self.ease(1.0 - (-dt / EASE_S).exp());
+        self.ir_peak *= 0.5f64.powf(dt / IR_PEAK_HALF_S);
+        self.ir_peak = self.ir_peak.max(self.eased_ir.iter().fold(0.0f64, |m, v| m.max(v.abs())));
     }
 
     /// Everything the streams hold, measured at once and landed (tools render one frame).
@@ -555,6 +548,7 @@ impl PhaseLab {
         self.mag_range = self.mag_target;
         self.gd_range = self.gd_target;
         self.ir_span = self.ir_target;
+        self.ir_peak = self.eased_ir.iter().fold(0.0f64, |m, v| m.max(v.abs()));
         self.take_readings();
     }
 
@@ -571,6 +565,14 @@ impl PhaseLab {
             self.eased_h[i] += d * k;
             self.eased_coh[i] += (coh - self.eased_coh[i]) * k;
             self.eased_gd[i] += (p.group_delay + self.delay / self.sample_rate - self.eased_gd[i]) * k;
+        }
+        // The impulse eases as the curves do (its fractional alignment, drawn later, is the
+        // delay's, which is steady).
+        if self.eased_ir.len() != self.ir.len() {
+            self.eased_ir = self.ir.clone();
+        }
+        for (e, v) in self.eased_ir.iter_mut().zip(&self.ir) {
+            *e += (v - *e) * k;
         }
         self.mag_range += (self.mag_target - self.mag_range) * k * 0.5;
         self.gd_range.0 += (self.gd_target.0 - self.gd_range.0) * k * 0.5;
@@ -685,7 +687,8 @@ impl PhaseLab {
         while ms <= hi {
             let y = self.gd_y(ms);
             cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_minor, None, &Line::new((GD.x0, y), (GD.x1, y)));
-            let t = if gstep < 1.0 { format!("{ms:.1}") } else { format!("{ms:.0}") };
+            let shown = if ms.abs() < 1e-9 { 0.0 } else { ms };
+            let t = if gstep < 1.0 { format!("{shown:.1}") } else { format!("{shown:.0}") };
             cx.text.draw(cx.scene, &t.replace('-', "−"), GD.x0 - 8.0, y - 8.0, AXIS, theme.text_lo, Align::Right);
             ms += gstep;
         }
@@ -848,14 +851,18 @@ impl PhaseLab {
         }
         // Per pixel column, the lowest and highest sample there (a long window has many a
         // column), filled between; normalised to the peak.
-        let n = self.ir.len();
-        let peak = self.ir.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1e-12);
+        let ir = &self.eased_ir;
+        let n = ir.len();
+        if n == 0 {
+            return;
+        }
+        let peak = self.ir_peak.max(1e-12);
         let frac = self.delay - self.delay_int.unwrap_or(0) as f64;
         let cols = r.width().round() as usize;
         let sample = |lag: f64| -> f64 {
             let i = lag.floor();
             let u = lag - i;
-            let at = |k: f64| self.ir[(k as isize).rem_euclid(n as isize) as usize];
+            let at = |k: f64| ir[(k as isize).rem_euclid(n as isize) as usize];
             at(i) + (at(i + 1.0) - at(i)) * u
         };
         let mut top = Vec::with_capacity(cols + 1);

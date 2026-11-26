@@ -42,6 +42,8 @@ use phase::{PhaseLab, SOURCE_ITEMS};
 /// Mite Analyzer wears its accent (tokens.json `color.accent.analyzer`, pewter).
 pub const ACCENT: &str = "analyzer";
 
+/// The vectorscope's radius: this many dB below full scale at its centre.
+const SCOPE_RANGE_DB: f64 = 48.0;
 const VIEW_W: f64 = 1520.0;
 const VIEW_H: f64 = 900.0;
 const HEADER: f64 = 56.0;
@@ -329,7 +331,6 @@ pub struct AnalyzerView {
     seen: usize,
     /// Stereo: the scope's points and gain, correlation, balance, the bands.
     scope: Vec<(f32, f32)>,
-    scope_gain: f64,
     correlation: f64,
     balance: f64,
     bands: [(f64, f64); 5],
@@ -369,7 +370,6 @@ impl AnalyzerView {
             // Everything the history still holds: an editor opened late shows the last minute.
             seen: 0,
             scope: Vec::with_capacity(SCOPE_SAMPLES),
-            scope_gain: 1.0,
             correlation: 0.0,
             balance: 0.0,
             bands: [(0.0, 0.0); 5],
@@ -525,24 +525,21 @@ impl AnalyzerView {
         // Stereo: the scope's points, correlation and balance over the newest samples.
         let n = SCOPE_SAMPLES;
         let (l, r) = (&self.l[FFT - n..], &self.r[FFT - n..]);
-        let (mut ll, mut rr, mut lr, mut peak) = (0.0f64, 0.0f64, 0.0f64, 0.0f32);
+        let (mut ll, mut rr, mut lr) = (0.0f64, 0.0f64, 0.0f64);
         self.scope.clear();
         for (&a, &b) in l.iter().zip(r) {
             ll += f64::from(a) * f64::from(a);
             rr += f64::from(b) * f64::from(b);
             lr += f64::from(a) * f64::from(b);
-            peak = peak.max(a.abs()).max(b.abs());
             self.scope.push(((b - a) * std::f32::consts::FRAC_1_SQRT_2, (a + b) * std::f32::consts::FRAC_1_SQRT_2));
         }
         let corr = if ll * rr > 1e-14 { lr / (ll * rr).sqrt() } else { 0.0 };
         let bal = if ll + rr > 1e-14 { 10.0 * ((rr + 1e-20) / (ll + 1e-20)).log10() } else { 0.0 };
-        let target_gain = if peak > 1e-5 { (0.9 / f64::from(peak)).min(30.0) } else { self.scope_gain };
         let bands = self.bands_fft.bands(&self.l, &self.r, fs);
         // Eased (about 300 ms): readable, not jumpy.
         let k = ease;
         self.correlation += (corr - self.correlation) * k;
         self.balance += (bal.clamp(-24.0, 24.0) - self.balance) * k;
-        self.scope_gain += (target_gain - self.scope_gain) * if target_gain < self.scope_gain { 0.5_f64.max(ease) } else { 0.05_f64.max(ease) };
         for (b, n) in self.bands.iter_mut().zip(bands) {
             b.0 += (n.0 - b.0) * k;
             b.1 += (n.1 - b.1) * k;
@@ -743,10 +740,14 @@ impl AnalyzerView {
         cx.text.draw(cx.scene, "R", c.x + r * 0.707 + 4.0, c.y - r * 0.707 - 4.0, SMALL, theme.text_lo, Align::Left);
         cx.text.draw(cx.scene, "M", c.x + 6.0, SCOPE.y0 + 4.0, SMALL, theme.text_lo, Align::Left);
         if self.scope.len() > 1 {
-            let g = self.scope_gain * r;
+            // A fixed scale (user, 2026-11-26: no zooming with the music): the radius in dB,
+            // −48 dBFS at the centre to 0 dBFS at the edge, so quiet material still shows.
             let mut path = BezPath::new();
             for (i, &(x, y)) in self.scope.iter().enumerate() {
-                let p = (c.x + f64::from(x) * g, c.y - f64::from(y) * g);
+                let (x, y) = (f64::from(x), f64::from(y));
+                let a = x.hypot(y);
+                let k = if a > 1e-9 { ((20.0 * a.log10() + SCOPE_RANGE_DB) / SCOPE_RANGE_DB).clamp(0.0, 1.05) * r / a } else { 0.0 };
+                let p = (c.x + x * k, c.y - y * k);
                 if i == 0 {
                     path.move_to(p);
                 } else {
