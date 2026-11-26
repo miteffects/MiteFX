@@ -1,10 +1,12 @@
 //! Mite Gate's engine: the gate (`mite_dsp::gate`) and its output stage (mix, delta and bypass
 //! against the latency-aligned dry signal, output gain), plus the history telemetry: one record
-//! per 5 ms slice, whatever the host's block size. A lookahead change dips (fades out, switches,
-//! fades back in) and the new latency is reported.
+//! per 5 ms slice, whatever the host's block size. The latency is constant while lookahead is on
+//! (the longest lookahead; the knob moves the key, not the audio), so turning it neither dips
+//! nor makes the host realign; switching lookahead on or off dips (fades out, switches, fades
+//! back in) and the new latency is reported.
 //!
 //! The MIDI trigger (brief §1.5): a note on at each opening and a note off at each closing, placed
-//! where the audio does it, the lookahead's latency after the key (the host's delay compensation
+//! where the audio does it, the lookahead after the key (the host's delay compensation
 //! then lines the notes up with the dry track). With the velocity taken from the key, the note
 //! waits for the hit's peak ([`mite_dsp::gate::VELOCITY_WINDOW_MS`] after the opening): with at
 //! least that much lookahead it still lands on the opening, without it that much late.
@@ -251,7 +253,8 @@ impl GateEngine {
 
     /// The gate's events of a chunk starting at `at` (absolute) become notes due later.
     fn schedule(&mut self, events: &[GateEvent], at: u64, threshold_db: f32) {
-        let latency = self.latency() as u64;
+        // An event is where the key does it; the audio there comes out the lookahead later.
+        let latency = Gate::lookahead_for(&GateSettings { lookahead_ms: self.lookahead_ms, ..GateSettings::default() }, self.sample_rate) as u64;
         for e in events {
             let time = at + e.offset as u64;
             match e.kind {
@@ -315,7 +318,11 @@ impl GateEngine {
         self.gain.set_target(db_to_gain(out.gain_db));
         let mut start = 0;
         while start < len {
-            if s.lookahead_ms != self.lookahead_ms {
+            let same_latency = Gate::latency_for(&GateSettings { lookahead_ms: s.lookahead_ms, ..GateSettings::default() }, self.sample_rate) == self.latency();
+            if s.lookahead_ms != self.lookahead_ms && same_latency {
+                // Only the key's delay moves (it glides): no dip, no new latency.
+                self.lookahead_ms = s.lookahead_ms;
+            } else if s.lookahead_ms != self.lookahead_ms {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
                     self.lookahead_ms = s.lookahead_ms;
@@ -437,8 +444,9 @@ mod tests {
             let mut e = GateEngine::new(48000.0, &s, &out);
             let (mut l, mut r) = (x.clone(), x.clone());
             run(&mut e, &s, &out, &mut l, &mut r, 333);
+            // The longest lookahead (10 ms) whenever lookahead is on.
             let d = e.latency();
-            assert_eq!(d, 144);
+            assert_eq!(d, 480);
             for i in d..x.len() {
                 assert_eq!(l[i], x[i - d], "sample {i}");
             }
@@ -557,11 +565,12 @@ mod tests {
         for block in [1, 333, 4096] {
             assert_eq!(at(notes(&s, &Output::default(), ON, &hits(), block)), at(a.clone()), "block {block}");
         }
-        // The lookahead's latency later than without it: where the delayed audio opens.
+        // The latency later than without lookahead: where the delayed audio opens (the host's
+        // delay compensation then lines them up with the dry track).
         let s0 = GateSettings { lookahead_ms: 0.0, ..s };
         let b = notes(&s0, &Output::default(), ON, &hits(), 64);
         for (x, y) in a.iter().zip(&b) {
-            assert_eq!(x.0, y.0 + 144);
+            assert_eq!(x.0, y.0 + 480);
         }
     }
 
