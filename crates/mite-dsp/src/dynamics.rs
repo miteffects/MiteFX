@@ -585,8 +585,14 @@ impl Default for CompSettings {
 }
 
 impl CompSettings {
-    /// Samples of lookahead at `sample_rate` (the latency the plugin reports).
+    /// The latency at `sample_rate`, samples (what the plugin reports): the longest lookahead
+    /// whenever lookahead is on, however far it is turned (`crate::lookahead`), else none.
     pub fn latency(&self, sample_rate: f32) -> usize {
+        crate::lookahead::constant_latency(self.lookahead_samples(sample_rate), (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).round() as usize)
+    }
+
+    /// Samples of lookahead at `sample_rate`: how early the detector hears the audio.
+    pub fn lookahead_samples(&self, sample_rate: f32) -> usize {
         (self.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * sample_rate).round() as usize
     }
 
@@ -852,6 +858,8 @@ impl StageGlide {
 
 /// Mite Comp's processor: stereo or mono, in place.
 pub struct Compressor {
+    /// The detector's key, delayed by the latency less the lookahead.
+    key_delay: crate::lookahead::KeyDelay,
     /// The rate it runs at: the host's, times the oversampling factor.
     sample_rate: f32,
     /// The host's rate, and the oversampling factor it runs at (1, 2 or 4).
@@ -942,6 +950,7 @@ impl Compressor {
             levels: [(0.0, 0.0); STAGES],
             levels_valid: false,
             prepared: false,
+            key_delay: crate::lookahead::KeyDelay::new(1),
         };
         c.prepare(sample_rate, &s);
         c
@@ -958,6 +967,7 @@ impl Compressor {
         for ch in &mut self.chans {
             ch.delay = vec![0.0; max];
         }
+        self.key_delay = crate::lookahead::KeyDelay::new(max);
         self.retune(1, s);
     }
 
@@ -1015,6 +1025,7 @@ impl Compressor {
         }
         self.write = 0;
         self.latency = self.lookahead(s);
+        self.key_delay.reset(self.key_lag(s));
         self.fast_env = 0.0;
         self.slow_sq = 0.0;
         self.program_env = 0.0;
@@ -1077,8 +1088,15 @@ impl Compressor {
     }
 
     /// `s`'s lookahead in samples at the running rate: whole host samples, times the factor.
+    /// The latency for `s` at the rate it runs at (constant while lookahead is on).
     fn lookahead(&self, s: &CompSettings) -> usize {
         s.latency(self.base_rate) * self.multiple
+    }
+
+    /// How far the key runs behind the input: the latency less the lookahead, at the rate it
+    /// runs at.
+    fn key_lag(&self, s: &CompSettings) -> usize {
+        (s.latency(self.base_rate) - s.lookahead_samples(self.base_rate).min(s.latency(self.base_rate))) * self.multiple
     }
 
     fn design_key(&mut self, s: &CompSettings, force: bool) {
@@ -1115,6 +1133,7 @@ impl Compressor {
         let link = if stereo { s.link.clamp(0.0, 1.0) } else { 0.0 };
         self.design_key(s, false);
         self.latency = self.lookahead(s);
+        self.key_delay.set(self.key_lag(s));
         let delay_len = self.chans[0].delay.len();
         let look = self.latency.min(delay_len - 1);
 
@@ -1240,6 +1259,13 @@ impl Compressor {
             } else {
                 audio
             };
+            // Behind the input by the latency less the lookahead (feedback hears the output: no).
+            if !s.feedback {
+                for c in 0..2 {
+                    det[c] = self.key_delay.process(c, det[c]);
+                }
+            }
+            self.key_delay.advance();
             // Detector EQ, then the sibilance guard (crossfades the detector towards its low part).
             let mut hf = [0.0f32; 2];
             for c in 0..n_ch {
@@ -1993,9 +2019,34 @@ mod tests {
         let mut buf = vec![0.0f32; 1000];
         buf[0] = 1.0;
         c.process(&mut [&mut buf], None, &s);
-        assert_eq!(c.latency(), 240);
-        assert_eq!(buf.iter().position(|&x| x != 0.0), Some(240));
-        assert_eq!(buf[240], 1.0);
+        // The latency is the longest lookahead (20 ms) whenever lookahead is on.
+        assert_eq!(c.latency(), 960);
+        assert_eq!(buf.iter().position(|&x| x != 0.0), Some(960));
+        assert_eq!(buf[960], 1.0);
+    }
+
+    /// Turning the lookahead keeps the latency and moves where the reduction starts: that far
+    /// before the delayed hit arrives.
+    #[test]
+    fn the_lookahead_moves_the_reduction_not_the_latency() {
+        let start_of_cut = |ms: f32| {
+            let s = CompSettings { lookahead_ms: ms, ..settings(&[Stage { attack_ms: 0.1, ..stage(Quadrant::Compress, -30.0, 8.0) }]) };
+            let mut c = Compressor::new(FS);
+            c.prepare(FS, &s);
+            // Quiet, then a loud step at 4000; a steady tone so the gain reads off the output.
+            let x: Vec<f32> = (0..8000).map(|i| (if i < 4000 { 0.01 } else { 0.5 }) * (i as f32 * 0.3).sin().signum()).collect();
+            let mut y = x.clone();
+            c.process(&mut [&mut y], None, &s);
+            let lat = c.latency();
+            // The gain: output against the input delayed by the latency, where it is quiet.
+            let first = (lat..4000 + lat).find(|&i| (y[i] / x[i - lat]).abs() < 0.97).expect("it cuts");
+            (lat, 4000 + lat - first)
+        };
+        let (l5, early5) = start_of_cut(5.0);
+        let (l15, early15) = start_of_cut(15.0);
+        assert_eq!(l5, l15, "one latency");
+        assert!((early5 as i64 - 240).abs() <= 8, "5 ms early: {early5}");
+        assert!((early15 as i64 - 720).abs() <= 8, "15 ms early: {early15}");
     }
 
     #[test]

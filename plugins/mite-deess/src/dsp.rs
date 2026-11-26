@@ -195,8 +195,9 @@ mod tests {
         for (a, b) in l.chunks_mut(333).zip(r.chunks_mut(333)) {
             e.process(&mut [a, b], &s, 0.0, &history, None, None);
         }
+        // The longest lookahead (10 ms) whenever lookahead is on.
         let look = e.latency();
-        assert_eq!(look, 144);
+        assert_eq!(look, 480);
         assert_eq!(&l[look..], &x[..x.len() - look]);
         let mut m = x.clone();
         e.process(&mut [&mut m], &s, 0.0, &history, None, None);

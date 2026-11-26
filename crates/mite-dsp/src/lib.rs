@@ -19,6 +19,7 @@ pub mod gate;
 pub mod hysteresis;
 pub mod limit;
 pub mod linear_phase;
+pub mod lookahead;
 pub mod loudness;
 pub mod matching;
 pub mod melody;

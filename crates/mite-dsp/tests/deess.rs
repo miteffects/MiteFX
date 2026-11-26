@@ -101,8 +101,9 @@ fn nothing_is_touched_without_sibilants() {
             ..DeEssSettings::default()
         };
         let y = run(&s, &x, 333);
+        // The longest lookahead (10 ms) whenever lookahead is on.
         let look = DeEsser::latency_for(&s, FS);
-        assert_eq!(look, 144);
+        assert_eq!(look, 480);
         assert_eq!(&y[look..], &x[..x.len() - look], "{reduce:?}");
     }
 }
@@ -223,8 +224,9 @@ fn the_lookahead_has_the_reduction_ready_when_the_sibilant_arrives() {
 }
 
 #[test]
-fn the_lookahead_is_a_time_and_the_latency_is_that_time() {
-    // Every time is the latency, and the audio at that latency is the input (nothing reduced).
+fn the_lookahead_is_a_time_and_the_latency_is_constant() {
+    // Any time on is one latency (the longest), 0 is none; the audio at it is the input (nothing
+    // reduced).
     let (x, _) = voice(0.5, -24.0, -90.0);
     for ms in [0.0, 1.0, 3.0, 6.5, 10.0] {
         let s = DeEssSettings {
@@ -233,7 +235,7 @@ fn the_lookahead_is_a_time_and_the_latency_is_that_time() {
             ..DeEssSettings::default()
         };
         let look = DeEsser::latency_for(&s, FS);
-        assert_eq!(look, (ms * 48.0).round() as usize, "{ms} ms");
+        assert_eq!(look, if ms > 0.0 { 480 } else { 0 }, "{ms} ms");
         let d = DeEsser::new(FS, &s);
         assert_eq!(d.latency(), look);
         let y = run(&s, &x, 128);
@@ -263,9 +265,8 @@ fn the_lookahead_is_a_time_and_the_latency_is_that_time() {
 }
 
 #[test]
-fn turning_the_lookahead_dial_changes_the_latency_once_when_it_stops() {
-    // A drag: a new time every 10 ms for 200 ms, then still. The latency stays until the hand
-    // has stopped (150 ms), then moves once, to the last time.
+fn turning_the_lookahead_dial_never_changes_the_latency() {
+    // A drag: a new time every 10 ms for 200 ms. The latency never moves (and so never dips).
     let x = vec![0.0f32; 48_000];
     let mut s = DeEssSettings::default();
     let mut d = DeEsser::new(FS, &s);
@@ -280,7 +281,7 @@ fn turning_the_lookahead_dial_changes_the_latency_once_when_it_stops() {
             seen.push(d.latency());
         }
     }
-    assert_eq!(seen, vec![144, (s.lookahead_ms * 48.0).round() as usize]);
+    assert_eq!(seen, vec![480]);
 }
 
 #[test]
