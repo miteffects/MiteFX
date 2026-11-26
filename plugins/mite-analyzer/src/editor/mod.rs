@@ -834,6 +834,7 @@ impl AnalyzerView {
         match self.hot {
             Some(Hot::Page(0)) => Help::default().text("Spectrum — the spectrum, the spectrogram, loudness and the stereo field."),
             Some(Hot::Page(_)) => Help::default().text("Phase — what a chain does: put a Mite Analyzer before it (or feed its input to the sidechain), this one after it."),
+            Some(Hot::PhasePlots) if self.pointer.is_some_and(|p| phase::IR_LIN_BUTTON.contains(p) || phase::IR_DB_BUTTON.contains(p)) => Help::default().text("The impulse linear, or its envelope in dB under the peak (−60 to 0): anything before 0 under about −40 dB is measurement or harmless pre-ringing"),
             Some(Hot::PhasePlots) => Help::default().text(self.pointer.and_then(|p| self.phase.help(p)).unwrap_or_default()),
             Some(Hot::Chain) => Help::default().text("The chain's delay (its latency, as heard), its polarity, and how well the two signals explain each other across the band; curves fade where they don't."),
             Some(Hot::Impulse) => Help::default().text("The chain's impulse response around its delay: ringing before 0 is a linear-phase filter's pre-ring."),
@@ -885,7 +886,7 @@ impl AnalyzerView {
             return Some(Hot::Reset);
         }
         if self.phase_open {
-            if ((phase::X0..=phase::X1).contains(&p.x) && (phase::MAG.y0..=phase::GD.y1).contains(&p.y)) || phase::IR_PLOT.contains(p) {
+            if ((phase::X0..=phase::X1).contains(&p.x) && (phase::MAG.y0..=phase::GD.y1).contains(&p.y)) || phase::IR_PLOT.contains(p) || phase::IR_LIN_BUTTON.contains(p) || phase::IR_DB_BUTTON.contains(p) {
                 return Some(Hot::PhasePlots);
             }
             if phase::CHAIN.contains(p) {
@@ -959,6 +960,10 @@ impl AnalyzerView {
         // scroll, double-click: as it was).
         if self.phase_open {
             match *event {
+                UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if phase::IR_LIN_BUTTON.contains(pos) || phase::IR_DB_BUTTON.contains(pos) => {
+                    self.phase.set_ir_db(phase::IR_DB_BUTTON.contains(pos));
+                    return true;
+                }
                 UiEvent::Wheel { pos, lines, mods } if phase::GD.contains(pos) => {
                     self.phase.gd_wheel(pos.y, f64::from(lines), mods.alt);
                     return true;

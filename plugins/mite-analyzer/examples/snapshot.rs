@@ -3,7 +3,7 @@
 //!
 //!     cargo run -p mite_analyzer --example snapshot -- out.png [scale] [dark|light|hc|cb]
 //!
-//! SNAPSHOT_VARIANT: default, ms (Mid / Side), lr (Left / Right), menu (the target list open),
+//! SNAPSHOT_VARIANT (phase-db: the impulse in dB): default, ms (Mid / Side), lr (Left / Right), menu (the target list open),
 //! phase (the phase page: the music through a test chain, a 60 Hz high-pass, a 12 kHz low-pass
 //! and 128 samples of delay, against the dry music on the sidechain), phase-menu (its reference
 //! list open).
@@ -71,6 +71,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if v("menu") || v("phase-menu") {
         let pos = view.button(if v("menu") { "target" } else { "source" }).expect("button").center();
         view.event(&UiEvent::PointerMove { pos, mods }, &host);
+        view.event(&UiEvent::PointerDown { pos, button: MouseButton::Left, mods }, &host);
+        view.event(&UiEvent::PointerUp { pos, button: MouseButton::Left, mods }, &host);
+    }
+    if v("phase-db") {
+        // The impulse in dB.
+        let pos = mite_analyzer::editor::phase::IR_DB_BUTTON.center();
         view.event(&UiEvent::PointerDown { pos, button: MouseButton::Left, mods }, &host);
         view.event(&UiEvent::PointerUp { pos, button: MouseButton::Left, mods }, &host);
     }

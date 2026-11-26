@@ -147,4 +147,10 @@ fn the_impulse_zooms_and_scrolls_by_hand() {
     assert!(view.phase().ir_window().0 > pre, "scrolled");
     view.event(&UiEvent::DoubleClick { pos: ir.center(), mods: MODS }, &host);
     assert_eq!(view.phase().ir_window(), (10.0, 10.0));
+    // The scale: dB, and back to linear.
+    click(&mut view, &host, mite_analyzer::editor::phase::IR_DB_BUTTON.center());
+    assert!(view.phase().ir_db());
+    draw(&mut view, &host);
+    click(&mut view, &host, mite_analyzer::editor::phase::IR_LIN_BUTTON.center());
+    assert!(!view.phase().ir_db());
 }

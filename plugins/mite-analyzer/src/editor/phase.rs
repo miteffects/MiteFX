@@ -80,6 +80,12 @@ const FREQ_LABELS_Y: f64 = 788.0;
 pub const CHAIN: Rect = Rect::new(1010.0, 64.0, 1508.0, 420.0);
 pub const SOURCE_BUTTON: Rect = Rect::new(CHAIN.x0 + 150.0, CHAIN.y0 + 12.0, CHAIN.x1 - 16.0, CHAIN.y0 + 50.0);
 pub const IMPULSE: Rect = Rect::new(1010.0, 428.0, 1508.0, 808.0);
+/// The impulse's scale switch: linear, or its envelope in dB (to read how far under the peak
+/// anything before 0 is).
+pub const IR_LIN_BUTTON: Rect = Rect::new(IMPULSE.x0 + 132.0, IMPULSE.y0 + 8.0, IMPULSE.x0 + 172.0, IMPULSE.y0 + 30.0);
+pub const IR_DB_BUTTON: Rect = Rect::new(IMPULSE.x0 + 176.0, IMPULSE.y0 + 8.0, IMPULSE.x0 + 216.0, IMPULSE.y0 + 30.0);
+/// The dB scale's floor under the peak.
+const IR_FLOOR_DB: f64 = 60.0;
 pub const IR_PLOT: Rect = Rect::new(IMPULSE.x0 + 16.0, IMPULSE.y0 + 40.0, IMPULSE.x1 - 16.0, IMPULSE.y1 - 34.0);
 
 const LABEL: TextStyle = TextStyle { size: 12.0, weight: 700.0, tracking: 0.08, tabular: false };
@@ -189,6 +195,8 @@ pub struct PhaseLab {
     gd_view: (f64, f64),
     /// The impulse view, ms before and after 0: fixed unless the user zooms or scrolls it.
     ir_view: (f64, f64),
+    /// The impulse drawn as its envelope in dB (else linear).
+    ir_db: bool,
     mag_target: f64,
     gd_target: (f64, f64),
     reference: Option<Reference>,
@@ -238,6 +246,7 @@ impl PhaseLab {
             gd_range: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
             gd_view: GD_SPAN_MS,
             ir_view: (IR_SPAN_MS, IR_SPAN_MS),
+            ir_db: false,
             mag_target: MAG_RANGE_DB,
             gd_target: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
             eased_ir: Vec::new(),
@@ -664,6 +673,15 @@ impl PhaseLab {
         self.set_ir_view((IR_SPAN_MS, IR_SPAN_MS));
     }
 
+    /// The impulse as its envelope in dB (`true`) or linear.
+    pub fn set_ir_db(&mut self, db: bool) {
+        self.ir_db = db;
+    }
+
+    pub fn ir_db(&self) -> bool {
+        self.ir_db
+    }
+
     /// The impulse window now, ms before and after 0 (tests and tools).
     pub fn ir_window(&self) -> (f64, f64) {
         self.ir_span
@@ -926,13 +944,28 @@ impl PhaseLab {
         panel(cx.scene, RoundedRect::from_rect(IMPULSE, 8.0), theme.display, theme.line);
         cx.text.draw(cx.scene, "IMPULSE · ms", IMPULSE.x0 + 16.0, IMPULSE.y0 + 12.0, LABEL, theme.text_lo, Align::Left);
         cx.text.draw(cx.scene, "0 = THE CHAIN DELAY", IMPULSE.x1 - 16.0, IMPULSE.y0 + 12.0, SMALL, theme.text_lo, Align::Right);
+        for (b, name, on) in [(IR_LIN_BUTTON, "LIN", !self.ir_db), (IR_DB_BUTTON, "dB", self.ir_db)] {
+            let rr = RoundedRect::from_rect(b, b.height() / 2.0);
+            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if on { theme.accent.multiply_alpha(0.18) } else { theme.well }, None, &rr);
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if on { theme.accent } else { theme.well_border }, None, &rr);
+            cx.text.draw(cx.scene, name, b.center().x, b.center().y - 6.5, SMALL, if on { theme.accent } else { theme.text_mid }, Align::Center);
+        }
         let r = IR_PLOT;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.well, None, &RoundedRect::from_rect(r, 6.0));
         let (pre, post) = self.ir_span;
         let fs = self.sample_rate;
         let x_of = |ms: f64| r.x0 + (ms + pre) / (pre + post) * r.width();
         let mid = r.center().y;
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_zero, None, &Line::new((r.x0, mid), (r.x1, mid)));
+        let db_y = |db: f64| r.y0 + 8.0 + (-db).clamp(0.0, IR_FLOOR_DB) / IR_FLOOR_DB * (r.height() - 16.0);
+        if self.ir_db {
+            for db in [0.0, -20.0, -40.0, -60.0] {
+                let y = db_y(db);
+                cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if db == 0.0 { theme.grid_zero } else { theme.grid_minor }, None, &Line::new((r.x0, y), (r.x1, y)));
+                cx.text.draw(cx.scene, &format!("{}", db as i32).replace('-', "−"), r.x0 + 6.0, y + 2.0, AXIS, theme.text_lo, Align::Left);
+            }
+        } else {
+            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.grid_zero, None, &Line::new((r.x0, mid), (r.x1, mid)));
+        }
         // Time ticks at a round step.
         let span = pre + post;
         let step = [0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0].into_iter().find(|s| span / s <= 7.0).unwrap_or(100.0);
@@ -980,8 +1013,17 @@ impl PhaseLab {
                 k += 1.0;
             }
             let x = r.x0 + r.width() * c as f64 / cols as f64;
-            top.push(Point::new(x, mid - hi / peak * amp));
-            bottom.push(Point::new(x, mid - lo / peak * amp));
+            if self.ir_db {
+                // The envelope: the column's largest swing, dB under the peak, filled up from
+                // the floor.
+                let a = lo.abs().max(hi.abs()) / peak;
+                let db = 20.0 * a.max(1e-9).log10();
+                top.push(Point::new(x, db_y(db)));
+                bottom.push(Point::new(x, r.y1));
+            } else {
+                top.push(Point::new(x, mid - hi / peak * amp));
+                bottom.push(Point::new(x, mid - lo / peak * amp));
+            }
         }
         let mut shape = BezPath::new();
         shape.move_to(top[0]);
