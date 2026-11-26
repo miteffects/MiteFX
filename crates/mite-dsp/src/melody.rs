@@ -554,6 +554,11 @@ pub struct NoteEdit {
     pub transition_ms: f64,
 }
 
+/// A gap between two notes shorter than this belongs to both: its pitch, level and formant blend
+/// from the one before to the one after (a gap left as sung put a grain or two at the original
+/// pitch and level between two shifted notes: a click, +9.9 dB at a seam on a real voice), s.
+pub const GAP_JOIN_S: f64 = 0.25;
+
 /// Notes this close are legato: a transition joins them, s.
 pub const LEGATO_S: f64 = 0.03;
 /// The longest transition, ms.
@@ -698,10 +703,18 @@ fn affect_margin(fs: f64) -> usize {
 
 /// Output times the grains are laid at whatever came before (a note's start, less
 /// [`affect_margin`]), so a render begun at one of them lays the same grains as the whole render.
+///
+/// Only in a gap: one inside a sounding note (a legato note's, whose margin reaches back into the
+/// note before) restarted the grains there, and the shifted note before jumped (a click at its
+/// end, up to +9.9 dB at a seam on a real voice).
 fn sync_points(a: &Analysis) -> Vec<f64> {
     let m = affect_margin(a.fs);
     let mut s: Vec<f64> = std::iter::once(0.0)
-                .chain(a.notes.iter().map(|n| n.span().0.saturating_sub(m) as f64))
+        .chain(a.notes.iter().enumerate().filter_map(|(i, n)| {
+            let p = n.span().0.saturating_sub(m);
+            let before = i.checked_sub(1).map_or(0, |j| a.notes[j].span().1);
+            (p >= before).then_some(p as f64)
+        }))
         .collect();
     s.sort_by(f64::total_cmp);
     s.dedup();
@@ -739,6 +752,13 @@ pub fn render_range(
         let i = a.notes.partition_point(|n| (n.span().0 as f64) <= t);
         i.checked_sub(1).filter(|&j| t < a.notes[j].span().1 as f64)
     };
+    // A short gap between two notes: the notes either side and how far through it `t` is.
+    let gap_of = |t: f64| -> Option<(usize, usize, f64)> {
+        let next = a.notes.partition_point(|n| (n.span().0 as f64) <= t);
+        let prev = next.checked_sub(1)?;
+        let (from, to) = (a.notes[prev].span().1 as f64, a.notes.get(next)?.span().0 as f64);
+        (t >= from && t < to && to - from < GAP_JOIN_S * fs).then(|| (prev, next, (t - from) / (to - from).max(1.0)))
+    };
     let noise_len = ((NOISE_GRAIN_S * fs) as usize).max(8);
     let lay = |acc: &mut [f64], wsum: &mut [f64], o: f64, w: f64, v: f64| {
         if o >= lo as f64 && (o as usize) < hi {
@@ -773,7 +793,14 @@ pub fn render_range(
             }
         }
         let note = note_of_in(t_in);
-        let e = note.map_or(NoteEdit::default(), |i| edits[i]);
+        let gap = if note.is_none() { gap_of(t_in) } else { None };
+        let mut e = note.map_or(NoteEdit::default(), |i| edits[i]);
+        if let Some((p, q, u)) = gap {
+            // In a short gap: the level and formant of the notes either side, blended.
+            let (ep, eq) = (edits[p], edits[q]);
+            e.gain_db = ep.gain_db + (eq.gain_db - ep.gain_db) * u;
+            e.formant_semitones = ep.formant_semitones + (eq.formant_semitones - ep.formant_semitones) * u;
+        }
         let gain = 10f64.powf(e.gain_db / 20.0);
         let mk = a.marks.partition_point(|&m| (m as f64) < t_in);
         let nearest = [mk.checked_sub(1), (mk < a.marks.len()).then_some(mk)]
@@ -793,11 +820,27 @@ pub fn render_range(
                 (None, None) => (fallback, fallback),
             };
             // The pitch moves by the note's shift and its drift scaled: a ratio on the period.
-                        let ratio = note.map_or(1.0, |i| 2f64.powf(pitch_offset(a, edits, i, t_in) / 1200.0));
+            let cents = match (note, gap) {
+                (Some(i), _) => pitch_offset(a, edits, i, t_in),
+                // In a short gap: from where the note before ends to where the next begins.
+                (None, Some((p, q, u))) => {
+                    let (np, nq) = (&a.notes[p], &a.notes[q]);
+                    let from = pitch_offset(a, edits, p, np.end.saturating_sub(1) as f64);
+                    let to = pitch_offset(a, edits, q, nq.start as f64);
+                    from + (to - from) * u * u * (3.0 - 2.0 * u)
+                }
+                (None, None) => 0.0,
+            };
+            let ratio = 2f64.powf(cents / 1200.0);
             let fr = 2f64.powf(e.formant_semitones / 12.0);
             // The grain: the input from the mark before to the mark after (Hann halves),
             // resampled by the formant ratio, centred at t_out.
-            let (ol, or) = (hl / fr, hr / fr);
+            // Raised, the output periods are shorter than the input's: grains two input periods
+            // long would overlap 2 × ratio deep and their tops, never quite in phase, would
+            // average away (−2…−5 dB over 1.6–6 kHz at +3…+7 semitones on a real voice). So a
+            // raised grain is two output periods long: the overlap stays 2.
+            let shrink = ratio.max(1.0);
+            let (ol, or) = (hl / fr / shrink, hr / fr / shrink);
             for k in (-ol.ceil() as isize)..=(or.ceil() as isize) {
                 let (u, src) = if k < 0 { (k as f64 / ol, m + k as f64 * fr) } else { (k as f64 / or, m + k as f64 * fr) };
                 if u.abs() >= 1.0 {
@@ -848,7 +891,11 @@ pub fn render_range(
             }
             match note_of_in(t) {
                 Some(i) => edits[i].is_neutral(),
-                None => !time_moved.iter().any(|&(s, e)| t >= s && t < e),
+                None => match gap_of(t) {
+                    // A short gap is edited when either note beside it is.
+                    Some((p, q, _)) => edits[p].is_neutral() && edits[q].is_neutral() && !time_moved.iter().any(|&(s, e)| t >= s && t < e),
+                    None => !time_moved.iter().any(|&(s, e)| t >= s && t < e),
+                },
             }
         })
         .collect();
@@ -1117,14 +1164,17 @@ mod tests {
             "moved {:.1} cents",
             got - was
         );
-        // The formants stay: the spectral centroid moves under 6 % (a resampling shift of three
-        // semitones moves it 19 %).
+        // The formants stay: the spectral centroid moves under 10 % (a resampling shift of three
+        // semitones moves it 19 %). Not 0: this voice's glottal pulse scales with its period, so
+        // the same line truly sung 3 semitones up has its centroid +37 %; and a raised grain is
+        // two output periods long (on a real voice that keeps the top: see melody_artifacts),
+        // which widens the envelope a little (+8.5 % here, +5 % with full-length grains).
         let (was, now) = (
             centroid(&x[s + 4800..e - 4800]),
             centroid(&y[s + 4800..e - 4800]),
         );
         assert!(
-            (now / was - 1.0).abs() < 0.06,
+            (now / was - 1.0).abs() < 0.10,
             "centroid {was:.0} → {now:.0} Hz"
         );
         // Other notes untouched.
