@@ -129,3 +129,22 @@ fn the_group_delay_plot_zooms_and_scrolls_by_hand() {
     assert_eq!(view.phase().gd_range(), start, "back as it was");
     let _ = shared;
 }
+
+/// The impulse zooms and scrolls by hand too: centred on 0 until then, back there on a
+/// double-click.
+#[test]
+fn the_impulse_zooms_and_scrolls_by_hand() {
+    let (mut view, host, _) = setup(|t| (sine(440.0, t), sine(440.0, t)));
+    let page = view.button("phase_page").expect("the phase page");
+    click(&mut view, &host, page.center());
+    view.tick(&host);
+    let ir = mite_analyzer::editor::phase::IR_PLOT;
+    assert_eq!(view.phase().ir_window(), (10.0, 10.0), "centred on 0, ±10 ms");
+    view.event(&UiEvent::Wheel { pos: ir.center(), lines: 4.0, mods: MODS }, &host);
+    let (pre, post) = view.phase().ir_window();
+    assert!(pre + post < 12.0 && (pre - post).abs() < 1e-9, "zoomed around 0 (the middle): {pre} {post}");
+    view.event(&UiEvent::Wheel { pos: ir.center(), lines: 1.0, mods: Modifiers { alt: true, ..MODS } }, &host);
+    assert!(view.phase().ir_window().0 > pre, "scrolled");
+    view.event(&UiEvent::DoubleClick { pos: ir.center(), mods: MODS }, &host);
+    assert_eq!(view.phase().ir_window(), (10.0, 10.0));
+}

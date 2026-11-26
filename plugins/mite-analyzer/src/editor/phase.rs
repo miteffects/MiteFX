@@ -55,6 +55,8 @@ const EASE_S: f64 = 0.6;
 /// the impulse ms either side of 0. Nothing rescales with the music.
 const MAG_RANGE_DB: f64 = 24.0;
 const GD_SPAN_MS: (f64, f64) = (10.0, 30.0);
+/// How far the impulse view zooms, its whole span in ms.
+const IR_ZOOM_MS: (f64, f64) = (0.5, 200.0);
 /// How far the group-delay view zooms, its whole span in ms.
 const GD_ZOOM_MS: (f64, f64) = (0.5, 500.0);
 const IR_SPAN_MS: f64 = 10.0;
@@ -78,7 +80,7 @@ const FREQ_LABELS_Y: f64 = 788.0;
 pub const CHAIN: Rect = Rect::new(1010.0, 64.0, 1508.0, 420.0);
 pub const SOURCE_BUTTON: Rect = Rect::new(CHAIN.x0 + 150.0, CHAIN.y0 + 12.0, CHAIN.x1 - 16.0, CHAIN.y0 + 50.0);
 pub const IMPULSE: Rect = Rect::new(1010.0, 428.0, 1508.0, 808.0);
-const IR_PLOT: Rect = Rect::new(IMPULSE.x0 + 16.0, IMPULSE.y0 + 40.0, IMPULSE.x1 - 16.0, IMPULSE.y1 - 34.0);
+pub const IR_PLOT: Rect = Rect::new(IMPULSE.x0 + 16.0, IMPULSE.y0 + 40.0, IMPULSE.x1 - 16.0, IMPULSE.y1 - 34.0);
 
 const LABEL: TextStyle = TextStyle { size: 12.0, weight: 700.0, tracking: 0.08, tabular: false };
 const SMALL: TextStyle = TextStyle { size: 11.0, weight: 700.0, tracking: 0.08, tabular: false };
@@ -185,6 +187,8 @@ pub struct PhaseLab {
     /// The group-delay view, ms below and above the chain delay: fixed unless the user zooms
     /// or scrolls it (user, 2026-11-26: "for group delay I should be able to zoom myself").
     gd_view: (f64, f64),
+    /// The impulse view, ms before and after 0: fixed unless the user zooms or scrolls it.
+    ir_view: (f64, f64),
     mag_target: f64,
     gd_target: (f64, f64),
     reference: Option<Reference>,
@@ -233,6 +237,7 @@ impl PhaseLab {
             mag_range: MAG_RANGE_DB,
             gd_range: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
             gd_view: GD_SPAN_MS,
+            ir_view: (IR_SPAN_MS, IR_SPAN_MS),
             mag_target: MAG_RANGE_DB,
             gd_target: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
             eased_ir: Vec::new(),
@@ -535,7 +540,7 @@ impl PhaseLab {
         self.mag_target = MAG_RANGE_DB;
         let d = (self.delay / fs * 1000.0).round();
         self.gd_target = (d - self.gd_view.0, d + self.gd_view.1);
-        self.ir_target = (IR_SPAN_MS, IR_SPAN_MS);
+        self.ir_target = self.ir_view;
     }
 
     /// Each frame: measure, then ease what is drawn.
@@ -622,6 +627,46 @@ impl PhaseLab {
     pub fn gd_drag(&mut self, dy: f64) {
         let ms = dy / (GD.height() - 16.0) * (self.gd_view.0 + self.gd_view.1);
         self.set_gd_view((self.gd_view.0 - ms, self.gd_view.1 + ms));
+    }
+
+    /// The impulse view set to `view` (ms before, after 0): at once, no glide.
+    fn set_ir_view(&mut self, view: (f64, f64)) {
+        let span = (view.0 + view.1).clamp(IR_ZOOM_MS.0, IR_ZOOM_MS.1);
+        let k = span / (view.0 + view.1).max(1e-9);
+        self.ir_view = (view.0 * k, view.1 * k);
+        self.ir_target = self.ir_view;
+        self.ir_span = self.ir_view;
+    }
+
+    /// The wheel over the impulse at `x`: zooms in time around the pointer, or with `scroll`
+    /// moves the view earlier or later.
+    pub fn ir_wheel(&mut self, x: f64, lines: f64, scroll: bool) {
+        let (pre, post) = self.ir_view;
+        let span = pre + post;
+        if scroll {
+            let d = lines * 0.1 * span;
+            self.set_ir_view((pre + d, post - d));
+            return;
+        }
+        let at = -pre + (x - IR_PLOT.x0) / IR_PLOT.width() * span;
+        let k = 0.85f64.powf(lines);
+        self.set_ir_view(((pre + at) * k - at, (post - at) * k + at));
+    }
+
+    /// A sideways drag on the impulse by `dx` px: the view follows the pointer.
+    pub fn ir_drag(&mut self, dx: f64) {
+        let ms = dx / IR_PLOT.width() * (self.ir_view.0 + self.ir_view.1);
+        self.set_ir_view((self.ir_view.0 + ms, self.ir_view.1 - ms));
+    }
+
+    /// The impulse view back to ±10 ms around 0.
+    pub fn ir_reset(&mut self) {
+        self.set_ir_view((IR_SPAN_MS, IR_SPAN_MS));
+    }
+
+    /// The impulse window now, ms before and after 0 (tests and tools).
+    pub fn ir_window(&self) -> (f64, f64) {
+        self.ir_span
     }
 
     /// The group-delay view back to its default.
@@ -955,6 +1000,11 @@ impl PhaseLab {
 
     /// The help strip's reading where the pointer is.
     pub fn help(&self, p: Point) -> Option<String> {
+        if IR_PLOT.contains(p) {
+            let (pre, post) = self.ir_span;
+            let ms = -pre + (p.x - IR_PLOT.x0) / IR_PLOT.width() * (pre + post);
+            return Some(format!("{} ms after the chain delay — wheel: zoom, Alt+wheel or drag: scroll, double-click: ±10 ms", fmt_signed(ms, 2)));
+        }
         if !((X0..=X1).contains(&p.x) && (MAG.y0..=GD.y1).contains(&p.y)) {
             return None;
         }

@@ -342,6 +342,8 @@ pub struct AnalyzerView {
     phase_open: bool,
     /// A drag scrolling the group-delay plot: the pointer's last height.
     gd_drag: Option<f64>,
+    /// A drag scrolling the impulse: the pointer's last x.
+    ir_drag: Option<f64>,
     /// The phase page's measurement.
     phase: PhaseLab,
     pointer: Option<Point>,
@@ -380,6 +382,7 @@ impl AnalyzerView {
             menu: None,
             phase_open: false,
             gd_drag: None,
+            ir_drag: None,
             phase: PhaseLab::new(f64::from(shared.sample_rate.load())),
             pointer: None,
             hot: None,
@@ -882,7 +885,7 @@ impl AnalyzerView {
             return Some(Hot::Reset);
         }
         if self.phase_open {
-            if (phase::X0..=phase::X1).contains(&p.x) && (phase::MAG.y0..=phase::GD.y1).contains(&p.y) {
+            if ((phase::X0..=phase::X1).contains(&p.x) && (phase::MAG.y0..=phase::GD.y1).contains(&p.y)) || phase::IR_PLOT.contains(p) {
                 return Some(Hot::PhasePlots);
             }
             if phase::CHAIN.contains(p) {
@@ -960,23 +963,39 @@ impl AnalyzerView {
                     self.phase.gd_wheel(pos.y, f64::from(lines), mods.alt);
                     return true;
                 }
+                UiEvent::Wheel { pos, lines, mods } if phase::IR_PLOT.contains(pos) => {
+                    self.phase.ir_wheel(pos.x, f64::from(lines), mods.alt);
+                    return true;
+                }
                 UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if phase::GD.contains(pos) => {
                     self.gd_drag = Some(pos.y);
                     return true;
                 }
-                UiEvent::PointerMove { pos, .. } if self.gd_drag.is_some() => {
-                    if let Some(y0) = self.gd_drag.replace(pos.y) {
+                UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if phase::IR_PLOT.contains(pos) => {
+                    self.ir_drag = Some(pos.x);
+                    return true;
+                }
+                UiEvent::PointerMove { pos, .. } if self.gd_drag.is_some() || self.ir_drag.is_some() => {
+                    if let Some(y0) = self.gd_drag.as_mut().map(|y| std::mem::replace(y, pos.y)) {
                         self.phase.gd_drag(pos.y - y0);
+                    }
+                    if let Some(x0) = self.ir_drag.as_mut().map(|x| std::mem::replace(x, pos.x)) {
+                        self.phase.ir_drag(pos.x - x0);
                     }
                     self.pointer = Some(pos);
                     return true;
                 }
-                UiEvent::PointerUp { button: MouseButton::Left, .. } if self.gd_drag.is_some() => {
+                UiEvent::PointerUp { button: MouseButton::Left, .. } if self.gd_drag.is_some() || self.ir_drag.is_some() => {
                     self.gd_drag = None;
+                    self.ir_drag = None;
                     return true;
                 }
                 UiEvent::DoubleClick { pos, .. } if phase::GD.contains(pos) => {
                     self.phase.gd_reset();
+                    return true;
+                }
+                UiEvent::DoubleClick { pos, .. } if phase::IR_PLOT.contains(pos) => {
+                    self.phase.ir_reset();
                     return true;
                 }
                 _ => {}
