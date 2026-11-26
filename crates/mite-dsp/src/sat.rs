@@ -2476,7 +2476,13 @@ impl Saturator {
                 }
                 // The sum. Left and right start from what they were and only take on the
                 // differences, so a neutral band stays the input bit for bit in every mode.
-                let bal_to = [s.bands[b].lr.clamp(-1.0, 1.0), s.bands[b].ms.clamp(-1.0, 1.0)];
+                // A band is in L/R or in M/S (user, 2026-11-26: both knobs side by side made no
+                // sense): only its own side's balance acts; the other glides to neutral.
+                let in_ms = s.bands[b].stereo.mid_side();
+                let bal_to = [
+                    if in_ms { 0.0 } else { s.bands[b].lr.clamp(-1.0, 1.0) },
+                    if in_ms { s.bands[b].ms.clamp(-1.0, 1.0) } else { 0.0 },
+                ];
                 let bal_k = (1.0 - (-1.0 / (BALANCE_GLIDE_S * self.fs)).exp()) as f32;
                 for i in 0..n {
                     let post = self.lanes.post[b][i] * dyn_gain[i];
@@ -2893,6 +2899,9 @@ mod tests {
             let mut s = band(Model::Tube, 18.0);
             s.bands[0].lr = lr;
             s.bands[0].ms = ms;
+            if ms != 0.0 {
+                s.bands[0].stereo = StereoMode::MidSide;
+            }
             let (a, b, _, _) = run_stereo(&s, &l, &r);
             match (lr as i32, ms as i32) {
                 (-1, 0) => assert!(peak(&b[k..]) < 1e-5 && (peak(&a[k..]) - peak(&a0[k..])).abs() < 1e-5, "left only"),
@@ -2901,6 +2910,23 @@ mod tests {
                 (0, 1) => assert!(peak(&mid(&a, &b)[k..]) < 1e-5 && peak(&side(&a, &b)[k..]) > 0.05, "side only"),
                 _ => assert_eq!((a, b), (a0.clone(), b0.clone()), "centred: as without them, bit for bit"),
             }
+        }
+    }
+
+    /// A band is in L/R or in M/S: the other side's balance does nothing (user, 2026-11-26).
+    #[test]
+    fn only_the_bands_own_side_balances_it() {
+        let (l, r) = stereo_input();
+        for mode in [StereoMode::Stereo, StereoMode::MidSide] {
+            let mut s = band(Model::Tube, 18.0);
+            s.bands[0].stereo = mode;
+            let plain = run_stereo(&s, &l, &r);
+            if mode == StereoMode::Stereo {
+                s.bands[0].ms = 1.0;
+            } else {
+                s.bands[0].lr = -1.0;
+            }
+            assert!(run_stereo(&s, &l, &r) == plain, "{mode:?}: the other side's balance moved it");
         }
     }
 

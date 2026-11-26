@@ -131,6 +131,8 @@ const DIALS: [(ParamSpec, &str, KnobKind); 14] = [
     (B_DYN_REL, "RELEASE", KnobKind::Unipolar),
     // The band's output balance, under MIX and OUTPUT (user, 2026-11-10: "i need it as output
     // control... just like saturn 2").
+    // Since 2026-11-26 one balance dial, L/R or M/S as the band is (user: "you are either in
+    // stereo or in M/S"); the second place holds the switch between them.
     (B_LR, "L/R", KnobKind::Bipolar),
     (B_MS, "M/S", KnobKind::Bipolar),
     // Feedback over its frequency (2026-11-24, as Saturn 2's).
@@ -140,6 +142,27 @@ const DIALS: [(ParamSpec, &str, KnobKind); 14] = [
     (B_PUNCH, "PUNCH", KnobKind::Bipolar),
     (B_BODY, "BODY", KnobKind::Bipolar),
 ];
+
+/// Where in `DIALS` the balance dial is, and the place the L/R | M/S switch takes.
+const BALANCE_DIAL: usize = 8;
+const FAMILY_DIAL: usize = 9;
+
+/// Whether band stereo mode `mode` (`B_STEREO`'s index) is on the M/S side.
+fn is_ms(mode: usize) -> bool {
+    matches!(mode, 1..=3)
+}
+
+/// The modes each side offers in its list: the whole pair first, then each half.
+const LR_MODES: [usize; 3] = [0, 4, 5];
+const MS_MODES: [usize; 3] = [3, 1, 2];
+const LR_NAMES: [&str; 3] = ["Stereo", "Left", "Right"];
+const MS_NAMES: [&str; 3] = ["Mid + Side", "Mid", "Side"];
+
+/// The same part of the image on the other side: Stereo ↔ Mid + Side, Left ↔ Mid, Right ↔ Side.
+fn other_family(mode: usize) -> usize {
+    let (from, to) = if is_ms(mode) { (MS_MODES, LR_MODES) } else { (LR_MODES, MS_MODES) };
+    to[from.iter().position(|&m| m == mode).unwrap_or(0)]
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CardKind {
@@ -171,9 +194,14 @@ struct Card {
 }
 
 impl Card {
-    fn buttons(&self) -> [(Option<Rect>, Hot); 5] {
+    fn buttons(&self) -> [(Option<Rect>, Hot); 6] {
         let b = self.band;
-        [(self.stereo, Hot::Stereo(b)), (self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b))]
+        [(self.stereo, Hot::Stereo(b)), (self.family(), Hot::Family(b)), (self.power, Hot::Power(b)), (self.solo, Hot::Solo(b)), (self.mute, Hot::Mute(b)), (self.remove, Hot::Remove(b))]
+    }
+
+    /// The L/R | M/S switch, in the dial place beside the balance (single and wide cards).
+    fn family(&self) -> Option<Rect> {
+        (self.kind != CardKind::Narrow).then(|| self.dials.get(FAMILY_DIAL)).flatten().map(|&(c, d)| Rect::from_center_size(c, (48.0, d.max(34.0) + 6.0)))
     }
 }
 
@@ -317,6 +345,8 @@ enum Hot {
     Model(usize, Model),
     Power(usize),
     Stereo(usize),
+    /// The band's L/R | M/S switch.
+    Family(usize),
     Solo(usize),
     Mute(usize),
     Remove(usize),
@@ -353,7 +383,7 @@ pub struct SatView {
     clipboard: Option<[f32; 13]>,
     /// The cards' dials, for the bands and the selection they were made for.
     knobs: Vec<Knob>,
-    knob_key: Option<(Vec<usize>, usize)>,
+    knob_key: Option<(Vec<usize>, usize, Vec<bool>)>,
     /// The newest history records, the tap's read position, and the meters as drawn (IN L/R,
     /// OUT L/R) with their ballistics.
     history: VecDeque<[f32; record::WIDTH]>,
@@ -499,6 +529,11 @@ impl SatView {
     /// Band `b`'s stereo button, if its card has one (tests and tools).
     pub fn band_stereo(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
         self.card(host, b).and_then(|c| c.stereo)
+    }
+
+    /// Band `b`'s L/R | M/S switch, if its card has one (tests and tools).
+    pub fn band_family(&self, host: &dyn ParamHost, b: usize) -> Option<Rect> {
+        self.card(host, b).and_then(|c| c.family())
     }
 
     /// The open stereo list's rows, Stereo first (tests and tools).
@@ -866,13 +901,29 @@ impl SatView {
                 let border = if open || hot(r) || lit { theme.accent } else { theme.panel_control_border };
                 mite_ui::paint::raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, border, theme.shadows);
                 let ink = if lit { theme.accent } else { theme.text_hi };
-                const NAMES: [&str; 6] = ["STEREO", "MID", "SIDE", "M/S", "LEFT", "RIGHT"];
+                const NAMES: [&str; 6] = ["STEREO", "MID", "SIDE", "MID+SIDE", "LEFT", "RIGHT"];
                 if r.width() >= 100.0 {
                     glyphs::draw_stereo(cx.scene, mode, Point::new(r.x0 + 16.0, r.center().y), 20.0, ink);
                     cx.text.draw(cx.scene, NAMES[mode.min(5)], r.x0 + 30.0, r.center().y - 7.0, TextStyle::LABEL.sized(11.0), ink, Align::Left);
                 } else {
                     // A tight header (the wide card): the name alone, centred.
                     cx.text.draw(cx.scene, NAMES[mode.min(5)], r.center().x, r.center().y - 7.0, TextStyle::LABEL.sized(10.5), ink, Align::Center);
+                }
+            }
+            if let Some(r) = card.family() {
+                // Two stacked halves, the band's side lit: L/R over M/S.
+                let ms = is_ms(mode);
+                let border = if hot(r) { theme.accent } else { theme.panel_control_border };
+                mite_ui::paint::raised(cx.scene, RoundedRect::from_rect(r, 6.0), theme.panel_control, border, theme.shadows);
+                let half = r.height() / 2.0;
+                for (k, label) in ["L/R", "M/S"].into_iter().enumerate() {
+                    let seg = Rect::new(r.x0 + 3.0, r.y0 + 3.0 + half * k as f64 - if k == 1 { 3.0 } else { 0.0 }, r.x1 - 3.0, r.y0 + half * (k + 1) as f64 - if k == 0 { 0.0 } else { 3.0 });
+                    let on = (k == 1) == ms;
+                    if on {
+                        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.22), None, &RoundedRect::from_rect(seg, 4.0));
+                    }
+                    let ink = if on { theme.accent } else { theme.text_lo };
+                    cx.text.draw(cx.scene, label, seg.center().x, seg.center().y - 6.5, TextStyle::LABEL.sized(10.5), ink, Align::Center);
                 }
             }
             if let Some(r) = card.solo {
@@ -1062,6 +1113,10 @@ impl SatView {
                 return Help::default().text("Drive ").slot(format!("{drive:.1} dB"), "36.0 dB").text("  bias ").slot(format!("{bias:+.0} %"), "+100 %").text(" — drag up for more drive, across for bias; Alt-drag: tone; wheel: drive; double-click resets.");
             }
             Some(Hot::Harmonic(_, i)) => return self.probe.help(i),
+            Some(Hot::Family(b)) => {
+                let ms = is_ms(Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize);
+                return Help::default().text(if ms { "M/S — the band works on mid and side; the dial beside balances them (−100 % mono). Click for L/R." } else { "L/R — the band works on left and right; the dial beside pans it. Click for M/S." });
+            }
             Some(Hot::Stereo(b)) => {
                 let i = Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
                 return Help::default().text(format!("{} — {}", B_STEREO.choices[i.min(5)], stereo_words(i)));
@@ -1117,7 +1172,8 @@ impl SatView {
     fn sync_knobs(&mut self, host: &dyn ParamHost) {
         let layout = Self::layout(host);
         let cards = self.cards(&layout);
-        let key = (layout.bands().to_vec(), self.rail.current(&layout));
+        let families: Vec<bool> = layout.bands().iter().map(|&b| is_ms(Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize)).collect();
+        let key = (layout.bands().to_vec(), self.rail.current(&layout), families);
         if self.knob_key.as_ref() != Some(&key) && !self.knobs.iter().any(Knob::is_dragging) {
             self.knobs.clear();
             for card in &cards {
@@ -1133,7 +1189,16 @@ impl SatView {
                         self.knobs.push(knob);
                     }
                 } else {
+                    let ms = is_ms(Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize);
                     for (k, (spec, label, kind)) in DIALS.iter().enumerate() {
+                        if k == FAMILY_DIAL {
+                            continue;
+                        }
+                        let (spec, label) = match k {
+                            BALANCE_DIAL if ms => (&DIALS[FAMILY_DIAL].0, "BALANCE"),
+                            BALANCE_DIAL => (spec, "BALANCE"),
+                            _ => (spec, *label),
+                        };
                         let (c, d) = card.dials[k];
                         let knob = Knob::new(*spec, label, *kind, c, d).with_id(band_id(b, spec.id));
                         self.knobs.push(if k == 0 { knob.with_curve(DRIVE_DIAL) } else { knob });
@@ -1143,7 +1208,7 @@ impl SatView {
             self.knob_key = Some(key);
         }
         // Follow the cards as the layout eases.
-        let mut centres = cards.iter().flat_map(|c| c.dials.iter().copied());
+        let mut centres = cards.iter().flat_map(|c| c.dials.iter().enumerate().filter(move |&(k, _)| c.kind == CardKind::Narrow || k != FAMILY_DIAL).map(|(_, d)| *d));
         for k in &mut self.knobs {
             if let Some((c, _)) = centres.next() {
                 k.center = c;
@@ -1330,11 +1395,19 @@ impl SatView {
                 self.phase_menu = true;
                 true
             }
+            Some(Hot::Family(b)) => {
+                let id = band_id(b, B_STEREO.id);
+                Self::set(host, &id, other_family(Self::plain(host, &id).round().max(0.0) as usize) as f32);
+                true
+            }
             Some(Hot::Stereo(b)) => {
                 self.rail.selected = b;
                 if let Some(r) = self.card(host, b).and_then(|c| c.stereo) {
+                    // Only this side's parts: the L/R | M/S switch changes side.
                     let current = Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
-                    self.stereo_menu = Some((b, Dropdown::new(r, B_STEREO.choices, current, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(150.0)));
+                    let (modes, names) = if is_ms(current) { (MS_MODES, &MS_NAMES) } else { (LR_MODES, &LR_NAMES) };
+                    let at = modes.iter().position(|&m| m == current).unwrap_or(0);
+                    self.stereo_menu = Some((b, Dropdown::new(r, names, at, (DISPLAY_TOP, FOOTER_TOP)).with_min_width(150.0)));
                 }
                 true
             }
@@ -1421,7 +1494,9 @@ impl SatView {
                 DropdownEvent::Open => {}
                 DropdownEvent::Picked(i) => {
                     self.stereo_menu = None;
-                    Self::set(host, &band_id(b, B_STEREO.id), i as f32);
+                    let current = Self::plain(host, &band_id(b, B_STEREO.id)).round().max(0.0) as usize;
+                    let modes = if is_ms(current) { MS_MODES } else { LR_MODES };
+                    Self::set(host, &band_id(b, B_STEREO.id), modes[i.min(2)] as f32);
                 }
                 DropdownEvent::Closed => self.stereo_menu = None,
             }

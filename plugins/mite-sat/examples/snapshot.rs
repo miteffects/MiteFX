@@ -79,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(&band_id(2, B_SOLO.id), 1.0);
     }
     if v("stereo") {
+        host.set_plain(&band_id(0, B_STEREO.id), 3.0);
         host.set_plain(&band_id(1, B_STEREO.id), 3.0);
         host.set_plain(&band_id(2, B_STEREO.id), 1.0);
     }

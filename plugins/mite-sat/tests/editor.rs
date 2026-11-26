@@ -8,7 +8,7 @@ use std::sync::Arc;
 use mite_dsp::sat::Model;
 use mite_sat::editor::{memory_host, SatView};
 use mite_dsp::sat::Layout;
-use mite_sat::params::{B_HARM, band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_DYN, B_DYN_ATT, B_DYN_THR, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
+use mite_sat::params::{B_HARM, B_LR, B_MS, band_id, cross_id, B_BIAS, B_BYPASS, B_DRIVE, B_DYN, B_DYN_ATT, B_DYN_THR, B_MIX, B_MODEL, B_MUTE, B_SOLO, B_STEREO, B_TONE, OVERSAMPLING, X_FREQ, X_ON};
 use mite_sat::SatShared;
 use mite_ui::kurbo::Point;
 use mite_ui::{DrawCx, Key, MemoryParamHost, Modifiers, MouseButton, ParamHost, Theme, ThemeKind, UiEvent, View};
@@ -327,11 +327,10 @@ fn the_stereo_list_sets_the_band_and_a_narrow_card_has_its_badge() {
     let button = view.band_stereo(&host, 0).expect("the card has one");
     click(&mut view, &host, button.center());
     let rows = view.stereo_rows();
-    assert_eq!(rows.len(), 6, "Stereo, Mid, Side, M/S, Left, Right");
+    assert_eq!(rows.len(), 3, "L/R side: Stereo, Left, Right");
     click(&mut view, &host, rows[2].center());
-    assert_eq!(plain(&host, &band_id(0, B_STEREO.id)), 2.0);
+    assert_eq!(mite_sat::editor::settings(&host).bands[0].stereo, mite_dsp::sat::StereoMode::Right);
     assert!(view.stereo_rows().is_empty());
-    assert_eq!(mite_sat::editor::settings(&host).bands[0].stereo, mite_dsp::sat::StereoMode::Side);
     host.set_plain(&cross_id(0, X_ON.id), 1.0);
     view.select(0);
     draw(&mut view, &host);
@@ -339,9 +338,32 @@ fn the_stereo_list_sets_the_band_and_a_narrow_card_has_its_badge() {
     let badge = view.band_stereo(&host, 1).expect("a narrow card has its badge");
     click(&mut view, &host, badge.center());
     let rows = view.stereo_rows();
-    assert_eq!(rows.len(), 6);
-    click(&mut view, &host, rows[4].center());
+    assert_eq!(rows.len(), 3);
+    click(&mut view, &host, rows[1].center());
     assert_eq!(mite_sat::editor::settings(&host).bands[1].stereo, mite_dsp::sat::StereoMode::Left);
+}
+
+/// A band is in L/R or in M/S (user, 2026-11-26): the switch moves the part across (Right ↔
+/// Side), the list offers that side's parts, and one balance dial follows the side.
+#[test]
+fn the_family_switch_moves_a_band_between_lr_and_ms() {
+    let (mut view, host) = shared_at(48_000.0);
+    draw(&mut view, &host);
+    assert!(view.dial(&band_id(0, B_LR.id)).is_some() && view.dial(&band_id(0, B_MS.id)).is_none(), "L/R: the L/R balance alone");
+    host.set_plain(&band_id(0, B_STEREO.id), 5.0); // Right
+    let switch = view.band_family(&host, 0).expect("the card has the switch");
+    click(&mut view, &host, switch.center());
+    assert_eq!(mite_sat::editor::settings(&host).bands[0].stereo, mite_dsp::sat::StereoMode::Side);
+    draw(&mut view, &host);
+    assert!(view.dial(&band_id(0, B_MS.id)).is_some() && view.dial(&band_id(0, B_LR.id)).is_none(), "M/S: the M/S balance alone");
+    let button = view.band_stereo(&host, 0).unwrap();
+    click(&mut view, &host, button.center());
+    let rows = view.stereo_rows();
+    assert_eq!(rows.len(), 3, "M/S side: Mid + Side, Mid, Side");
+    click(&mut view, &host, rows[0].center());
+    assert_eq!(mite_sat::editor::settings(&host).bands[0].stereo, mite_dsp::sat::StereoMode::MidSide);
+    click(&mut view, &host, switch.center());
+    assert_eq!(mite_sat::editor::settings(&host).bands[0].stereo, mite_dsp::sat::StereoMode::Stereo);
 }
 
 #[test]
