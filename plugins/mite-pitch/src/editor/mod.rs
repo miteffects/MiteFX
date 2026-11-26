@@ -20,7 +20,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_core::{BoolSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::melody::{legato, pitch_offset, Analysis, Note, NoteEdit, READING_MOVES, TRANSITION_MAX_MS};
+use mite_dsp::melody::{attack_gain, legato, pitch_offset, Analysis, Note, NoteEdit, ATTACK_SHARP_S, ATTACK_SOFT_S, READING_MOVES, TRANSITION_MAX_MS};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke, Vec2};
 use mite_ui::paint::glow_stroke;
 use mite_ui::peniko::Fill;
@@ -58,8 +58,10 @@ const SNAP_X: f64 = 176.0;
 const SNAP_W: f64 = 36.0;
 const KEY_BUTTON: Rect = Rect::new(298.0, FOOTER_TOP + 10.0, 440.0, FOOTER_TOP + 46.0);
 /// The Correct macro's two sliders.
-const CENTRE_SLIDER: Rect = Rect::new(530.0, FOOTER_TOP + 22.0, 690.0, FOOTER_TOP + 34.0);
-const DRIFT_SLIDER: Rect = Rect::new(780.0, FOOTER_TOP + 22.0, 940.0, FOOTER_TOP + 34.0);
+const CENTRE_SLIDER: Rect = Rect::new(522.0, FOOTER_TOP + 22.0, 622.0, FOOTER_TOP + 34.0);
+const DRIFT_SLIDER: Rect = Rect::new(692.0, FOOTER_TOP + 22.0, 792.0, FOOTER_TOP + 34.0);
+/// Melodyne's Quantize Time: the notes' starts onto the beat grid.
+const TIME_SLIDER: Rect = Rect::new(858.0, FOOTER_TOP + 22.0, 958.0, FOOTER_TOP + 34.0);
 /// The plugin's own transport: play and loop.
 const PLAY: Rect = Rect::new(986.0, FOOTER_TOP + 12.0, 1022.0, FOOTER_TOP + 44.0);
 const LOOP: Rect = Rect::new(1030.0, FOOTER_TOP + 12.0, 1066.0, FOOTER_TOP + 44.0);
@@ -113,9 +115,11 @@ pub enum Tool {
     Split,
     /// Melodyne's note assignment: the tracker read a note at another harmonic; move its reading.
     Reading,
+    /// How each note's sound comes in (Melodyne's attack speed).
+    Attack,
 }
 
-pub const TOOLS: [Tool; 8] = [Tool::Main, Tool::Vibrato, Tool::Drift, Tool::Formant, Tool::Level, Tool::Transition, Tool::Split, Tool::Reading];
+pub const TOOLS: [Tool; 9] = [Tool::Main, Tool::Vibrato, Tool::Drift, Tool::Formant, Tool::Level, Tool::Transition, Tool::Split, Tool::Reading, Tool::Attack];
 
 impl Tool {
     fn glyph(self) -> &'static str {
@@ -129,6 +133,8 @@ impl Tool {
             Tool::Split => "M12 3 V21 M10 8.5 H7 C4.5 8.5 3 10 3 12 C3 14 4.5 15.5 7 15.5 H10 M14 8.5 H17 C19.5 8.5 21 10 21 12 C21 14 19.5 15.5 17 15.5 H14",
             // A note and its ghost an octave above, joined.
             Tool::Reading => "M4 17 H11 M4 7 H11 M7.5 9.5 V14.5 M14 15 L17 18 L20 15 M14 9 L17 6 L20 9",
+            // A level rising steeply, then holding.
+            Tool::Attack => "M3 19 C6 19 7.5 5 10.5 5 H21 M3 19 C9 19 13 11 21 11",
         }
     }
 
@@ -142,6 +148,7 @@ impl Tool {
                         Tool::Transition => "Transition (6) — drag from a note's start: how long it glides in from the note before it; double-click: a step",
             Tool::Split => "Split (7) — click a note to split it there; click where two notes meet to join them",
             Tool::Reading => "Reading (8) — a note read an octave or a fifth off? Drag it to where it really sits: its curve follows, the sound stays; double-click: as read",
+            Tool::Attack => "Attack (9) — drag a note up for a sharper start, down for a softer one (a fade in); double-click: as sung",
         }
     }
 }
@@ -186,6 +193,7 @@ enum Hot {
         KeyButton,
     Centre,
     Drift,
+    Time,
     Ruler,
     Play,
     Loop,
@@ -220,9 +228,35 @@ struct Drag {
     reading: f64,
 }
 
+/// Which Correct macro.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacroKind {
+    Centre,
+    Drift,
+    Time,
+}
+
+impl MacroKind {
+    fn slider(self) -> Rect {
+        match self {
+            MacroKind::Centre => CENTRE_SLIDER,
+            MacroKind::Drift => DRIFT_SLIDER,
+            MacroKind::Time => TIME_SLIDER,
+        }
+    }
+
+    fn hot(self) -> Hot {
+        match self {
+            MacroKind::Centre => Hot::Centre,
+            MacroKind::Drift => Hot::Drift,
+            MacroKind::Time => Hot::Time,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Macro {
-    centre: bool,
+    kind: MacroKind,
     notes: Vec<(usize, NoteEdit)>,
     undo: Snapshot,
 }
@@ -246,6 +280,7 @@ pub struct PitchView {
     /// The macro sliders' values (0–1), until the selection changes.
     centre: f64,
     drift: f64,
+    time: f64,
         key_menu: Option<Dropdown>,
     /// A press on the ruler: where (s); a drag from it sets the loop.
     ruler_from: Option<f64>,
@@ -292,6 +327,7 @@ impl PitchView {
             macro_drag: None,
             centre: 0.0,
             drift: 0.0,
+            time: 0.0,
                         key_menu: None,
             ruler_from: None,
             hot: None,
@@ -346,6 +382,10 @@ impl PitchView {
 
     pub fn drift_slider(&self) -> Rect {
         DRIFT_SLIDER
+    }
+
+    pub fn time_slider(&self) -> Rect {
+        TIME_SLIDER
     }
 
     pub fn tool(&self) -> Tool {
@@ -515,6 +555,9 @@ impl PitchView {
         if DRIFT_SLIDER.inflate(8.0, 10.0).contains(p) {
             return Some(Hot::Drift);
         }
+        if TIME_SLIDER.inflate(8.0, 10.0).contains(p) {
+            return Some(Hot::Time);
+        }
         if !ROLL.contains(p) {
             return None;
         }
@@ -586,6 +629,7 @@ impl PitchView {
         }
         self.centre = 0.0;
         self.drift = 0.0;
+        self.time = 0.0;
     }
 
         /// The play cursor, s of the take.
@@ -880,6 +924,25 @@ impl PitchView {
                 let y = body.center().y - (e.formant_semitones / FORMANT_RANGE) * (body.height() / 2.0 - 1.0);
                 cx.scene.stroke(&Stroke::new(1.6), Affine::IDENTITY, theme.text_strong.multiply_alpha(0.8), None, &Line::new((body.x0 + body.height() / 2.0, y), (body.x1 - body.height() / 2.0, y)));
             }
+            // Its attack moved: the gain over its start, drawn across the blob from its sound's
+            // beginning (as the engine applies it).
+            if e.attack != 0.0 {
+                let dur = if e.attack < 0.0 { -e.attack * ATTACK_SOFT_S } else { ATTACK_SHARP_S };
+                let begin = ts - lead_s;
+                let top = attack_gain(e.attack, 0.0).max(1.0);
+                let pts: Vec<Point> = (0..=24)
+                    .map(|k| {
+                        let t = dur * k as f64 / 24.0;
+                        Point::new(self.x_of(begin + t * e.stretch), body.y1 - attack_gain(e.attack, t) / top * body.height())
+                    })
+                    .collect();
+                let mut env = BezPath::new();
+                env.move_to(pts[0]);
+                for p in &pts[1..] {
+                    env.line_to(*p);
+                }
+                cx.scene.stroke(&Stroke::new(1.6), Affine::IDENTITY, theme.text_strong.multiply_alpha(0.8), None, &env);
+            }
             // The reading tool, dragging: where the reading lands.
             if let Some(d) = self.drag.as_ref().filter(|d| d.grip == Grip::Reading && d.reading != 0.0 && sel) {
                 let dy = self.y_of(n.cents + e.shift_cents + d.reading) - r.center().y;
@@ -1152,8 +1215,8 @@ impl PitchView {
             draw_glyph(cx.scene, glyph, r.center(), 18.0, if on { accent } else if hot { theme.text_hi } else { theme.text_mid }, 1.5);
         }
         // The Correct macro.
-        for (r, v, name, h) in [(CENTRE_SLIDER, self.centre, "CENTRE", Hot::Centre), (DRIFT_SLIDER, self.drift, "DRIFT", Hot::Drift)] {
-            let hot = self.hot == Some(h) || self.macro_drag.as_ref().is_some_and(|m| m.centre == (h == Hot::Centre));
+        for (r, v, name, h) in [(CENTRE_SLIDER, self.centre, "CENTRE", Hot::Centre), (DRIFT_SLIDER, self.drift, "DRIFT", Hot::Drift), (TIME_SLIDER, self.time, "TIME", Hot::Time)] {
+            let hot = self.hot == Some(h) || self.macro_drag.as_ref().is_some_and(|m| m.kind.hot() == h);
             cx.text.draw(cx.scene, name, r.x0 - 12.0, r.center().y - 6.0, TextStyle::LABEL.sized(10.0), if hot { theme.text_hi } else { theme.text_mid }, Align::Right);
             let track = RoundedRect::from_rect(Rect::new(r.x0, r.center().y - 2.0, r.x1, r.center().y + 2.0), 2.0);
             cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.grid_major, None, &track);
@@ -1191,6 +1254,11 @@ impl PitchView {
                                         Tool::Transition if legato(&a, i) => Help::default().text(format!("{name} · glides in over ")).slot(format!("{:.0} ms", e.transition_ms), "500 ms"),
                     Tool::Transition => Help::default().text(format!("{name} — no note right before it to glide from")),
                     Tool::Split => Help::default().text(format!("{name} — click to split it here")),
+                    Tool::Attack => Help::default().text(format!("{name} · attack ")).slot(match e.attack {
+                        a if a < 0.0 => format!("soft, {:.0} ms", -a * ATTACK_SOFT_S * 1000.0),
+                        a if a > 0.0 => format!("sharp {:+.0} %", a * 100.0),
+                        _ => "as sung".to_owned(),
+                    }, "soft, 300 ms"),
                     Tool::Reading => {
                         let moved = a.fixes.iter().filter(|f| f.0 <= n.start && f.1 >= n.end).map(|f| f.2).sum::<f64>();
                         let dragged = self.drag.as_ref().map_or(0.0, |d| d.reading);
@@ -1219,6 +1287,8 @@ impl PitchView {
             Some(Hot::KeyButton) => Help::default().text("The key (found from the notes): its scale shades the grid and is what the scale snap snaps to"),
             Some(Hot::Centre) => Help::default().text("Correct, centre — pull the selected notes (or every note) onto the snap, by this much"),
             Some(Hot::Drift) => Help::default().text("Correct, drift — take the slow slides out of the selected notes (or every note), by this much"),
+            Some(Hot::Time) if self.shared.session.grid().is_none() => Help::default().text("Correct, timing — needs the song's tempo (play the host once, or bind through ARA)"),
+            Some(Hot::Time) => Help::default().text("Correct, timing — pull the starts of the selected notes (or every note) onto the beats, as fine as the ruler shows them, by this much"),
             _ => Help::default().text(self.tool.words()),
         }
     }
@@ -1306,6 +1376,7 @@ impl PitchView {
                     (Grip::Amount, Tool::Drift) => e.drift = (e0.drift - dy / AMOUNT_PX * 2.0).clamp(0.0, 2.0),
                     (Grip::Amount, Tool::Formant) => e.formant_semitones = (e0.formant_semitones - dy / FORMANT_PX).clamp(-FORMANT_RANGE, FORMANT_RANGE),
                     (Grip::Amount, Tool::Level) => e.gain_db = (e0.gain_db - dy / LEVEL_PX).clamp(LEVEL_RANGE.0, LEVEL_RANGE.1),
+                    (Grip::Amount, Tool::Attack) => e.attack = (e0.attack - dy / AMOUNT_PX * 2.0).clamp(-1.0, 1.0),
                                         (Grip::Amount, _) => {}
                     (Grip::Transition, _) => e.transition_ms = glide,
                     (Grip::Reading, _) => {}
@@ -1336,25 +1407,35 @@ impl PitchView {
         let Some(a) = s.analysis() else { return };
         let scale = s.scale();
         let snap = if scale.snap == Snap::Off { Snap::Semitone } else { scale.snap };
+        let grid = s.grid();
+        let origin = self.take_song_s();
+        // As fine as the ruler shows the beats now (as a drag snaps).
+        let gap = GRID_SNAP_PX * self.span / ROLL.width();
         let changes: Vec<(usize, NoteEdit)> = m
             .notes
             .iter()
             .filter_map(|&(i, e0)| {
                 let n = a.notes.get(i)?;
                 let mut e = e0;
-                if m.centre {
-                    let now = n.cents + e0.shift_cents;
-                    e.shift_cents = e0.shift_cents + (scale.snap(now, snap) - now) * v;
-                } else {
-                    e.drift = e0.drift * (1.0 - v);
+                match m.kind {
+                    MacroKind::Centre => {
+                        let now = n.cents + e0.shift_cents;
+                        e.shift_cents = e0.shift_cents + (scale.snap(now, snap) - now) * v;
+                    }
+                    MacroKind::Drift => e.drift = e0.drift * (1.0 - v),
+                    MacroKind::Time => {
+                        let g = grid.as_ref()?;
+                        let at = origin + (n.start as f64 + e0.offset) / a.fs;
+                        e.offset = e0.offset + (g.snap(at, gap) - at) * a.fs * v;
+                    }
                 }
                 Some((i, e))
             })
             .collect();
-        if m.centre {
-            self.centre = v;
-        } else {
-            self.drift = v;
+        match m.kind {
+            MacroKind::Centre => self.centre = v,
+            MacroKind::Drift => self.drift = v,
+            MacroKind::Time => self.time = v,
         }
         s.set_many(&changes);
     }
@@ -1409,7 +1490,7 @@ impl PitchView {
                 self.selected.clear();
                 true
             }
-            UiEvent::KeyDown { key: Key::Character(c), mods } if !mods.ctrl && ('1'..='8').contains(&c) => {
+            UiEvent::KeyDown { key: Key::Character(c), mods } if !mods.ctrl && ('1'..='9').contains(&c) => {
                 self.tool = TOOLS[(c as u8 - b'1') as usize];
                 true
             }
@@ -1420,7 +1501,7 @@ impl PitchView {
                     return true;
                 }
                 if let Some(m) = &self.macro_drag {
-                    let r = if m.centre { CENTRE_SLIDER } else { DRIFT_SLIDER };
+                    let r = m.kind.slider();
                     self.macro_to(((pos.x - r.x0) / r.width()).clamp(0.0, 1.0));
                     return true;
                 }
@@ -1477,13 +1558,17 @@ impl PitchView {
                     self.key_menu = Some(Dropdown::new(KEY_BUTTON, &KEY_NAMES, sc.tonic * 2 + usize::from(sc.minor), (DISPLAY_TOP, FOOTER_TOP)).with_min_width(170.0));
                     true
                 }
-                Some(h @ (Hot::Centre | Hot::Drift)) => {
+                Some(h @ (Hot::Centre | Hot::Drift | Hot::Time)) => {
                     let Some(undo) = self.snapshot() else { return true };
                     let edits = session.edits();
                     let notes = self.targets().into_iter().filter_map(|i| edits.get(i).map(|e| (i, *e))).collect();
-                    let centre = h == Hot::Centre;
-                    self.macro_drag = Some(Macro { centre, notes, undo });
-                    let r = if centre { CENTRE_SLIDER } else { DRIFT_SLIDER };
+                    let kind = match h {
+                        Hot::Centre => MacroKind::Centre,
+                        Hot::Drift => MacroKind::Drift,
+                        _ => MacroKind::Time,
+                    };
+                    self.macro_drag = Some(Macro { kind, notes, undo });
+                    let r = kind.slider();
                     self.macro_to(((pos.x - r.x0) / r.width()).clamp(0.0, 1.0));
                     true
                 }
@@ -1626,6 +1711,7 @@ impl PitchView {
                                 Tool::Formant => e.formant_semitones = d.formant_semitones,
                                                                 Tool::Level => e.gain_db = d.gain_db,
                                 Tool::Transition => e.transition_ms = d.transition_ms,
+                                Tool::Attack => e.attack = d.attack,
                                 Tool::Split | Tool::Reading => {}
                             }
                             Some((j, e))

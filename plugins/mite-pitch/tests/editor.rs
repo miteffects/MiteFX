@@ -591,3 +591,56 @@ fn the_reading_tool_moves_a_notes_reading_by_an_octave() {
     assert_eq!(*s.analysis().expect("analysis"), *before);
     settle(&shared);
 }
+
+/// The TIME macro (Melodyne's Quantize Time): every note's start pulled onto the beats by the
+/// slider's share; at 100 % each lands on a grid line; undo gives the timing back.
+#[test]
+fn the_time_macro_pulls_note_starts_onto_the_beats() {
+    let (mut view, host, shared) = ready("ed-time");
+    let s = &shared.session;
+    s.set_song_time(120.0, (4, 4), FS, 24_000, 1.0, Some(0.0));
+    let a = s.analysis().expect("analysis");
+    let start = s.take().expect("take").start as f64 / FS;
+    let off_grid = |e: &mite_dsp::melody::NoteEdit, i: usize| {
+        let at = start + (a.notes[i].start as f64 + e.offset) / FS;
+        ((at / 0.0625) - (at / 0.0625).round()).abs() * 0.0625
+    };
+    let before: Vec<f64> = s.edits().iter().enumerate().map(|(i, e)| off_grid(e, i)).collect();
+    assert!(before.iter().any(|&d| d > 0.002), "sung off the grid: {before:?}");
+    let r = view.time_slider();
+    // Half way: each start half as far off.
+    drag(&mut view, &host, Point::new(r.x0, r.center().y), Point::new(r.center().x, r.center().y), MODS);
+    for (i, e) in s.edits().iter().enumerate() {
+        assert!((off_grid(e, i) - 0.5 * before[i]).abs() < 1e-4, "note {i}: {} of {}", off_grid(e, i), before[i]);
+    }
+    // All the way: on the lines.
+    drag(&mut view, &host, Point::new(r.x0, r.center().y), Point::new(r.x1 + 20.0, r.center().y), MODS);
+    for (i, e) in s.edits().iter().enumerate() {
+        assert!(off_grid(e, i) < 1e-6, "note {i} off by {}", off_grid(e, i));
+    }
+    view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
+    view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
+    assert!(s.edits().iter().all(|e| e.offset == 0.0), "undone");
+    settle(&shared);
+}
+
+/// The attack tool: up sharper, down softer, double-click as sung; the state keeps it.
+#[test]
+fn the_attack_tool_sharpens_and_softens_a_notes_start() {
+    let (mut view, host, shared) = ready("ed-attack");
+    let s = &shared.session;
+    view.event(&UiEvent::KeyDown { key: Key::Character('9'), mods: MODS }, &host);
+    assert_eq!(view.tool(), Tool::Attack);
+    let r = view.note_rect(2).expect("in view");
+    drag(&mut view, &host, r.center(), r.center() - (0.0, 40.0), MODS);
+    assert!(s.edits()[2].attack > 0.3, "{:?}", s.edits()[2]);
+    drag(&mut view, &host, r.center(), r.center() + (0.0, 200.0), MODS);
+    assert_eq!(s.edits()[2].attack, -1.0);
+    draw(&mut view, &host);
+    settle(&shared);
+    let json = s.to_json().expect("state");
+    assert!(json.contains("-1.0]") || json.contains("-1]"), "kept: {json}");
+    view.event(&UiEvent::DoubleClick { pos: r.center(), mods: MODS }, &host);
+    assert_eq!(s.edits()[2].attack, 0.0);
+    settle(&shared);
+}

@@ -734,7 +734,7 @@ impl Session {
             .edits
             .iter()
             .map(|e| {
-                serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms])
+                serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms, e.attack])
             })
             .collect();
         let bounds: Vec<[usize; 2]> = st.analysis.as_ref().map(|a| a.bounds().into_iter().map(|(s, e)| [s, e]).collect()).unwrap_or_default();
@@ -775,7 +775,7 @@ impl Session {
                             offset: g(2, 0.0),
                             stretch: g(3, 1.0),
                             formant_semitones: g(4, 0.0),
-                            gain_db: g(5, 0.0), modulation: g(6, 1.0), transition_ms: g(7, 0.0) }
+                            gain_db: g(5, 0.0), modulation: g(6, 1.0), transition_ms: g(7, 0.0), attack: g(8, 0.0) }
                     })
                     .collect()
             })
@@ -852,7 +852,7 @@ fn parse_fixes(v: &serde_json::Value) -> Vec<(usize, usize, f64)> {
 
 /// An audio modification's edits as JSON (what the ARA archive keeps for it).
 pub fn edits_json(edits: &[NoteEdit], a: &Analysis, scale: Scale) -> String {
-    let e: Vec<serde_json::Value> = edits.iter().map(|e| serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms])).collect();
+    let e: Vec<serde_json::Value> = edits.iter().map(|e| serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms, e.attack])).collect();
     let bounds: Vec<[usize; 2]> = a.bounds().into_iter().map(|(s, e)| [s, e]).collect();
     let snap = match scale.snap {
         Snap::Semitone => 0,
@@ -881,7 +881,7 @@ pub fn parse_edits_json(json: &str, x: &[f32], a: &mut Analysis) -> (Vec<NoteEdi
             arr.iter()
                 .map(|e| {
                     let g = |k: usize, d: f64| e.get(k).and_then(serde_json::Value::as_f64).unwrap_or(d);
-                    NoteEdit { shift_cents: g(0, 0.0), drift: g(1, 1.0), offset: g(2, 0.0), stretch: g(3, 1.0), formant_semitones: g(4, 0.0), gain_db: g(5, 0.0), modulation: g(6, 1.0), transition_ms: g(7, 0.0) }
+                    NoteEdit { shift_cents: g(0, 0.0), drift: g(1, 1.0), offset: g(2, 0.0), stretch: g(3, 1.0), formant_semitones: g(4, 0.0), gain_db: g(5, 0.0), modulation: g(6, 1.0), transition_ms: g(7, 0.0), attack: g(8, 0.0) }
                 })
                 .collect()
         })

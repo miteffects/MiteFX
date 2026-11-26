@@ -714,6 +714,32 @@ pub struct NoteEdit {
     /// from the note's start, its shift eases (S-curve) from the note before's shift to its own,
     /// ms; 0: a step.
     pub transition_ms: f64,
+    /// How its sound comes in (Melodyne's attack speed), −1…1: 0 as sung; below, softer (a
+    /// fade in over up to [`ATTACK_SOFT_S`]); above, sharper (its onset lifted by up to
+    /// [`ATTACK_LIFT_DB`], back over [`ATTACK_SHARP_S`]). From where its sound begins, its leading
+    /// consonant included. See [`attack_gain`].
+    pub attack: f64,
+}
+
+/// The longest fade in, at attack −1, s.
+pub const ATTACK_SOFT_S: f64 = 0.3;
+/// The onset's lift at attack +1, dB, and how long it takes to fall back, s.
+pub const ATTACK_LIFT_DB: f64 = 9.0;
+pub const ATTACK_SHARP_S: f64 = 0.06;
+
+/// The gain attack `attack` puts on a note's sound `t` s after it begins (the engine and the
+/// drawing both use it).
+pub fn attack_gain(attack: f64, t: f64) -> f64 {
+    let a = attack.clamp(-1.0, 1.0);
+    if a < 0.0 {
+        let u = (t / (-a * ATTACK_SOFT_S)).clamp(0.0, 1.0);
+        u * u * (3.0 - 2.0 * u)
+    } else if a > 0.0 {
+        let u = (t / ATTACK_SHARP_S).clamp(0.0, 1.0);
+        1.0 + a * (10f64.powf(ATTACK_LIFT_DB / 20.0) - 1.0) * (1.0 - u) * (1.0 - u)
+    } else {
+        1.0
+    }
 }
 
 /// A gap between two notes shorter than this belongs to both: its pitch, level and formant blend
@@ -756,6 +782,7 @@ impl Default for NoteEdit {
         Self {
                         modulation: 1.0,
             transition_ms: 0.0,
+            attack: 0.0,
             shift_cents: 0.0,
             drift: 1.0,
             offset: 0.0,
@@ -963,7 +990,8 @@ pub fn render_range(
             e.gain_db = ep.gain_db + (eq.gain_db - ep.gain_db) * u;
             e.formant_semitones = ep.formant_semitones + (eq.formant_semitones - ep.formant_semitones) * u;
         }
-        let gain = 10f64.powf(e.gain_db / 20.0);
+        let attack = note.map_or(1.0, |i| attack_gain(e.attack, (t_in - a.notes[i].span().0 as f64) / fs));
+        let gain = 10f64.powf(e.gain_db / 20.0) * attack;
         let mk = a.marks.partition_point(|&m| (m as f64) < t_in);
         let nearest = [mk.checked_sub(1), (mk < a.marks.len()).then_some(mk)]
             .into_iter()
@@ -1369,6 +1397,31 @@ mod tests {
         let mut whole = c.clone();
         whole.marks = find_marks(&x, FS, c.hop, &c.frames);
         assert_eq!(whole.marks, c.marks);
+    }
+
+    #[test]
+    fn attack_softens_or_sharpens_a_notes_start_and_leaves_the_rest() {
+        let (x, _) = line();
+        let a = analyse(&x, FS);
+        let n = &a.notes[2];
+        let begin = n.span().0;
+        let rms = |y: &[f32], from: usize, to: usize| (y[from..to].iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / (to - from) as f64).sqrt();
+        let onset = |y: &[f32]| rms(y, begin, begin + (0.03 * FS) as usize);
+        let later = |y: &[f32]| rms(y, n.start + (0.35 * FS) as usize, n.end - (0.05 * FS) as usize);
+        let with = |attack: f64| {
+            let mut edits = vec![NoteEdit::default(); a.notes.len()];
+            edits[2].attack = attack;
+            render(&x, &a, &edits)
+        };
+        let (soft, sharp) = (with(-1.0), with(1.0));
+        assert!(onset(&soft) < 0.2 * onset(&x), "soft: {} of {}", onset(&soft), onset(&x));
+        assert!(onset(&sharp) > 1.6 * onset(&x), "sharp: {} of {}", onset(&sharp), onset(&x));
+        for (y, what) in [(&soft, "soft"), (&sharp, "sharp")] {
+            let d = 20.0 * (later(y) / later(&x)).log10();
+            assert!(d.abs() < 0.5, "{what}: past its start {d:+.2} dB");
+        }
+        assert_eq!(attack_gain(0.0, 0.0), 1.0);
+        assert_eq!(attack_gain(-0.5, 0.15), 1.0, "a fade over 150 ms is done by then");
     }
 
     #[test]

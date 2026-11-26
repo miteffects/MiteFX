@@ -561,6 +561,26 @@ layout and group while Ctrl is down (`keymap::layout_char`, the UI thread's own 
 XKB for the group). The editor's undo and redo, per take, move into `Session::history` when the
 editor closes and come back when it opens (tested).
 
+**2026-11-26 (user: "can we enhance our melodyne counterpart"; picked quality, detection errors,
+timing macro + attack):** measured on the user's stems (`examples/melody_artifacts`: envelope,
+air, consonants and seams; `examples/melody_notes`: readings note by note). (1) **Quality:** a
+raised grain is two output periods long (two input periods overlapped 2 × ratio deep and their
+tops averaged away: −2…−5 dB over 1.6–6 kHz at +3…+7 st; now air −0.9 dB at +7); sync points
+only in gaps (one inside a legato note before jumped the grains: seams up to +7.9 dB); a short
+gap (< 250 ms) between notes blends their pitch, level and formant. (2) **Detection:** octave
+slips up to 60 ms fold back; a note holds one pitch (frames an octave, a fifth or an octave and a
+fifth off its majority folded): notes with in-note jumps on the user's vocals 13 → 4, 16 → 9,
+11 → 5, 6 → 2; no-shift resynthesis 31 → 41 dB under the take. **Reading tool (8)**, Melodyne's
+note assignment: a note's reading moves to ±702/1200/1902/2400 cents, frames, marks and centre
+following, the sound as sung kept (`Analysis::move_reading`/`set_fixes`, marks found again
+through the note's voiced stretch only: 10 ms, each stretch's marks start on its own first frame
+so a local pass equals a whole one); undo, plugin state and the ARA archive keep the fixes.
+(3) **TIME** macro beside CENTRE and DRIFT (Quantize Time: note starts onto the beats, as fine
+as the ruler shows, by its share; needs the song's tempo) and the **Attack tool (9)**
+(`NoteEdit::attack`, state index 8: softer is a fade in over up to 300 ms from where the note's
+sound begins, sharper lifts its onset up to +9 dB back over 60 ms; the envelope is drawn on the
+note).
+
 ### 16. Mite DeNoise. Rival: Acon Digital DeNoise
 
 Spectral noise reduction (user, 2026-11-09: "the functionality of Acon Digital's DeNoise but
