@@ -369,7 +369,12 @@ latency: a dip and the host realigning all tracks mid-song. Now, whenever lookah
 audio is delayed by the longest lookahead (10 ms, reported once) and the key by the rest; the
 knob moves only the key's delay (gliding ½ sample per sample), so it never dips or changes the
 latency. 0 is no latency. MIDI notes land the lookahead after the key's event, where the delayed
-audio opens.
+audio opens. **The same in every plugin with a lookahead (2026-11-26):** `mite_dsp::lookahead`
+(`constant_latency`, `KeyDelay`) in Comp, Multiband and Rig (20 ms), DeEss (10 ms; spectral mode
+keeps its frame), Shape (5 ms; each band's key in its own ring, and a new structure fades in only
+once its delay has filled) and Limit (10 ms; `Limiter::configure_within` hears the input the rest
+late in whole samples, so the no-overshoot proof holds; the limiter still rebuilds for a new
+lookahead, behind one dip once the dial has stayed put 150 ms, but the latency never moves).
 
 ### 10. Mite Shape. Rival: none from FabFilter (SPL Transient Designer, Kilohearts)
 

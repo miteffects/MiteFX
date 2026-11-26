@@ -334,6 +334,11 @@ pub struct Limiter {
     rate: f32,
     max_lookahead: usize,
     lookahead: usize,
+    /// The lookahead the audio delay (and so the latency) follows, ≥ `lookahead`: the detector
+    /// hears the input `span − lookahead` samples late (whole samples, so the proof holds), so a
+    /// plugin can keep one latency across lookaheads (2026-11-26, `crate::lookahead`).
+    span: usize,
+    key: [Delay; 2],
     true_peak: bool,
     detectors: [TruePeak; 2],
     last_peak: [f32; 2],
@@ -357,6 +362,8 @@ impl Limiter {
             rate,
             max_lookahead: l,
             lookahead: 1,
+            span: 1,
+            key: [Delay::new(l), Delay::new(l)],
             true_peak: false,
             detectors: [tp.clone(), tp],
             last_peak: [0.0; 2],
@@ -384,7 +391,14 @@ impl Limiter {
     /// Sets the lookahead (samples, 1 = none: a clipper) and the detector, and clears the state.
     /// No allocation; the plugin crossfades two limiters across a change.
     pub fn configure(&mut self, lookahead: usize, true_peak: bool, settings: Settings) {
+        self.configure_within(lookahead, lookahead, true_peak, settings);
+    }
+
+    /// [`Self::configure`] with the audio delayed as for a lookahead of `span` (≥ `lookahead`):
+    /// the latency is `span`'s, the detector `span − lookahead` samples behind the input.
+    pub fn configure_within(&mut self, lookahead: usize, span: usize, true_peak: bool, settings: Settings) {
         self.lookahead = lookahead.clamp(1, self.max_lookahead);
+        self.span = span.clamp(self.lookahead, self.max_lookahead);
         self.true_peak = true_peak && self.detectors[0].phases() > 1;
         self.settings = settings;
         let (a1, a2) = self.boxes();
@@ -395,6 +409,7 @@ impl Limiter {
             self.box2[c].reset(a2);
             self.release[c] = Release::default();
             self.delay[c].reset();
+            self.key[c].reset();
         }
         self.last_peak = [0.0; 2];
         self.coeffs = self.release_coeffs(&settings);
@@ -402,12 +417,12 @@ impl Limiter {
 
     /// Clears the state, keeping the configuration.
     pub fn reset(&mut self) {
-        self.configure(self.lookahead, self.true_peak, self.settings);
+        self.configure_within(self.lookahead, self.span, self.true_peak, self.settings);
     }
 
     /// The delay from input to output, samples at the engine rate.
     pub fn latency(&self) -> usize {
-        Self::latency_for(self.lookahead, self.true_peak)
+        Self::latency_for(self.span, self.true_peak)
     }
 
     pub fn latency_for(lookahead: usize, true_peak: bool) -> usize {
@@ -449,15 +464,18 @@ impl Limiter {
     #[inline]
     pub fn process(&mut self, x: [f32; 2], stereo: bool) -> ([f32; 2], [f32; 2]) {
         let chans = if stereo { 2 } else { 1 };
+        let lag = self.span - self.lookahead;
         let mut v = [0.0f32; 2];
         for c in 0..chans {
+            // What the detector hears: the input, `span − lookahead` late.
+            let k = if lag > 0 { self.key[c].run(x[c], lag) } else { x[c] };
             v[c] = if self.true_peak {
-                let q = self.detectors[c].push(x[c]);
+                let q = self.detectors[c].push(k);
                 let both = q.max(self.last_peak[c]);
                 self.last_peak[c] = q;
                 both
             } else {
-                x[c].abs()
+                k.abs()
             };
         }
         if stereo && self.settings.link_transients > 0.0 {
@@ -480,6 +498,13 @@ impl Limiter {
     /// exceeds `need × input` of the sample it carries. The detector is not used.
     #[inline]
     pub fn process_needs(&mut self, x: [f32; 2], mut need: [f32; 2], stereo: bool) -> ([f32; 2], [f32; 2]) {
+        // The needs, as the detector would hear them: `span − lookahead` late.
+        let lag = self.span - self.lookahead;
+        if lag > 0 {
+            for (n, key) in need.iter_mut().zip(&mut self.key) {
+                *n = key.run(*n, lag);
+            }
+        }
         if stereo && self.settings.link_transients > 0.0 {
             let low = need[0].min(need[1]);
             for g in &mut need {
@@ -628,9 +653,15 @@ impl Protect {
 
     /// Sets the lookahead (samples, as the limiter's) and clears the state.
     pub fn configure(&mut self, lookahead: usize, settings: Settings) {
+        self.configure_within(lookahead, lookahead, settings);
+    }
+
+    /// [`Self::configure`] with the bands' audio delayed as for `span` (see
+    /// [`Limiter::configure_within`]).
+    pub fn configure_within(&mut self, lookahead: usize, span: usize, settings: Settings) {
         self.split.reset();
         for b in &mut self.bands {
-            b.configure(lookahead, false, settings);
+            b.configure_within(lookahead, span, false, settings);
         }
     }
 
