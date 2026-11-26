@@ -781,6 +781,16 @@ impl Tilt {
         }
     }
 
+    /// The section `u` (0…1) of the way from `self` to `to`, coefficient by coefficient (stable
+    /// between two stable sections: the pole stays inside the unit circle).
+    pub fn lerp(self, to: Self, u: f32) -> Self {
+        Self {
+            b0: self.b0 + (to.b0 - self.b0) * u,
+            b1: self.b1 + (to.b1 - self.b1) * u,
+            a1: self.a1 + (to.a1 - self.a1) * u,
+        }
+    }
+
     /// The exact inverse (the section is minimum phase: its zero is inside the unit circle).
     pub fn inverse(self) -> Self {
         Self {
@@ -1597,9 +1607,15 @@ pub struct Saturator {
     /// The values each control step ramps from and to, by band slot: gain, bias, share, post, fader.
     from: [[f32; 8]; BANDS],
     to: [[f32; 8]; BANDS],
+    /// Each band's tilt over the control step: from the last design to this one, per sample (a
+    /// tilt that changed once per step clicked when Tone moved).
+    tilt_from: [Tilt; BANDS],
     tilt_now: [Tilt; BANDS],
     /// The tone and pivot each band's tilt was designed for.
     tilt_key: [(f32, f32); BANDS],
+    /// Each band's tilt pivot as it glides, ln Hz (a pivot that followed a crossover at once
+    /// redesigned both neighbours' tilts in one step: Crossover 1 clicked +45 dB).
+    pivot_ln: [f64; BANDS],
     /// The band slots either playing core uses (only they are worked out).
     live: [bool; BANDS],
     lanes: Box<Lanes>,
@@ -1650,8 +1666,10 @@ impl Saturator {
             hp_k: 0.0,
             from: [[0.0; 8]; BANDS],
             to: [[0.0; 8]; BANDS],
+            tilt_from: [Tilt::IDENTITY; BANDS],
             tilt_now: [Tilt::IDENTITY; BANDS],
             tilt_key: [(0.0, 0.0); BANDS],
+            pivot_ln: [TONE_PIVOT.ln() as f64; BANDS],
             live: [false; BANDS],
             lanes: Box::new(Lanes {
                 gain: [[0.0; CHUNK]; BANDS],
@@ -1771,7 +1789,9 @@ impl Saturator {
         for b in 0..BANDS {
             let key = (s.bands[b].tone_db, tone_pivot(&layout, &s.crossovers, b));
             self.tilt_now[b] = Tilt::new(key.0, key.1, self.fs as f32);
+            self.tilt_from[b] = self.tilt_now[b];
             self.tilt_key[b] = key;
+            self.pivot_ln[b] = f64::from(key.1).ln();
             let v = self.targets(b, s.auto_gain);
             self.from[b] = v;
             self.to[b] = v;
@@ -2034,10 +2054,18 @@ impl Saturator {
                 self.targets(b, s.auto_gain)
             };
             self.to[b] = self.targets(b, s.auto_gain);
-            let key = (
-                self.eased[b].tone_db as f32,
-                tone_pivot(&layout, &s.crossovers, b),
-            );
+            let pivot = f64::from(tone_pivot(&layout, &s.crossovers, b)).ln();
+            if was_live[b] {
+                ease(&mut self.pivot_ln[b], pivot, self.glide);
+            } else {
+                self.pivot_ln[b] = pivot;
+            }
+            let key = (self.eased[b].tone_db as f32, self.pivot_ln[b].exp() as f32);
+            self.tilt_from[b] = if was_live[b] {
+                self.tilt_now[b]
+            } else {
+                Tilt::new(key.0, key.1, fs)
+            };
             if key != self.tilt_key[b] {
                 self.tilt_now[b] = Tilt::new(key.0, key.1, fs);
                 self.tilt_key[b] = key;
@@ -2151,7 +2179,7 @@ impl Saturator {
                 self.lanes.level[b][i] = r(5);
                 self.lanes.feedback[b][i] = r(6);
                 self.lanes.push[b][i] = r(7);
-                self.lanes.tilt[b][i] = self.tilt_now[b];
+                self.lanes.tilt[b][i] = self.tilt_from[b].lerp(self.tilt_now[b], u);
                 let e = &mut self.eased[b];
                 self.lanes.blend[b][i] = match e.lane_fade {
                     Some(t) => {

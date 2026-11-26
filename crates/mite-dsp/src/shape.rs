@@ -33,6 +33,8 @@ pub const DETECTOR_LP_OPEN: f32 = 19_900.0;
 const CONTROL: usize = 8;
 /// Amounts, times, band mix and output and crossover frequencies glide with this time constant.
 const GLIDE_MS: f64 = 20.0;
+/// A length gliding to or from endless passes through this, ms (far past any sustain).
+const ENDLESS_MS: f64 = 1e7;
 /// Solo and mute fade, ms.
 const SOLO_MS: f64 = 10.0;
 /// A change of the split (a band made or removed, L/R ↔ M/S, a crossover set past another)
@@ -322,8 +324,18 @@ struct Eased {
     transition: f64,
     mix: f64,
     out: f64,
+    /// The output as it glides, dB, through two one-poles (`out_db_a` first), so the glide
+    /// starts and ends at zero speed: eased as a gain, −24 → +24 dB rose 10 dB in its first 8
+    /// samples, and one pole in dB still started 48 dB at full speed (clicks of 18 and 11 dB).
+    out_db_a: f64,
+    out_db: f64,
     length_ms: f64,
     audible: f64,
+    /// Mix, output and audible as the control step leaves them, and the per-sample ramp there
+    /// from where the last step left them (stepped once per control step, a jump of Output
+    /// clicked +38 dB).
+    goal: [f64; 3],
+    ramp: [f64; 3],
     /// The times the detectors were last set to.
     times: (f64, f64),
 }
@@ -337,9 +349,13 @@ impl Eased {
             transient_ms: times.0,
             transition: times.1,
             mix: f64::from(b.mix),
-            out: crate::db_to_gain(b.out_db).into(),
+            out: 10f64.powf(f64::from(b.out_db) / 20.0),
+            out_db_a: f64::from(b.out_db),
+            out_db: f64::from(b.out_db),
             length_ms: f64::from(b.length_ms),
             audible: if audible { 1.0 } else { 0.0 },
+            goal: [f64::from(b.mix), 10f64.powf(f64::from(b.out_db) / 20.0), if audible { 1.0 } else { 0.0 }],
+            ramp: [0.0; 3],
             times,
         }
     }
@@ -364,6 +380,8 @@ pub struct Shaper {
     write: usize,
     /// Scratch for one sample's band signals.
     glide: f64,
+    /// Each of two cascaded glides, for half the time each.
+    glide2: f64,
     solo_step: f64,
     fade_step: f64,
     hit_report: u32,
@@ -395,6 +413,7 @@ impl Shaper {
             countdown: 0,
             write: 0,
             glide: 0.0,
+            glide2: 0.0,
             solo_step: 0.0,
             fade_step: 0.0,
             hit_report: 1,
@@ -409,6 +428,7 @@ impl Shaper {
         let ring_len = lookahead_samples(MAX_LOOKAHEAD_MS, sample_rate) + 1;
         self.cores = [Core::new(self.fs, ring_len), Core::new(self.fs, ring_len)];
         self.glide = 1.0 - (-(CONTROL as f64) * 1000.0 / (GLIDE_MS * self.fs)).exp();
+        self.glide2 = 1.0 - (-(CONTROL as f64) * 2000.0 / (GLIDE_MS * self.fs)).exp();
         self.solo_step = CONTROL as f64 * 1000.0 / (SOLO_MS * self.fs);
         self.fade_step = 1000.0 / (STRUCTURE_MS * self.fs);
         self.hit_report = (HIT_REPORT_MS * 0.001 * self.fs).round() as u32;
@@ -546,6 +566,9 @@ impl Shaper {
         for b in 0..BANDS {
             let t = &s.bands[b];
             let e = &mut self.eased[b];
+            // The last ramp ends exactly where it aimed; this step eases on from there.
+            (e.mix, e.out, e.audible) = (e.goal[0], e.goal[1], e.goal[2]);
+            let from = e.goal;
             ease(
                 &mut e.attack,
                 f64::from(t.attack_db.clamp(-AMOUNT_DB, AMOUNT_DB)),
@@ -559,19 +582,20 @@ impl Shaper {
             ease(&mut e.transient_ms, f64::from(t.transient_ms), self.glide);
             ease(&mut e.transition, f64::from(t.transition), self.glide);
             ease(&mut e.mix, f64::from(t.mix.clamp(0.0, 1.0)), self.glide);
-            ease(
-                &mut e.out,
-                f64::from(crate::db_to_gain(t.out_db)),
-                self.glide,
-            );
-            // Lengths glide in octaves; to or from endless they jump (the S curve is the glide).
+            ease(&mut e.out_db_a, f64::from(t.out_db), self.glide2);
+            ease(&mut e.out_db, e.out_db_a, self.glide2);
+            e.out = 10f64.powf(e.out_db / 20.0);
+            // Lengths glide in octaves, to and from endless through ENDLESS_MS (a jump there
+            // restored a faded sustain within one control step: +6.4 dB).
             let length = f64::from(t.length_ms);
-            if length.is_finite() && e.length_ms.is_finite() {
-                let mut ln = e.length_ms.ln();
-                ease(&mut ln, length.ln(), self.glide);
-                e.length_ms = ln.exp();
-            } else {
-                e.length_ms = length;
+            if length.is_finite() || e.length_ms.is_finite() {
+                let mut ln = e.length_ms.min(ENDLESS_MS).ln();
+                ease(&mut ln, length.min(ENDLESS_MS).ln(), self.glide);
+                e.length_ms = if ln >= ENDLESS_MS.ln() && length.is_infinite() {
+                    f64::INFINITY
+                } else {
+                    ln.exp()
+                };
             }
             let a = if heard[b] { 1.0 } else { 0.0 };
             e.audible = if a > e.audible {
@@ -579,6 +603,9 @@ impl Shaper {
             } else {
                 (e.audible - self.solo_step).max(a)
             };
+            e.goal = [e.mix, e.out, e.audible];
+            e.ramp = std::array::from_fn(|k| (e.goal[k] - from[k]) / CONTROL as f64);
+            (e.mix, e.out, e.audible) = (from[0], from[1], from[2]);
         }
         let floor = f64::from(s.floor_db);
         let fading = self.fade.is_some();
@@ -675,6 +702,15 @@ impl Shaper {
                 self.countdown = CONTROL;
             }
             self.countdown -= 1;
+            for e in &mut self.eased {
+                if self.countdown == 0 {
+                    (e.mix, e.out, e.audible) = (e.goal[0], e.goal[1], e.goal[2]);
+                } else {
+                    e.mix += e.ramp[0];
+                    e.out += e.ramp[1];
+                    e.audible += e.ramp[2];
+                }
+            }
             let x = [f64::from(channels[0][i]), f64::from(channels[n_ch - 1][i])];
             let fading = self.fade;
             let mut out = [[0.0f64; 2]; 2];

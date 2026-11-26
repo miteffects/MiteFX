@@ -216,6 +216,11 @@ impl Gates {
         let n = (0.9 * rate) as usize;
         let jump = (0.4 * rate) as usize + 37;
         let window = (0.1 * rate) as usize;
+        let block = 256;
+        // A plugin without sample-accurate automation applies the change where its host block
+        // starts, up to a block before `jump`: the "during" window opens there, or a click on the
+        // change itself would count as "before" and pass.
+        let start = jump - jump % block;
         let input = test_signal(rate, n);
         let params = self.instance(rate).params();
         let held: Vec<ParamChange> = self
@@ -231,7 +236,6 @@ impl Gates {
             let mut p = self.instance(rate);
             let mut out: [Vec<f32>; 2] = [Vec::with_capacity(n), Vec::with_capacity(n)];
             let mut at = 0;
-            let block = 256;
             let mut first = true;
             while at < n {
                 let len = block.min(n - at);
@@ -258,8 +262,8 @@ impl Gates {
             }
             // Both channels: a pan or balance silences one of them.
             let d2 = |range: std::ops::Range<usize>| out.iter().flat_map(|o| range.clone().map(move |i| (o[i] - 2.0 * o[i - 1] + o[i - 2]).abs())).fold(0.0f32, f32::max);
-            let before = d2(jump - window..jump);
-            let during = d2(jump..jump + window);
+            let before = d2(start - window..start);
+            let during = d2(start..start + window);
             let after = d2(n - window..n);
             let floor = before.max(after).max(1e-6);
             20.0 * f64::from(during / floor).log10()

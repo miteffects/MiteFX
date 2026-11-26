@@ -502,6 +502,12 @@ struct Transport {
     dt: f64,
     last: f64,
     exact: bool,
+    /// Wow's and flutter's reach, samples, gliding every sample (a reach that stepped once per
+    /// control stretch jumped the read position: a click on every move of Wow).
+    wow_d: f64,
+    flutter_d: f64,
+    /// The per-sample glide toward them.
+    k: f64,
 }
 
 /// The tape machine stage.
@@ -554,6 +560,9 @@ impl Machine {
                 dt: 0.0,
                 last: 0.0,
                 exact: true,
+                wow_d: 0.0,
+                flutter_d: 0.0,
+                k: 0.0,
             },
             glide: 0.0,
             now: [1.0, 0.0, 0.0, 0.0, 0.0],
@@ -594,6 +603,7 @@ impl Machine {
         self.transport.ripple.step = (1.0 / (0.4 * self.fs)) as f32;
         self.fade_step = 1000.0 / (HEAD_FADE_MS * self.fs);
         self.glide = 1.0 - (-(CONTROL as f64) * 1000.0 / (GLIDE_MS * self.fs)).exp();
+        self.transport.k = 1.0 - (-1000.0 / (GLIDE_MS * self.fs)).exp();
         self.reset(s);
     }
 
@@ -647,6 +657,8 @@ impl Machine {
         t.t = 0.0;
         t.last = t.centre as f64;
         t.exact = s.wow == 0.0 && s.flutter == 0.0;
+        t.wow_d = f64::from(s.wow.clamp(0.0, 1.0)) * WOW_MS * 1e-3 * self.fs;
+        t.flutter_d = f64::from(s.flutter.clamp(0.0, 1.0)) * FLUTTER_MS * 1e-3 * self.fs;
         self.rng = [Rng(0x7A9E_0001), Rng(0x3C6E_F372)];
         self.countdown = 0;
         self.telemetry = MachineTelemetry::default();
@@ -797,15 +809,16 @@ impl Machine {
         }
 
         // The heads' crossfade, then the transport.
-        let (wow, flutter) = (self.now[2], self.now[3]);
         let t = &mut self.transport;
-        if wow > 0.0 || flutter > 0.0 || target[2] > 0.0 || target[3] > 0.0 {
+        let wow_to = target[2] * WOW_MS * 1e-3 * self.fs;
+        let flutter_to = target[3] * FLUTTER_MS * 1e-3 * self.fs;
+        if wow_to > 0.0 || flutter_to > 0.0 {
             t.exact = false;
-        } else if wow == 0.0 && flutter == 0.0 {
+        } else if t.wow_d < 1e-6 && t.flutter_d < 1e-6 {
+            // Back at the centre to within a millionth of a sample: the plain tap again.
+            (t.wow_d, t.flutter_d) = (0.0, 0.0);
             t.exact = true;
         }
-        let wow_d = wow * WOW_MS * 1e-3 * self.fs;
-        let flutter_d = flutter * FLUTTER_MS * 1e-3 * self.fs;
         let mut fade = self.fade;
         for i in 0..len {
             let mut d = t.centre as f64;
@@ -816,7 +829,9 @@ impl Machine {
                 let w = 0.6 * wn + 0.4 * (TAU * WOW_HZ * tt).sin();
                 let fl = (TAU * FLUTTER_HZ.0 * tt).sin() * (0.75 + 0.25 * rp)
                     + 0.35 * (TAU * FLUTTER_HZ.1 * tt).sin();
-                d += wow_d * w + flutter_d * fl;
+                t.wow_d += (wow_to - t.wow_d) * t.k;
+                t.flutter_d += (flutter_to - t.flutter_d) * t.k;
+                d += t.wow_d * w + t.flutter_d * fl;
                 t.t += t.dt;
                 if t.t > 1e4 {
                     t.t -= 1e4;

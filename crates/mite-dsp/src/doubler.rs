@@ -31,6 +31,9 @@ const LINE_MS: f32 = MAX_DELAY_MS + 0.5 * MAX_TIMING_MS + CHORUS_MS + 10.0;
 /// signal a little apart, so an equal-power fade would bump the level).
 const SWITCH_MS: f32 = 3.0;
 const SWITCH_MAX_MS: f32 = 8.0;
+/// A delay change larger than this, ms, crossfades instead of gliding (a turned knob moves less
+/// per host block and glides).
+const JUMP_MS: f32 = 2.0;
 /// The onset is heard this late at most; a switch must be done before the note reaches a reading.
 const ONSET_LAG_MS: f32 = 2.5;
 /// The reading's interpolator: a windowed sinc (Kaiser, β = 8, cut at 0.92 of Nyquist), this many
@@ -259,6 +262,27 @@ pub fn pan_gains(pan: f32) -> (f32, f32) {
     (th.cos(), th.sin())
 }
 
+/// A value gliding toward its target through two one-poles, so the glide starts and ends at
+/// zero speed (one pole sets off at full speed: Source Level −48 → +6 dB clicked +8 dB).
+#[derive(Debug, Clone, Copy, Default)]
+struct Glide2 {
+    a: f32,
+    v: f32,
+}
+
+impl Glide2 {
+    fn at(v: f32) -> Self {
+        Self { a: v, v }
+    }
+
+    #[inline]
+    fn next(&mut self, target: f32, k: f32) -> f32 {
+        self.a += (target - self.a) * k;
+        self.v += (self.a - self.v) * k;
+        self.v
+    }
+}
+
 /// A value gliding toward its target, one pole per sample.
 #[derive(Debug, Clone, Copy, Default)]
 struct Glide {
@@ -293,7 +317,7 @@ struct Voice {
     from: f64,
     fade_left: u32,
     fade_len: u32,
-    gain: Glide,
+    gain: Glide2,
     tilt: Glide,
     lp: f32,
     gl: Glide,
@@ -315,7 +339,7 @@ impl Voice {
             from: 0.0,
             fade_left: 0,
             fade_len: 1,
-            gain: Glide::default(),
+            gain: Glide2::default(),
             tilt: Glide::default(),
             lp: 0.0,
             gl: Glide::default(),
@@ -418,16 +442,16 @@ pub struct Doubler {
     line: Delay,
     sinc: Sinc,
     bass: MonoBass,
-    out_gain: Glide,
+    out_gain: Glide2,
     /// The source's level alone (its lows, under mono bass).
-    src_g: Glide,
+    src_g: Glide2,
     voices: [Voice; MAX_VOICES],
     k_glide: f32,
     switch_len: u32,
     base: Glide,
     chorus: Glide,
-    src_l: Glide,
-    src_r: Glide,
+    src_l: Glide2,
+    src_r: Glide2,
     on: [Glide; MAX_VOICES],
     a_tilt: f32,
     hp: f32,
@@ -450,8 +474,8 @@ impl Doubler {
                 mix: Glide::default(),
                 count: 0,
             },
-            out_gain: Glide { v: 1.0 },
-            src_g: Glide { v: 1.0 },
+            out_gain: Glide2::at(1.0),
+            src_g: Glide2::at(1.0),
             voices: [
                 Voice::new(0x1234_5677),
                 Voice::new(0x8BAD_F00D),
@@ -461,8 +485,8 @@ impl Doubler {
             switch_len: ((SWITCH_MS * 0.001 * fs) as u32).max(1),
             base: Glide::default(),
             chorus: Glide::default(),
-            src_l: Glide::default(),
-            src_r: Glide::default(),
+            src_l: Glide2::default(),
+            src_r: Glide2::default(),
             on: [Glide::default(); MAX_VOICES],
             a_tilt: 1.0 - (-std::f32::consts::TAU * TILT_HZ / fs).exp(),
             hp: 0.0,
@@ -506,15 +530,15 @@ impl Doubler {
 
     /// Jumps every glide to `s` (the first block, so nothing fades in from nothing).
     fn settle(&mut self, s: &DoublerSettings) {
-        self.out_gain.v = crate::db_to_gain(auto_gain_db(s));
-        self.src_g.v = crate::db_to_gain(s.source_db);
+        self.out_gain = Glide2::at(crate::db_to_gain(auto_gain_db(s)));
+        self.src_g = Glide2::at(crate::db_to_gain(s.source_db));
         self.bass.mix.v = f32::from(u8::from(s.mono_bass));
         self.base.v = s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS);
         self.chorus.v = s.chorus.clamp(0.0, 1.0);
         let (l, r) = pan_gains(s.source_pan);
         let g = crate::db_to_gain(s.source_db);
-        self.src_l.v = l * g;
-        self.src_r.v = r * g;
+        self.src_l = Glide2::at(l * g);
+        self.src_r = Glide2::at(r * g);
         for i in 0..MAX_VOICES {
             self.on[i].v = f32::from(u8::from(i < s.voices));
             let note = self.voices[i].pick(s);
@@ -523,7 +547,7 @@ impl Doubler {
             let (l, r) = pan_gains(s.voice[i].pan);
             v.gl.v = l;
             v.gr.v = r;
-            v.gain.v = crate::db_to_gain(s.voice[i].level_db + note.gain_db + doubles_trim_db(s));
+            v.gain = Glide2::at(crate::db_to_gain(s.voice[i].level_db + note.gain_db + doubles_trim_db(s)));
             v.tilt.v = s.tone_db + note.tilt_db;
             v.free_left = 0;
         }
@@ -580,6 +604,8 @@ impl Doubler {
         }
         let fs = self.fs;
         let k = self.k_glide;
+        // Two poles in series, each at half the time.
+        let k2 = 1.0 - (1.0 - k) * (1.0 - k);
         let mut tel = DoublerTelemetry::default();
         // Mono bass: the split's frequency glides on a log scale, redesigned every 32 samples.
         let fc = f64::from(s.bass_hz.clamp(40.0, 400.0));
@@ -632,12 +658,30 @@ impl Doubler {
                 self.since_onset = 0;
                 tel.onset = true;
             }
-            let base = self
-                .base
-                .next(s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS), k);
+            // A delay that jumps (automation, a preset): every double crossfades to its reading at
+            // the new delay, once no double is mid-fade (until then the delay holds). Glided, a
+            // jump read the line up to 2.6× too fast, backwards (Delay 8 → 60 ms clicked +26 dB).
+            let target = s.delay_ms.clamp(MIN_DELAY_MS, MAX_DELAY_MS);
+            let base = if (target - self.base.v).abs() > JUMP_MS {
+                if self.voices.iter().all(|v| v.fade_left == 0) {
+                    let len = (self.ms(SWITCH_MAX_MS) as u32).max(self.switch_len);
+                    let old = self.base.v;
+                    for i in 0..MAX_VOICES {
+                        let from = self.note_delay(old, &self.voices[i].note) + self.voices[i].drift;
+                        let v = &mut self.voices[i];
+                        v.from = from;
+                        v.fade_left = len;
+                        v.fade_len = len;
+                    }
+                    self.base.v = target;
+                }
+                self.base.v
+            } else {
+                self.base.next(target, k)
+            };
             let chorus = self.chorus.next(s.chorus.clamp(0.0, 1.0), k);
-            let sl = self.src_l.next(src_l, k);
-            let sr = self.src_r.next(src_r, k);
+            let sl = self.src_l.next(src_l, k2);
+            let sr = self.src_r.next(src_r, k2);
             self.bass.count = (self.bass.count + 1) % 32;
             if self.bass.count == 0 && self.bass.fc != fc {
                 let ratio = fc / self.bass.fc;
@@ -653,7 +697,7 @@ impl Doubler {
                 let lo = self.bass.source.low(f64::from(x)) as f32;
                 let hi = self.bass.source.high(f64::from(x)) as f32;
                 (
-                    lo * bass * self.src_g.next(src_level, k),
+                    lo * bass * self.src_g.next(src_level, k2),
                     x + (hi - x) * bass,
                 )
             } else {
@@ -693,7 +737,10 @@ impl Doubler {
                 let d = (note_delay + v.drift + wob).max(min_read);
                 let mut y = self.sinc.read(&self.line, d);
                 if v.fade_left > 0 {
+                    // An S curve: a straight fade kinks where it starts and ends (a click as the
+                    // readings jump to a delay 52 ms away).
                     let t = 1.0 - v.fade_left as f32 / v.fade_len as f32;
+                    let t = t * t * (3.0 - 2.0 * t);
                     let old = self.sinc.read(&self.line, (v.from + wob).max(min_read));
                     y = old + (y - old) * t;
                     v.fade_left -= 1;
@@ -715,7 +762,7 @@ impl Doubler {
                 };
                 let g = v.gain.next(
                     crate::db_to_gain(s.voice[i].level_db + v.note.gain_db + trim),
-                    k,
+                    k2,
                 ) * on;
                 let (pl, pr) = pan_gains(s.voice[i].pan);
                 let (gl, gr) = (v.gl.next(pl, k), v.gr.next(pr, k));
@@ -724,7 +771,7 @@ impl Doubler {
                 l += gl * y;
                 r += gr * y;
             }
-            let g = self.out_gain.next(out_target, k);
+            let g = self.out_gain.next(out_target, k2);
             ol[j] = l * g;
             or[j] = r * g;
         }

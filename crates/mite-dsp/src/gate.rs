@@ -486,7 +486,12 @@ impl Gate {
                     rel
                 };
                 ch.stages[1] += (ch.stages[0] - ch.stages[1]) * k2;
-                let g = if range >= 0.0 { 1.0 } else { ch.stages[1] };
+                // Range 0 dB passes the input bit for bit, but only once the gain has glided up
+                // there (jumped at once, Range −80 → 0 dB under a closed gate clicked +29 dB).
+                if range >= 0.0 && 1.0 - ch.stages[1] < 1e-6 && 1.0 - ch.stages[0] < 1e-6 {
+                    ch.stages = [1.0, 1.0];
+                }
+                let g = if range >= 0.0 && ch.stages[1] == 1.0 { 1.0 } else { ch.stages[1] };
                 gain_min[c] = gain_min[c].min(g);
                 // The audio, delayed by the lookahead.
                 let w = self.write;

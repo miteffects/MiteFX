@@ -3,12 +3,12 @@
 //! every figure.
 
 mite_plugin::gate_tests!(mite_sat, MiteSat, "mite_sat", block_tolerance = 0.0, skip = [
-    // Clicks Sat had before the tape machine (2026-11-25): with the deck off, a jump end to end
-    // steps the output in one sample (Crossover 1 +45 dB, Band 2 Tone +23.5 dB over the music),
-    // but the change lands at the start of the host block, 37 samples before the step test's
-    // window opens, so it read as "before" and passed. The deck's latency (+169 samples) moves
-    // it into the window. Open: fix the click, and open the window where the block starts.
-    "Crossover 1 Frequency", "Band 2 Tone",
+    // Not a click (2026-11-26): end to end, Band 2 (Fold, 9 dB) sweeps from everything above
+    // 150 Hz to nothing, through the upper mids, where Fold is harsher than at either end. The
+    // step test sets "during" against before and after only, so that passage reads +8.5 dB. With
+    // drive 0 it measures −14.5 dB, and an 80 ms glide stretches it into a 70 ms plateau of the
+    // same height instead of a spike.
+    "Crossover 1 Frequency",
 ], hold = [
     // The golden state runs LFO 1 at 1 Hz into Band 1 Drive: held near still, so each step is
     // judged on its own (at 1 Hz the LFO's swell read as a +10–17 dB "click" on every band 1 step).
