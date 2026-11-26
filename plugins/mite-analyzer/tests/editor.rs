@@ -95,3 +95,37 @@ fn the_stereo_readings_tell_mono_from_wide_from_out_of_phase() {
     assert!(b[0] < -0.9, "the lows out of phase: {b:?}");
     assert!(b[3] > 0.9, "the high mids mono: {b:?}");
 }
+
+/// The group-delay plot zooms and scrolls by hand only: the wheel zooms around the pointer, Alt
+/// scrolls, a drag scrolls, a double-click puts it back; the music does not move it.
+#[test]
+fn the_group_delay_plot_zooms_and_scrolls_by_hand() {
+    let (mut view, host, shared) = setup(|t| (sine(440.0, t), sine(440.0, t)));
+    let page = view.button("phase_page").expect("the phase page");
+    click(&mut view, &host, page.center());
+    view.tick(&host);
+    draw(&mut view, &host);
+    let gd = mite_analyzer::editor::phase::GD;
+    let start = view.phase().gd_range();
+    for _ in 0..30 {
+        view.tick(&host);
+    }
+    assert_eq!(view.phase().gd_range(), start, "steady with the music");
+    let at = Point::new(gd.center().x, gd.center().y);
+    view.event(&UiEvent::Wheel { pos: at, lines: 3.0, mods: MODS }, &host);
+    let zoomed = view.phase().gd_range();
+    assert!(zoomed.1 - zoomed.0 < 0.7 * (start.1 - start.0), "zoomed in: {start:?} → {zoomed:?}");
+    let mid = (start.0 + start.1) / 2.0;
+    assert!(zoomed.0 < mid + 1.0 && zoomed.1 > mid - 1.0, "around the pointer: {zoomed:?}");
+    view.event(&UiEvent::Wheel { pos: at, lines: 1.0, mods: Modifiers { alt: true, ..MODS } }, &host);
+    let scrolled = view.phase().gd_range();
+    assert!(scrolled.0 > zoomed.0 && ((scrolled.1 - scrolled.0) - (zoomed.1 - zoomed.0)).abs() < 1e-9, "scrolled up, same span");
+    view.event(&UiEvent::PointerMove { pos: at, mods: MODS }, &host);
+    view.event(&UiEvent::PointerDown { pos: at, button: MouseButton::Left, mods: MODS }, &host);
+    view.event(&UiEvent::PointerMove { pos: at + (0.0, 40.0), mods: MODS }, &host);
+    view.event(&UiEvent::PointerUp { pos: at + (0.0, 40.0), button: MouseButton::Left, mods: MODS }, &host);
+    assert!(view.phase().gd_range().0 > scrolled.0, "dragged down: the view moves up");
+    view.event(&UiEvent::DoubleClick { pos: at, mods: MODS }, &host);
+    assert_eq!(view.phase().gd_range(), start, "back as it was");
+    let _ = shared;
+}

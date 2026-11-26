@@ -55,6 +55,8 @@ const EASE_S: f64 = 0.6;
 /// the impulse ms either side of 0. Nothing rescales with the music.
 const MAG_RANGE_DB: f64 = 24.0;
 const GD_SPAN_MS: (f64, f64) = (10.0, 30.0);
+/// How far the group-delay view zooms, its whole span in ms.
+const GD_ZOOM_MS: (f64, f64) = (0.5, 500.0);
 const IR_SPAN_MS: f64 = 10.0;
 /// The impulse's height: its peak, held, letting go this slowly (s per halving), so the trace
 /// does not grow and shrink with each reading.
@@ -180,6 +182,9 @@ pub struct PhaseLab {
     /// The plots' ranges (eased): magnitude ±dB, group delay ms.
     mag_range: f64,
     gd_range: (f64, f64),
+    /// The group-delay view, ms below and above the chain delay: fixed unless the user zooms
+    /// or scrolls it (user, 2026-11-26: "for group delay I should be able to zoom myself").
+    gd_view: (f64, f64),
     mag_target: f64,
     gd_target: (f64, f64),
     reference: Option<Reference>,
@@ -227,6 +232,7 @@ impl PhaseLab {
             ir_target: (IR_SPAN_MS, IR_SPAN_MS),
             mag_range: MAG_RANGE_DB,
             gd_range: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
+            gd_view: GD_SPAN_MS,
             mag_target: MAG_RANGE_DB,
             gd_target: (-GD_SPAN_MS.0, GD_SPAN_MS.1),
             eased_ir: Vec::new(),
@@ -528,7 +534,7 @@ impl PhaseLab {
         self.mean_coherence = self.points.iter().map(|p| p.coherence).sum::<f64>() / n;
         self.mag_target = MAG_RANGE_DB;
         let d = (self.delay / fs * 1000.0).round();
-        self.gd_target = (d - GD_SPAN_MS.0, d + GD_SPAN_MS.1);
+        self.gd_target = (d - self.gd_view.0, d + self.gd_view.1);
         self.ir_target = (IR_SPAN_MS, IR_SPAN_MS);
     }
 
@@ -579,6 +585,54 @@ impl PhaseLab {
         self.gd_range.1 += (self.gd_target.1 - self.gd_range.1) * k * 0.5;
         self.ir_span.0 += (self.ir_target.0 - self.ir_span.0) * k * 0.5;
         self.ir_span.1 += (self.ir_target.1 - self.ir_span.1) * k * 0.5;
+    }
+
+    /// The chain delay the group-delay view is around, ms (whole ms, as the view follows it).
+    fn gd_centre(&self) -> f64 {
+        (self.delay / self.sample_rate * 1000.0).round()
+    }
+
+    /// The group-delay view set to `view` (ms below, above the chain delay): at once, no glide.
+    fn set_gd_view(&mut self, view: (f64, f64)) {
+        let span = (view.0 + view.1).clamp(GD_ZOOM_MS.0, GD_ZOOM_MS.1);
+        let k = span / (view.0 + view.1).max(1e-9);
+        self.gd_view = (view.0 * k, view.1 * k);
+        let d = self.gd_centre();
+        self.gd_target = (d - self.gd_view.0, d + self.gd_view.1);
+        self.gd_range = self.gd_target;
+    }
+
+    /// The wheel over the group-delay plot at `y`: zooms around the pointer (as the editors'
+    /// wheel does), or with `scroll` moves the view up or down.
+    pub fn gd_wheel(&mut self, y: f64, lines: f64, scroll: bool) {
+        let (below, above) = self.gd_view;
+        let span = below + above;
+        if scroll {
+            let d = lines * 0.1 * span;
+            self.set_gd_view((below - d, above + d));
+            return;
+        }
+        let d = self.gd_centre();
+        let at = self.gd_ms_at(y) - d;
+        let k = 0.85f64.powf(lines);
+        self.set_gd_view(((below + at) * k - at, (above - at) * k + at));
+    }
+
+    /// A vertical drag on the group-delay plot by `dy` px: the view follows the pointer.
+    pub fn gd_drag(&mut self, dy: f64) {
+        let ms = dy / (GD.height() - 16.0) * (self.gd_view.0 + self.gd_view.1);
+        self.set_gd_view((self.gd_view.0 - ms, self.gd_view.1 + ms));
+    }
+
+    /// The group-delay view back to its default.
+    pub fn gd_reset(&mut self) {
+        self.set_gd_view(GD_SPAN_MS);
+    }
+
+    /// The ms at plot height `y` on the group-delay plot.
+    fn gd_ms_at(&self, y: f64) -> f64 {
+        let (lo, hi) = self.gd_range;
+        lo + (GD.y1 - 8.0 - y) / (GD.height() - 16.0) * (hi - lo)
     }
 
     /// The numbers, now (they then hold).
@@ -912,6 +966,12 @@ impl PhaseLab {
         let h = self.eased_h[i];
         let coh = self.points[i].coherence;
         let db = 20.0 * h.norm().max(1e-6).log10();
-        Some(format!("{} Hz · phase {}° · group delay {} ms · {} dB · coherence {:.2}", fmt_hz(f), fmt_signed(h.arg().to_degrees(), 1), format!("{:.2}", self.eased_gd[i] * 1000.0).replace('-', "−"), fmt_signed(db, 1), coh))
+        let hint = if GD.contains(p) { " — wheel: zoom, Alt+wheel or drag: scroll, double-click: as it was" } else { "" };
+        Some(format!("{} Hz · phase {}° · group delay {} ms · {} dB · coherence {:.2}{hint}", fmt_hz(f), fmt_signed(h.arg().to_degrees(), 1), format!("{:.2}", self.eased_gd[i] * 1000.0).replace('-', "−"), fmt_signed(db, 1), coh))
+    }
+
+    /// The group-delay plot's range now, ms (tests and tools).
+    pub fn gd_range(&self) -> (f64, f64) {
+        self.gd_range
     }
 }

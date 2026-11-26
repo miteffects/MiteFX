@@ -340,6 +340,8 @@ pub struct AnalyzerView {
     menu: Option<(Menu, Dropdown)>,
     /// The phase page is open (from `page`, as of the last tick or draw).
     phase_open: bool,
+    /// A drag scrolling the group-delay plot: the pointer's last height.
+    gd_drag: Option<f64>,
     /// The phase page's measurement.
     phase: PhaseLab,
     pointer: Option<Point>,
@@ -377,6 +379,7 @@ impl AnalyzerView {
             shown_at: Instant::now(),
             menu: None,
             phase_open: false,
+            gd_drag: None,
             phase: PhaseLab::new(f64::from(shared.sample_rate.load())),
             pointer: None,
             hot: None,
@@ -948,6 +951,36 @@ impl AnalyzerView {
         }
         if self.footer.event(event, host) {
             return true;
+        }
+        // The group-delay plot zooms and scrolls by hand (wheel: zoom, Alt+wheel or a drag:
+        // scroll, double-click: as it was).
+        if self.phase_open {
+            match *event {
+                UiEvent::Wheel { pos, lines, mods } if phase::GD.contains(pos) => {
+                    self.phase.gd_wheel(pos.y, f64::from(lines), mods.alt);
+                    return true;
+                }
+                UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if phase::GD.contains(pos) => {
+                    self.gd_drag = Some(pos.y);
+                    return true;
+                }
+                UiEvent::PointerMove { pos, .. } if self.gd_drag.is_some() => {
+                    if let Some(y0) = self.gd_drag.replace(pos.y) {
+                        self.phase.gd_drag(pos.y - y0);
+                    }
+                    self.pointer = Some(pos);
+                    return true;
+                }
+                UiEvent::PointerUp { button: MouseButton::Left, .. } if self.gd_drag.is_some() => {
+                    self.gd_drag = None;
+                    return true;
+                }
+                UiEvent::DoubleClick { pos, .. } if phase::GD.contains(pos) => {
+                    self.phase.gd_reset();
+                    return true;
+                }
+                _ => {}
+            }
         }
         match *event {
             UiEvent::PointerMove { pos, .. } => {
