@@ -79,6 +79,7 @@ impl MiteShape {
             clip: p.clip.value(),
             ceiling_db: p.clip_ceiling.value(),
             softness: p.clip_soft.value() / 100.0,
+            linear: p.phase.value() == 1,
         }
     }
 }
@@ -112,7 +113,7 @@ impl Plugin for MiteShape {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate_v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
@@ -170,3 +171,7 @@ impl Vst3Plugin for MiteShape {
 
 nih_export_clap!(MiteShape);
 nih_export_vst3!(MiteShape);
+
+/// State 1 → 2: `phase` appended. Missing, it loads at its default, Minimum Phase: how a
+/// version 1 session sounded. Nothing to change.
+pub fn migrate_v1_to_v2(_state: &mut nih_plug::wrapper::state::PluginState) {}

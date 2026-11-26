@@ -215,3 +215,22 @@ fn the_scope_sets_the_sustain_length_and_its_right_edge_is_endless() {
     drag(&mut view, &host, Point::new(x200, 467.0), Point::new(796.0, 467.0));
     assert_eq!(plain(&host, &id), mite_shape::params::B_LENGTH.max);
 }
+
+/// With bands, the footer's split button opens the phase list; picking Linear Phase sets it, and
+/// the button then reads LINEAR.
+#[test]
+fn the_footer_picks_linear_phase() {
+    let (mut view, host) = setup();
+    host.set_plain(&cross_id(0, X_ON.id), 1.0);
+    host.set_plain(&cross_id(0, X_FREQ.id), 150.0);
+    draw(&mut view, &host);
+    let id = mite_shape::params::PHASE.id;
+    assert_eq!(plain(&host, id), 0.0, "minimum phase by default");
+    click(&mut view, &host, Point::new(60.0, 704.0 + 28.0));
+    draw(&mut view, &host);
+    let rows = view.phase_rows();
+    assert_eq!(rows.len(), 2, "Minimum Phase · LR4, Linear Phase");
+    click(&mut view, &host, rows[1].center());
+    assert!(view.phase_rows().is_empty(), "closed");
+    assert_eq!(plain(&host, id), 1.0, "linear phase");
+}

@@ -23,7 +23,7 @@ use mite_ui::session::{Session, SessionConfig};
 use mite_ui::widgets::brand::{draw_mark, draw_title};
 use mite_ui::widgets::footer::draw_dropdown_button;
 use mite_ui::widgets::rail::{draw_badge, draw_glyph, fmt_freq, glyph as rail_glyph, hatch, BandMenu, MenuAsk, Rail, RailHot, RailParams};
-use mite_ui::widgets::{Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::{Dropdown, DropdownEvent, Footer, FooterDial, FooterToggle, Help, Knob, KnobKind, ToggleGlyph};
 use mite_ui::{write_if_changed, Align, DrawCx, Key, Modifiers, MouseButton, ParamHost, RecordingHost, TextStyle, UiEvent, View};
 
 use crate::dsp::record;
@@ -32,6 +32,9 @@ use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::ShapeShared;
 
 pub use mite_dsp::analyzer::ANALYZER_SIZE;
+
+/// The phase list's rows, as `PHASE`'s choices.
+const PHASE_ITEMS: [&str; 2] = ["Minimum Phase · LR4", "Linear Phase"];
 
 /// Mite Shape wears the Shape accent (tokens.json `color.accent.shape`, leaf).
 pub const ACCENT: &str = "shape";
@@ -331,6 +334,8 @@ pub struct ShapeView {
     head_hits: [Rect; 2],
     focus_hit: Rect,
     lr4_hit: Option<Rect>,
+    /// The phase list (Minimum Phase · LR4 or Linear Phase), open from the footer's split button.
+    phase_menu: Option<Dropdown>,
     /// The cards' dials, for the bands and the selection they were made for.
     card_knobs: Vec<Knob>,
     card_key: Option<(Vec<usize>, usize)>,
@@ -398,6 +403,7 @@ impl ShapeView {
             head_hits: [Rect::ZERO; 2],
             focus_hit: Rect::ZERO,
             lr4_hit: None,
+            phase_menu: None,
             card_knobs: Vec::new(),
             card_key: None,
             clipboard: None,
@@ -467,6 +473,11 @@ impl ShapeView {
     }
 
     // ---- parameters -------------------------------------------------------------------------
+
+    /// The open phase list's rows, Minimum Phase first (tests and tools).
+    pub fn phase_rows(&self) -> Vec<Rect> {
+        self.phase_menu.as_ref().map(Dropdown::item_rects).unwrap_or_default()
+    }
 
     fn plain(host: &dyn ParamHost, id: &str) -> f32 {
         host.plain(id, host.normalized(id))
@@ -1250,7 +1261,8 @@ impl ShapeView {
         if layout.n > 0 {
             let r = Rect::new(x, top + 9.0, x + 110.0, top + 47.0);
             let hot = self.pointer.is_some_and(|p| r.contains(p));
-            draw_dropdown_button(cx, r, "LR4", false, hot, |scene, at| draw_glyph(scene, glyph::LR4, at + (8.0, 6.0), 22.0, theme.text_mid, 1.7));
+            let linear = Self::index(cx.host, PHASE.id) == 1;
+            draw_dropdown_button(cx, r, if linear { "LINEAR" } else { "LR4" }, self.phase_menu.is_some(), hot, |scene, at| draw_glyph(scene, glyph::LR4, at + (8.0, 6.0), 22.0, theme.text_mid, 1.7));
             self.lr4_hit = Some(r);
             x += 126.0;
         }
@@ -1283,7 +1295,11 @@ impl ShapeView {
         }
         let p = self.pointer.unwrap_or(Point::ZERO);
         if self.lr4_hit.is_some_and(|r| r.contains(p)) {
-            return Help::default().text("Crossover · LR4 — 24 dB/oct, minimum phase; the bands always add up flat");
+            return Help::default().text(if Self::index(host, PHASE.id) == 1 {
+                "Crossovers · Linear Phase — the bands split with no phase turn at the crossovers and add back to the input exactly; 90.7 ms of latency (the host compensates it). Click to choose"
+            } else {
+                "Crossovers · LR4 — 24 dB/oct, minimum phase: no latency, the bands add up flat but the phase turns at each crossover. Click to choose"
+            });
         }
         if self.focus_hit.contains(p) {
             return Help::default().text(if self.focus_on() {
@@ -1575,6 +1591,20 @@ impl ShapeView {
         if let UiEvent::KeyDown { key, mods } = *event {
             return self.key_event(key, mods, host);
         }
+        if let Some(list) = &mut self.phase_menu {
+            if let UiEvent::PointerMove { pos, .. } = *event {
+                self.pointer = Some(pos);
+            }
+            match list.event(event) {
+                DropdownEvent::Open => {}
+                DropdownEvent::Picked(i) => {
+                    self.phase_menu = None;
+                    Self::set(host, PHASE.id, i as f32);
+                }
+                DropdownEvent::Closed => self.phase_menu = None,
+            }
+            return true;
+        }
         if self.menu.is_some() && !self.session.menu_open() {
             return self.menu_event(event, host);
         }
@@ -1638,6 +1668,10 @@ impl ShapeView {
     }
 
     fn press(&mut self, host: &dyn ParamHost, pos: Point, mods: Modifiers) -> bool {
+        if let Some(r) = self.lr4_hit.filter(|r| r.contains(pos)) {
+            self.phase_menu = Some(Dropdown::new(r, &PHASE_ITEMS, Self::index(host, PHASE.id), (DISPLAY_TOP, FOOTER_TOP)).with_min_width(220.0));
+            return true;
+        }
         if pos.y < HEADER {
             if self.focus_hit.contains(pos) {
                 self.shared.focus_mode.store(!self.focus_on(), std::sync::atomic::Ordering::Relaxed);
@@ -1939,6 +1973,9 @@ impl View for ShapeView {
         self.draw_footer(cx, &layout);
         self.draw_panel(cx, &layout);
         self.draw_menu(cx);
+        if let Some(list) = &self.phase_menu {
+            list.draw(cx, cx.theme.accent, |_, _, _, _| {});
+        }
         self.session.draw_menu(cx);
     }
 

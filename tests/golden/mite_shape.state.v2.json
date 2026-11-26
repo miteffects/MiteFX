@@ -1,0 +1,219 @@
+{
+  "fields": {
+    "mitefx_state": "2",
+    "preset": "Kit Split",
+    "snapshots": "{\"active\":0,\"slots\":[{\"auto_gain\":1.0,\"b1_attack\":0.6388889,\"b1_length\":1.0,\"b1_mix\":1.0,\"b1_mute\":0.0,\"b1_out\":0.5,\"b1_sustain\":0.41666666,\"b1_time\":0.45261392,\"b1_trans\":0.5,\"b2_attack\":0.5,\"b2_length\":1.0,\"b2_mix\":1.0,\"b2_mute\":0.0,\"b2_out\":0.5,\"b2_sustain\":0.5,\"b2_time\":0.54995775,\"b2_trans\":0.5,\"b3_attack\":0.5,\"b3_length\":1.0,\"b3_mix\":1.0,\"b3_mute\":0.0,\"b3_out\":0.5,\"b3_sustain\":0.5,\"b3_time\":0.45261392,\"b3_trans\":0.5,\"b4_attack\":0.41666666,\"b4_length\":1.0,\"b4_mix\":1.0,\"b4_mute\":1.0,\"b4_out\":0.5,\"b4_sustain\":0.5,\"b4_time\":0.45261392,\"b4_trans\":0.6,\"b5_attack\":0.5,\"b5_length\":1.0,\"b5_mix\":1.0,\"b5_mute\":0.0,\"b5_out\":0.5,\"b5_sustain\":0.5,\"b5_time\":0.45261392,\"b5_trans\":0.5,\"clip\":0.0,\"clip_ceil\":0.9166667,\"clip_soft\":0.4,\"det_hp\":0.0,\"det_lp\":1.0,\"floor\":0.5,\"link\":0.5,\"lookahead\":0.4,\"mix\":1.0,\"out_gain\":0.5,\"out_pan\":0.5,\"phase\":0.0,\"stereo\":1.0,\"x1_freq\":0.36735705,\"x1_on\":1.0,\"x2_freq\":0.47634372,\"x2_on\":0.0,\"x3_freq\":0.7063767,\"x3_on\":1.0,\"x4_freq\":0.8331485,\"x4_on\":0.0},{\"b1_attack\":0.7},null,null]}"
+  },
+  "params": {
+    "auto_gain": {
+      "bool": true
+    },
+    "b1_attack": {
+      "f32": 5.0
+    },
+    "b1_length": {
+      "f32": 2000.0
+    },
+    "b1_mix": {
+      "f32": 100.0
+    },
+    "b1_mute": {
+      "bool": false
+    },
+    "b1_out": {
+      "f32": 0.0
+    },
+    "b1_solo": {
+      "bool": false
+    },
+    "b1_sustain": {
+      "f32": -3.0
+    },
+    "b1_time": {
+      "f32": 25.0
+    },
+    "b1_trans": {
+      "f32": 100.0
+    },
+    "b2_attack": {
+      "f32": 0.0
+    },
+    "b2_length": {
+      "f32": 2000.0
+    },
+    "b2_mix": {
+      "f32": 100.0
+    },
+    "b2_mute": {
+      "bool": false
+    },
+    "b2_out": {
+      "f32": 0.0
+    },
+    "b2_solo": {
+      "bool": false
+    },
+    "b2_sustain": {
+      "f32": 0.0
+    },
+    "b2_time": {
+      "f32": 40.0
+    },
+    "b2_trans": {
+      "f32": 100.0
+    },
+    "b3_attack": {
+      "f32": 0.0
+    },
+    "b3_length": {
+      "f32": 2000.0
+    },
+    "b3_mix": {
+      "f32": 100.0
+    },
+    "b3_mute": {
+      "bool": false
+    },
+    "b3_out": {
+      "f32": 0.0
+    },
+    "b3_solo": {
+      "bool": false
+    },
+    "b3_sustain": {
+      "f32": 0.0
+    },
+    "b3_time": {
+      "f32": 25.0
+    },
+    "b3_trans": {
+      "f32": 100.0
+    },
+    "b4_attack": {
+      "f32": -3.0
+    },
+    "b4_length": {
+      "f32": 2000.0
+    },
+    "b4_mix": {
+      "f32": 100.0
+    },
+    "b4_mute": {
+      "bool": true
+    },
+    "b4_out": {
+      "f32": 0.0
+    },
+    "b4_solo": {
+      "bool": false
+    },
+    "b4_sustain": {
+      "f32": 0.0
+    },
+    "b4_time": {
+      "f32": 25.0
+    },
+    "b4_trans": {
+      "f32": 120.0
+    },
+    "b5_attack": {
+      "f32": 0.0
+    },
+    "b5_length": {
+      "f32": 2000.0
+    },
+    "b5_mix": {
+      "f32": 100.0
+    },
+    "b5_mute": {
+      "bool": false
+    },
+    "b5_out": {
+      "f32": 0.0
+    },
+    "b5_solo": {
+      "bool": false
+    },
+    "b5_sustain": {
+      "f32": 0.0
+    },
+    "b5_time": {
+      "f32": 25.0
+    },
+    "b5_trans": {
+      "f32": 100.0
+    },
+    "bypass": {
+      "bool": false
+    },
+    "clip": {
+      "bool": false
+    },
+    "clip_ceil": {
+      "f32": -1.0
+    },
+    "clip_soft": {
+      "f32": 40.0
+    },
+    "delta": {
+      "bool": false
+    },
+    "det_hp": {
+      "f32": 20.0
+    },
+    "det_lp": {
+      "f32": 20000.0
+    },
+    "floor": {
+      "f32": -50.0
+    },
+    "link": {
+      "f32": 50.0
+    },
+    "listen": {
+      "bool": false
+    },
+    "lookahead": {
+      "f32": 2.0
+    },
+    "mix": {
+      "f32": 100.0
+    },
+    "out_gain": {
+      "f32": 0.0
+    },
+    "out_pan": {
+      "f32": 0.0
+    },
+    "phase": {
+      "i32": 0
+    },
+    "stereo": {
+      "i32": 1
+    },
+    "x1_freq": {
+      "f32": 150.0
+    },
+    "x1_on": {
+      "bool": true
+    },
+    "x2_freq": {
+      "f32": 500.0
+    },
+    "x2_on": {
+      "bool": false
+    },
+    "x3_freq": {
+      "f32": 3500.0
+    },
+    "x3_on": {
+      "bool": true
+    },
+    "x4_freq": {
+      "f32": 8000.0
+    },
+    "x4_on": {
+      "bool": false
+    }
+  }
+}

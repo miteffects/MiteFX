@@ -67,3 +67,4 @@ b5_out | dB | -24 | 24 | 0 | Linear
 b5_length | ms | 10 | 2000 | 2000 | Log
 b5_mute | bool | false
 b5_solo | bool | false
+phase | choice | Minimum Phase, Linear Phase | 0

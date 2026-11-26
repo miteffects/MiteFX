@@ -16,7 +16,10 @@ use nih_plug::prelude::*;
 /// The state format version (`mite_plugin::state`). Bump it, with a migration step in
 /// `MiteShape::filter_state` and a new golden state file, when a release changes what a state
 /// means.
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 2 (2026-11-26): `phase` (Minimum Phase or Linear Phase) appended; a version 1 state gets
+///   Minimum Phase, the default, as it sounded ([`crate::migrate_v1_to_v2`]).
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -27,6 +30,9 @@ const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32
 
 pub const STEREO: ChoiceSpec = ChoiceSpec { id: "stereo", name: "Stereo", choices: &["L/R", "M/S"], default: 0 };
 pub const LINK: ParamSpec = spec("link", "Stereo Link", "%", 0.0, 100.0, 100.0, ParamScale::Linear, 0, (1.0, 0.1), ParamDisplay::Number);
+/// How the bands are split (2026-11-26, appended): LR4 crossovers (no latency, the phase turns
+/// at each crossover) or linear-phase kernels (no phase turn, 90.7 ms of latency).
+pub const PHASE: ChoiceSpec = ChoiceSpec { id: "phase", name: "Phase", choices: &["Minimum Phase", "Linear Phase"], default: 0 };
 pub const LOOKAHEAD: ParamSpec = spec("lookahead", "Lookahead", "ms", 0.0, MAX_LOOKAHEAD_MS, 0.0, ParamScale::Linear, 1, (0.1, 0.01), ParamDisplay::Time);
 pub const FLOOR: ParamSpec = spec("floor", "Floor", "dBFS", -80.0, -20.0, -60.0, ParamScale::Linear, 0, (1.0, 0.1), ParamDisplay::Number);
 /// What the detector hears with one band (open at the ends).
@@ -121,6 +127,7 @@ pub fn manifest() -> String {
         lines.push(prefix(B_MUTE.manifest_line()));
         lines.push(prefix(B_SOLO.manifest_line()));
     }
+    lines.push(PHASE.manifest_line());
     lines.join("\n") + "\n"
 }
 
@@ -213,6 +220,7 @@ pub struct ShapeParams {
     pub bypass: BoolParam,
     pub crossovers: [CrossParams; CROSSOVERS],
     pub bands: [BandParams; BANDS],
+    pub phase: IntParam,
     /// Snapshots A–D and the current preset's name (not parameters: saved with the state through
     /// `serialize_fields`).
     pub snapshots: std::sync::Arc<Snapshots>,
@@ -246,6 +254,7 @@ impl Default for ShapeParams {
             bypass: flag(&BYPASS),
             crossovers: std::array::from_fn(CrossParams::new),
             bands: std::array::from_fn(BandParams::new),
+            phase: choice_param(&PHASE, PHASE.name.to_owned()),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
             focus_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -323,6 +332,7 @@ unsafe impl Params for ShapeParams {
             map.push((String::from(band_id(i, B_MUTE.id)), b.mute.as_ptr(), group.clone()));
             map.push((String::from(band_id(i, B_SOLO.id)), b.solo.as_ptr(), group));
         }
+        map.push(global(PHASE.id, self.phase.as_ptr(), ""));
         map
     }
 }

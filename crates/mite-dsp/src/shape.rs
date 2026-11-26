@@ -680,12 +680,37 @@ impl Shaper {
 
     /// Shapes one chunk in place (`channels`: one or two) and writes the dry band sum (the
     /// allpass the split makes, delayed like the result) into `dry`, for mix and delta.
-    #[allow(clippy::needless_range_loop)] // bands and channels indexed across several arrays
     pub fn process(
         &mut self,
         channels: &mut [&mut [f32]],
         dry: &mut [&mut [f32]],
         s: &ShapeSettings,
+    ) -> ShapeTelemetry {
+        self.process_split(channels, dry, s, None)
+    }
+
+    /// [`Self::process`] with the bands split outside (Linear Phase): `bands[slot][channel]`
+    /// (left and right, as long as `channels`) replace the crossovers, whose state then stands
+    /// still. Their sum is the input as the shaper hears it (a linear-phase split adds up to a
+    /// pure delay), so the detector stays in time with the bands; mid and side are made from
+    /// each band's left and right.
+    pub fn process_bands(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        dry: &mut [&mut [f32]],
+        s: &ShapeSettings,
+        bands: &[[&[f32]; 2]; BANDS],
+    ) -> ShapeTelemetry {
+        self.process_split(channels, dry, s, Some(bands))
+    }
+
+    #[allow(clippy::needless_range_loop)] // bands and channels indexed across several arrays
+    fn process_split(
+        &mut self,
+        channels: &mut [&mut [f32]],
+        dry: &mut [&mut [f32]],
+        s: &ShapeSettings,
+        bands: Option<&[[&[f32]; 2]; BANDS]>,
     ) -> ShapeTelemetry {
         let mut telemetry = ShapeTelemetry::default();
         let n_ch = channels.len().min(2);
@@ -711,7 +736,13 @@ impl Shaper {
                     e.audible += e.ramp[2];
                 }
             }
-            let x = [f64::from(channels[0][i]), f64::from(channels[n_ch - 1][i])];
+            let x = match bands {
+                Some(b) => {
+                    let sum = |c: usize| b.iter().map(|band| f64::from(band[c][i])).sum::<f64>();
+                    [sum(0), sum(n_ch - 1)]
+                }
+                None => [f64::from(channels[0][i]), f64::from(channels[n_ch - 1][i])],
+            };
             let fading = self.fade;
             let mut out = [[0.0f64; 2]; 2];
             let mut dry_out = [[0.0f64; 2]; 2];
@@ -731,9 +762,24 @@ impl Shaper {
                 // Split each channel into its bands (by position from the bottom).
                 let mut sig = [[0.0f64; BANDS]; 2];
                 let mut listen = [0.0f64; 2];
+                if let Some(b) = bands {
+                    for p in 0..=layout.n {
+                        let slot = layout.owners[p];
+                        let (l, r) = (f64::from(b[slot][0][i]), f64::from(b[slot][n_ch - 1][i]));
+                        if ms {
+                            sig[0][p] = 0.5 * (l + r);
+                            sig[1][p] = 0.5 * (l - r);
+                        } else {
+                            sig[0][p] = l;
+                            sig[1][p] = r;
+                        }
+                    }
+                }
                 for c in 0..n_ch {
                     let cross = if fading.is_some() && ci == self.active { &self.old_cross } else { &self.cross };
-                    core.split.process(c, input[c], &layout, cross, &mut sig[c]);
+                    if bands.is_none() {
+                        core.split.process(c, input[c], &layout, cross, &mut sig[c]);
+                    }
                     if layout.n == 0 {
                         // One band: the detector hears the input through its own filter.
                         let f = &mut core.det_filter[c];

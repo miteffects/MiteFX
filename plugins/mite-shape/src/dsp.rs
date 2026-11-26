@@ -1,11 +1,24 @@
 //! Mite Shape's engine: the shaper (`mite_dsp::shape`) and its output stage (mix and delta
 //! against the band sum, bypass against the latency-aligned dry signal, auto gain, output gain and
 //! balance), plus the history telemetry: one record per 5 ms slice, whatever the host's block size.
+//!
+//! Linear Phase (2026-11-26, user: the minimum-phase crossovers turned the kick's phase at each
+//! crossover) splits the bands with FIR kernels instead (`mite_dsp::crossover::linear_phase_kernels`:
+//! each band the LR4 magnitude with zero phase, their sum a pure delay), one convolver per band
+//! slot, as Mite Sat does. A designer thread makes them whenever the crossovers move; the audio
+//! thread swaps them in with a crossfade and hands the old ones back to be freed there. Switching
+//! it moves the latency: behind the dip, as the lookahead and the clip stage.
 
-use mite_core::{HistoryTap, SpectrumTap};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use mite_core::{triple_buffer, Handover, HistoryTap, SpectrumTap, TripleReader, TripleWriter};
+use mite_dsp::conv::{Convolver, KernelLayout, KernelSet};
 use mite_dsp::output::{balance, DryDelay};
 use mite_dsp::oversample::Oversampler;
-use mite_dsp::shape::{soft_clip, ShapeSettings, ShapeTelemetry, Shaper, BANDS, MAX_LOOKAHEAD_MS};
+use mite_dsp::shape::{soft_clip, Layout, ShapeSettings, ShapeTelemetry, Shaper, BANDS, CROSSOVERS, MAX_LOOKAHEAD_MS};
 use mite_dsp::{db_to_gain, LinearSmoother, MINUS_INFINITY_DB};
 
 /// Fields of a history record (`ShapeShared::history`).
@@ -48,6 +61,73 @@ const AUTO_EVERY: usize = 64;
 /// The clip stage runs this many times oversampled (it is the one nonlinear step).
 const CLIP_OVERSAMPLING: usize = 4;
 
+/// Linear Phase's kernel length and convolution block at 48 kHz (both scale with the sample
+/// rate), as Mite Sat's: 8192 taps hold an LR4 band down to the lowest crossovers within 0.3 dB;
+/// the latency is a block plus half the kernel, 90.7 ms.
+const LP_LEN_48K: usize = 8192;
+const LP_BLOCK_48K: usize = 256;
+/// A kernel swap's crossfade, ms.
+const KERNEL_FADE_MS: f64 = 20.0;
+
+fn rate_ratio(sample_rate: f64) -> usize {
+    ((sample_rate / 48_000.0).round().max(1.0) as usize).next_power_of_two()
+}
+
+/// Linear Phase's added latency at `sample_rate`, samples.
+pub fn linear_phase_latency(sample_rate: f32) -> usize {
+    let r = rate_ratio(f64::from(sample_rate));
+    LP_BLOCK_48K * r + LP_LEN_48K * r / 2
+}
+
+/// What the designer makes kernels for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SplitRequest {
+    crossovers: [Option<f32>; CROSSOVERS],
+    sample_rate: f64,
+    len: usize,
+    block: usize,
+}
+
+impl SplitRequest {
+    fn new(crossovers: [Option<f32>; CROSSOVERS], sample_rate: f32) -> Self {
+        let r = rate_ratio(f64::from(sample_rate));
+        Self { crossovers, sample_rate: f64::from(sample_rate), len: LP_LEN_48K * r, block: LP_BLOCK_48K * r }
+    }
+}
+
+/// A band slot's kernel each (zero for slots the split does not use), and what they were made for.
+pub struct SplitKernels {
+    request: SplitRequest,
+    sets: [Option<Box<KernelSet>>; BANDS],
+}
+
+fn design_split(req: &SplitRequest) -> SplitKernels {
+    let layout = Layout::new(&req.crossovers);
+    let kernels = mite_dsp::crossover::linear_phase_kernels(&layout, &req.crossovers, req.sample_rate, req.len);
+    SplitKernels { request: *req, sets: std::array::from_fn(|b| Some(Box::new(KernelSet::new(req.block, KernelLayout::Shared, std::slice::from_ref(&kernels[b]), req.len / 2)))) }
+}
+
+/// The designer thread: designs for the latest request, hands it over, frees what came back.
+fn run_designer(mut requests: TripleReader<SplitRequest>, kernels: Arc<Handover<SplitKernels>>, stop: Arc<AtomicBool>) {
+    while !stop.load(Ordering::Relaxed) {
+        if let Some(req) = requests.read() {
+            kernels.send(Box::new(design_split(&req)));
+        }
+        kernels.collect();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Where a switch that moves the latency stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Switch {
+    Steady,
+    /// Muted, waiting (for Linear Phase's first kernels).
+    Waiting,
+    /// Muted while the new path fills (its latency), so the sound comes back with the fade.
+    Filling(usize),
+}
+
 /// The output stage as the parameters set it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Output {
@@ -63,11 +143,14 @@ pub struct Output {
     pub clip: bool,
     pub ceiling_db: f32,
     pub softness: f32,
+    /// The bands split by linear-phase kernels (no phase turn at the crossovers, 90.7 ms of
+    /// latency) rather than LR4 crossovers.
+    pub linear: bool,
 }
 
 impl Default for Output {
     fn default() -> Self {
-        Self { mix: 1.0, delta: false, bypass: false, auto_gain: false, gain_db: 0.0, pan: 0.0, clip: false, ceiling_db: -1.0, softness: 0.4 }
+        Self { mix: 1.0, delta: false, bypass: false, auto_gain: false, gain_db: 0.0, pan: 0.0, clip: false, ceiling_db: -1.0, softness: 0.4, linear: false }
     }
 }
 
@@ -105,10 +188,41 @@ pub struct ShapeEngine {
     slice_len: usize,
     slice_pos: usize,
     acc: [f32; record::WIDTH],
+    switch: Switch,
+    /// Linear Phase: running, its convolvers (one per band slot) and their outputs, the kernels'
+    /// way in and out, the request last sent, what the convolvers' kernels were made for, a set
+    /// whose old kernels are still fading out, and the designer thread.
+    linear: bool,
+    convs: Vec<Convolver>,
+    lp_bands: Vec<[Vec<f32>; 2]>,
+    kernels: Arc<Handover<SplitKernels>>,
+    requests: TripleWriter<SplitRequest>,
+    last_request: Option<SplitRequest>,
+    installed: Option<SplitRequest>,
+    spare: Option<Box<SplitKernels>>,
+    stop: Arc<AtomicBool>,
+    designer: Option<JoinHandle<()>>,
+}
+
+impl Drop for ShapeEngine {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.designer.take() {
+            let _ = t.join();
+        }
+    }
 }
 
 impl ShapeEngine {
+    /// Allocates and starts the kernel designer; call off the audio thread.
     pub fn new(sample_rate: f32, s: &ShapeSettings) -> Self {
+        let kernels = Arc::new(Handover::new());
+        let stop = Arc::new(AtomicBool::new(false));
+        let (requests, reader) = triple_buffer(SplitRequest::new(s.crossovers, sample_rate));
+        let designer = {
+            let (kernels, stop) = (kernels.clone(), stop.clone());
+            std::thread::Builder::new().name("mite-shape-split".into()).spawn(move || run_designer(reader, kernels, stop)).ok()
+        };
         let mut e = Self {
             sample_rate,
             shaper: Shaper::new(sample_rate, s),
@@ -137,6 +251,17 @@ impl ShapeEngine {
             slice_len: 1,
             slice_pos: 0,
             acc: empty_record(),
+            switch: Switch::Steady,
+            linear: false,
+            convs: Vec::new(),
+            lp_bands: Vec::new(),
+            kernels,
+            requests,
+            last_request: None,
+            installed: None,
+            spare: None,
+            stop,
+            designer,
         };
         e.prepare(sample_rate, s, &Output::default());
         e
@@ -145,8 +270,28 @@ impl ShapeEngine {
     /// Sizes everything for `sample_rate`. Allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &ShapeSettings, out: &Output) {
         self.sample_rate = sample_rate;
-        let max_latency = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1 + Oversampler::latency_for(CLIP_OVERSAMPLING);
+        let max_latency = (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).ceil() as usize + 1 + Oversampler::latency_for(CLIP_OVERSAMPLING) + linear_phase_latency(sample_rate);
         self.dry = DryDelay::new(max_latency, CHUNK);
+        let req = SplitRequest::new(s.crossovers, sample_rate);
+        let fade = (KERNEL_FADE_MS * 0.001 * f64::from(sample_rate)) as usize;
+        self.convs = (0..BANDS).map(|_| Convolver::new(req.block, req.len, fade)).collect();
+        self.lp_bands = (0..BANDS).map(|_| [vec![0.0; CHUNK], vec![0.0; CHUNK]]).collect();
+        self.spare = None;
+        self.last_request = None;
+        self.installed = None;
+        self.linear = out.linear;
+        if out.linear {
+            // Designed here, so a render starts with them.
+            let mut set = design_split(&req);
+            for (conv, k) in self.convs.iter_mut().zip(set.sets.iter_mut()) {
+                if let Some(k) = k.take() {
+                    conv.replace(k);
+                }
+            }
+            self.last_request = Some(req);
+            self.installed = Some(req);
+            self.requests.write(req);
+        }
         self.wet = [vec![0.0; CHUNK], vec![0.0; CHUNK]];
         self.band_sum = [vec![0.0; CHUNK], vec![0.0; CHUNK]];
         self.hi = vec![0.0; CHUNK * CLIP_OVERSAMPLING];
@@ -173,6 +318,10 @@ impl ShapeEngine {
         self.ceiling.reset(db_to_gain(out.ceiling_db));
         self.softness.reset(out.softness);
         self.shaper.reset(s);
+        self.switch = Switch::Steady;
+        for conv in &mut self.convs {
+            conv.reset();
+        }
         self.dry.reset();
         self.dry.set_delay(self.latency());
         self.mix.reset(out.mix);
@@ -190,9 +339,104 @@ impl ShapeEngine {
     }
 
     /// The latency in force, samples: the lookahead, plus the clip stage's oversampling while it
-    /// is on (it follows a change once the dip has faded out).
+    /// is on, plus Linear Phase's split while it runs (each follows a change once the dip has
+    /// faded out).
     pub fn latency(&self) -> usize {
-        self.active(&ShapeSettings::default()).latency(self.sample_rate) + self.os.latency()
+        self.active(&ShapeSettings::default()).latency(self.sample_rate) + self.os.latency() + if self.linear { linear_phase_latency(self.sample_rate) } else { 0 }
+    }
+
+    /// Whether Linear Phase is running.
+    pub fn linear(&self) -> bool {
+        self.linear
+    }
+
+    /// Gives a set back to the designer to free; never frees on this thread.
+    fn give_back(&mut self, set: Box<SplitKernels>) {
+        if let Err(set) = self.kernels.retire(set) {
+            if self.spare.is_none() {
+                self.spare = Some(set);
+            } else {
+                // Nowhere to keep it: leaking is the only way that keeps the audio thread clean.
+                std::mem::forget(set);
+            }
+        }
+    }
+
+    /// Once per stretch, while Linear Phase runs: asks for kernels when the crossovers move, takes
+    /// a new set into every convolver at once (they fade together), and returns the old ones.
+    fn update_kernels(&mut self, s: &ShapeSettings) {
+        let req = SplitRequest::new(s.crossovers, self.sample_rate);
+        if self.last_request != Some(req) {
+            self.requests.write(req);
+            self.last_request = Some(req);
+        }
+        let fading = self.convs.iter().any(Convolver::is_fading);
+        if let Some(mut spare) = self.spare.take() {
+            for (conv, slot) in self.convs.iter_mut().zip(spare.sets.iter_mut()) {
+                if let Some(old) = conv.retired() {
+                    *slot = Some(old);
+                }
+            }
+            if fading {
+                self.spare = Some(spare);
+            } else {
+                self.give_back(spare);
+            }
+            return;
+        }
+        // Only while it runs: switching into it, the kernels wait in the handover for
+        // `install_kernels`.
+        if fading || self.switch != Switch::Steady || !self.linear {
+            return;
+        }
+        if let Some(mut set) = self.kernels.take() {
+            if set.request.block != req.block || set.request.len != req.len || set.request.sample_rate != req.sample_rate {
+                self.give_back(set);
+                return;
+            }
+            for (conv, slot) in self.convs.iter_mut().zip(set.sets.iter_mut()) {
+                if let Some(k) = slot.take() {
+                    if let Err(k) = conv.offer(k) {
+                        *slot = Some(k);
+                    }
+                }
+            }
+            self.installed = Some(set.request);
+            self.spare = Some(set);
+        }
+    }
+
+    /// Switching into Linear Phase behind the dip: the convolvers start empty, with the kernels
+    /// they kept if those still fit the crossovers, else the newest designed (no fade). Whether
+    /// they have kernels to run.
+    fn install_kernels(&mut self, s: &ShapeSettings) -> bool {
+        let req = SplitRequest::new(s.crossovers, self.sample_rate);
+        if self.installed == Some(req) {
+            for conv in &mut self.convs {
+                conv.reset();
+            }
+            return true;
+        }
+        let Some(mut set) = self.kernels.take() else {
+            if self.last_request != Some(req) || self.installed.is_some() {
+                self.requests.write(req);
+                self.last_request = Some(req);
+            }
+            return false;
+        };
+        if set.request.sample_rate != f64::from(self.sample_rate) {
+            self.give_back(set);
+            return false;
+        }
+        for (conv, slot) in self.convs.iter_mut().zip(set.sets.iter_mut()) {
+            if let Some(k) = slot.take() {
+                *slot = conv.replace(k);
+            }
+            conv.reset();
+        }
+        self.installed = Some(set.request);
+        self.give_back(set);
+        true
     }
 
     /// The band layout playing now (for tests and tools).
@@ -233,22 +477,48 @@ impl ShapeEngine {
 
         let mut start = 0;
         while start < len {
-            // A lookahead or clip change (both move the latency): fade out, switch once silent,
-            // fade back in.
-            if s.lookahead_ms != self.lookahead_ms || clip != self.clip_on {
-                self.dip.set_target(0.0);
-                if self.dip.current() == 0.0 {
-                    self.lookahead_ms = s.lookahead_ms;
-                    if clip != self.clip_on {
-                        self.clip_on = clip;
-                        self.os.set_factor(if clip { CLIP_OVERSAMPLING } else { 1 });
-                        self.os.reset();
+            // A lookahead, clip or phase change (each moves the latency): fade out, switch once
+            // silent (into Linear Phase once its kernels are in), let a new split fill, fade in.
+            if out.linear || self.linear {
+                self.update_kernels(s);
+            }
+            match self.switch {
+                Switch::Steady if s.lookahead_ms != self.lookahead_ms || clip != self.clip_on || out.linear != self.linear => {
+                    self.dip.set_target(0.0);
+                    if self.dip.current() == 0.0 {
+                        self.switch = Switch::Waiting;
                     }
-                    self.dry.set_delay(self.latency());
+                }
+                Switch::Waiting => {
+                    if out.linear && !self.linear && !self.install_kernels(s) {
+                        // Still designing: stay muted.
+                    } else {
+                        self.lookahead_ms = s.lookahead_ms;
+                        if clip != self.clip_on {
+                            self.clip_on = clip;
+                            self.os.set_factor(if clip { CLIP_OVERSAMPLING } else { 1 });
+                            self.os.reset();
+                        }
+                        let refill = out.linear != self.linear;
+                        if refill {
+                            self.linear = out.linear;
+                            self.shaper.reset(&self.active(s));
+                        }
+                        self.dry.set_delay(self.latency());
+                        self.switch = Switch::Filling(if refill { self.latency() } else { 0 });
+                    }
+                }
+                Switch::Filling(0) => {
+                    self.switch = Switch::Steady;
                     self.dip.set_target(1.0);
                 }
+                _ => {}
             }
             let n = (len - start).min(CHUNK).min(self.slice_len - self.slice_pos);
+            let n = match self.switch {
+                Switch::Filling(left) if left > 0 => n.min(left),
+                _ => n,
+            };
             let end = start + n;
             for c in 0..n_ch {
                 self.wet[c][..n].copy_from_slice(&channels[c][start..end]);
@@ -264,8 +534,23 @@ impl ShapeEngine {
                 let [da, db] = &mut self.band_sum;
                 let mut wet: [&mut [f32]; 2] = [&mut a[..n], &mut b[..n]];
                 let mut dry: [&mut [f32]; 2] = [&mut da[..n], &mut db[..n]];
-                self.shaper.process(&mut wet[..n_ch], &mut dry[..n_ch], &active)
+                if self.linear {
+                    // Each band slot's own split of the input (mono runs as two equal sides).
+                    for (conv, buf) in self.convs.iter_mut().zip(self.lp_bands.iter_mut()) {
+                        let [l, r] = buf;
+                        l[..n].copy_from_slice(&channels[0][start..end]);
+                        r[..n].copy_from_slice(&channels[n_ch - 1][start..end]);
+                        conv.process(&mut l[..n], &mut r[..n]);
+                    }
+                    let bands: [[&[f32]; 2]; BANDS] = std::array::from_fn(|b| [&self.lp_bands[b][0][..n], &self.lp_bands[b][1][..n]]);
+                    self.shaper.process_bands(&mut wet[..n_ch], &mut dry[..n_ch], &active, &bands)
+                } else {
+                    self.shaper.process(&mut wet[..n_ch], &mut dry[..n_ch], &active)
+                }
             };
+            if let Switch::Filling(left) = self.switch {
+                self.switch = Switch::Filling(left.saturating_sub(n));
+            }
             let mut out_peak = [0.0f32; 2];
             for i in 0..n {
                 // Auto gain: the band sum's loudness against the result's, over seconds.
@@ -428,6 +713,66 @@ mod tests {
             e.process(&mut [chunk], s, out, &tap, None);
         }
         y
+    }
+
+    /// Linear Phase: with three bands and no shaping, the output is the input delayed by the
+    /// latency (no phase turn at the crossovers); shaping still shapes; Minimum Phase turns the
+    /// phase at a crossover where Linear Phase does not.
+    #[test]
+    fn linear_phase_splits_without_turning_the_phase() {
+        let mut s = ShapeSettings::default();
+        s.crossovers[0] = Some(120.0);
+        s.crossovers[1] = Some(2000.0);
+        let lp = Output { linear: true, ..Output::default() };
+        let n = (FS * 1.5) as usize;
+        let tone = |f: f32| -> Vec<f32> { (0..n).map(|i| 0.3 * (std::f32::consts::TAU * f * i as f32 / FS).sin()).collect() };
+        let err = |y: &[f32], x: &[f32], d: usize| -> f32 {
+            let from = d + (FS * 0.5) as usize;
+            (from..n).map(|i| (y[i] - x[i - d]).abs()).fold(0.0, f32::max)
+        };
+        let mut e = ShapeEngine::new(FS, &s);
+        e.prepare(FS, &s, &lp);
+        assert!(e.linear());
+        let latency = e.latency();
+        assert_eq!(latency, linear_phase_latency(FS));
+        // On a crossover (a tone right at 120 Hz) and between them.
+        for f in [120.0, 500.0, 2000.0, 60.0] {
+            let x = tone(f);
+            e.reset(&s, &lp);
+            let y = run(&mut e, &x, &s, &lp, 333);
+            assert!(err(&y, &x, latency) < 0.003, "{f} Hz: off by {}", err(&y, &x, latency));
+        }
+        // Minimum Phase at the crossover: flat in level but turned (180° at 120 Hz), far from the
+        // input delayed.
+        let mut m = ShapeEngine::new(FS, &s);
+        let x = tone(120.0);
+        let y = run(&mut m, &x, &s, &Output::default(), 333);
+        assert!(err(&y, &x, m.latency()) > 0.2, "minimum phase turns it");
+        // Shaping still shapes in Linear Phase.
+        let mut sh = s;
+        sh.bands[0].attack_db = 9.0;
+        e.reset(&sh, &lp);
+        let x = noise(n, 3);
+        let y = run(&mut e, &x, &sh, &lp, 333);
+        assert!(err(&y, &x, latency) > 0.01, "the low band's attacks moved");
+    }
+
+    #[test]
+    fn switching_into_linear_phase_moves_the_latency_after_a_dip() {
+        let mut s = ShapeSettings::default();
+        s.crossovers[0] = Some(200.0);
+        let mut e = ShapeEngine::new(FS, &s);
+        let before = e.latency();
+        let x = noise((FS * 2.0) as usize, 5);
+        let lp = Output { linear: true, ..Output::default() };
+        let tap = HistoryTap::new(1024);
+        let mut y = x.clone();
+        for chunk in y.chunks_mut(256) {
+            e.process(&mut [chunk], &s, &lp, &tap, None);
+        }
+        assert!(e.linear(), "it switched (once its kernels were designed)");
+        assert_eq!(e.latency(), before + linear_phase_latency(FS));
+        assert!(y.iter().all(|v| v.is_finite()));
     }
 
     #[test]
