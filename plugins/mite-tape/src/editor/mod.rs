@@ -128,7 +128,10 @@ impl TapeView {
         let footer = Footer::new(
             FOOTER_TOP,
             (VIEW_W, VIEW_H),
-            vec![FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input as it came (in time with the deck's latency)" }],
+            vec![
+                FooterToggle { id: AUTO_GAIN.id, glyph: ToggleGlyph::Auto, words: "Auto gain — the tape as loud as the input, measured over a few seconds (driven hard it compresses; the head bump and the top it loses move the loudness too), so Bypass and MIX compare fairly" },
+                FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass — the input as it came (in time with the deck's latency)" },
+            ],
             vec![
                 FooterDial { spec: MIX, kind: KnobKind::Unipolar, name: "MIX", words: "Mix — the tape against the input (in time with it, so it never combs)" },
                 FooterDial { spec: OUT_GAIN, kind: KnobKind::Bipolar, name: "OUTPUT", words: "Output gain" },

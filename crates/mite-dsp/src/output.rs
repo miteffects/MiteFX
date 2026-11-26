@@ -170,6 +170,111 @@ pub fn loudness_change_db(bands: &[BandSettings], mono: bool) -> f64 {
     10.0 * (total / weights).log10()
 }
 
+/// Auto gain by measurement: the input's and the output's loudness (BS.1770 K weighting, both
+/// channels) and the gain that makes the output as loud as the input, for an effect whose loudness
+/// change depends on the signal (a tape driven hard compresses; quieter, it does not). Its meters
+/// start as running averages of all the sound heard (quick to settle on a new session) and then
+/// hold `METER_S` of it, counting only while the input sounds, so the gain follows the settings and
+/// the song, never a phrase or a gap; the gain glides over `GLIDE_S`. Allocation-free.
+#[derive(Debug, Clone)]
+pub struct LoudnessMatch {
+    k_in: [crate::loudness::KWeighting; 2],
+    k_out: [crate::loudness::KWeighting; 2],
+    p_in: f64,
+    p_out: f64,
+    /// Samples of sound heard so far (for the running average's start).
+    heard: f64,
+    k_meter: f64,
+    k_glide: f32,
+    gate: f64,
+    max: f32,
+    gain: f32,
+    /// On (1) or off (0), gliding: switching never jumps.
+    on: f32,
+    k_switch: f32,
+}
+
+impl LoudnessMatch {
+    /// The meters hold this much sound, seconds.
+    pub const METER_S: f64 = 3.0;
+    /// The gain glides this long, seconds.
+    pub const GLIDE_S: f64 = 0.3;
+    /// Sound below this (K-weighted mean square, dBFS) is not metered.
+    pub const GATE_DB: f64 = -70.0;
+
+    /// At `sample_rate`, giving back at most `max_db` either way.
+    pub fn new(sample_rate: f32, max_db: f32) -> Self {
+        let fs = f64::from(sample_rate);
+        let kw = crate::loudness::KWeighting::new(fs);
+        Self {
+            k_in: [kw; 2],
+            k_out: [kw; 2],
+            p_in: 0.0,
+            p_out: 0.0,
+            heard: 0.0,
+            k_meter: 1.0 - (-1.0 / (Self::METER_S * fs)).exp(),
+            k_glide: (1.0 - (-1.0 / (Self::GLIDE_S * fs)).exp()) as f32,
+            gate: 10f64.powf(Self::GATE_DB / 10.0),
+            max: crate::db_to_gain(max_db.abs()),
+            gain: 1.0,
+            on: 1.0,
+            k_switch: (1.0 - (-1.0 / (0.02 * fs)).exp()) as f32,
+        }
+    }
+
+    /// Forgets what it heard: the gain back to unity, on or off at once.
+    pub fn reset(&mut self, on: bool) {
+        for k in self.k_in.iter_mut().chain(&mut self.k_out) {
+            k.reset();
+        }
+        self.p_in = 0.0;
+        self.p_out = 0.0;
+        self.heard = 0.0;
+        self.gain = 1.0;
+        self.on = f32::from(u8::from(on));
+    }
+
+    /// The gain to apply to this sample's output (1 when off).
+    #[inline]
+    pub fn gain(&self) -> f32 {
+        1.0 + (self.gain - 1.0) * self.on
+    }
+
+    /// The gain now, dB (0 when off).
+    pub fn gain_db(&self) -> f32 {
+        crate::gain_to_db(self.gain())
+    }
+
+    /// Takes one sample: the input (`x`, as it would sound bypassed) and the output before this
+    /// gain (`y`), one or two channels, and moves the gain on.
+    #[inline]
+    pub fn step(&mut self, x: [f32; 2], y: [f32; 2], n_ch: usize, on: bool) {
+        let (mut e_in, mut e_out) = (0.0f64, 0.0f64);
+        for c in 0..n_ch.min(2) {
+            let (a, b) = (self.k_in[c].run(x[c]), self.k_out[c].run(y[c]));
+            e_in += a * a;
+            e_out += b * b;
+        }
+        if e_in > self.gate {
+            self.heard += 1.0;
+            let k = self.k_meter.max(1.0 / self.heard);
+            self.p_in += (e_in - self.p_in) * k;
+            self.p_out += (e_out - self.p_out) * k;
+        }
+        let target = if self.p_in > 1e-14 && self.p_out > 1e-14 {
+            ((self.p_in / self.p_out).sqrt() as f32).clamp(1.0 / self.max, self.max)
+        } else {
+            1.0
+        };
+        self.gain += (target - self.gain) * self.k_glide;
+        let to = f32::from(u8::from(on));
+        self.on += (to - self.on) * self.k_switch;
+        if (self.on - to).abs() < 1e-5 {
+            self.on = to;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

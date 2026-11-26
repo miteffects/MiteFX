@@ -622,7 +622,7 @@ against the input's, on a worker thread whenever speed, EQ, bias or level move (
 mostly treble, which the slow speeds' record emphasis drove into the core: +9 dB of false bass).
 Under it the deck from Sat (reels at the tape's speed, the transport's speed trace, the level going
 into the tape against operating level and MOL, speed and EQ chips, five dials); IN/OUT meters;
-MIX, OUTPUT and Bypass in the footer. Six factory presets. Not embeddable yet (no `core` split):
+MIX, OUTPUT and Bypass in the footer. **Auto gain (2026-11-26, state 2, user: "tape doesnt have auto gain"):** on by default (`migrate::v1_to_v2` turns it off in older sessions); `mite_dsp::output::LoudnessMatch` (shared, reusable): K-weighted loudness of the tape before its own gain against the latency-aligned input, metered as a running average of all sound heard settling into 3 s (only while the input sounds, so gaps and phrases don't move it), the gain gliding over 300 ms, ±12 dB; it applies to the tape's side of the mix only, so MIX blends equal loudness and Bypass compares fairly. Measured: LEVEL +18 dB is −3.6 dB without it, +24 dB under-biased −6.6 dB, −12 dB over-biased +1.3 dB; with it each within 0.01 dB, and the gain holds within 0.3 dB over hits and gaps (tested). Six factory presets. Not embeddable yet (no `core` split):
 split it when Rig wants a tape block.
 
 ## 7. Shared UX system (Claude Design brief)

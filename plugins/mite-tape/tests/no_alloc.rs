@@ -22,6 +22,7 @@ fn engine_process_never_allocates() {
         s.machine.hiss = [0.0, 1.0][(i / 40) % 2];
         s.mix = [1.0, 0.0, 0.5][(i / 45) % 3];
         s.bypass = (i / 70) % 4 == 3;
+        s.auto_gain = (i / 55) % 3 != 2;
         for (a, b) in l.iter_mut().zip(r.iter_mut()) {
             seed ^= seed << 13;
             seed ^= seed >> 17;

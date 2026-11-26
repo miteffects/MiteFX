@@ -4,7 +4,7 @@
 
 use mite_core::{SpectrumTap, StereoMeter};
 use mite_dsp::analyzer::{Analyzer, LogSpectrum, SPECTRUM_POINTS};
-use mite_dsp::output::DryDelay;
+use mite_dsp::output::{DryDelay, LoudnessMatch};
 use mite_dsp::tape::{Machine, MachineSettings, MachineTelemetry, MAX_BLOCK};
 use mite_dsp::{db_to_gain, gain_to_db, LinearSmoother, MINUS_INFINITY_DB};
 
@@ -14,6 +14,8 @@ use crate::params::TapeSettings;
 pub const FACTOR: usize = 4;
 /// Peak meters: one reading per slice this long.
 const METER_SLICE_MS: f32 = 10.0;
+/// Auto gain gives back at most this much either way, dB.
+pub const AUTO_MAX_DB: f32 = 12.0;
 
 pub struct TapeEngine {
     machine: Machine,
@@ -22,6 +24,8 @@ pub struct TapeEngine {
     mix: LinearSmoother,
     gain: LinearSmoother,
     bypass: LinearSmoother,
+    /// Auto gain: the tape's output (before its own gain) against the input, both in time.
+    auto: LoudnessMatch,
     fs: f32,
     slice_len: usize,
     slice_pos: usize,
@@ -38,6 +42,7 @@ impl TapeEngine {
             mix: LinearSmoother::new(1.0),
             gain: LinearSmoother::new(1.0),
             bypass: LinearSmoother::new(0.0),
+            auto: LoudnessMatch::new(sample_rate, AUTO_MAX_DB),
             fs: sample_rate,
             slice_len: 1,
             slice_pos: 0,
@@ -50,6 +55,7 @@ impl TapeEngine {
     /// Sizes everything for `sample_rate`. Allocates.
     pub fn prepare(&mut self, sample_rate: f32, s: &TapeSettings) {
         self.fs = sample_rate;
+        self.auto = LoudnessMatch::new(sample_rate, AUTO_MAX_DB);
         self.machine.prepare(sample_rate, FACTOR, &s.machine);
         let latency = self.machine.latency();
         self.dry = DryDelay::new(latency, MAX_BLOCK);
@@ -71,6 +77,7 @@ impl TapeEngine {
         self.mix.reset(s.mix.clamp(0.0, 1.0));
         self.gain.reset(db_to_gain(s.out_db));
         self.bypass.reset(if s.bypass { 1.0 } else { 0.0 });
+        self.auto.reset(s.auto_gain);
         self.slice_pos = 0;
         self.peaks = [0.0; 4];
     }
@@ -78,6 +85,11 @@ impl TapeEngine {
     /// The latency, samples (the oversampler's round trip and the transport's centre; constant).
     pub fn latency(&self) -> usize {
         self.machine.latency()
+    }
+
+    /// What auto gain gives back now, dB (0 when off).
+    pub fn auto_gain_db(&self) -> f32 {
+        self.auto.gain_db()
     }
 
     pub fn telemetry(&self) -> MachineTelemetry {
@@ -117,9 +129,14 @@ impl TapeEngine {
             }
             for i in 0..n {
                 let (mix, g, bp) = (self.mix.next_value(), self.gain.next_value(), self.bypass.next_value());
+                // Auto gain meters the tape before its own gain (no loop) against the input in
+                // time with it, and gives back to the tape's side of the mix only.
+                let (d2, w2) = ([self.dry.read(0, i), self.dry.read(1, i)], [self.wet[0][i], self.wet[n_ch - 1][i]]);
+                let makeup = self.auto.gain();
+                self.auto.step(d2, w2, n_ch, s.auto_gain);
                 for c in 0..n_ch {
                     let d = self.dry.read(c, i);
-                    let w = self.wet[c][i];
+                    let w = self.wet[c][i] * makeup;
                     // Mix 0 and bypass are the dry signal bit for bit.
                     let y = if mix == 0.0 { d } else { d + (w - d) * mix } * g;
                     let out = if bp == 1.0 { d } else if bp == 0.0 { y } else { y + (d - y) * bp };
@@ -262,6 +279,65 @@ mod tests {
         let mut m = x.clone();
         e.process(&mut [&mut m], &s, None, None);
         assert!(m.iter().all(|v| v.is_finite()));
+    }
+
+    /// K-weighted loudness of both channels, dB (BS.1770 without the gating).
+    fn loudness(l: &[f32], r: &[f32]) -> f64 {
+        let mut k = [mite_dsp::loudness::KWeighting::new(48_000.0); 2];
+        let e: f64 = l.iter().zip(r).map(|(a, b)| k[0].run(*a).powi(2) + k[1].run(*b).powi(2)).sum();
+        10.0 * (e / l.len() as f64).log10()
+    }
+
+    /// Music-like: a bass and a chord, a hit every half second.
+    fn program(n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / 48_000.0;
+                let hit = (-((i % 24_000) as f32) / 2400.0).exp();
+                (0.25 * (std::f32::consts::TAU * 55.0 * t).sin() + 0.08 * (std::f32::consts::TAU * 440.0 * t).sin() + 0.05 * (std::f32::consts::TAU * 3300.0 * t).sin()) * (0.5 + hit)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn auto_gain_brings_a_driven_tape_back_to_the_inputs_loudness() {
+        let x = program(48_000 * 12);
+        let settle = 48_000 * 8;
+        for (level, bias) in [(18.0, 0.0), (24.0, -0.6), (-12.0, 0.6)] {
+            let machine = MachineSettings { drive_db: level, bias, ..TapeSettings::default().machine };
+            let mut off = 0.0;
+            for auto_gain in [false, true] {
+                let s = TapeSettings { machine, auto_gain, ..TapeSettings::default() };
+                let (l, r, look) = run(&s, &x);
+                let right: Vec<f32> = x.iter().map(|v| -0.5 * v).collect();
+                let want = loudness(&x[settle - look..x.len() - look], &right[settle - look..x.len() - look]);
+                let got = loudness(&l[settle..], &r[settle..]);
+                println!("level {level:+} dB, bias {bias:+}: auto gain {}: {:+.2} dB against the input", if auto_gain { "on" } else { "off" }, got - want);
+                if auto_gain {
+                    assert!((got - want).abs() < 0.5, "level {level}: {got:.2} against the input's {want:.2} (off: {off:.2})");
+                } else {
+                    off = got - want;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn auto_gain_neither_pumps_nor_rides_the_hits() {
+        // Once settled, the gain stays within 0.3 dB over two seconds of hits and gaps.
+        let x = program(48_000 * 10);
+        let s = TapeSettings { machine: MachineSettings { drive_db: 18.0, ..TapeSettings::default().machine }, ..TapeSettings::default() };
+        let mut e = TapeEngine::new(48_000.0, &s);
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for (k, block) in x.chunks(480).enumerate() {
+            let (mut l, mut r) = (block.to_vec(), block.to_vec());
+            e.process(&mut [&mut l, &mut r], &s, None, None);
+            if k * 480 > 48_000 * 8 {
+                lo = lo.min(e.auto_gain_db());
+                hi = hi.max(e.auto_gain_db());
+            }
+        }
+        assert!(hi - lo < 0.3, "the gain moved {lo:.2}…{hi:.2} dB");
     }
 
     #[test]

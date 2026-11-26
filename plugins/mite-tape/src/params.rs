@@ -10,7 +10,10 @@ use mite_plugin::{bool_param, choice_param, float_param};
 use nih_plug::prelude::*;
 
 /// The state format version (`mite_plugin::state`).
-pub const STATE_VERSION: u32 = 1;
+///
+/// - 2 (2026-11-26): AUTO GAIN (on by default); [`crate::migrate::v1_to_v2`] turns it off in
+///   sessions saved before it, so they sound as they did.
+pub const STATE_VERSION: u32 = 2;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
 const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32, max: f32, default: f32, scale: ParamScale, decimals: u8, wheel: (f32, f32), display: ParamDisplay) -> ParamSpec {
@@ -32,6 +35,9 @@ pub const HISS: ParamSpec = spec("hiss", "Hiss", "%", 0.0, 100.0, 0.0, ParamScal
 pub const MIX: ParamSpec = spec("mix", "Mix", "%", 0.0, 100.0, 100.0, ParamScale::Linear, 0, (5.0, 1.0), ParamDisplay::Number);
 pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, (0.5, 0.1), ParamDisplay::Number);
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
+/// The tape's output as loud as the input, measured (user, 2026-11-26: "tape doesnt have auto
+/// gain"): a hot LEVEL compresses, the head bump and the top's loss move the loudness too.
+pub const AUTO_GAIN: BoolSpec = BoolSpec { id: "auto_gain", name: "Auto Gain", default: true };
 
 const CONTINUOUS: [ParamSpec; 7] = [LEVEL, BIAS, WOW, FLUTTER, HISS, MIX, OUT_GAIN];
 
@@ -47,6 +53,7 @@ pub fn manifest() -> String {
         MIX.manifest_line(),
         OUT_GAIN.manifest_line(),
         BYPASS.manifest_line(),
+        AUTO_GAIN.manifest_line(),
     ]
     .join("\n")
         + "\n"
@@ -77,6 +84,7 @@ pub struct TapeSettings {
     pub mix: f32,
     pub out_db: f32,
     pub bypass: bool,
+    pub auto_gain: bool,
 }
 
 impl Default for TapeSettings {
@@ -91,6 +99,7 @@ impl Default for TapeSettings {
             "hiss" => HISS.default,
             "mix" => MIX.default,
             "out_gain" => OUT_GAIN.default,
+            "auto_gain" => 1.0,
             _ => 0.0,
         })
     }
@@ -113,6 +122,7 @@ pub fn tape_settings(p: impl Fn(&str) -> f32) -> TapeSettings {
         mix: p(MIX.id) / 100.0,
         out_db: p(OUT_GAIN.id),
         bypass: p(BYPASS.id) >= 0.5,
+        auto_gain: p(AUTO_GAIN.id) >= 0.5,
     }
 }
 
@@ -127,6 +137,7 @@ pub struct TapeParams {
     pub mix: FloatParam,
     pub out_gain: FloatParam,
     pub bypass: BoolParam,
+    pub auto_gain: BoolParam,
     pub snapshots: std::sync::Arc<Snapshots>,
     pub preset: std::sync::Arc<CurrentPreset>,
 }
@@ -146,6 +157,7 @@ impl Default for TapeParams {
             // An ordinary parameter, never the host's bypass (REAPER stops processing a
             // host-bypassed plugin, and then the editor could not turn it off).
             bypass: bool_param(&BYPASS, BYPASS.name.to_owned()),
+            auto_gain: bool_param(&AUTO_GAIN, AUTO_GAIN.name.to_owned()),
             snapshots: std::sync::Arc::new(Snapshots::new()),
             preset: std::sync::Arc::new(CurrentPreset::default()),
         }
@@ -165,6 +177,7 @@ impl TapeParams {
             "mix" => self.mix.value(),
             "out_gain" => self.out_gain.value(),
             "bypass" => f32::from(u8::from(self.bypass.value())),
+            "auto_gain" => f32::from(u8::from(self.auto_gain.value())),
             _ => 0.0,
         }
     }
@@ -199,6 +212,7 @@ unsafe impl Params for TapeParams {
             p(MIX.id, self.mix.as_ptr(), ""),
             p(OUT_GAIN.id, self.out_gain.as_ptr(), ""),
             p(BYPASS.id, self.bypass.as_ptr(), ""),
+            p(AUTO_GAIN.id, self.auto_gain.as_ptr(), ""),
         ]
     }
 }

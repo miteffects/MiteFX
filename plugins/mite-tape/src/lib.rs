@@ -13,6 +13,7 @@ use nih_plug::prelude::*;
 
 pub mod dsp;
 pub mod editor;
+pub mod migrate;
 pub mod params;
 pub mod presets;
 
@@ -30,6 +31,8 @@ pub struct TapeShared {
     /// The transport's speed against nominal and the peak going into the tape (linear).
     pub speed_dev: AtomicF32,
     pub field_peak: AtomicF32,
+    /// What auto gain gives back now, dB (0 when off).
+    pub auto_db: AtomicF32,
     pub sample_rate: AtomicF32,
     /// The latency the engine runs with, samples.
     pub latency: AtomicF32,
@@ -50,6 +53,7 @@ impl TapeShared {
             output_meter: StereoMeter::new(MINUS_INFINITY_DB),
             speed_dev: AtomicF32::new(0.0),
             field_peak: AtomicF32::new(0.0),
+            auto_db: AtomicF32::new(0.0),
             sample_rate: AtomicF32::new(48_000.0),
             latency: AtomicF32::new(0.0),
             snapshots,
@@ -63,6 +67,7 @@ impl TapeShared {
         let t = engine.telemetry();
         self.speed_dev.store(t.speed_dev);
         self.field_peak.store(t.field_peak);
+        self.auto_db.store(engine.auto_gain_db());
     }
 }
 
@@ -105,7 +110,7 @@ impl Plugin for MiteTape {
     type BackgroundTask = ();
 
     fn filter_state(state: &mut PluginState) {
-        mite_plugin::state::migrate(state, params::STATE_VERSION, &[]);
+        mite_plugin::state::migrate(state, params::STATE_VERSION, &[migrate::v1_to_v2]);
     }
 
     fn params(&self) -> Arc<dyn Params> {
