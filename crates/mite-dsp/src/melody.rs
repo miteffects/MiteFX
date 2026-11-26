@@ -95,9 +95,87 @@ pub struct Analysis {
         pub marks: Vec<usize>,
     /// The level that counts as sound (the voicing gate), dBFS.
     pub gate_db: f64,
+    /// Readings moved by hand (Melodyne's note assignment: the tracker took another harmonic for
+    /// a whole note): the samples a note spanned and by how many cents (one of
+    /// [`READING_MOVES`]), in the order made.
+    pub fixes: Vec<(usize, usize, f64)>,
+    /// Each frame's pitch as the analysis read it, before any fix.
+    read: Vec<Option<f64>>,
 }
 
 impl Analysis {
+    /// Moves note `i`'s reading by `cents` (the tracker read another harmonic: one of
+    /// [`READING_MOVES`]): its frames, pitch marks and centre follow, the sound as sung stays.
+    /// Returns false if there is no such note or the move is not one of them.
+    pub fn move_reading(&mut self, x: &[f32], i: usize, cents: f64) -> bool {
+        let Some(n) = self.notes.get(i) else { return false };
+        if cents == 0.0 {
+            return true;
+        }
+        if !READING_MOVES.contains(&cents) {
+            return false;
+        }
+        let (s, e) = (n.start, n.end);
+        let mut fixes = self.fixes.clone();
+        match fixes.iter().position(|f| f.0 == s && f.1 == e) {
+            Some(k) => {
+                fixes[k].2 += cents;
+                if fixes[k].2.abs() < 0.5 {
+                    fixes.remove(k);
+                }
+            }
+            None => fixes.push((s, e, cents)),
+        }
+        self.set_fixes(x, &fixes)
+    }
+
+    /// Sets the fixes (as [`Self::fixes`] holds them): frames and marks worked out again where
+    /// one came, went or changed, the notes rebuilt over the same bounds.
+    pub fn set_fixes(&mut self, x: &[f32], fixes: &[(usize, usize, f64)]) -> bool {
+        let n = self.frames.len();
+        if fixes.iter().any(|&(s, e, _)| s >= e || s / self.hop >= n) {
+            return false;
+        }
+        let changed: Vec<(usize, usize)> = self
+            .fixes
+            .iter()
+            .filter(|f| !fixes.contains(f))
+            .chain(fixes.iter().filter(|f| !self.fixes.contains(f)))
+            .map(|&(s, e, _)| (s, e))
+            .collect();
+        self.fixes = fixes.to_vec();
+        for (s, e) in changed {
+            self.refresh(x, s, e);
+        }
+        let b = self.bounds();
+        self.set_bounds(x, &b)
+    }
+
+    /// Frames `s..e` (samples) as read plus the fixes over them, and the marks through the
+    /// voiced stretch around them found again (a whole take's marks took 200 ms on a 4-minute
+    /// vocal; this, a few).
+    fn refresh(&mut self, x: &[f32], s: usize, e: usize) {
+        let frames = self.frames.len();
+        let (f0, f1) = (s / self.hop, e.div_ceil(self.hop).min(frames));
+        for f in f0..f1 {
+            let t = f * self.hop;
+            let moved: f64 = self.fixes.iter().filter(|fx| t >= fx.0 / self.hop * self.hop && t < fx.1.div_ceil(self.hop) * self.hop).map(|fx| fx.2).sum();
+            self.frames[f].cents = self.read[f].map(|c| c + moved);
+        }
+        let (mut a, mut b) = (f0, f1);
+        while a > 0 && self.frames[a - 1].cents.is_some() {
+            a -= 1;
+        }
+        while b < frames && self.frames[b].cents.is_some() {
+            b += 1;
+        }
+        let (from, to) = (a * self.hop, b * self.hop);
+        let fresh = marks_between(x, self.fs, self.hop, &self.frames, from, to);
+        let lo = self.marks.partition_point(|&m| m < from);
+        let hi = self.marks.partition_point(|&m| m < to);
+        self.marks.splice(lo..hi, fresh);
+    }
+
     /// The frame holding sample `t`.
     pub fn frame_at(&self, t: f64) -> usize {
         ((t / self.hop as f64).max(0.0) as usize).min(self.frames.len().saturating_sub(1))
@@ -190,9 +268,16 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
         })
         .collect();
     clean_pitch(&mut frames);
-        let mut notes = find_notes(&frames, hop, x, fs);
+    let mut notes = find_notes(&frames, hop, x, fs);
+    // A note holds one octave: frames a whole number of octaves off its majority were the
+    // tracker on another harmonic (held 50 ms and more on real takes, so `clean_pitch` keeps
+    // them); folded, and the notes found again.
+    if one_octave_per_note(&mut frames, &notes, hop) {
+        notes = find_notes(&frames, hop, x, fs);
+    }
     attach_consonants(&mut notes, &frames, hop, fs, gate);
     let marks = find_marks(x, fs, hop, &frames);
+    let read = frames.iter().map(|f| f.cents).collect();
     Analysis {
         fs,
         hop,
@@ -200,13 +285,83 @@ pub fn analyse(x: &[f32], fs: f64) -> Analysis {
         notes,
         marks,
         gate_db: gate,
+        fixes: Vec::new(),
+        read,
     }
 }
 
-/// Octave slips folded back (a frame an octave off both neighbours), lone voiced or unvoiced
-/// frames dropped or filled.
+/// Where a note's reading can be moved by hand, cents: the harmonics a tracker takes for the
+/// pitch (a fifth either way between the 2nd and 3rd, an octave, an octave and a fifth, two).
+pub const READING_MOVES: [f64; 8] = [-2400.0, -1902.0, -1200.0, -702.0, 702.0, 1200.0, 1902.0, 2400.0];
+
+/// What the tracker mistakes a voice's pitch for besides octaves (±250 cents): the 3rd harmonic
+/// (an octave and a fifth, 1902 cents) and the fifth between the 2nd and 3rd (702), cents and
+/// tolerance (on a rough voice the reading wandered over harmonics 2, 3 and 6 within one note).
+const HARMONIC_SLIPS: [(f64, f64); 4] = [(1902.0, 120.0), (-1902.0, 120.0), (702.0, 120.0), (-702.0, 120.0)];
+
+/// Folds each note's frames that sit a whole number of octaves (±250 cents) or a
+/// [`HARMONIC_SLIPS`] interval off the note's majority onto it. Whether any moved.
+fn one_octave_per_note(frames: &mut [Frame], notes: &[Note], hop: usize) -> bool {
+    let mut moved = false;
+    for n in notes {
+        let range = n.start / hop..(n.end / hop).min(frames.len());
+        let mut c: Vec<f64> = frames[range.clone()].iter().filter_map(|f| f.cents).collect();
+        if c.len() < 3 {
+            continue;
+        }
+        c.sort_by(f64::total_cmp);
+        let median = c[c.len() / 2];
+        for f in &mut frames[range] {
+            if let Some(v) = f.cents {
+                let k = ((median - v) / 1200.0).round();
+                if k != 0.0 && (v + k * 1200.0 - median).abs() < 250.0 {
+                    f.cents = Some(v + k * 1200.0);
+                    moved = true;
+                } else if let Some(&(d, _)) = HARMONIC_SLIPS.iter().find(|&&(d, tol)| (v + d - median).abs() < tol) {
+                    f.cents = Some(v + d);
+                    moved = true;
+                }
+            }
+        }
+    }
+    moved
+}
+
+/// The longest octave slip folded back, frames (60 ms at the 5 ms hop): longer, the singer
+/// really leapt.
+const MAX_SLIP_FRAMES: usize = 12;
+
+/// Octave slips folded back: a stretch of up to [`MAX_SLIP_FRAMES`] that sits a whole number of
+/// octaves (±250 cents) off the pitch before it and comes back to it (the tracker locking on the
+/// second harmonic or a subharmonic for a few frames: 1–4 frames at a time on real takes, drift
+/// spikes of up to 600 cents, kept by any edit). Then lone voiced or unvoiced frames dropped or
+/// filled.
 fn clean_pitch(frames: &mut [Frame]) {
     let n = frames.len();
+    let mut i = 1;
+    while i < n {
+        let (Some(before), Some(c)) = (frames[i - 1].cents, frames[i].cents) else {
+            i += 1;
+            continue;
+        };
+        let octaves = ((before - c) / 1200.0).round();
+        if octaves == 0.0 || (c + octaves * 1200.0 - before).abs() > 250.0 {
+            i += 1;
+            continue;
+        }
+        // The slipped stretch: frames near `c`, then back near `before` (or the run's end).
+        let mut j = i;
+        while j < n && j - i < MAX_SLIP_FRAMES && frames[j].cents.is_some_and(|v| (v - c).abs() < 400.0) {
+            j += 1;
+        }
+        let back = j < n && frames[j].cents.is_none_or(|v| (v - before).abs() < 400.0);
+        if back && j - i < MAX_SLIP_FRAMES {
+            for f in &mut frames[i..j] {
+                f.cents = f.cents.map(|v| v + octaves * 1200.0);
+            }
+        }
+        i = j.max(i + 1);
+    }
     for i in 1..n.saturating_sub(1) {
         if let (Some(a), Some(c), Some(b)) =
             (frames[i - 1].cents, frames[i].cents, frames[i + 1].cents)
@@ -482,14 +637,21 @@ pub fn detect_key(notes: &[Note]) -> (usize, bool) {
 /// around the last (normalised cross-correlation), so every mark sits at the same point of its
 /// cycle however the peaks change shape.
 fn find_marks(x: &[f32], fs: f64, hop: usize, frames: &[Frame]) -> Vec<usize> {
+    marks_between(x, fs, hop, frames, 0, x.len())
+}
+
+/// The marks of the voiced stretches starting in `from..to` (samples; `from` on a frame
+/// boundary). Each stretch's marks start from its own first frame, never from where the stretch
+/// before ended, so a stretch can be marked again alone and come out as a whole take's pass would.
+fn marks_between(x: &[f32], fs: f64, hop: usize, frames: &[Frame], from: usize, to: usize) -> Vec<usize> {
     let hz_at = |t: usize| {
         let f = (t / hop).min(frames.len() - 1);
         frames[f].cents.map(cents_to_hz)
     };
     let at = |k: isize| if k >= 0 && (k as usize) < x.len() { f64::from(x[k as usize]) } else { 0.0 };
     let mut marks = Vec::new();
-    let mut t = 0usize;
-    while t < x.len() {
+    let mut t = from;
+    while t < to.min(x.len()) {
         let Some(hz) = hz_at(t) else {
             t += hop;
             continue;
@@ -527,7 +689,7 @@ fn find_marks(x: &[f32], fs: f64, hop: usize, frames: &[Frame]) -> Vec<usize> {
             marks.push(next);
             m = next;
         }
-        t = m + hop;
+        t = (m / hop + 1) * hop;
     }
     marks
 }
@@ -1179,6 +1341,54 @@ mod tests {
         );
         // Other notes untouched.
         assert_eq!(&y[..truth[1].1], &x[..truth[1].1]);
+    }
+
+    #[test]
+    fn a_notes_reading_moves_to_another_harmonic_and_back() {
+        let (x, _) = line();
+        let a = analyse(&x, FS);
+        let mut b = a.clone();
+        assert!(b.move_reading(&x, 2, 1200.0));
+        assert!((b.notes[2].cents - a.notes[2].cents - 1200.0).abs() < 1.0, "{} → {}", a.notes[2].cents, b.notes[2].cents);
+        assert_eq!(b.notes[1].cents, a.notes[1].cents, "the other notes stay");
+        // The marks follow the reading: twice as many through the note.
+        let count = |an: &Analysis| an.marks.iter().filter(|&&m| m >= an.notes[2].start + 2000 && m < an.notes[2].end - 2000).count() as f64;
+        assert!((count(&b) / count(&a) - 2.0).abs() < 0.1, "{} → {} marks", count(&a), count(&b));
+        assert_eq!(b.fixes, vec![(a.notes[2].start, a.notes[2].end, 1200.0)]);
+        assert!(!b.move_reading(&x, 2, 300.0), "only to a harmonic the tracker mistakes");
+        // Down again: as analysed, and the fix gone.
+        assert!(b.move_reading(&x, 2, -1200.0));
+        assert_eq!(b, a);
+        // The fixes as a session keeps them rebuild the same analysis.
+        let mut c = a.clone();
+        c.move_reading(&x, 2, -702.0);
+        let mut d = a.clone();
+        assert!(d.set_fixes(&x, &c.fixes));
+        assert_eq!(c, d);
+        // And as a whole take's pass marks it.
+        let mut whole = c.clone();
+        whole.marks = find_marks(&x, FS, c.hop, &c.frames);
+        assert_eq!(whole.marks, c.marks);
+    }
+
+    #[test]
+    fn short_octave_slips_fold_back_and_a_held_leap_stays() {
+        let f = |c: f64| Frame { cents: Some(c), clarity: 0.95, db: -20.0 };
+        // 6000 cents, three frames read an octave up (+ a little), back; then two frames an
+        // octave down; then a real leap up an octave that holds.
+        let mut seq: Vec<f64> = vec![6000.0; 10];
+        seq.extend([7210.0, 7190.0, 7205.0]);
+        seq.extend(vec![6010.0; 10]);
+        seq.extend([4800.0, 4795.0]);
+        seq.extend(vec![6000.0; 10]);
+        seq.extend(vec![7200.0; 30]);
+        let mut frames: Vec<Frame> = seq.iter().map(|&c| f(c)).collect();
+        clean_pitch(&mut frames);
+        let got: Vec<f64> = frames.iter().map(|fr| fr.cents.unwrap()).collect();
+        for (k, v) in got[..35].iter().enumerate() {
+            assert!((v - 6000.0).abs() < 30.0, "frame {k}: {v}");
+        }
+        assert!(got[35..].iter().all(|v| (v - 7200.0).abs() < 1.0), "the held leap moved: {:?}", &got[35..]);
     }
 
     #[test]

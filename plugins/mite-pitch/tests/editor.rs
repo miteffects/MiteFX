@@ -544,3 +544,50 @@ fn undo_survives_closing_the_editor() {
     key(&mut view, true);
     assert!(!s.edits()[1].is_neutral(), "and redone after another");
 }
+
+/// The reading tool (Melodyne's note assignment): a note dragged an octave up is read there, its
+/// edit and the sound as sung untouched; undo, and a double-click, give the tracker's reading back;
+/// the state keeps the reading.
+#[test]
+fn the_reading_tool_moves_a_notes_reading_by_an_octave() {
+    let (mut view, host, shared) = ready("ed-reading");
+    let s = &shared.session;
+    let before = s.analysis().expect("analysis");
+    view.event(&UiEvent::KeyDown { key: Key::Character('8'), mods: MODS }, &host);
+    assert_eq!(view.tool(), Tool::Reading);
+    let r = view.note_rect(2).expect("in view");
+    // Most of an octave up: it lands on the octave.
+    let px = 1050.0 / view.cents_per_px();
+    drag(&mut view, &host, r.center(), r.center() - (0.0, px), MODS);
+    let a = s.analysis().expect("analysis");
+    assert!((a.notes[2].cents - before.notes[2].cents - 1200.0).abs() < 1.0, "{} → {}", before.notes[2].cents, a.notes[2].cents);
+    assert_eq!(a.notes[1].cents, before.notes[1].cents);
+    assert!(s.edits()[2].is_neutral(), "the edit stays: {:?}", s.edits()[2]);
+    draw(&mut view, &host);
+    // Kept in the state.
+    settle(&shared);
+    let json = s.to_json().expect("state");
+    let t = session("ed-reading-2");
+    t.set_dir(s.dir());
+    t.load_json(&json);
+    assert!(t.wait_idle(std::time::Duration::from_secs(30)));
+    assert_eq!(t.analysis().expect("analysis").fixes, a.fixes);
+    assert!((t.analysis().expect("analysis").notes[2].cents - a.notes[2].cents).abs() < 1e-9);
+    // Undo: as read.
+    view.event(&UiEvent::KeyDown { key: Key::Character('z'), mods: Modifiers { ctrl: true, ..MODS } }, &host);
+    assert_eq!(*s.analysis().expect("analysis"), *before);
+    // Again, then a double-click: as read.
+    draw(&mut view, &host);
+    let r = view.note_rect(2).expect("in view");
+    drag(&mut view, &host, r.center(), r.center() - (0.0, px), MODS);
+    assert!(!s.analysis().expect("analysis").fixes.is_empty());
+    // Scrolled up an octave to where it is read now.
+    let r = view.note_rect(2).expect("in view");
+    view.event(&UiEvent::Wheel { pos: Point::new(r.center().x, 400.0), lines: 12.0, mods: Modifiers { shift: true, ..MODS } }, &host);
+    draw(&mut view, &host);
+    let r = view.note_rect(2).expect("in view");
+    assert!(r.y0 > 80.0 && r.y1 < 600.0, "scrolled to it: {r:?}");
+    view.event(&UiEvent::DoubleClick { pos: r.center(), mods: MODS }, &host);
+    assert_eq!(*s.analysis().expect("analysis"), *before);
+    settle(&shared);
+}

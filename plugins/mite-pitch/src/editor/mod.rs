@@ -20,8 +20,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mite_core::{BoolSpec, ParamDisplay, ParamScale, ParamSpec};
-use mite_dsp::melody::{legato, pitch_offset, Analysis, Note, NoteEdit, TRANSITION_MAX_MS};
-use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke};
+use mite_dsp::melody::{legato, pitch_offset, Analysis, Note, NoteEdit, READING_MOVES, TRANSITION_MAX_MS};
+use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Stroke, Vec2};
 use mite_ui::paint::glow_stroke;
 use mite_ui::peniko::Fill;
 use mite_ui::widgets::brand::{draw_mark, draw_title};
@@ -111,9 +111,11 @@ pub enum Tool {
         Level,
     Transition,
     Split,
+    /// Melodyne's note assignment: the tracker read a note at another harmonic; move its reading.
+    Reading,
 }
 
-pub const TOOLS: [Tool; 7] = [Tool::Main, Tool::Vibrato, Tool::Drift, Tool::Formant, Tool::Level, Tool::Transition, Tool::Split];
+pub const TOOLS: [Tool; 8] = [Tool::Main, Tool::Vibrato, Tool::Drift, Tool::Formant, Tool::Level, Tool::Transition, Tool::Split, Tool::Reading];
 
 impl Tool {
     fn glyph(self) -> &'static str {
@@ -125,6 +127,8 @@ impl Tool {
                         Tool::Level => "M5.5 18 V14 M10 18 V10 M14.5 18 V7 M19 18 V4",
             Tool::Transition => "M3 17 H7.5 C12 17 12 7 16.5 7 H21",
             Tool::Split => "M12 3 V21 M10 8.5 H7 C4.5 8.5 3 10 3 12 C3 14 4.5 15.5 7 15.5 H10 M14 8.5 H17 C19.5 8.5 21 10 21 12 C21 14 19.5 15.5 17 15.5 H14",
+            // A note and its ghost an octave above, joined.
+            Tool::Reading => "M4 17 H11 M4 7 H11 M7.5 9.5 V14.5 M14 15 L17 18 L20 15 M14 9 L17 6 L20 9",
         }
     }
 
@@ -137,6 +141,7 @@ impl Tool {
             Tool::Level => "Level (5) — drag a note up or down to make it louder or quieter; double-click: as sung",
                         Tool::Transition => "Transition (6) — drag from a note's start: how long it glides in from the note before it; double-click: a step",
             Tool::Split => "Split (7) — click a note to split it there; click where two notes meet to join them",
+            Tool::Reading => "Reading (8) — a note read an octave or a fifth off? Drag it to where it really sits: its curve follows, the sound stays; double-click: as read",
         }
     }
 }
@@ -198,6 +203,8 @@ enum Grip {
     Amount,
     /// The transition tool: the glide runs from the note's start to the pointer.
     Transition,
+    /// The reading tool: the notes' reading moves to another harmonic on release.
+    Reading,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +216,8 @@ struct Drag {
     /// The notes it moves and their edits when it began.
     notes: Vec<(usize, NoteEdit)>,
     undo: Snapshot,
+    /// The reading tool: where the notes' reading lands on release, cents (0: stays).
+    reading: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -871,6 +880,12 @@ impl PitchView {
                 let y = body.center().y - (e.formant_semitones / FORMANT_RANGE) * (body.height() / 2.0 - 1.0);
                 cx.scene.stroke(&Stroke::new(1.6), Affine::IDENTITY, theme.text_strong.multiply_alpha(0.8), None, &Line::new((body.x0 + body.height() / 2.0, y), (body.x1 - body.height() / 2.0, y)));
             }
+            // The reading tool, dragging: where the reading lands.
+            if let Some(d) = self.drag.as_ref().filter(|d| d.grip == Grip::Reading && d.reading != 0.0 && sel) {
+                let dy = self.y_of(n.cents + e.shift_cents + d.reading) - r.center().y;
+                let to = RoundedRect::from_rect(r + Vec2::new(0.0, dy), r.height() / 2.0);
+                cx.scene.stroke(&Stroke::new(1.4).with_dashes(0.0, [4.0, 3.0]), Affine::IDENTITY, theme.text_strong.multiply_alpha(0.85), None, &to);
+            }
             // The edge grip, when hot.
             if let Some(Hot::Edge(j, right)) = self.hot {
                 if j == i {
@@ -1176,8 +1191,18 @@ impl PitchView {
                                         Tool::Transition if legato(&a, i) => Help::default().text(format!("{name} · glides in over ")).slot(format!("{:.0} ms", e.transition_ms), "500 ms"),
                     Tool::Transition => Help::default().text(format!("{name} — no note right before it to glide from")),
                     Tool::Split => Help::default().text(format!("{name} — click to split it here")),
+                    Tool::Reading => {
+                        let moved = a.fixes.iter().filter(|f| f.0 <= n.start && f.1 >= n.end).map(|f| f.2).sum::<f64>();
+                        let dragged = self.drag.as_ref().map_or(0.0, |d| d.reading);
+                        let words = match (moved.abs() > 0.5, dragged != 0.0) {
+                            (_, true) => format!(" — release: read as {}", note_name(n.cents + dragged)),
+                            (true, false) => format!(" — read {:+.0} cents from where the tracker put it", moved),
+                            _ => " — as the tracker read it".to_owned(),
+                        };
+                        Help::default().text(format!("{} (sung){words}", note_name(n.cents)))
+                    }
                 };
-                                return what.text(if self.drag.is_some() || matches!(self.tool, Tool::Split | Tool::Transition) { "" } else { " — Shift: fine" });
+                                return what.text(if self.drag.is_some() || matches!(self.tool, Tool::Split | Tool::Transition | Tool::Reading) { "" } else { " — Shift: fine" });
             }
         }
         match self.hot {
@@ -1204,7 +1229,7 @@ impl PitchView {
         let Some(undo) = self.snapshot() else { return };
         let edits = self.shared.session.edits();
         let notes = self.selected.iter().filter_map(|&i| edits.get(i).map(|e| (i, *e))).collect();
-        self.drag = Some(Drag { grip, grab, start: pos, notes, undo });
+        self.drag = Some(Drag { grip, grab, start: pos, notes, undo, reading: 0.0 });
     }
 
     fn drag_to(&mut self, pos: Point, mods: Modifiers) {
@@ -1216,6 +1241,15 @@ impl PitchView {
         let dt = dx / ROLL.width() * self.span * a.fs;
         let snap = self.snap_now(mods);
         let scale = s.scale();
+        if d.grip == Grip::Reading {
+            // To the nearest harmonic a tracker takes for the pitch (or back where it was).
+            let moved = -(pos.y - d.start.y) * self.cents_per_px();
+            let to = std::iter::once(0.0).chain(READING_MOVES).min_by(|p, q| (p - moved).abs().total_cmp(&(q - moved).abs())).unwrap_or(0.0);
+            if let Some(cur) = self.drag.as_mut() {
+                cur.reading = to;
+            }
+            return;
+        }
         if let Grip::Body(None) = d.grip {
             if (pos.x - d.start.x).abs().max((pos.y - d.start.y).abs()) < 4.0 {
                 return;
@@ -1274,6 +1308,7 @@ impl PitchView {
                     (Grip::Amount, Tool::Level) => e.gain_db = (e0.gain_db - dy / LEVEL_PX).clamp(LEVEL_RANGE.0, LEVEL_RANGE.1),
                                         (Grip::Amount, _) => {}
                     (Grip::Transition, _) => e.transition_ms = glide,
+                    (Grip::Reading, _) => {}
                 }
                 Some((i, e))
             })
@@ -1283,6 +1318,11 @@ impl PitchView {
 
     fn end_drag(&mut self) {
         if let Some(d) = self.drag.take() {
+            if d.grip == Grip::Reading && d.reading != 0.0 {
+                for &(i, _) in &d.notes {
+                    self.shared.session.move_reading(i, d.reading);
+                }
+            }
             if self.snapshot().is_some_and(|now| now != d.undo) {
                 self.push_undo(d.undo);
             }
@@ -1369,7 +1409,7 @@ impl PitchView {
                 self.selected.clear();
                 true
             }
-            UiEvent::KeyDown { key: Key::Character(c), mods } if !mods.ctrl && ('1'..='7').contains(&c) => {
+            UiEvent::KeyDown { key: Key::Character(c), mods } if !mods.ctrl && ('1'..='8').contains(&c) => {
                 self.tool = TOOLS[(c as u8 - b'1') as usize];
                 true
             }
@@ -1475,6 +1515,7 @@ impl PitchView {
                                                 let grip = match self.tool {
                             Tool::Main => Grip::Body(None),
                             Tool::Transition => Grip::Transition,
+                            Tool::Reading => Grip::Reading,
                             _ => Grip::Amount,
                         };
                         self.begin_drag(grip, i, pos);
@@ -1547,6 +1588,20 @@ impl PitchView {
                 false
             }
             UiEvent::DoubleClick { pos, mods } => match self.hot_at(pos) {
+                Some(Hot::Note(i) | Hot::Edge(i, _)) if self.tool == Tool::Reading => {
+                    // As the tracker read it.
+                    self.drag = None;
+                    let Some(undo) = self.snapshot() else { return true };
+                    if !self.selected.contains(&i) {
+                        self.select(i, mods);
+                    }
+                    let notes: Vec<usize> = self.selected.iter().copied().collect();
+                    session.clear_readings(&notes);
+                    if self.snapshot().is_some_and(|now| now != undo) {
+                        self.push_undo(undo);
+                    }
+                    true
+                }
                 Some(Hot::Note(i) | Hot::Edge(i, _)) if self.tool != Tool::Split => {
                     self.drag = None;
                     let Some(a) = session.analysis() else { return true };
@@ -1571,7 +1626,7 @@ impl PitchView {
                                 Tool::Formant => e.formant_semitones = d.formant_semitones,
                                                                 Tool::Level => e.gain_db = d.gain_db,
                                 Tool::Transition => e.transition_ms = d.transition_ms,
-                                Tool::Split => {}
+                                Tool::Split | Tool::Reading => {}
                             }
                             Some((j, e))
                         })

@@ -200,10 +200,11 @@ impl Scale {
     }
 }
 
-/// What undo keeps: the notes' bounds and the edits.
+/// What undo keeps: the notes' bounds, the readings moved by hand and the edits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub bounds: Vec<(usize, usize)>,
+    pub fixes: Vec<(usize, usize, f64)>,
     pub edits: Vec<NoteEdit>,
 }
 
@@ -230,7 +231,7 @@ enum Job {
     /// A recording finished: keep it (file), analyse it, render it.
     Recorded(Vec<f32>, i64, f64),
     /// Read a saved take back, analyse it, render it with these edits.
-        Load(TakeInfo, Vec<NoteEdit>, Option<Vec<(usize, usize)>>),
+        Load(TakeInfo, Vec<NoteEdit>, Option<Vec<(usize, usize)>>, Vec<(usize, usize, f64)>),
     /// Re-render the samples of note `i`'s edit (or everything).
         Render(Option<usize>),
     /// Look at the ARA document now.
@@ -594,7 +595,8 @@ impl Session {
     /// The notes and edits now (for undo).
     pub fn snapshot(&self) -> Option<Snapshot> {
         let st = self.lock();
-        Some(Snapshot { bounds: st.analysis.as_ref()?.bounds(), edits: st.edits.clone() })
+        let a = st.analysis.as_ref()?;
+        Some(Snapshot { bounds: a.bounds(), fixes: a.fixes.clone(), edits: st.edits.clone() })
     }
 
     /// Back to a snapshot: the notes rebuilt if they were split or merged since, the edits.
@@ -602,9 +604,12 @@ impl Session {
         {
             let mut st = self.lock();
             let (Some(a), Some(x)) = (st.analysis.clone(), st.audio.clone()) else { return };
-            if a.bounds() != snap.bounds {
+            if a.bounds() != snap.bounds || a.fixes != snap.fixes {
                 let mut b = (*a).clone();
-                if !b.set_bounds(&x, &snap.bounds) {
+                if b.bounds() != snap.bounds && !b.set_bounds(&x, &snap.bounds) {
+                    return;
+                }
+                if b.fixes != snap.fixes && !b.set_fixes(&x, &snap.fixes) {
                     return;
                 }
                 st.analysis = Some(Arc::new(b));
@@ -629,6 +634,44 @@ impl Session {
             }
             let e = st.edits[i];
             st.edits.insert(i + 1, e);
+            st.analysis = Some(Arc::new(b));
+        }
+        self.version.fetch_add(1, Ordering::AcqRel);
+        self.send(Job::Render(None));
+        true
+    }
+
+    /// Moves note `i`'s reading by `cents` (one of `melody::READING_MOVES`: the tracker took
+    /// another harmonic for it). The sound as sung stays; its edit stays too.
+    pub fn move_reading(&self, i: usize, cents: f64) -> bool {
+        {
+            let mut st = self.lock();
+            let (Some(a), Some(x)) = (st.analysis.clone(), st.audio.clone()) else { return false };
+            let mut b = (*a).clone();
+            if !b.move_reading(&x, i, cents) {
+                return false;
+            }
+            st.analysis = Some(Arc::new(b));
+        }
+        self.version.fetch_add(1, Ordering::AcqRel);
+        self.send(Job::Render(Some(i)));
+        true
+    }
+
+    /// Notes `notes` read as the tracker read them: every reading moved over them dropped.
+    pub fn clear_readings(&self, notes: &[usize]) -> bool {
+        {
+            let mut st = self.lock();
+            let (Some(a), Some(x)) = (st.analysis.clone(), st.audio.clone()) else { return false };
+            let spans: Vec<(usize, usize)> = notes.iter().filter_map(|&i| a.notes.get(i).map(|n| (n.start, n.end))).collect();
+            let keep: Vec<(usize, usize, f64)> = a.fixes.iter().copied().filter(|f| !spans.iter().any(|&(s, e)| f.0 < e && f.1 > s)).collect();
+            if keep.len() == a.fixes.len() {
+                return false;
+            }
+            let mut b = (*a).clone();
+            if !b.set_fixes(&x, &keep) {
+                return false;
+            }
             st.analysis = Some(Arc::new(b));
         }
         self.version.fetch_add(1, Ordering::AcqRel);
@@ -695,13 +738,14 @@ impl Session {
             })
             .collect();
         let bounds: Vec<[usize; 2]> = st.analysis.as_ref().map(|a| a.bounds().into_iter().map(|(s, e)| [s, e]).collect()).unwrap_or_default();
+        let fixes = st.analysis.as_ref().map(|a| fixes_json(&a.fixes)).unwrap_or_default();
         let sc = st.scale;
         let snap = match sc.snap {
             Snap::Semitone => 0,
             Snap::Scale => 1,
             Snap::Off => 2,
         };
-        Some(serde_json::json!({"id": t.id, "start": t.start, "fs": t.sample_rate, "len": t.len, "edits": edits, "bounds": bounds, "key": sc.tonic, "minor": sc.minor, "snap": snap}).to_string())
+        Some(serde_json::json!({"id": t.id, "start": t.start, "fs": t.sample_rate, "len": t.len, "edits": edits, "bounds": bounds, "fixes": fixes, "key": sc.tonic, "minor": sc.minor, "snap": snap}).to_string())
     }
 
     /// Restores what [`Self::to_json`] kept: the take is read back and analysed on the worker.
@@ -737,6 +781,7 @@ impl Session {
             })
             .unwrap_or_default();
                 let bounds: Option<Vec<(usize, usize)>> = v["bounds"].as_array().map(|a| a.iter().filter_map(|p| Some((p.get(0)?.as_u64()? as usize, p.get(1)?.as_u64()? as usize))).collect());
+        let fixes = parse_fixes(&v["fixes"]);
         let snap = match v["snap"].as_u64() {
             Some(1) => Snap::Scale,
             Some(2) => Snap::Off,
@@ -747,13 +792,13 @@ impl Session {
         let info = TakeInfo { id: id.to_owned(), start, sample_rate: fs, len: len as usize };
         if self.lock().take.as_ref() == Some(&info) {
             match bounds {
-                Some(b) => self.restore(&Snapshot { bounds: b, edits }),
+                Some(b) => self.restore(&Snapshot { bounds: b, fixes, edits }),
                 None => self.set_edits(edits),
             }
             return;
         }
         self.lock().status = Status::Analysing;
-        self.send(Job::Load(info, edits, bounds));
+        self.send(Job::Load(info, edits, bounds, fixes));
     }
 }
 
@@ -795,6 +840,16 @@ fn new_id() -> String {
     format!("take-{:016x}", h.finish())
 }
 
+/// Readings moved by hand as JSON: `[[start, end, cents], …]`.
+fn fixes_json(fixes: &[(usize, usize, f64)]) -> Vec<serde_json::Value> {
+    fixes.iter().map(|&(s, e, c)| serde_json::json!([s, e, c])).collect()
+}
+
+/// [`fixes_json`] read back (none when missing: sessions saved before readings could move).
+fn parse_fixes(v: &serde_json::Value) -> Vec<(usize, usize, f64)> {
+    v.as_array().map(|a| a.iter().filter_map(|f| Some((f.get(0)?.as_u64()? as usize, f.get(1)?.as_u64()? as usize, f.get(2)?.as_f64()?))).collect()).unwrap_or_default()
+}
+
 /// An audio modification's edits as JSON (what the ARA archive keeps for it).
 pub fn edits_json(edits: &[NoteEdit], a: &Analysis, scale: Scale) -> String {
     let e: Vec<serde_json::Value> = edits.iter().map(|e| serde_json::json!([e.shift_cents, e.drift, e.offset, e.stretch, e.formant_semitones, e.gain_db, e.modulation, e.transition_ms])).collect();
@@ -804,7 +859,7 @@ pub fn edits_json(edits: &[NoteEdit], a: &Analysis, scale: Scale) -> String {
         Snap::Scale => 1,
         Snap::Off => 2,
     };
-    serde_json::json!({"edits": e, "bounds": bounds, "key": scale.tonic, "minor": scale.minor, "snap": snap}).to_string()
+    serde_json::json!({"edits": e, "bounds": bounds, "fixes": fixes_json(&a.fixes), "key": scale.tonic, "minor": scale.minor, "snap": snap}).to_string()
 }
 
 /// [`edits_json`] read back onto analysis `a` (its notes rebuilt over the kept bounds): the
@@ -815,6 +870,10 @@ pub fn parse_edits_json(json: &str, x: &[f32], a: &mut Analysis) -> (Vec<NoteEdi
     if let Some(b) = v["bounds"].as_array() {
         let b: Vec<(usize, usize)> = b.iter().filter_map(|p| Some((p.get(0)?.as_u64()? as usize, p.get(1)?.as_u64()? as usize))).collect();
         a.set_bounds(x, &b);
+    }
+    let fixes = parse_fixes(&v["fixes"]);
+    if !fixes.is_empty() {
+        a.set_fixes(x, &fixes);
     }
     let edits: Vec<NoteEdit> = v["edits"]
         .as_array()
@@ -1191,12 +1250,15 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                     s.version.fetch_add(1, Ordering::AcqRel);
                     render_all = true;
                 }
-                Job::Load(info, edits, bounds) => match std::fs::read(take_path(&s.dir(), &info.id)) {
+                Job::Load(info, edits, bounds, fixes) => match std::fs::read(take_path(&s.dir(), &info.id)) {
                     Ok(bytes) => {
                         let audio: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
                         let mut a = analyse(&audio, info.sample_rate);
                         if let Some(b) = bounds {
                             a.set_bounds(&audio, &b);
+                        }
+                        if !fixes.is_empty() {
+                            a.set_fixes(&audio, &fixes);
                         }
                         let mut st = s.lock();
                         st.edits = if edits.len() == a.notes.len() { edits } else { vec![NoteEdit::default(); a.notes.len()] };
