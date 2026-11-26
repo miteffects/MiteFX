@@ -1,0 +1,10 @@
+level | dB | -12 | 24 | 0 | Linear
+bias | % | -100 | 100 | 0 | Linear
+speed | choice | 3.75 ips, 7.5 ips, 15 ips, 30 ips | 2
+eq | choice | NAB, CCIR | 0
+wow | % | 0 | 100 | 10 | Linear
+flutter | % | 0 | 100 | 10 | Linear
+hiss | % | 0 | 100 | 0 | Linear
+mix | % | 0 | 100 | 100 | Linear
+out_gain | dB | -24 | 24 | 0 | Linear
+bypass | bool | false

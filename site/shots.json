@@ -83,6 +83,20 @@
    "Up to 16\u00d7 oversampling, linear or minimum phase"
   ]
  ],
+ "mite-tape": [
+  [
+   "img/mite-tape-1.webp",
+   "Driven hard: the level over the tape's maximum, the harmonics it makes"
+  ],
+  [
+   "img/mite-tape-2.webp",
+   "3\u00be ips, a worn deck: wow, flutter, hiss and the top falling away"
+  ],
+  [
+   "img/mite-tape-3.webp",
+   "30 ips, CCIR: a light print, nearly flat"
+  ]
+ ],
  "mite-gate": [
   [
    "img/mite-gate-1.webp",

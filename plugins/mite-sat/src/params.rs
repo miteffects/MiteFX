@@ -23,7 +23,8 @@ use nih_plug::prelude::*;
 ///   version 2 state gets them centred, what it was.
 /// - 4 (2026-11-10): `phase` (Minimum Phase or Linear Phase: how the bands are split) appended; a
 ///   version 3 state gets Minimum Phase, what it was.
-/// - 9 (2026-11-25): the tape machine (`tape_*`) appended; a version 8 state gets it off.
+/// - 9 (2026-11-25): the tape machine (`tape_*`) appended; a version 8 state gets it off. Unused
+///   and hidden since 2026-11-26 (the deck is Mite Tape now).
 pub const STATE_VERSION: u32 = 9;
 
 #[allow(clippy::too_many_arguments)] // one line per parameter reads best
@@ -47,7 +48,7 @@ pub const OUT_GAIN: ParamSpec = spec("out_gain", "Output", "dB", -24.0, 24.0, 0.
 pub const DELTA: BoolSpec = BoolSpec { id: "delta", name: "Delta", default: false };
 pub const BYPASS: BoolSpec = BoolSpec { id: "bypass", name: "Bypass", default: false };
 
-// ---- Tape machine (2026-11-25, sat-brief §1.4) ---------------------------------------------
+// ---- Tape machine (2026-11-25, sat-brief §1.4; unused since 2026-11-26: Mite Tape) -----------
 
 /// One deck after the bands are summed: off by default (a version 8 state gets it off).
 pub const TAPE_ON: BoolSpec = BoolSpec { id: "tape_on", name: "Tape", default: false };
@@ -442,7 +443,9 @@ impl BandParams {
     }
 }
 
-/// The tape machine's parameters.
+/// The tape machine's parameters, unused since 2026-11-26: the deck moved to Mite Tape (user: a
+/// tape-style curve and a tape machine in one plugin made little sense). Their ids are frozen, so
+/// they stay, hidden from the host and doing nothing; saved values load and save back unchanged.
 pub struct TapeParams {
     pub on: BoolParam,
     pub drive: FloatParam,
@@ -457,29 +460,14 @@ pub struct TapeParams {
 impl Default for TapeParams {
     fn default() -> Self {
         Self {
-            on: bool_param(&TAPE_ON, TAPE_ON.name.to_owned()),
-            drive: float_param(&TAPE_DRIVE),
-            bias: float_param(&TAPE_BIAS),
-            speed: choice_param(&TAPE_SPEED, TAPE_SPEED.name.to_owned()),
-            eq: choice_param(&TAPE_EQ, TAPE_EQ.name.to_owned()),
-            wow: float_param(&TAPE_WOW),
-            flutter: float_param(&TAPE_FLUTTER),
-            hiss: float_param(&TAPE_HISS),
-        }
-    }
-}
-
-impl TapeParams {
-    pub fn settings(&self) -> mite_dsp::tape::MachineSettings {
-        mite_dsp::tape::MachineSettings {
-            on: self.on.value(),
-            drive_db: self.drive.value(),
-            bias: self.bias.value() / 100.0,
-            speed: mite_dsp::tape::Speed::from_index(self.speed.value().max(0) as usize),
-            standard: mite_dsp::tape::Standard::from_index(self.eq.value().max(0) as usize),
-            wow: self.wow.value() / 100.0,
-            flutter: self.flutter.value() / 100.0,
-            hiss: self.hiss.value() / 100.0,
+            on: bool_param(&TAPE_ON, TAPE_ON.name.to_owned()).hide(),
+            drive: float_param(&TAPE_DRIVE).hide(),
+            bias: float_param(&TAPE_BIAS).hide(),
+            speed: choice_param(&TAPE_SPEED, TAPE_SPEED.name.to_owned()).hide(),
+            eq: choice_param(&TAPE_EQ, TAPE_EQ.name.to_owned()).hide(),
+            wow: float_param(&TAPE_WOW).hide(),
+            flutter: float_param(&TAPE_FLUTTER).hide(),
+            hiss: float_param(&TAPE_HISS).hide(),
         }
     }
 }

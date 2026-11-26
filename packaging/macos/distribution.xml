@@ -9,7 +9,7 @@
   <choices-outline>
     <line choice="mitefx"/>
   </choices-outline>
-  <choice id="mitefx" title="MiteFX" description="The 18 Mite plugins, VST3 and CLAP, in /Library/Audio/Plug-Ins.">
+  <choice id="mitefx" title="MiteFX" description="The 19 Mite plugins, VST3 and CLAP, in /Library/Audio/Plug-Ins.">
     <pkg-ref id="io.github.miteffects.mitefx"/>
   </choice>
   <pkg-ref id="io.github.miteffects.mitefx" version="__VERSION__" onConclusion="none">mitefx.pkg</pkg-ref>

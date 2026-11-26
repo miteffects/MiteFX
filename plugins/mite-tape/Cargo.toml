@@ -1,0 +1,26 @@
+[package]
+name = "mite_tape"
+description = "Mite Tape: a tape machine — record level into a magnetic core, speed, NAB/CCIR, head bump, wow, flutter and hiss"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+mite-core.workspace = true
+mite-dsp.workspace = true
+mite-plugin.workspace = true
+mite-ui.workspace = true
+nih_plug.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
+baseview.workspace = true
+png = "0.18"

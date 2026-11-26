@@ -1,0 +1,10 @@
+{
+  "plugin": "Mite Tape",
+  "version": 1,
+  "name": "Warm Bus",
+  "params": {
+    "level": 4.0,
+    "wow": 5.0,
+    "flutter": 5.0
+  }
+}

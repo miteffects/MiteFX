@@ -1,4 +1,4 @@
-MiteFX for Windows (64-bit): 18 plugins, VST3 and CLAP.
+MiteFX for Windows (64-bit): 19 plugins, VST3 and CLAP.
 
 The easy way: MiteFX-Windows-Setup.exe (from the website) installs and uninstalls them for you.
 

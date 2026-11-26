@@ -24,7 +24,7 @@ SetupIconFile=mite.ico
 UninstallDisplayIcon={app}\mite.ico
 UninstallDisplayName=MiteFX (audio plugins)
 OutputBaseFilename=MiteFX-Windows-Setup
-; One 512 MB window over everything: the 18 plugins share most of their code, so it is stored
+; One 512 MB window over everything: the 19 plugins share most of their code, so it is stored
 ; about once (decompressing needs that much memory, compressing ~6 GB in islzma64).
 Compression=lzma2/ultra64
 LZMADictionarySize=524288

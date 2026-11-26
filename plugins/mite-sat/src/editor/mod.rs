@@ -12,7 +12,6 @@ mod bars;
 mod curve;
 mod glyphs;
 mod spectrum;
-mod tape;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -36,7 +35,6 @@ use crate::presets::{preset_ids, FACTORY, PLUGIN};
 use crate::SatShared;
 
 pub use spectrum::ANALYZER_SIZE;
-pub use tape::DeckReading;
 
 /// Mite Sat wears the Sat accent (tokens.json `color.accent.sat`, crimson).
 pub const ACCENT: &str = "sat";
@@ -64,9 +62,6 @@ const METER_TOP: f64 = DISPLAY_TOP + 20.0;
 const PHASE_BUTTON: Rect = Rect::new(380.0, FOOTER_TOP + 9.0, 540.0, FOOTER_TOP + 47.0);
 const MATRIX_BUTTON: Rect = Rect::new(268.0, FOOTER_TOP + 15.0, 364.0, FOOTER_TOP + 41.0);
 const MATRIX_PANEL: Rect = Rect::new(8.0, DISPLAY_TOP + 226.0, 1172.0, HELP_TOP - 4.0);
-/// The tape machine: its button (footer, after the phase list) and its deck, where the matrix opens.
-const TAPE_BUTTON: Rect = Rect::new(556.0, FOOTER_TOP + 15.0, 652.0, FOOTER_TOP + 41.0);
-const TAPE_PANEL: Rect = MATRIX_PANEL;
 const METER_BOTTOM: f64 = DISPLAY_TOP + 592.0;
 /// The bands' peaks on their curves: 60 ms up, 300 ms down (as the spectrum).
 const PEAK_RISE_S: f64 = 0.06;
@@ -255,6 +250,7 @@ pub fn memory_host() -> mite_ui::MemoryParamHost {
             _ => {
                 // Globals by their whole id, slot parameters (`x2_freq`, `lfo1_rate`, `m3_amt`) by
                 // the part after the slot.
+                // The tape_* ones are hidden and unused (the deck is Mite Tape), but still saved.
                 let globals = [MIX, OUT_PAN, OUT_GAIN, ENV_ATT, ENV_REL, ENV_GAIN, TAPE_DRIVE, TAPE_BIAS, TAPE_WOW, TAPE_FLUTTER, TAPE_HISS];
                 let short = id.split_once('_').map_or(id, |(_, rest)| rest);
                 let pool: &[ParamSpec] = if id.starts_with('x') {
@@ -309,21 +305,6 @@ pub fn settings(host: &dyn ParamHost) -> mite_dsp::sat::SatSettings {
     }
 }
 
-/// The tape machine as a host's parameters set it (as `TapeParams::settings` does).
-pub fn tape_settings(host: &dyn ParamHost) -> mite_dsp::tape::MachineSettings {
-    let p = |id: &str| host.plain(id, host.normalized(id));
-    mite_dsp::tape::MachineSettings {
-        on: p(TAPE_ON.id) >= 0.5,
-        drive_db: p(TAPE_DRIVE.id),
-        bias: p(TAPE_BIAS.id) / 100.0,
-        speed: mite_dsp::tape::Speed::from_index(p(TAPE_SPEED.id).round().max(0.0) as usize),
-        standard: mite_dsp::tape::Standard::from_index(p(TAPE_EQ.id).round().max(0.0) as usize),
-        wow: p(TAPE_WOW.id) / 100.0,
-        flutter: p(TAPE_FLUTTER.id) / 100.0,
-        hiss: p(TAPE_HISS.id) / 100.0,
-    }
-}
-
 /// The oversampling factor a host's parameter sets.
 pub fn oversampling(host: &dyn ParamHost) -> usize {
     factor(host.plain(OVERSAMPLING.id, host.normalized(OVERSAMPLING.id)).round() as i32)
@@ -361,10 +342,6 @@ pub struct SatView {
     matrix: MatrixPanel,
     matrix_open: bool,
     matrix_button_hot: bool,
-    /// The tape machine's deck (over the cards, as the matrix; one open at a time).
-    tape: tape::TapePanel,
-    tape_open: bool,
-    tape_button_hot: bool,
     session: Session,
     footer: Footer,
     /// The crossovers, band regions and the selection.
@@ -459,9 +436,6 @@ impl SatView {
             matrix: MatrixPanel::new(MatrixConfig { targets: TARGETS, sidechain: false }, MATRIX_PANEL),
             matrix_open: false,
             matrix_button_hot: false,
-            tape: tape::TapePanel::new(TAPE_PANEL),
-            tape_open: false,
-            tape_button_hot: false,
             shared,
         }
     }
@@ -1019,7 +993,6 @@ impl SatView {
         self.footer.draw_latency(cx, 142.0, f64::from(self.shared.latency.load()) / sample_rate * 1000.0);
         self.footer.draw_controls(cx);
         draw_matrix_button(cx, MATRIX_BUTTON, self.matrix_open, self.matrix_button_hot, active_routes(cx.host));
-        tape::draw_tape_button(cx, TAPE_BUTTON, self.tape_open, self.tape_button_hot, Self::on(cx.host, TAPE_ON.id));
         let phase = (Self::plain(cx.host, PHASE.id).round().max(0.0) as usize).min(1);
         let hot = self.pointer.is_some_and(|p| PHASE_BUTTON.contains(p));
         draw_dropdown_button(cx, PHASE_BUTTON, PHASE.choices[phase], self.os_menu.is_some() && self.phase_menu, hot, |_, _| {});
@@ -1068,14 +1041,6 @@ impl SatView {
     fn help_text(&self, host: &dyn ParamHost) -> Help {
         if self.matrix_open && (self.pointer.is_some_and(|p| MATRIX_PANEL.contains(p)) || self.matrix.busy()) {
             return self.matrix.help(host).unwrap_or_else(|| Help::default().text("The modulation matrix: two LFOs and an envelope, each slot moving one control by a share of its travel (its dial shows the reach and where it is now)."));
-        }
-        if self.tape_open {
-            if let Some(h) = self.tape.help(host) {
-                return h;
-            }
-        }
-        if self.tape_button_hot {
-            return Help::default().text("Tape — open the deck: one tape machine after the bands (speed, EQ, bias, wow and flutter, hiss)");
         }
         if self.matrix_button_hot {
             return Help::default().text("Modulation — open the matrix: two LFOs and an envelope follower, routed to any band's controls, the crossovers, mix and output");
@@ -1217,7 +1182,7 @@ impl SatView {
     }
 
     fn busy(&self) -> bool {
-        self.drag.is_some() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy() || (self.matrix_open && self.matrix.busy()) || (self.tape_open && self.tape.busy())
+        self.drag.is_some() || self.rail.busy() || self.knobs.iter().any(Knob::is_dragging) || self.footer.busy() || (self.matrix_open && self.matrix.busy())
     }
 
     fn hot_at(&self, host: &dyn ParamHost, p: Point) -> Option<Hot> {
@@ -1424,10 +1389,6 @@ impl SatView {
                 self.matrix_open = false;
                 return true;
             }
-            if self.tape_open && key == Key::Escape {
-                self.tape_open = false;
-                return true;
-            }
             return self.key_event(key, mods, host);
         }
         if self.matrix_open && self.os_menu.is_none() && self.stereo_menu.is_none() && self.menu.is_none() {
@@ -1442,31 +1403,10 @@ impl SatView {
                 return true;
             }
         }
-        if self.tape_open && self.os_menu.is_none() && self.stereo_menu.is_none() && self.menu.is_none() {
-            if let Some(handled) = self.tape.event(event, host) {
-                if !handled {
-                    self.tape_open = false;
-                }
-                if let UiEvent::PointerMove { pos, .. } = *event {
-                    self.pointer = Some(pos);
-                    self.hot = None;
-                }
-                return true;
-            }
-        }
         match *event {
-            UiEvent::PointerMove { pos, .. } => {
-                self.matrix_button_hot = MATRIX_BUTTON.contains(pos);
-                self.tape_button_hot = TAPE_BUTTON.contains(pos);
-            }
+            UiEvent::PointerMove { pos, .. } => self.matrix_button_hot = MATRIX_BUTTON.contains(pos),
             UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if MATRIX_BUTTON.contains(pos) && self.os_menu.is_none() && self.stereo_menu.is_none() => {
                 self.matrix_open = !self.matrix_open;
-                self.tape_open = false;
-                return true;
-            }
-            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } if TAPE_BUTTON.contains(pos) && self.os_menu.is_none() && self.stereo_menu.is_none() => {
-                self.tape_open = !self.tape_open;
-                self.matrix_open = false;
                 return true;
             }
             _ => {}
@@ -1665,7 +1605,7 @@ impl View for SatView {
         let l = lanes(self.grow);
         self.draw_header(cx);
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.display, None, &Rect::new(0.0, DISPLAY_TOP, WIDTH, HELP_TOP));
-        let matrix_hole = (self.matrix_open || self.tape_open).then(|| RoundedRect::from_rect(MATRIX_PANEL, 12.0));
+        let matrix_hole = self.matrix_open.then(|| RoundedRect::from_rect(MATRIX_PANEL, 12.0));
         if let Some(h) = matrix_hole {
             cx.begin_glow_hole(h);
         }
@@ -1684,9 +1624,6 @@ impl View for SatView {
         }
         if self.matrix_open {
             self.matrix.draw(cx, &self.shared.matrix);
-        }
-        if self.tape_open {
-            self.tape.draw(cx);
         }
         self.draw_footer(cx);
         if let Some((_, list)) = &self.stereo_menu {
@@ -1764,11 +1701,6 @@ impl View for SatView {
         let probe = self.update_probe(host, &layout, dt);
         let spectrum = self.spectrum.update(&self.shared, dt);
         let flowing = self.last_fresh.elapsed().as_secs_f32() < 0.25;
-        let deck = self.shared.deck();
-        if self.tape_open {
-            self.tape.advance(host, deck);
-        }
-        let deck_moving = self.tape_open && self.tape.moving(deck);
-        fresh || flowing || moved || grew || probe || spectrum || deck_moving || self.busy() || self.matrix_open || self.meters.iter().any(|&m| m > -149.0)
+        fresh || flowing || moved || grew || probe || spectrum || self.busy() || self.matrix_open || self.meters.iter().any(|&m| m > -149.0)
     }
 }

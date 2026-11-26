@@ -420,32 +420,3 @@ fn drawing_on_the_bars_makes_the_band_harmonic_in_one_undo_step() {
     assert_eq!(plain(&host, &band_id(0, B_MODEL.id)), Model::Tube.index() as f32, "one undo: the model");
     assert_eq!(plain(&host, &band_id(0, B_HARM[1].id)), B_HARM[1].default, "and the recipe");
 }
-
-#[test]
-fn the_tape_button_opens_the_deck_and_its_controls_set_the_machine() {
-    use mite_sat::params::{TAPE_EQ, TAPE_ON, TAPE_SPEED};
-    let (mut view, host) = setup();
-    let tape_button = Point::new(604.0, 704.0 + 28.0);
-    let power = Point::new(86.0, 302.0);
-    click(&mut view, &host, tape_button);
-    click(&mut view, &host, power);
-    assert_eq!(plain(&host, TAPE_ON.id), 1.0, "the deck's power turns the machine on");
-    // 7.5 ips, then CCIR.
-    click(&mut view, &host, Point::new(52.0 + 62.0, 627.0));
-    assert_eq!(plain(&host, TAPE_SPEED.id), 1.0);
-    click(&mut view, &host, Point::new(332.0 + 74.0, 627.0));
-    assert_eq!(plain(&host, TAPE_EQ.id), 1.0);
-    // The panel covers the cards: a click on it never reaches the band underneath.
-    let drive = plain(&host, &band_id(0, B_DRIVE.id));
-    click(&mut view, &host, Point::new(300.0, 450.0));
-    assert_eq!(plain(&host, &band_id(0, B_DRIVE.id)), drive);
-    // The close button shuts the panel and the deck keeps running; MOD opens in its place.
-    click(&mut view, &host, Point::new(1150.0, 302.0));
-    click(&mut view, &host, power);
-    assert_eq!(plain(&host, TAPE_ON.id), 1.0, "closed: the power spot is a card again");
-    click(&mut view, &host, tape_button);
-    click(&mut view, &host, Point::new(316.0, 704.0 + 28.0));
-    assert!(view.matrix_panel().is_some(), "MOD replaces the deck");
-    click(&mut view, &host, power);
-    assert_eq!(plain(&host, TAPE_ON.id), 1.0);
-}

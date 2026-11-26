@@ -203,6 +203,10 @@ anti-aliasing. Aliasing is measured per factor (`docs/dsp/sat-aliasing.md`).
 
 ### 1.4 The tape machine (2026-11-25, state 9; user: "a real tape machine", as a stage)
 
+**Moved out on 2026-11-26 into Mite Tape** (its own plugin, BLUEPRINT §6.17; user: a tape-style
+curve and a tape machine in one plugin made little sense). What follows describes the machine,
+which is unchanged; in Sat only its eight hidden, unused `tape_*` parameters remain.
+
 One deck after the bands are summed, as a mix goes to tape (`mite_dsp::tape`): it acts on the
 whole signal, as speed, head bump and wow do on a real machine (per band, the bands would wobble
 apart). Off by default; on, it is part of the wet signal (mix and delta read it; the band sum is

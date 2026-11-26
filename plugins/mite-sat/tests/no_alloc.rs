@@ -56,17 +56,6 @@ fn engine_process_never_allocates() {
             *b = -x * 0.7;
         }
         let block = if i % 3 == 0 { 256 } else { 100 };
-        // The tape machine on and off (it moves the latency), its speed and standard crossfading.
-        let tape = mite_dsp::tape::MachineSettings {
-            on: (i / 120) % 3 != 0,
-            drive_db: if (i / 35) % 2 == 0 { 6.0 } else { -4.0 },
-            bias: if (i / 65) % 2 == 0 { -0.6 } else { 0.4 },
-            speed: mite_dsp::tape::Speed::ALL[(i / 50) % 4],
-            standard: mite_dsp::tape::Standard::ALL[(i / 85) % 2],
-            wow: if (i / 75) % 2 == 0 { 0.0 } else { 0.8 },
-            flutter: if (i / 95) % 2 == 0 { 0.0 } else { 0.5 },
-            hiss: if (i / 105) % 2 == 0 { 0.0 } else { 1.0 },
-        };
         // Through the matrix, routed half the time (a drive, a crossover, the output).
         let mut ms = MatrixSettings::default();
         if (i / 70) % 2 == 1 {
@@ -79,14 +68,14 @@ fn engine_process_never_allocates() {
                 if offsets.iter().any(|o| *o != 0.0) {
                     let (mut sm, mut om) = (s, out);
                     mite_sat::params::modulate_settings(&mut sm, &mut om, offsets);
-                    engine.process(sub, &sm, factor, linear, &om, &tape, &history, Some([&spectrum, &spectrum]));
+                    engine.process(sub, &sm, factor, linear, &om, &history, Some([&spectrum, &spectrum]));
                 } else {
-                    engine.process(sub, &s, factor, linear, &out, &tape, &history, Some([&spectrum, &spectrum]));
+                    engine.process(sub, &s, factor, linear, &out, &history, Some([&spectrum, &spectrum]));
                 }
             });
         });
         if i % 50 == 0 {
-            process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, factor, linear, &out, &tape, &history, Some([&spectrum, &spectrum])));
+            process_wrapper(|| engine.process(&mut [&mut l[..block]], &s, factor, linear, &out, &history, Some([&spectrum, &spectrum])));
         }
         assert!(l.iter().chain(&r).all(|x| x.is_finite()));
     }

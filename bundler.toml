@@ -52,3 +52,6 @@ name = "Mite Analyzer"
 
 [mite_rig]
 name = "Mite Rig"
+
+[mite_tape]
+name = "Mite Tape"

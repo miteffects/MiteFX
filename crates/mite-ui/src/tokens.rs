@@ -202,9 +202,9 @@ pub fn parse_color(s: &str) -> Option<Color> {
 mod tests {
     use super::*;
 
-    const PLUGINS: [&str; 19] = [
+    const PLUGINS: [&str; 20] = [
         "eq", "comp", "limit", "multiband", "verb", "delay", "sat", "deess", "gate", "shape", "soothe", "filter", "mod",
-        "analyzer", "utility", "tuner", "double", "pitch", "denoise",
+        "analyzer", "utility", "tuner", "double", "pitch", "denoise", "tape",
     ];
 
     #[test]

@@ -1,0 +1,13 @@
+{
+  "plugin": "Mite Tape",
+  "version": 1,
+  "name": "Worn Deck",
+  "params": {
+    "level": 6.0,
+    "speed": 0.0,
+    "bias": 40.0,
+    "wow": 70.0,
+    "flutter": 50.0,
+    "hiss": 40.0
+  }
+}

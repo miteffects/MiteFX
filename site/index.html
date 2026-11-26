@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MiteFX: free, open-source audio plugins</title>
-<meta name="description" content="18 free, open-source audio plugins (VST3 and CLAP) for Windows, macOS and Linux: EQ, compressor, limiter, saturation, reverb, delay, guitar rig and more.">
+<meta name="description" content="19 free, open-source audio plugins (VST3 and CLAP) for Windows, macOS and Linux: EQ, compressor, limiter, saturation, reverb, delay, guitar rig and more.">
 <meta property="og:title" content="MiteFX: free, open-source audio plugins">
-<meta property="og:description" content="18 free plugins, VST3 and CLAP, for Windows, macOS and Linux.">
+<meta property="og:description" content="19 free plugins, VST3 and CLAP, for Windows, macOS and Linux.">
 <meta property="og:image" content="img/mite-sat.webp">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101217'/%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M11.2 14 L6.5 9.5 M10.4 17 L4.5 15 M10.2 20.5 L4.5 21.5 M10.8 24 L6 28 M20.8 14 L25.5 9.5 M21.6 17 L27.5 15 M21.8 20.5 L27.5 21.5 M21.2 24 L26 28' stroke='%23a3abb8' stroke-width='1.6'/%3E%3Cpath d='M16 11 C20.5 11 22 15 22 19 C22 24 19.5 28 16 28 C12.5 28 10 24 10 19 C10 15 11.5 11 16 11 Z M18.6 7.4 A2.6 2.6 0 1 1 13.4 7.4 A2.6 2.6 0 1 1 18.6 7.4 Z' stroke='%23e8ebf0' stroke-width='2'/%3E%3Cpath d='M11.8 21 C14 21 14.6 16.5 16 16.5 C17.4 16.5 18 21 20.2 21' stroke='%23F0284A' stroke-width='2.2'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css?v=__V__">
@@ -29,7 +29,7 @@
   <canvas id="signal" aria-hidden="true"></canvas>
   <p class="eyebrow">Free · open source · VST3 &amp; CLAP</p>
   <h1>Studio-grade audio plugins,<br>free for everyone.</h1>
-  <p class="lede">Eighteen plugins for mixing, mastering and guitar: an EQ, compressors, a limiter, saturation,
+  <p class="lede">Nineteen plugins for mixing, mastering and guitar: an EQ, compressors, a limiter, saturation, a tape machine,
   reverb, delay, a pitch editor and a full guitar rig. For Windows, macOS and Linux, under the GNU GPL.</p>
   <div class="cta" id="download">
     <a class="btn" data-platform="Windows" href="#">Download for Windows</a>
@@ -124,6 +124,7 @@ const plugins = [
   ["mite-multiband", "Mite Multiband", "#59FCE1", "Multiband compressor: up to five bands, sidechain and lookahead, each band's history drawn over the spectrum."],
   ["mite-shape", "Mite Shape", "#6BA208", "Transient shaper, per band: more or less attack and sustain, with a clip stage and a focus view of every hit."],
   ["mite-sat", "Mite Sat", "#F0284A", "Multiband saturation: tape and transformer magnetics, tube, drawn harmonics, punch and body drive, feedback, up to 16× oversampling."],
+  ["mite-tape", "Mite Tape", "#C59587", "Tape machine: record level into a magnetic core, four speeds with their head bump, NAB or CCIR, bias, wow, flutter and hiss."],
   ["mite-gate", "Mite Gate", "#C2ECB9", "Gate and expander with sidechain, lookahead and a MIDI trigger out for drum replacement."],
   ["mite-deess", "Mite DeEss", "#16B3EB", "De-esser that listens relative to the voice, with four ways to reduce, spectral included, and a heat map of what it caught."],
   ["mite-denoise", "Mite DeNoise", "#EDE3D2", "Noise reduction that learns the noise from the gaps between words and takes it out without the swirl."],
@@ -144,6 +145,7 @@ const FEATURES = {
   "mite-multiband": ["Up to six bands, crossovers dragged on the spectrum", "Each band's gain history drawn over the spectrum", "Sidechain, and a sidechain EQ to key each band", "Lookahead across bands, auto gain", "Solo, bypass and delta per band"],
   "mite-shape": ["More or less attack and sustain, per band", "Every hit shown in a focus view", "A clip stage for the peaks it brings up", "Adjustable detector and lookahead", "Stereo, Mid/Side, and delta listening"],
   "mite-sat": ["Nine models: tape, tube, transformer, diode, soft, hard, fold, rectify and drawn harmonics", "Up to six bands, each its own model", "Punch and body: drive that follows the hits or the sustain", "Feedback, bias, auto gain", "Up to 16× oversampling, linear or minimum phase", "A modulation matrix"],
+  "mite-tape": ["Record level into a magnetic core: saturation, not volume", "3¾, 7½, 15 and 30 ips: head bump and high-frequency loss per speed", "NAB or CCIR, and bias from bright to dull", "Wow, flutter and hiss at a real deck's levels", "The deck's response measured and drawn as you turn it"],
   "mite-gate": ["Gate, expander and ducker", "Sidechain from any source, with its own EQ", "Lookahead so no attack is lost", "MIDI trigger out for drum replacement", "Listen and delta"],
   "mite-deess": ["Detection relative to the voice, not a fixed threshold", "Four ways to reduce: wideband, split band, spectral and more", "A heat map of what it caught", "Auto gain and lookahead"],
   "mite-denoise": ["Learns the noise from the gaps between words", "Adaptive, or a learned profile held fixed", "Listen to only what it removes", "No swirl: the threshold drawn over the noise floor"],

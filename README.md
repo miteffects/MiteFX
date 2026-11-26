@@ -1,6 +1,6 @@
 # MiteFX
 
-Free, open-source audio plugins: 18 of them, VST3 and CLAP, for Windows, macOS and Linux.
+Free, open-source audio plugins: 19 of them, VST3 and CLAP, for Windows, macOS and Linux.
 
 **Website and downloads:** https://miteffects.github.io/MiteFX/ · **Releases:** [latest](https://github.com/miteffects/MiteFX/releases/latest)
 
@@ -10,7 +10,7 @@ Free, open-source audio plugins: 18 of them, VST3 and CLAP, for Windows, macOS a
 | Mite Sat | Mite Limit | Mite Delay | Mite Tuner |
 | Mite Shape | Mite Multiband | Mite Mod | Mite Analyzer |
 | Mite Double | Mite Gate | | Mite Rig (guitar and bass) |
-| | Mite DeEss | | Mite Gain |
+| Mite Tape | Mite DeEss | | Mite Gain |
 | | Mite DeNoise | | |
 
 This is an early release (0.1).

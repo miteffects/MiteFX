@@ -1,8 +1,8 @@
-//! The tape machine's panel (sat-brief §3.4): opened from the footer's TAPE button, over the
-//! cards as the matrix is. A deck drawn from the machine: the reels turn at the tape's speed, the
-//! trace under them is the transport's speed against nominal as the engine reports it (wow and
-//! flutter, ±0.3 % full height), the meter is the peak going into the tape against the deck's
-//! operating level (0) and its maximum output level (+10). Then speed, standard, and the dials.
+//! The deck (moved from Mite Sat's tape panel, 2026-11-26): drawn from the machine. The reels
+//! turn at the tape's speed, the trace under them is the transport's speed against nominal as the
+//! engine reports it (wow and flutter, ±0.3 % full height), the meter is the peak going into the
+//! tape against the deck's operating level (0) and its maximum output level (+10). Then speed,
+//! standard, and the dials.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -11,11 +11,10 @@ use mite_dsp::tape::{Speed, Standard};
 use mite_ui::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, RoundedRect, Shape, Stroke};
 use mite_ui::paint::{glow_stroke, panel};
 use mite_ui::peniko::Fill;
-use mite_ui::widgets::footer::draw_toggle_glyph;
-use mite_ui::widgets::{Help, Knob, KnobKind, ToggleGlyph};
+use mite_ui::widgets::{Help, Knob, KnobKind};
 use mite_ui::{write_if_changed, Align, DrawCx, MouseButton, ParamHost, TextStyle, UiEvent};
 
-use crate::params::{TAPE_BIAS, TAPE_DRIVE, TAPE_EQ, TAPE_FLUTTER, TAPE_HISS, TAPE_ON, TAPE_SPEED, TAPE_WOW};
+use crate::params::{BIAS, EQ, FLUTTER, HISS, LEVEL, SPEED, WOW};
 
 /// The speed trace: this many frames kept, and its full height (± fraction of nominal).
 const TRACE_LEN: usize = 180;
@@ -32,8 +31,6 @@ const METER_FALL_DB_S: f32 = 20.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hot {
-    Close,
-    Power,
     Speed(usize),
     Eq(usize),
 }
@@ -48,7 +45,7 @@ pub struct DeckReading {
     pub field_peak: f32,
 }
 
-pub struct TapePanel {
+pub struct Deck {
     rect: Rect,
     knobs: Vec<Knob>,
     hot: Option<Hot>,
@@ -57,6 +54,8 @@ pub struct TapePanel {
     angle: f64,
     meter_db: f32,
     last: Option<Instant>,
+    /// Whether the deck runs (lit) or is bypassed, as last read.
+    running: bool,
 }
 
 fn plain(host: &dyn ParamHost, id: &str) -> f32 {
@@ -70,27 +69,19 @@ fn set(host: &dyn ParamHost, id: &str, v: f32) {
 /// Speed chips' labels (the deck's own markings).
 const SPEED_MARKS: [&str; 4] = ["3¾", "7½", "15", "30"];
 
-impl TapePanel {
+impl Deck {
     pub fn new(rect: Rect) -> Self {
         let y = rect.y0 + 178.0;
         let x0 = rect.x0 + 660.0;
         let dial = |spec, label, kind, i: usize, d: f64| Knob::new(spec, label, kind, Point::new(x0 + [0.0, 120.0, 220.0, 320.0, 420.0][i], y), d).with_id(spec.id);
         let knobs = vec![
-            dial(TAPE_DRIVE, "LEVEL", KnobKind::Bipolar, 0, 84.0),
-            dial(TAPE_BIAS, "BIAS", KnobKind::Bipolar, 1, 64.0),
-            dial(TAPE_WOW, "WOW", KnobKind::Unipolar, 2, 64.0),
-            dial(TAPE_FLUTTER, "FLUTTER", KnobKind::Unipolar, 3, 64.0),
-            dial(TAPE_HISS, "HISS", KnobKind::Unipolar, 4, 64.0),
+            dial(LEVEL, "LEVEL", KnobKind::Bipolar, 0, 84.0),
+            dial(BIAS, "BIAS", KnobKind::Bipolar, 1, 64.0),
+            dial(WOW, "WOW", KnobKind::Unipolar, 2, 64.0),
+            dial(FLUTTER, "FLUTTER", KnobKind::Unipolar, 3, 64.0),
+            dial(HISS, "HISS", KnobKind::Unipolar, 4, 64.0),
         ];
-        Self { rect, knobs, hot: None, pointer: None, trace: VecDeque::with_capacity(TRACE_LEN + 1), angle: 0.0, meter_db: METER_DB.0, last: None }
-    }
-
-    fn close_rect(&self) -> Rect {
-        Rect::new(self.rect.x1 - 36.0, self.rect.y0 + 6.0, self.rect.x1 - 8.0, self.rect.y0 + 34.0)
-    }
-
-    fn power_rect(&self) -> Rect {
-        Rect::new(self.rect.x0 + 64.0, self.rect.y0 + 6.0, self.rect.x0 + 92.0, self.rect.y0 + 34.0)
+        Self { rect, knobs, hot: None, pointer: None, trace: VecDeque::with_capacity(TRACE_LEN + 1), angle: 0.0, meter_db: METER_DB.0, last: None, running: true }
     }
 
     /// The deck's drawing: reels, heads and the trace.
@@ -121,54 +112,46 @@ impl TapePanel {
     }
 
     fn hot_at(&self, p: Point) -> Option<Hot> {
-        if self.close_rect().contains(p) {
-            return Some(Hot::Close);
-        }
-        if self.power_rect().contains(p) {
-            return Some(Hot::Power);
-        }
         if let Some(i) = self.speed_rects().iter().position(|r| r.contains(p)) {
             return Some(Hot::Speed(i));
         }
         self.eq_rects().iter().position(|r| r.contains(p)).map(Hot::Eq)
     }
 
-    /// `Some(true)`: handled; `Some(false)`: close the panel; `None`: not the panel's.
-    pub fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> Option<bool> {
+    /// Whether the deck took the event.
+    pub fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         if let UiEvent::PointerMove { pos, .. } = *event {
             self.pointer = Some(pos);
             self.hot = self.hot_at(pos);
         }
         for k in &mut self.knobs {
             if k.event(event, host) {
-                return Some(true);
+                return true;
             }
         }
         match *event {
             UiEvent::PointerMove { pos, .. } => {
                 self.pointer = Some(pos);
                 self.hot = self.hot_at(pos);
-                self.rect.contains(pos).then_some(true)
+                false
             }
             UiEvent::PointerLeft => {
                 self.pointer = None;
                 self.hot = None;
-                None
+                false
             }
-            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => {
-                if !self.rect.contains(pos) {
-                    return None;
+            UiEvent::PointerDown { pos, button: MouseButton::Left, .. } => match self.hot_at(pos) {
+                Some(Hot::Speed(i)) => {
+                    set(host, SPEED.id, i as f32);
+                    true
                 }
-                match self.hot_at(pos) {
-                    Some(Hot::Close) => return Some(false),
-                    Some(Hot::Power) => set(host, TAPE_ON.id, if plain(host, TAPE_ON.id) >= 0.5 { 0.0 } else { 1.0 }),
-                    Some(Hot::Speed(i)) => set(host, TAPE_SPEED.id, i as f32),
-                    Some(Hot::Eq(i)) => set(host, TAPE_EQ.id, i as f32),
-                    None => {}
+                Some(Hot::Eq(i)) => {
+                    set(host, EQ.id, i as f32);
+                    true
                 }
-                Some(true)
-            }
-            _ => self.pointer.is_some_and(|p| self.rect.contains(p)).then_some(true),
+                None => false,
+            },
+            _ => false,
         }
     }
 
@@ -181,18 +164,16 @@ impl TapePanel {
         if let Some(k) = self.knobs.iter().find(|k| k.bounds().contains(p) || k.is_dragging()) {
             let v = plain(host, &k.id);
             let words = match k.spec.id {
-                id if id == TAPE_DRIVE.id => " — how hard the mix hits the tape: 0 dB puts −18 dBFS at the deck's operating level, +10 over it is its maximum output level. It comes back off after the tape, so it moves the saturation, not the volume.",
-                id if id == TAPE_BIAS.id => " — under-biased (left) is brighter and grittier at every level; over-biased (right) is cleaner and loses its highs.",
-                id if id == TAPE_WOW.id => " — the transport's slow drift in speed (pitch), the same for both channels; 100 % is a worn deck (about 0.6 %).",
-                id if id == TAPE_FLUTTER.id => " — the transport's fast ripple in speed (7 and 13 Hz); 100 % is about 0.25 %.",
-                id if id == TAPE_HISS.id => " — the tape's own noise, through the playback EQ and the head; 100 % is the deck's real level for its speed.",
+                id if id == LEVEL.id => " — how hard the mix hits the tape: 0 dB puts −18 dBFS at the deck's operating level, +10 over it is its maximum output level. It comes back off after the tape, so it moves the saturation, not the volume.",
+                id if id == BIAS.id => " — under-biased (left) is brighter and grittier at every level; over-biased (right) is cleaner and loses its highs.",
+                id if id == WOW.id => " — the transport's slow drift in speed (pitch), the same for both channels; 100 % is a worn deck (about 0.6 %).",
+                id if id == FLUTTER.id => " — the transport's fast ripple in speed (7 and 13 Hz); 100 % is about 0.25 %.",
+                id if id == HISS.id => " — the tape's own noise, through the playback EQ and the head; 100 % is the deck's real level for its speed.",
                 _ => "",
             };
             return Some(Help::default().text(format!("{} ", k.spec.name)).slot(k.spec.format(v), k.spec.format(k.spec.max)).text(words));
         }
         let words = match self.hot {
-            Some(Hot::Close) => "Close the deck (Esc). It keeps running if it is on.".to_owned(),
-            Some(Hot::Power) => if plain(host, TAPE_ON.id) >= 0.5 { "Tape on — the whole mix goes through the deck after the bands. Click to take it out." } else { "Tape off — click to send the mix through the deck after the bands (adds a few ms of latency)." }.to_owned(),
             Some(Hot::Speed(i)) => format!(
                 "{} — sets the head bump ({:.0} Hz), how soon the highs saturate and fall off, the EQ's time constants, and the hiss.",
                 Speed::NAMES[i],
@@ -206,7 +187,7 @@ impl TapePanel {
                 } else if self.deck_rect().contains(p) {
                     "The reels turn at the tape's speed; the trace under them is the speed against nominal now (wow and flutter), ±0.3 % full height.".to_owned()
                 } else {
-                    "The tape machine: one deck after the bands, as a mix goes to tape.".to_owned()
+                    "The tape machine.".to_owned()
                 }
             }
         };
@@ -218,8 +199,9 @@ impl TapePanel {
         let now = Instant::now();
         let dt = self.last.map_or(0.0, |t| now.duration_since(t).as_secs_f64()).min(0.1);
         self.last = Some(now);
+        self.running = reading.running;
         if reading.running {
-            let speed = Speed::from_index(plain(host, TAPE_SPEED.id).round().max(0.0) as usize);
+            let speed = Speed::from_index(plain(host, SPEED.id).round().max(0.0) as usize);
             let turns = REEL_TURNS_AT_7_5 * speed.ips() / 7.5 * (1.0 + f64::from(reading.speed_dev));
             self.angle = (self.angle + std::f64::consts::TAU * turns * dt) % std::f64::consts::TAU;
             self.trace.push_back(reading.speed_dev);
@@ -241,46 +223,21 @@ impl TapePanel {
 
     pub fn draw(&self, cx: &mut DrawCx<'_>) {
         let theme = cx.theme;
-        let accent = theme.accent;
         let host = cx.host;
-        let on = plain(host, TAPE_ON.id) >= 0.5;
+        let on = self.running;
         if theme.shadows {
             cx.scene.draw_blurred_rounded_rect(Affine::translate((0.0, 6.0)), self.rect, mite_ui::peniko::Color::from_rgba8(0, 0, 0, 160), 12.0, 16.0);
         }
         panel(cx.scene, RoundedRect::from_rect(self.rect, 12.0), theme.display, theme.well_border);
-        cx.text.draw(cx.scene, "TAPE", self.rect.x0 + 16.0, self.rect.y0 + 12.0, TextStyle::LABEL.sized(10.0), theme.text_mid, Align::Left);
-
-        // Power.
-        let pr = self.power_rect();
-        let ink = if on { accent } else if self.hot == Some(Hot::Power) { theme.text_hi } else { theme.text_lo };
-        let ring = RoundedRect::from_rect(pr, 6.0);
-        if on {
-            cx.scene.fill(Fill::NonZero, Affine::IDENTITY, accent.multiply_alpha(0.15), None, &ring);
-            glow_stroke(cx, &ring, 1.2, accent, accent, 2.0);
-        } else {
-            cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.well_border, None, &ring);
-        }
-        draw_toggle_glyph(cx.scene, ToggleGlyph::Bypass, pr.center(), ink);
-
-        // Close.
-        let c = self.close_rect().center();
-        let ink = if self.hot == Some(Hot::Close) { theme.text_hi } else { theme.text_lo };
-        let mut x = BezPath::new();
-        x.move_to((c.x - 5.0, c.y - 5.0));
-        x.line_to((c.x + 5.0, c.y + 5.0));
-        x.move_to((c.x + 5.0, c.y - 5.0));
-        x.line_to((c.x - 5.0, c.y + 5.0));
-        cx.scene.stroke(&Stroke::new(1.6), Affine::IDENTITY, ink, None, &x);
-
         self.draw_deck(cx, on);
         self.draw_meter(cx, on);
 
         // Speed and standard.
-        let speed = plain(host, TAPE_SPEED.id).round().max(0.0) as usize;
+        let speed = plain(host, SPEED.id).round().max(0.0) as usize;
         for (i, r) in self.speed_rects().iter().enumerate() {
             chip(cx, *r, SPEED_MARKS[i], i == speed, self.hot == Some(Hot::Speed(i)));
         }
-        let standard = plain(host, TAPE_EQ.id).round().max(0.0) as usize;
+        let standard = plain(host, EQ.id).round().max(0.0) as usize;
         for (i, r) in self.eq_rects().iter().enumerate() {
             chip(cx, *r, Standard::NAMES[i], i == standard, self.hot == Some(Hot::Eq(i)));
         }
@@ -417,26 +374,4 @@ fn draw_reel(cx: &mut DrawCx<'_>, c: Point, r: f64, pack: f64, phase: f64, on: b
         windows.extend(Circle::new(p, 0.3 * (r - pack)).path_elements(0.1));
     }
     cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, edge, None, &windows);
-}
-
-/// The footer's TAPE button: lit while the deck runs or its panel is open.
-pub fn draw_tape_button(cx: &mut DrawCx<'_>, r: Rect, open: bool, hot: bool, on: bool) {
-    let theme = cx.theme;
-    let ink = theme.accent;
-    let rr = RoundedRect::from_rect(r, r.height() / 2.0);
-    let lit = open || on;
-    cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if open { ink.multiply_alpha(0.2) } else { theme.well }, None, &rr);
-    if lit {
-        glow_stroke(cx, &rr, 1.2, ink, ink, if open { 3.0 } else { 1.5 });
-    } else {
-        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if hot { theme.text_hi } else { theme.well_border }, None, &rr);
-    }
-    let c = r.center();
-    let color = if lit { ink } else if hot { theme.text_hi } else { theme.text_mid };
-    // Two small reels and the word.
-    for dx in [-30.0, -18.0] {
-        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, color, None, &Circle::new((c.x + dx, c.y), 4.5));
-    }
-    cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, color, None, &Line::new((c.x - 30.0, c.y + 4.5), (c.x - 18.0, c.y + 4.5)));
-    cx.text.draw(cx.scene, "TAPE", c.x + 8.0, c.y - 6.0, TextStyle::LABEL.sized(10.0), color, Align::Center);
 }

@@ -20,7 +20,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  PACKAGES: -p mite_gain -p mite_eq -p mite_comp -p mite_shape -p mite_sat -p mite_limit -p mite_gate -p mite_multiband -p mite_verb -p mite_delay -p mite_tuner -p mite_double -p mite_deess -p mite_denoise -p mite_analyzer -p mite_rig -p mite_mod -p mite_pitch
+  PACKAGES: -p mite_gain -p mite_eq -p mite_comp -p mite_shape -p mite_sat -p mite_limit -p mite_gate -p mite_multiband -p mite_verb -p mite_delay -p mite_tuner -p mite_double -p mite_deess -p mite_denoise -p mite_analyzer -p mite_rig -p mite_mod -p mite_pitch -p mite_tape
 
 jobs:
   build:
@@ -131,8 +131,8 @@ jobs:
           Depends: libc6, libx11-6, libx11-xcb1, libxcb1, libxcursor1, libgl1
           Recommends: libvulkan1
           Description: free, open-source audio plugins (VST3 and CLAP)
-           Eighteen plugins for mixing, mastering and guitar: EQ, compressors, limiter,
-           saturation, reverb, delay, pitch editor, tuner, analyzer and a guitar rig.
+           Nineteen plugins for mixing, mastering and guitar: EQ, compressors, limiter,
+           saturation, tape, reverb, delay, pitch editor, tuner, analyzer and a guitar rig.
           CONTROL
           sed -i 's/^          //' "$root/DEBIAN/control"
           dpkg-deb -Zxz -z9 --root-owner-group --build "$root" MiteFX-Linux.deb

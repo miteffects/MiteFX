@@ -1,0 +1,11 @@
+{
+  "plugin": "Mite Tape",
+  "version": 1,
+  "name": "Hot Drums",
+  "params": {
+    "level": 12.0,
+    "bias": -30.0,
+    "wow": 0.0,
+    "flutter": 4.0
+  }
+}

@@ -49,31 +49,23 @@ fn main() -> Result<(), String> {
             let h = params.lock().expect("host");
             let p = |id: &str| h.plain(id, h.normalized(id));
             let out = Output { mix: p(MIX.id) / 100.0, delta: p(DELTA.id) >= 0.5, bypass: p(BYPASS.id) >= 0.5, gain_db: p(OUT_GAIN.id), pan: p(OUT_PAN.id) / 100.0 };
-            (settings(&*h), oversampling(&*h), out, mite_sat::editor::tape_settings(&*h))
+            (settings(&*h), oversampling(&*h), out)
         };
-        let (s0, f0, _, _) = read();
+        let (s0, f0, _) = read();
         let mut engine = SatEngine::new(48_000.0, f0, &s0);
         let start = Instant::now();
         let mut blocks = 0u64;
         let mut pos = 0usize;
         loop {
-            let (s, factor, out, tape) = read();
+            let (s, factor, out) = read();
             let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
             for i in 0..512 {
                 l[i] = l0[(pos + i) % l0.len()];
                 r[i] = r0[(pos + i) % r0.len()];
             }
             pos = (pos + 512) % l0.len();
-            engine.process(&mut [&mut l, &mut r], &s, factor, false, &out, &tape, &audio.history, Some([&audio.spectrum, &audio.post]));
+            engine.process(&mut [&mut l, &mut r], &s, factor, false, &out, &audio.history, Some([&audio.spectrum, &audio.post]));
             audio.latency.store(engine.latency() as f32);
-            match engine.machine() {
-                Some(t) => {
-                    audio.tape_running.store(1.0);
-                    audio.tape_dev.store(t.speed_dev);
-                    audio.tape_field.store(t.field_peak);
-                }
-                None => audio.tape_running.store(0.0),
-            }
             blocks += 1;
             let due = start + Duration::from_secs_f64(blocks as f64 * 512.0 / 48_000.0);
             if let Some(wait) = due.checked_duration_since(Instant::now()) {

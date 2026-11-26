@@ -604,6 +604,27 @@ Shared engines across the suite:
 
 ---
 
+### 17. Mite Tape. Rival: tape machine emulations (Kramer Master Tape, J37, Satin)
+
+**Built 2026-11-26** (user: "how much sense does it have tape style of saturation and then tape
+emulation in the same plugin… move tape emulation into separate plugin"). The deck built into Sat
+the day before (`mite_dsp::tape`, sat-brief §1.4) as a plugin of its own: Sat keeps its Tape curve
+per band (a model, like Tube); the machine is a print through a deck, used once on a bus or the
+master, and its latency (164 samples at 48 kHz) and CPU (about 9 % of a core at 4×) are paid only
+where it is wanted. Accent oxide (`color.accent.tape`, #C59587, checked against the ramp and the
+semantics). Parameters: LEVEL (record level, −12…+24 dB; comes back off after the tape, so it moves
+saturation, not volume), BIAS, SPEED (3¾, 7½, 15, 30 ips), EQ (NAB, CCIR), WOW, FLUTTER, HISS, MIX
+against the latency-aligned dry, OUTPUT, Bypass (bypass and mix 0 null bit for bit; tested). The
+machine runs at 4× (minimum-phase oversampling); the latency is constant and reported once.
+Editor: the spectrum (input dim, output lit) with the deck's **response measured, not drawn**: pink
+noise at −30 dBFS RMS through a machine set as the dials (no wow, flutter or hiss), its spectrum
+against the input's, on a worker thread whenever speed, EQ, bias or level move (white noise was
+mostly treble, which the slow speeds' record emphasis drove into the core: +9 dB of false bass).
+Under it the deck from Sat (reels at the tape's speed, the transport's speed trace, the level going
+into the tape against operating level and MOL, speed and EQ chips, five dials); IN/OUT meters;
+MIX, OUTPUT and Bypass in the footer. Six factory presets. Not embeddable yet (no `core` split):
+split it when Rig wants a tape block.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat
@@ -683,7 +704,7 @@ FabFilter's strengths:
 
 **Mite Delay designed in-house on 2026-11-04** (`docs/design/delay-brief.md`, interaction.md "Mite Delay"): the echo plot is the hero (each tap's echoes as stems, left up and right down; the first echo's grip sets time and level, the second's the feedback), the loop EQ under it; the accent is orchid tint.
 
-**Mite Sat designed in-house on 2026-10-26** (`docs/design/sat-brief.md`, interaction.md "Mite Sat"): user decision, no Claude Design pass. Shape's frame with the spectrum on top and a card per band; the transfer square is the hero of the card; the accent is crimson. **Measured against Saturn 2 (2026-11-24, `cargo xtask compare sat`, docs/compare/saturn-2.md; user: "replicate everything Saturn 2 has" became "how much do we have in quality"; full style library not wanted):** at matched distortion our Tube, Tape and Transformer were 15–50 dB harsher in the upper harmonics and there was no gentle range. Fixed (user picked replace + migrate): Tube one analytic off-centre tanh; Tape/Transformer narrower loops (reversible share 0.97/0.95, as AC bias); drive law −12 dB calibration, 0–60 dB, level kept above 24 dB (state 5, `migrate::v4_to_v5`; presets record their state and are lifted on load, `PresetLibrary::with_state`). Soft unchanged (measured purer than Gentle Saturation). Feedback built 2026-11-24 (state 6, per band amount + frequency, never runs away). 16× oversampling, 4× default (state 7). Minimum Phase = low latency (minimum-phase oversampling, 5 smp at 4×; mix 0 / neutral match level not phase above ~10 kHz there — a user-chosen exception to the null rule; Linear Phase still nulls). Drawn harmonics (model Harmonic, drag the bars) and Punch / Body (transient / sustain drive) built (state 8). If models are added, a family row + variant row picker. **Tape machine (2026-11-25, state 9):** one deck after the band sum (`mite_dsp::tape`, sat-brief §1.4): record level around a Jiles–Atherton core, NAB/CCIR record and playback EQ with record-loss compensation, bias (loop and treble), the head's gap and spacing loss and bump per speed (3.75–30 ips), hiss at the deck's real level, one transport for wow and flutter; a TAPE panel over the cards with reels, a speed trace and a tape-level meter. +164 samples of latency at 48 kHz, 8.9 % of a core at 4×.
+**Mite Sat designed in-house on 2026-10-26** (`docs/design/sat-brief.md`, interaction.md "Mite Sat"): user decision, no Claude Design pass. Shape's frame with the spectrum on top and a card per band; the transfer square is the hero of the card; the accent is crimson. **Measured against Saturn 2 (2026-11-24, `cargo xtask compare sat`, docs/compare/saturn-2.md; user: "replicate everything Saturn 2 has" became "how much do we have in quality"; full style library not wanted):** at matched distortion our Tube, Tape and Transformer were 15–50 dB harsher in the upper harmonics and there was no gentle range. Fixed (user picked replace + migrate): Tube one analytic off-centre tanh; Tape/Transformer narrower loops (reversible share 0.97/0.95, as AC bias); drive law −12 dB calibration, 0–60 dB, level kept above 24 dB (state 5, `migrate::v4_to_v5`; presets record their state and are lifted on load, `PresetLibrary::with_state`). Soft unchanged (measured purer than Gentle Saturation). Feedback built 2026-11-24 (state 6, per band amount + frequency, never runs away). 16× oversampling, 4× default (state 7). Minimum Phase = low latency (minimum-phase oversampling, 5 smp at 4×; mix 0 / neutral match level not phase above ~10 kHz there — a user-chosen exception to the null rule; Linear Phase still nulls). Drawn harmonics (model Harmonic, drag the bars) and Punch / Body (transient / sustain drive) built (state 8). If models are added, a family row + variant row picker. **Tape machine (2026-11-25, state 9):** one deck after the band sum (`mite_dsp::tape`, sat-brief §1.4): record level around a Jiles–Atherton core, NAB/CCIR record and playback EQ with record-loss compensation, bias (loop and treble), the head's gap and spacing loss and bump per speed (3.75–30 ips), hiss at the deck's real level, one transport for wow and flutter; a TAPE panel over the cards with reels, a speed trace and a tape-level meter. +164 samples of latency at 48 kHz, 8.9 % of a core at 4×. **Moved out 2026-11-26 into Mite Tape (§6.17):** the deck, its panel and the TAPE button are gone from Sat; the eight `tape_*` parameters stay (frozen ids), hidden from the host and doing nothing, so saved sessions load and save back unchanged but no longer run a deck.
 
 **Pass 5 (Mite Shape) received and built on 2026-10-25.** Design's answers (canvas note `shapeAnswers`): the history is the hero (levels on top, the signed gain under its own 0 dB line, attack solid and sustain light, a tick per hit); one card per band, always visible, the selected one wide with six dials; every band in the plugin accent with its number (the ramp keeps meaning stereo placement); one band is the same screen with a 36 px rail and ghost grips, which grows to 80 px when a crossover is made; the Shape accent moved from blush to leaf (`#6BA208`), far from both gainUp and gr.
 

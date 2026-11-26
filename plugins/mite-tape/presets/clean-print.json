@@ -1,0 +1,12 @@
+{
+  "plugin": "Mite Tape",
+  "version": 1,
+  "name": "Clean Print",
+  "params": {
+    "level": -4.0,
+    "speed": 3.0,
+    "eq": 1.0,
+    "wow": 0.0,
+    "flutter": 2.0
+  }
+}
