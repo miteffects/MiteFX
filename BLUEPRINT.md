@@ -734,6 +734,18 @@ its loudest), boundary −6 dB, Sensitivity moving it ±12 dB. A kick mic alone 
 floor tom's bleed, kick-like, stays. The editor marks such a track "judged alone" and says so
 in the header when only one track has the plugin.
 
+**One score, one threshold (2026-11-27, user: "one visually obvious and even sonically kick
+sample gets cleared before some bleed by tweaking sensitivity … this is not professional"):**
+the decision had read a hit's *share* of the drum's sound alone, blind to its level, so a loud
+kick landing in a ring could score under quiet bleed. Now each hit's score is how loud the
+drum's own part of it is (level in the drum's band plus the dominance or, alone, the in-band
+share) and Sensitivity is a threshold on it (±24 dB): it cuts strictly in that order, more
+sensitivity never drops a hit nor silences what sounded (tested over 21 steps, alone and in
+the kit). The automatic threshold: in the kit, where it best agrees with the dominance's verdict
+(precision over the three kits 0.981 → 0.988, nothing more cut); alone, the widest gap in the
+scores under the loud hits (kick mic alone: precision 1.000, the floor tom's bleed gone too).
+The help names a hit's score and its distance to the threshold; amber is near it.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

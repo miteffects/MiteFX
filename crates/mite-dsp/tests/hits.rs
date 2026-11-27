@@ -484,3 +484,36 @@ fn a_kick_mic_alone_drops_the_snares_bleed_by_its_sound() {
         assert!(more > less, "sensitivity does something: {less} → {more}");
     }
 }
+
+#[test]
+fn sensitivity_cuts_in_order_of_how_loud_the_drum_is_in_each_hit() {
+    // (User, 2026-11-27: "one visually obvious and even sonically kick sample gets cleared
+    // before some bleed by tweaking sensitivity". Turning it up only ever keeps more, never a
+    // hit scoring lower while one higher is cut, and nothing that sounded goes quiet.)
+    let (mics, _truth) = kit(91);
+    let roles = [Role::Kick, Role::Snare, Role::Tom, Role::Tom, Role::Hat];
+    let tracks: Vec<(&[f32], Role)> = mics.iter().zip(roles).map(|(m, r)| (m.as_slice(), r)).collect();
+    let kit_det = detect(&tracks, FS);
+    let alone = detect(&[(&mics[0], Role::Kick)], FS);
+    for (name, d) in [("kick alone", &alone[0]), ("tom 1 in the kit", &kit_det[2]), ("kick in the kit", &kit_det[0])] {
+        let mut before: Option<(Vec<bool>, Vec<f32>)> = None;
+        for step in 0..=20 {
+            let s = Settings { sensitivity: step as f32 / 20.0, ..Settings::default() };
+            let hits = d.hits(&s, &[]);
+            let counted = |h: &Hit| h.kept || h.inside;
+            let lowest_kept = hits.iter().filter(|h| counted(h)).map(|h| h.score_db).fold(f32::INFINITY, f32::min);
+            let highest_cut = hits.iter().filter(|h| !counted(h)).map(|h| h.score_db).fold(f32::NEG_INFINITY, f32::max);
+            assert!(highest_cut < lowest_kept, "{name}, sensitivity {}: a hit at {highest_cut:.1} dB cut, one at {lowest_kept:.1} dB kept", s.sensitivity);
+            let kept: Vec<bool> = hits.iter().map(counted).collect();
+            let mut gain = vec![0.0f32; d.len];
+            d.curve(&hits, &s).fill(0, &mut gain);
+            if let Some((was, g0)) = &before {
+                assert!(was.iter().zip(&kept).all(|(a, b)| !a || *b), "{name}: more sensitivity dropped a hit");
+                let worst = g0.iter().zip(&gain).map(|(a, b)| a - b).fold(0.0f32, f32::max);
+                assert!(worst < 1e-3, "{name}, sensitivity {}: something that sounded went quiet ({worst})", s.sensitivity);
+            }
+            before = Some((kept, gain));
+        }
+        println!("{name}: in order at every sensitivity");
+    }
+}

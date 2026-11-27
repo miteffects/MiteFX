@@ -2,8 +2,9 @@
 //!
 //! - **Lanes:** each track's waveform, lit where it is kept and dim where it is cut (the cut is
 //!   the one that plays: the curve the audio thread reads), with a mark at every hit found:
-//!   accent where it is kept, dim where it is cut, warning where the detection is unsure (those
-//!   are the ones to check). A click on a mark keeps or cuts that hit; a double-click puts it
+//!   accent where it is kept, dim where it is cut, warning where it is close to the threshold
+//!   (those are the ones to check; SENS moves the threshold, in order of how loud the drum is
+//!   in each hit). A click on a mark keeps or cuts that hit; a double-click puts it
 //!   back to what the detection says; a double-click on the lane where no hit was found adds
 //!   one there.
 //! - **Tracks:** the name (a click selects the track for the dials) and the role chip (a click
@@ -145,7 +146,7 @@ impl CutView {
     pub fn new(shared: Arc<CutShared>) -> Self {
         let local = DIAL_SPECS.iter().fold(MemoryParamHost::new(), |h, s| h.with(*s));
         let words = [
-            "How readily a hit counts as this drum's own (more: soft hits in, and some bleed)",
+            "The threshold on how loud this drum is in a hit: lower keeps more, and the quietest of this drum's own go first",
             "How loud the other tracks' bleed is taken to be (more: cuts more of what they play)",
             "How long before each hit the cut opens",
             "How long a hit is held after it ends",
@@ -414,7 +415,10 @@ impl CutView {
                 let state = if h.forced { "set by hand" } else if h.kept { "kept" } else { "cut" };
                 let action = if h.kept { "click: cut it" } else { "click: keep it" };
                 let back = if h.forced { " · double-click: as detected" } else { "" };
-                Help::default().text(format!("A hit, {state} · {:.0} % sure it is this drum's · {action}{back}", 100.0 * h.confidence))
+                // (Confidence is the logistic of the score's distance to the threshold.)
+                let over = 2.0 * (h.confidence / (1.0 - h.confidence)).max(1e-6).ln();
+                let near = if over.abs() < 0.05 { "at the threshold".to_owned() } else { format!("{:.1} dB {} the threshold", over.abs(), if over > 0.0 { "over" } else { "under" }) };
+                Help::default().text(format!("A hit, {state} · this drum's own part {:.1} dB, {near} · {action}{back}", h.score_db))
             }
             Hot::Chip(_) => Help::default().text("The track's role: click for the next, Shift-click for the one before · OH and Room are never cut, Off passes"),
             Hot::Name(row) if tracks.get(row).is_some_and(|t| t.role.cuts() && t.compared == 0) => Help::default().text("Judged alone, by its own sound: no other drum track has Mite Cut. Put it on the kit's other tracks (kick, snare, toms, hats) and each is judged against the others"),
@@ -422,7 +426,7 @@ impl CutView {
             Hot::Lane(..) => Help::default().text("Wheel: zoom · drag: pan · double-click: add a hit here (where none was found)"),
             Hot::Ruler => Help::default().text("Wheel: zoom · drag: pan · double-click: the whole song"),
             Hot::Export => Help::default().text(format!("Write each cut track as a WAV file (32-bit float, stamped with its place on the song) into {}", crate::session::export_root().display())),
-            Hot::None => Help::default().text("Each track is judged against the others · lit: kept · dim: cut · amber marks: unsure, check those"),
+            Hot::None => Help::default().text("Each track is judged against the others · lit: kept · dim: cut · amber marks: close to the threshold, check those"),
         }
     }
 
