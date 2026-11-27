@@ -261,6 +261,23 @@ impl TestHost {
     /// of it at song time `play_start` s for `duration` s. Samples access is enabled.
     #[allow(clippy::too_many_arguments)]
     pub fn add_clip(&mut self, audio: Audio, src_id: &CStr, mod_id: &CStr, play_start: f64, mod_start: f64, duration: f64) -> (ARAAudioSourceRef, ARAAudioModificationRef, ARAPlaybackRegionRef) {
+        let seq = self.seq;
+        self.add_clip_to(seq, audio, src_id, mod_id, play_start, mod_start, duration)
+    }
+
+    /// Another track (region sequence) named `name`, in the song's musical context.
+    pub fn add_track(&mut self, name: &str) -> ARARegionSequenceRef {
+        let name = crate::document::leak(name);
+        call!(self.beginEditing());
+        let seq_props = ARARegionSequenceProperties { structSize: std::mem::size_of::<ARARegionSequenceProperties>(), name: name.as_ptr(), orderIndex: 0, musicalContextRef: self.ctx, color: std::ptr::null() };
+        let seq = call!(self.createRegionSequence(std::ptr::null_mut(), &seq_props));
+        call!(self.endEditing());
+        seq
+    }
+
+    /// [`Self::add_clip`] on track `seq`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_clip_to(&mut self, seq: ARARegionSequenceRef, audio: Audio, src_id: &CStr, mod_id: &CStr, play_start: f64, mod_start: f64, duration: f64) -> (ARAAudioSourceRef, ARAAudioModificationRef, ARAPlaybackRegionRef) {
         let a = Box::new(audio);
         let host_ref = &*a as *const Audio as *mut c_void;
         let (n, fs) = (a.l.len() as i64, a.fs);
@@ -270,7 +287,7 @@ impl TestHost {
         let src = call!(self.createAudioSource(host_ref.cast(), &src_props));
         let mod_props = ARAAudioModificationProperties { structSize: std::mem::size_of::<ARAAudioModificationProperties>(), name: c"vox".as_ptr(), persistentID: mod_id.as_ptr() };
         let md = call!(self.createAudioModification(src, std::ptr::null_mut(), &mod_props));
-        let reg_props = ARAPlaybackRegionProperties { structSize: std::mem::size_of::<ARAPlaybackRegionProperties>(), transformationFlags: 0, startInModificationTime: mod_start, durationInModificationTime: duration, startInPlaybackTime: play_start, durationInPlaybackTime: duration, musicalContextRef: self.ctx, regionSequenceRef: self.seq, name: c"vox".as_ptr(), color: std::ptr::null() };
+        let reg_props = ARAPlaybackRegionProperties { structSize: std::mem::size_of::<ARAPlaybackRegionProperties>(), transformationFlags: 0, startInModificationTime: mod_start, durationInModificationTime: duration, startInPlaybackTime: play_start, durationInPlaybackTime: duration, musicalContextRef: self.ctx, regionSequenceRef: seq, name: c"vox".as_ptr(), color: std::ptr::null() };
         let rg = call!(self.createPlaybackRegion(md, std::ptr::null_mut(), &reg_props));
         call!(self.enableAudioSourceSamplesAccess(src, 1));
         call!(self.endEditing());
@@ -331,6 +348,16 @@ impl TestHost {
         if !ext.editorRendererInterface.is_null() {
             let ed = unsafe { std::ptr::read_unaligned(ext.editorRendererInterface) };
             unsafe { ed.addRegionSequence.expect("add sequence")(ext.editorRendererRef, self.seq) };
+        }
+    }
+
+    /// Hands track `seq` to a plug-in instance's editor renderer ([`Self::show_track`] for
+    /// another track than the first).
+    pub fn show(&self, ext: *const ARAPlugInExtensionInstance, seq: ARARegionSequenceRef) {
+        let ext = unsafe { std::ptr::read_unaligned(ext) };
+        if !ext.editorRendererInterface.is_null() {
+            let ed = unsafe { std::ptr::read_unaligned(ext.editorRendererInterface) };
+            unsafe { ed.addRegionSequence.expect("add sequence")(ext.editorRendererRef, seq) };
         }
     }
 

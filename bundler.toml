@@ -55,3 +55,6 @@ name = "Mite Rig"
 
 [mite_tape]
 name = "Mite Tape"
+
+[mite_cut]
+name = "Mite Cut"

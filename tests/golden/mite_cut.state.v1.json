@@ -1,0 +1,15 @@
+{
+  "fields": {
+    "mitefx_state": "1",
+    "preset": "Init",
+    "snapshots": "{\"active\":0,\"slots\":[{},{\"bypass\":1.0},null,null]}"
+  },
+  "params": {
+    "bypass": {
+      "bool": true
+    },
+    "removed": {
+      "bool": false
+    }
+  }
+}

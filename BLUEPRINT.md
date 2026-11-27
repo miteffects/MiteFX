@@ -687,6 +687,20 @@ undamped toms ringing into each other, the softest toms quieter than the snare's
 found as hits of their own, onsets within 1.33 ms (`crates/mite-dsp/tests/hits.rs`; known misses
 listed there). Detection 0.35 s for 5 × 42 s; a settings change 25 ms.
 
+**Plugin (`plugins/mite-cut`, slice 3, 2026-11-27):** ARA over VST3 as Mite Pitch (CLAP ARA off
+unless `MITE_CUT_CLAP_ARA`: REAPER's CLAP ARA crash). Every clip in the document is detected at
+once, aligned on the song (a later clip padded in front, one rate together), in one run per
+document that all its instances share (REAPER binds one per track and a hidden player each). A
+track's role is the user's, kept in its clips' modification states (so the project keeps it),
+or guessed from its name (`session::guess_role`: "Kick In", "Snare Top", "Floor Tom", "HH",
+"OH L", "Room"; anything else Off, which passes). The playback renderer plays each region's clip
+through its cut curve, silence elsewhere; an editor-only instance passes its input. A new cut
+crossfades in over 10 ms; Bypass (the clip as it is) and Listen Removed (only what is cut) glide
+over the same. First editor: the tracks, each role a chip (click: next, Shift: back), hits kept
+of candidates. Tested in the test host with a five-track kit (`tests/ara.rs`): roles from names,
+one detection for two instances, tom hits play exactly, the snare's bleed away from the toms is
+silent, Off passes, a role set by hand survives the archive, no allocation while playing.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

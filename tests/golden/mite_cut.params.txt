@@ -1,0 +1,2 @@
+bypass | bool | false
+removed | bool | false
