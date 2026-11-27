@@ -1159,7 +1159,7 @@ impl PhaseLab {
         let db = 20.0 * h.norm().max(1e-6).log10();
         let hint = if GD.contains(p) { " — wheel: zoom, Alt+wheel or drag: scroll, double-click: as it was" } else { "" };
         let level = if self.mark[i] > 0.5 && trust(self.eased_coh[i]) > 0.5 {
-            " · changes with level here (a gate, compressor or saturator): not a filter's phase"
+            " · changes with level here (a gate, compressor or saturator): true for what plays now, not a fixed response"
         } else {
             ""
         };
