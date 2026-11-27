@@ -437,3 +437,23 @@ fn overrides_win_and_the_curve_is_clean() {
         assert!(c.at(h.onset) > 0.99, "open at the onset of {h:?}");
     }
 }
+
+#[test]
+fn a_clip_cut_right_on_a_hit_keeps_it() {
+    // (REAPER items are often split on a hit: the clip's first sample is the hit's.)
+    let mut r = Rng(11);
+    let mut x = vec![0.0f32; (3.0 * FS) as usize];
+    for at in [0usize, 48_000, 96_000] {
+        for (i, s) in voice(Drum::Tom1, 0.8, &mut r).iter().enumerate() {
+            if at + i < x.len() {
+                x[at + i] += s;
+            }
+        }
+    }
+    let det = detect(&[(&x, Role::Tom)], FS);
+    let hits = det[0].hits(&Settings::default(), &[]);
+    let first = hits.iter().find(|h| h.kept).expect("a hit");
+    assert!(first.onset < 48, "the first hit kept, at its start: {first:?}");
+    let curve = det[0].curve(&hits, &Settings::default());
+    assert!(curve.at(10) > 0.99, "and open from the clip's start");
+}

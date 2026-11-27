@@ -14,7 +14,7 @@
 //! The worker thread does all of it; the editor and the audio thread read what it publishes.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -48,6 +48,19 @@ pub struct Clip {
     pub len: usize,
     pub hits: Arc<Vec<Hit>>,
     pub curve: Arc<Curve>,
+    /// Its waveform: the lowest and highest sample in each [`PEAK_HOP`].
+    pub peaks: Peaks,
+}
+
+/// A waveform (see [`peaks_of`]).
+pub type Peaks = Arc<Vec<(f32, f32)>>;
+
+/// Samples per waveform peak.
+pub const PEAK_HOP: usize = 128;
+
+/// The waveform of `x`: its lowest and highest sample in each [`PEAK_HOP`].
+pub fn peaks_of(x: &[f32]) -> Vec<(f32, f32)> {
+    x.chunks(PEAK_HOP).map(|c| c.iter().fold((0.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)))).collect()
 }
 
 impl Track {
@@ -189,6 +202,9 @@ pub struct Session {
     busy: AtomicUsize,
     /// Bumped whenever what the editor shows changes.
     pub version: AtomicU64,
+    /// The transport as the audio thread last saw it (host samples), and whether it plays.
+    pub playhead: AtomicI64,
+    pub playing: AtomicBool,
     /// Detection runs this instance's worker made (tests: instances share one).
     pub detections_made: AtomicUsize,
     sample_rate: Mutex<f32>,
@@ -203,6 +219,8 @@ impl Session {
             jobs: Mutex::new(None),
             busy: AtomicUsize::new(0),
             version: AtomicU64::new(0),
+            playhead: AtomicI64::new(0),
+            playing: AtomicBool::new(false),
             detections_made: AtomicUsize::new(0),
             sample_rate: Mutex::new(48_000.0),
             ara: Mutex::new(None),
@@ -413,6 +431,8 @@ struct AraState {
     sincs: Vec<((u64, u64), Arc<SincTable>)>,
     host: f64,
     audio: HashMap<u64, Arc<Vec<f32>>>,
+    /// Each clip's waveform, with the audio it came from.
+    peaks: HashMap<u64, (Arc<Vec<f32>>, Peaks)>,
     renders: bool,
 }
 
@@ -487,11 +507,20 @@ impl AraState {
         }
         self.cuts.retain(|m, _| units.iter().any(|u| u.modification == *m));
         self.audio = units.iter().map(|u| (u.modification, u.audio.clone())).collect();
+        self.peaks.retain(|m, _| units.iter().any(|u| u.modification == *m));
         // The tracks for the editor.
         let mut tracks: Vec<Track> = Vec::new();
         for u in &units {
             let Some(cut) = self.cuts.get(&u.modification) else { continue };
-            let clip = Clip { modification: u.modification, song_s: u.song_s, fs: u.fs, len: u.audio.len(), hits: cut.1.clone(), curve: cut.2.clone() };
+            let peaks = match self.peaks.get(&u.modification) {
+                Some((a, p)) if Arc::ptr_eq(a, &u.audio) => p.clone(),
+                _ => {
+                    let p = Arc::new(peaks_of(&u.audio));
+                    self.peaks.insert(u.modification, (u.audio.clone(), p.clone()));
+                    p
+                }
+            };
+            let clip = Clip { modification: u.modification, song_s: u.song_s, fs: u.fs, len: u.audio.len(), hits: cut.1.clone(), curve: cut.2.clone(), peaks };
             match tracks.iter_mut().find(|t| t.sequence == u.sequence) {
                 Some(t) => t.clips.push(clip),
                 None => {

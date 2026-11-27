@@ -130,6 +130,10 @@ impl CutEngine {
             self.old = self.current.replace(r);
             self.xfade = if self.old.is_some() { 0.0 } else { 1.0 };
         }
+        s.playing.store(t.playing, std::sync::atomic::Ordering::Relaxed);
+        if let Some(p) = t.pos {
+            s.playhead.store(p, std::sync::atomic::Ordering::Relaxed);
+        }
         let Some(cur) = &self.current else { return };
         if !cur.ara {
             return; // an editor-only instance: the input passes

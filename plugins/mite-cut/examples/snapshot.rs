@@ -10,7 +10,7 @@ use mite_cut::CutShared;
 use mite_cut::editor::{ACCENT, CutView};
 use mite_cut::session::Session;
 use mite_ui::render::render_view;
-use mite_ui::{MemoryParamHost, Theme, ThemeKind, View};
+use mite_ui::{Theme, ThemeKind, View};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
@@ -23,7 +23,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => ThemeKind::Dark,
     };
     let fs = 48_000.0;
-    let n = (8.0 * fs) as usize;
+    // MITE_CUT_SNAP_SECONDS: a longer song (to time the drawing).
+    let seconds: f64 = std::env::var("MITE_CUT_SNAP_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(8.0);
+    let n = (seconds * fs) as usize;
     // Each drum a decaying tone every so often, heard by every mic (its own loudest).
     let drums = [(55.0, 0.5, 0.0), (190.0, 0.5, 0.25), (130.0, 1.0, 0.125), (90.0, 2.0, 0.375), (7000.0, 0.25, 0.0)];
     let names = ["Kick In", "Snare Top", "Tom 1", "Floor Tom", "Vox"];
@@ -34,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (d, &(f, every, at)) in drums.iter().enumerate() {
             let gain = if d == m { 0.8 } else { 0.15 };
             let mut t0 = at;
-            while t0 < 7.5 {
+            while t0 < seconds - 0.5 {
                 let s0 = (t0 * fs) as usize;
                 for i in 0..(0.3 * fs) as usize {
                     let t = i as f64 / fs;
@@ -46,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let seq = host.add_track(name);
         let src = mite_ara::document::leak(&format!("src-{m}"));
         let md = mite_ara::document::leak(&format!("mod-{m}"));
-        let (_s, _md, rg) = host.add_clip_to(seq, Audio { fs, l: x.clone(), r: x }, src, md, 0.0, 0.0, 8.0);
+        let (_s, _md, rg) = host.add_clip_to(seq, Audio { fs, l: x.clone(), r: x }, src, md, 0.0, 0.0, seconds);
         first.get_or_insert(rg);
     }
     let session = Session::new();
@@ -58,10 +60,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     session.bind_ara(inst);
     session.wait_idle(Duration::from_secs(60));
 
-    let host_params = MemoryParamHost::new();
+    let host_params = mite_cut::editor::memory_host();
     let mut view = CutView::new(std::sync::Arc::new(CutShared { session }));
     view.tick(&host_params);
-    let image = render_view(&mut view, &host_params, &Theme::load(theme, ACCENT), scale)?;
+    let theme = Theme::load(theme, ACCENT);
+    let t = std::time::Instant::now();
+    let image = render_view(&mut view, &host_params, &theme, scale)?;
+    println!("rendered in {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    let t = std::time::Instant::now();
+    let again = 5;
+    for _ in 0..again {
+        let _ = render_view(&mut view, &host_params, &theme, scale)?;
+    }
+    println!("again: {:.1} ms a frame", t.elapsed().as_secs_f64() * 1e3 / f64::from(again));
     let file = std::io::BufWriter::new(std::fs::File::create(&path)?);
     let mut encoder = png::Encoder::new(file, image.width, image.height);
     encoder.set_color(png::ColorType::Rgba);

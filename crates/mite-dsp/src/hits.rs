@@ -652,12 +652,9 @@ impl Curve {
                     continue;
                 }
             }
-            spans.push([
-                a,
-                a + fade_in,
-                e.max(a + fade_in),
-                e.max(a + fade_in) + fade_out,
-            ]);
+            // (A region from the clip's first sample opens there at once: no fade over the hit.)
+            let full = if a == 0 { 0 } else { a + fade_in };
+            spans.push([a, full, e.max(full), e.max(full) + fade_out]);
         }
         Self {
             spans,
@@ -1099,7 +1096,8 @@ fn candidates(x: &[f32], fs: f32, bands: &mut Bands) -> Vec<Candidate> {
     let local = 4;
     let refractory = (REFRACTORY_S * fs) as usize;
     let mut out: Vec<Candidate> = Vec::new();
-    for k in 1..frames {
+    // (From frame 0: a clip cut right on a hit starts with it.)
+    for k in 0..frames {
         let (a, b) = (k.saturating_sub(w), (k + w + 1).min(frames));
         let mean = ((sum[b] - sum[a]) / (b - a) as f64) as f32;
         let (la, lb) = (k.saturating_sub(local), (k + local + 1).min(frames));

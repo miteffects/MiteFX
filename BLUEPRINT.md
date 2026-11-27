@@ -701,6 +701,20 @@ of candidates. Tested in the test host with a five-track kit (`tests/ara.rs`): r
 one detection for two instances, tom hits play exactly, the snare's bleed away from the toms is
 silent, Off passes, a role set by hand survives the archive, no allocation while playing.
 
+**Editor (slice 4, 2026-11-27):** the session's drum tracks as lanes on one timeline (1100×680).
+Each lane: the track's waveform dim, lit where the cut keeps it (the curve that plays), a mark
+at each hit (accent kept; amber where the detection is unsure, 25–75 %: the ones to check; a
+dot where it is surely bleed; a bar over one set by hand); marks show once they are 4 px apart
+or more. A click on a mark keeps or cuts that hit, a double-click puts it back as detected, a
+double-click on the lane adds a hit there; the wheel zooms around the pointer, a drag pans, a
+double-click on the ruler shows the whole song; the host's playhead runs across. Left: name
+(click selects the track for the dials), role chip, hits kept and how many to check. Dials (the
+selected track's, on the editor's own parameter host; they live with the track in the
+document): SENS, BLEED, PRE, HOLD, ENDS (above the floor), FADE, FLOOR (−80 dB is −80 dB, not
+−∞: honest). Footer: Listen Removed, Bypass, the help strip. A clip cut right on a hit keeps it
+(onsets from frame 0; a region from a clip's first sample opens without a fade). Drawing costs
+the same at 8 s and 4 min (`examples/snapshot.rs`, `MITE_CUT_SNAP_SECONDS`).
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat
