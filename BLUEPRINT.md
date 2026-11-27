@@ -658,6 +658,35 @@ into the tape against operating level and MOL, speed and EQ chips, five dials); 
 MIX, OUTPUT and Bypass in the footer. **Auto gain (2026-11-26, state 2, user: "tape doesnt have auto gain"):** on by default (`migrate::v1_to_v2` turns it off in older sessions); `mite_dsp::output::LoudnessMatch` (shared, reusable): K-weighted loudness of the tape before its own gain against the latency-aligned input, metered as a running average of all sound heard settling into 3 s (only while the input sounds, so gaps and phrases don't move it), the gain gliding over 300 ms, ±12 dB; it applies to the tape's side of the mix only, so MIX blends equal loudness and Bypass compares fairly. Measured: LEVEL +18 dB is −3.6 dB without it, +24 dB under-biased −6.6 dB, −12 dB over-biased +1.3 dB; with it each within 0.01 dB, and the gain holds within 0.3 dB over hits and gaps (tested). Six factory presets. Not embeddable yet (no `core` split):
 split it when Rig wants a tape block.
 
+### 18. Mite Cut. Rival: Strip Silence, REAPER Dynamic Split, Cubase Hitpoints, Beat Detective
+
+**Started 2026-11-27** (user: "a professional plugin which detects hits on a track (let's focus on
+drums) and with tuning options/parameters offers a user to have pre-cut silences … i dont want to
+manually edit toms"). An ARA plugin (over VST3, the Mite Pitch pattern): it reads whole tracks,
+so detection is offline (no lookahead limit, no latency), and plays each track back cut; the
+project's items are never touched; the cut tracks also export as audio (WAV, aligned to the
+source) for any DAW. It goes on several drum tracks and the user names each (Kick, Snare, Tom,
+Hat, Cymbal; OH and Room are never cut nor compared): every track is judged against the others,
+which is what level gates (Strip Silence and the rest) cannot do, as a tom mic hears the snare as
+loudly as a soft tom. Plan: `~/.claude/plans/snappy-hugging-lemur-*.md`; slices: 1–2 engine (done),
+3 the ARA plugin, 4 the editor (lanes, hit markers by confidence, overrides, audition what is
+cut), 5 WAV export.
+
+**Engine (`mite_dsp::hits`, slices 1–2, 2026-11-27):** candidates from a SuperFlux onset function,
+each onset to the sample (the energy rise, then the first sample a linear predictor of what
+sounded before cannot explain); each candidate fit, band by band, as this drum's learned sound
+plus every compared track's learned bleed (each ±6 dB free), its *dominance* the share that is
+this drum's; less up to 12 dB where another mic heard it first (a drum reaches its own close mic
+first); the boundary −7 dB or a clear gap between −12 and −5. Alone (no track to compare) only
+what is 30 dB under the loud hits is cut. Ends at the floor (a low percentile of the envelope)
+plus a margin; regions with pre-roll, fades, hold, minimum gap and length, a floor gain; user
+overrides (keep, remove, edges) win and survive re-detection. Measured on three synthetic kits
+(every drum bleeding into every close mic with delay, duller tone and ±1.5 dB hit to hit,
+undamped toms ringing into each other, the softest toms quieter than the snare's bleed): over
+415 real hits on the kick, snare and tom mics, precision 0.981, 99.8 % of real hits sound, 97.8 %
+found as hits of their own, onsets within 1.33 ms (`crates/mite-dsp/tests/hits.rs`; known misses
+listed there). Detection 0.35 s for 5 × 42 s; a settings change 25 ms.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

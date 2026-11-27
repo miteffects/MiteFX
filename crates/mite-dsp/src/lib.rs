@@ -16,6 +16,7 @@ pub mod eq;
 pub mod filter;
 pub mod gain;
 pub mod gate;
+pub mod hits;
 pub mod hysteresis;
 pub mod limit;
 pub mod linear_phase;
