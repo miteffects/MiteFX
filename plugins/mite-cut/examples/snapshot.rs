@@ -31,7 +31,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let names = ["Kick In", "Snare Top", "Tom 1", "Floor Tom", "Vox"];
     let mut host = TestHost::new(mite_ara::factory(&mite_cut::ara::INFO));
     let mut first = None;
-    for (m, name) in names.iter().enumerate() {
+    // MITE_CUT_SNAP_FILE=<mono f32 file at 48 kHz>: that one track, "Kick In", instead.
+    if let Some(file) = std::env::var_os("MITE_CUT_SNAP_FILE") {
+        let x: Vec<f32> = std::fs::read(file)?.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+        let dur = x.len() as f64 / fs;
+        let seq = host.add_track("Kick In");
+        let (_s, _m, rg) = host.add_clip_to(seq, Audio { fs, l: x.clone(), r: x }, c"file-src", c"file-mod", 0.0, 0.0, dur);
+        first = Some(rg);
+    }
+    let from_file = first.is_some();
+    for (m, name) in names.iter().enumerate().filter(|_| !from_file) {
         let mut x = vec![0.0f32; n];
         for (d, &(f, every, at)) in drums.iter().enumerate() {
             let gain = if d == m { 0.8 } else { 0.15 };

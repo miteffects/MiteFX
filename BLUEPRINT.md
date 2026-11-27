@@ -746,6 +746,18 @@ the kit). The automatic threshold: in the kit, where it best agrees with the dom
 scores under the loud hits (kick mic alone: precision 1.000, the floor tom's bleed gone too).
 The help names a hit's score and its distance to the threshold; amber is near it.
 
+**On the user's own kick track (2026-11-27, user: "now it's shit again … algorithm is garbage"):**
+tested on the real KICK IN track (36.8 s, `crates/mite-dsp/examples/hits_probe.rs`), not only
+synthetic kits. With the score a band level over 43 ms, a kick peaking at −13 dBFS was cut
+before one at −18 as the dial moved, and the dial did everything between 0.3 and 0.8. Now,
+alone, the score is the hit's peak (what the waveform shows) less what lies outside the drum's
+bands: on that track kept and cut follow the peaks at every setting, and the default sits mid
+a wide plateau (all 52 kicks kept, every bleed cut, from 0.4 to 0.6). With tracks to compare it
+stays the level in the drum's band (bleed peaks loud and broadband in a tom mic). The dial is
+THRESH, dB from the automatic threshold (+ cuts more); alone, the threshold is drawn across
+the waveform (scaled to the track's loudest peak), as a gate's. A hit's help: its peak, how much
+of it is bleed, how far over or under the threshold.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

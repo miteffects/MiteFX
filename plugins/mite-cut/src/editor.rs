@@ -3,8 +3,8 @@
 //! - **Lanes:** each track's waveform, lit where it is kept and dim where it is cut (the cut is
 //!   the one that plays: the curve the audio thread reads), with a mark at every hit found:
 //!   accent where it is kept, dim where it is cut, warning where it is close to the threshold
-//!   (those are the ones to check; SENS moves the threshold, in order of how loud the drum is
-//!   in each hit). A click on a mark keeps or cuts that hit; a double-click puts it
+//!   (those are the ones to check). The threshold is drawn across the waveform: a hit must
+//!   peak over it in its own drum (less what of it is bleed); THRESH moves it. A click on a mark keeps or cuts that hit; a double-click puts it
 //!   back to what the detection says; a double-click on the lane where no hit was found adds
 //!   one there.
 //! - **Tracks:** the name (a click selects the track for the dials) and the role chip (a click
@@ -63,23 +63,23 @@ const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32
 
 // The selected track's tuning (`mite_dsp::hits::Settings`), on the editor's own dials: they
 // live with the track in the document, not in the host's parameters.
-const SENSITIVITY: ParamSpec = spec("sensitivity", "Sensitivity", "%", 0.0, 100.0, 50.0, ParamScale::Linear, 0, ParamDisplay::Number);
+const THRESH: ParamSpec = spec("threshold", "Threshold", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, ParamDisplay::Number);
 const BLEED: ParamSpec = spec("bleed", "Bleed", "%", 0.0, 100.0, 50.0, ParamScale::Linear, 0, ParamDisplay::Number);
 const PRE_ROLL: ParamSpec = spec("pre_roll", "Pre-roll", "ms", 0.0, 20.0, 2.0, ParamScale::Linear, 1, ParamDisplay::Time);
 const HOLD: ParamSpec = spec("hold", "Hold", "ms", 0.0, 250.0, 10.0, ParamScale::Linear, 0, ParamDisplay::Time);
 const RELEASE: ParamSpec = spec("release", "Ends", "dB", 0.0, 24.0, 6.0, ParamScale::Linear, 1, ParamDisplay::Number);
 const FADE_OUT: ParamSpec = spec("fade_out", "Fade out", "ms", 1.0, 500.0, 40.0, ParamScale::Log, 0, ParamDisplay::Time);
 const FLOOR: ParamSpec = spec("floor", "Floor", "dB", -80.0, 0.0, -80.0, ParamScale::Linear, 1, ParamDisplay::Number);
-const DIAL_SPECS: [ParamSpec; 7] = [SENSITIVITY, BLEED, PRE_ROLL, HOLD, RELEASE, FADE_OUT, FLOOR];
+const DIAL_SPECS: [ParamSpec; 7] = [THRESH, BLEED, PRE_ROLL, HOLD, RELEASE, FADE_OUT, FLOOR];
 
 fn settings_of(h: &MemoryParamHost) -> Settings {
     let p = |s: &ParamSpec| h.plain(s.id, h.normalized(s.id));
     let floor = p(&FLOOR);
-    Settings { sensitivity: p(&SENSITIVITY) / 100.0, bleed: p(&BLEED) / 100.0, pre_roll_ms: p(&PRE_ROLL), hold_ms: p(&HOLD), release_db: p(&RELEASE), fade_out_ms: p(&FADE_OUT), floor_db: floor, ..Settings::default() }
+    Settings { sensitivity: 0.5 - p(&THRESH) / 48.0, bleed: p(&BLEED) / 100.0, pre_roll_ms: p(&PRE_ROLL), hold_ms: p(&HOLD), release_db: p(&RELEASE), fade_out_ms: p(&FADE_OUT), floor_db: floor, ..Settings::default() }
 }
 
 fn load_settings(h: &MemoryParamHost, s: &Settings) {
-    h.set_plain(SENSITIVITY.id, s.sensitivity * 100.0);
+    h.set_plain(THRESH.id, (0.5 - s.sensitivity) * 48.0);
     h.set_plain(BLEED.id, s.bleed * 100.0);
     h.set_plain(PRE_ROLL.id, s.pre_roll_ms);
     h.set_plain(HOLD.id, s.hold_ms);
@@ -146,7 +146,7 @@ impl CutView {
     pub fn new(shared: Arc<CutShared>) -> Self {
         let local = DIAL_SPECS.iter().fold(MemoryParamHost::new(), |h, s| h.with(*s));
         let words = [
-            "The threshold on how loud this drum is in a hit: lower keeps more, and the quietest of this drum's own go first",
+            "The threshold (the line on the lanes), from the automatic one: a hit must peak over it in its own drum (less what of it is bleed); higher cuts more, lowest peaks first",
             "How loud the other tracks' bleed is taken to be (more: cuts more of what they play)",
             "How long before each hit the cut opens",
             "How long a hit is held after it ends",
@@ -154,7 +154,7 @@ impl CutView {
             "How long the cut takes to close",
             "What is left between hits (−80 dB: as good as nothing)",
         ];
-        let names = ["SENS", "BLEED", "PRE", "HOLD", "ENDS", "FADE", "FLOOR"];
+        let names = ["THRESH", "BLEED", "PRE", "HOLD", "ENDS", "FADE", "FLOOR"];
         let dials: Vec<FooterDial> = DIAL_SPECS.iter().zip(words).zip(names).map(|((s, w), n)| FooterDial { spec: *s, kind: KnobKind::Unipolar, name: n, words: w }).collect();
         let dials = Footer::new(HEIGHT - FOOTER - DIALS, (WIDTH, HEIGHT - FOOTER), Vec::new(), dials);
         let toggles = vec![
@@ -272,14 +272,14 @@ impl CutView {
     }
 
     /// A clip's waveform in `lane` (one low–high line per pixel), `from`..`to` its samples.
-    fn draw_wave(&self, cx: &mut DrawCx<'_>, lane: Rect, c: &Clip, (from, to): (usize, usize), ink: Color) {
+    fn draw_wave(&self, cx: &mut DrawCx<'_>, lane: Rect, c: &Clip, (from, to): (usize, usize), ink: Color, full: f32) {
         let peaks = &c.peaks;
         if peaks.is_empty() || to <= from {
             return;
         }
         let per_s = c.fs / PEAK_HOP as f64;
         let mid = lane.center().y + 6.0;
-        let half = lane.height() / 2.0 - 10.0;
+        let half = (lane.height() / 2.0 - 10.0) / f64::from(full.max(1e-6));
         let x0 = self.x_of(c.song_s + from as f64 / c.fs).max(LANES_X).floor();
         let x1 = self.x_of(c.song_s + to as f64 / c.fs).min(LANES_X1).ceil();
         if x1 <= x0 {
@@ -295,13 +295,13 @@ impl CutView {
             let a = ((centre - reach).max(0.0) as usize).max(lo_k);
             let b = ((centre + reach).max(0.0) as usize + 1).min(hi_k);
             let (lo, hi) = peaks.get(a.min(b)..b).unwrap_or(&[]).iter().fold((0.0f32, 0.0f32), |(l, h), p| (l.min(p.0), h.max(p.1)));
-            let p = Point::new(x, mid - f64::from(hi.clamp(0.0, 1.0)) * half);
+            let p = Point::new(x, mid - f64::from(hi.clamp(0.0, full)) * half);
             if col == 0 {
                 top.move_to(p);
             } else {
                 top.line_to(p);
             }
-            bottom.push(Point::new(x, mid - f64::from(lo.clamp(-1.0, 0.0)) * half));
+            bottom.push(Point::new(x, mid - f64::from(lo.clamp(-full, 0.0)) * half));
         }
         for p in bottom.iter().rev() {
             top.line_to(*p);
@@ -343,11 +343,27 @@ impl CutView {
         if cuts && t.compared == 0 && r.height() >= 58.0 {
             cx.text.draw(cx.scene, "judged alone", 14.0, r.y0 + 43.0, TextStyle::BODY.sized(10.0), theme.warn, Align::Left);
         }
-        // The waveform: dim all of it, lit where the cut keeps it (its regions, as played).
+        // The waveform (scaled to the track's loudest peak): dim all of it, lit where the cut
+        // keeps it (its regions, as played).
         cx.begin_clip(&lane);
+        let full = t.clips.iter().flat_map(|c| c.peaks.iter()).fold(0.0f32, |m, p| m.max(-p.0).max(p.1)).max(1e-6);
         let dim = theme.text_lo.multiply_alpha(0.55);
+        // The threshold, on a track judged alone (there it is a peak: a hit of this drum must
+        // peak over it, less what of it lies outside the drum's bands; with tracks to compare
+        // it is a level in the drum's band, which the waveform does not show).
+        if cuts && t.compared == 0 {
+            if let Some(thr) = t.clips.iter().flat_map(|c| c.hits.first()).map(|h| h.threshold_db).next() {
+                let a = f64::from(10f32.powf(thr / 20.0) / full);
+                if a < 1.0 {
+                    let (mid, half) = (lane.center().y + 6.0, lane.height() / 2.0 - 10.0);
+                    for y in [mid - a * half, mid + a * half] {
+                        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.warn.multiply_alpha(0.7), None, &Line::new((LANES_X, y.round() + 0.5), (LANES_X1, y.round() + 0.5)));
+                    }
+                }
+            }
+        }
         for (ci, c) in t.clips.iter().enumerate() {
-            self.draw_wave(cx, lane, c, (0, c.len), if cuts { dim } else { theme.text_mid });
+            self.draw_wave(cx, lane, c, (0, c.len), if cuts { dim } else { theme.text_mid }, full);
             if !cuts {
                 continue;
             }
@@ -357,7 +373,7 @@ impl CutView {
                     continue;
                 }
                 cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.08), None, &Rect::new(xa, lane.y0 + 18.0, xb.max(xa + 1.0), lane.y1 - 2.0));
-                self.draw_wave(cx, lane, c, (a, b.min(c.len)), theme.accent);
+                self.draw_wave(cx, lane, c, (a, b.min(c.len)), theme.accent, full);
             }
             // The hits: a mark each at its onset, once they are far enough apart to tell apart.
             let (t0, t1) = self.view();
@@ -415,10 +431,9 @@ impl CutView {
                 let state = if h.forced { "set by hand" } else if h.kept { "kept" } else { "cut" };
                 let action = if h.kept { "click: cut it" } else { "click: keep it" };
                 let back = if h.forced { " · double-click: as detected" } else { "" };
-                // (Confidence is the logistic of the score's distance to the threshold.)
-                let over = 2.0 * (h.confidence / (1.0 - h.confidence)).max(1e-6).ln();
-                let near = if over.abs() < 0.05 { "at the threshold".to_owned() } else { format!("{:.1} dB {} the threshold", over.abs(), if over > 0.0 { "over" } else { "under" }) };
-                Help::default().text(format!("A hit, {state} · this drum's own part {:.1} dB, {near} · {action}{back}", h.score_db))
+                let over = h.score_db - h.threshold_db;
+                let bleed = if h.dominance_db < -0.5 { format!(" ({:.1} dB of it bleed)", -h.dominance_db) } else { String::new() };
+                Help::default().text(format!("A hit, {state} · peaks {:.1} dBFS{bleed}, {:.1} dB {} the threshold · {action}{back}", h.peak_db, over.abs(), if over >= 0.0 { "over" } else { "under" }))
             }
             Hot::Chip(_) => Help::default().text("The track's role: click for the next, Shift-click for the one before · OH and Room are never cut, Off passes"),
             Hot::Name(row) if tracks.get(row).is_some_and(|t| t.role.cuts() && t.compared == 0) => Help::default().text("Judged alone, by its own sound: no other drum track has Mite Cut. Put it on the kit's other tracks (kick, snare, toms, hats) and each is judged against the others"),

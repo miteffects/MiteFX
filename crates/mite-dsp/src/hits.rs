@@ -87,6 +87,8 @@ const ALONE_BOUNDARY_DB: f32 = -6.0;
 const LIKENESS_BAND: f32 = 0.3;
 /// Sensitivity moves the threshold this far either way, dB.
 const SENSITIVITY_DB: f32 = 24.0;
+/// A hit's peak is its largest sample this long from its onset, s.
+const PEAK_S: f32 = 0.03;
 /// Alone, the auto threshold: a gap at least this wide, dB, between this far under the loud hits
 /// (most, least), dB.
 const ALONE_GAP_DB: f32 = 6.0;
@@ -224,6 +226,9 @@ pub struct Candidate {
     pub peak: usize,
     /// Band power over [`SPEC`] from the onset, weighted by the track's own sound, dBFS.
     pub level_db: f32,
+    /// Its peak (the largest sample within [`PEAK_S`] of the onset), dBFS: what the waveform
+    /// shows and the ear hears of it.
+    pub peak_db: f32,
     power: [f32; BANDS],
     /// What it adds over the window just before it (see `Bands::near`).
     near: [f32; BANDS],
@@ -265,9 +270,14 @@ pub struct Hit {
     /// What is this drum's own, against what the mic heard, dB (0: all its own): after the
     /// other tracks' bleed, or alone, as far as its own sound explains it.
     pub dominance_db: f32,
-    /// How loud this drum's own part of it is (its level plus `dominance_db`), dB: what the
-    /// threshold reads (a hit scoring higher is never cut while one lower is kept).
+    /// Its peak, dBFS (the largest sample within [`PEAK_S`] of the onset).
+    pub peak_db: f32,
+    /// What the threshold reads, dB (a hit scoring higher is never cut while one lower is kept):
+    /// alone, its peak less what of it is not this drum's (`dominance_db`); with tracks to
+    /// compare, its level in the drum's band less the others' bleed.
     pub score_db: f32,
+    /// The threshold the settings put on the scores, dB (the same for every hit of a track).
+    pub threshold_db: f32,
     /// 0…1: how surely it is this drum's own hit.
     pub confidence: f32,
     pub kept: bool,
@@ -384,13 +394,18 @@ impl TrackDetection {
         }
         let beta = 2.0 * s.bleed.clamp(0.0, 1.0);
         let compare = !self.compared.is_empty();
-        // Each candidate's *score*: how loud this drum's own part of it is, dB (its level in
-        // the drum's band, less what the other tracks' bleed explains; alone, less what lies
-        // outside the drum's bands). One threshold on it decides, so a hit louder in its own
-        // drum is never cut while a quieter one is kept, whatever the sensitivity (user,
-        // 2026-11-27: an obvious kick went before some bleed as sensitivity moved).
+        // Each candidate's *score*: alone, its peak (what the waveform shows), less what of it
+        // lies outside the drum's bands; with tracks to compare, its level in the drum's band,
+        // less what the other tracks' bleed explains. One
+        // threshold on it decides, so a hit is never cut while one that peaks lower in its own
+        // drum is kept, whatever the sensitivity (user, 2026-11-27: an obvious kick went before
+        // some bleed as sensitivity moved; then, with the score a band level over 43 ms, a kick
+        // peaking at −13 dBFS before one at −18 on the user's own kick track).
         let own: Vec<f32> = self.candidates.iter().map(|c| if compare { self.dominance(c, beta) } else { self.likeness(c) }).collect();
-        let score: Vec<f32> = self.candidates.iter().zip(&own).map(|(c, o)| c.level_db + o).collect();
+        // (With tracks to compare, the level in the drum's band instead of the peak: in a tom
+        // mic the snare's and the kick's bleed peak louder than a soft tom, broadband, and the
+        // dominance alone does not always take enough off them.)
+        let score: Vec<f32> = self.candidates.iter().zip(&own).map(|(c, o)| if compare { c.level_db + o } else { c.peak_db + o }).collect();
         // The threshold where the share alone (the classifier the kit tests hold) would put it:
         // the cut through the scores that disagrees with it least, a real hit cut counting
         // twice; Sensitivity moves it ±24 dB from there.
@@ -399,7 +414,8 @@ impl TrackDetection {
         // Alone, the shares tell little apart in level, and imitating them imports their
         // mistakes: the widest gap in the scores under the loud hits (as a gate's auto
         // threshold would), if there is a clear one.
-        let auto = if compare { None } else { widest_gap(&score, (self.loud_db() - ALONE_GAP_RANGE_DB.0, self.loud_db() - ALONE_GAP_RANGE_DB.1)) }.unwrap_or_else(|| threshold(&score, &labels));
+        let loud_peak = self.loud_peak_db();
+        let auto = if compare { None } else { widest_gap(&score, (loud_peak - ALONE_GAP_RANGE_DB.0, loud_peak - ALONE_GAP_RANGE_DB.1)) }.unwrap_or_else(|| threshold(&score, &labels));
         let threshold = auto - (s.sensitivity.clamp(0.0, 1.0) - 0.5) * 2.0 * SENSITIVITY_DB;
         let mut hits: Vec<Hit> = self
             .candidates
@@ -414,7 +430,9 @@ impl TrackDetection {
                     end: usize::MAX,
                     level_db: c.level_db,
                     dominance_db: o,
+                    peak_db: c.peak_db,
                     score_db: sc,
+                    threshold_db: threshold,
                     confidence,
                     kept: sc >= threshold,
                     forced: false,
@@ -441,7 +459,9 @@ impl TrackDetection {
                         end: usize::MAX,
                         level_db: self.env_db.get(k).copied().unwrap_or(-150.0),
                         dominance_db: 0.0,
+                        peak_db: self.env_db.get(k).copied().unwrap_or(-150.0),
                         score_db: 0.0,
+                        threshold_db: threshold,
                         confidence: 1.0,
                         kept: true,
                         forced: true,
@@ -507,6 +527,13 @@ impl TrackDetection {
             }
         }
         hits
+    }
+
+    /// The track's loud hits' peak (the median of its loudest [`OWN_SHARE`]), dBFS.
+    fn loud_peak_db(&self) -> f32 {
+        let mut p: Vec<f32> = self.candidates.iter().map(|c| c.peak_db).collect();
+        p.sort_by(|a, b| b.total_cmp(a));
+        p.get(((p.len() as f32 * OWN_SHARE) as usize / 2).min(p.len().saturating_sub(1))).copied().unwrap_or(0.0)
     }
 
     /// The track's loud hits' level (the median of its loudest [`OWN_SHARE`]), dB.
@@ -1243,10 +1270,12 @@ fn candidates(x: &[f32], fs: f32, bands: &mut Bands) -> Vec<Candidate> {
             continue; // a ring or a tail moving, nothing new
         }
         let near = bands.near(x, onset);
+        let top = x[onset..(onset + (PEAK_S * fs) as usize).min(x.len())].iter().fold(0.0f32, |m, v| m.max(v.abs()));
         out.push(Candidate {
             onset,
             peak,
             level_db: 0.0,
+            peak_db: 20.0 * top.max(1e-9).log10(),
             power,
             near,
             others: Vec::new(),
