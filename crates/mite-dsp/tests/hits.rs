@@ -8,7 +8,7 @@
 //! and the snare's bleed in a fill is cut; a kick's sweep through the tom's band reads at the
 //! boundary; undamped toms beating swell above the floor for a moment, and are kept.
 
-use mite_dsp::hits::{Curve, Hit, Override, Role, Settings, detect};
+use mite_dsp::hits::{Curve, Hit, Override, Role, Settings, detect, detect_linked, link};
 
 const FS: f32 = 48_000.0;
 
@@ -516,4 +516,97 @@ fn sensitivity_cuts_in_order_of_how_loud_the_drum_is_in_each_hit() {
         }
         println!("{name}: in order at every sensitivity");
     }
+}
+
+/// A kit with two mics on the kick (in; sub, hearing only the lows) and two on the snare (top;
+/// bottom, its polarity inverted, more of the kick): kick in, kick sub, snare top, snare bottom,
+/// tom 1, tom 2, hat.
+fn kit_two_mics(seed: u32) -> (Vec<Vec<f32>>, Truth) {
+    let drums = [Drum::Kick, Drum::Snare, Drum::Tom1, Drum::Tom2, Drum::Hat];
+    let bleed: [[f32; 5]; 7] = [
+        [1.0, 0.25, 0.15, 0.2, 0.05],
+        [1.2, 0.12, 0.15, 0.25, 0.0],
+        [0.2, 1.0, 0.3, 0.25, 0.4],
+        [0.35, -0.8, 0.25, 0.2, 0.15],
+        [0.2, 0.55, 1.0, 0.4, 0.3],
+        [0.25, 0.5, 0.4, 1.0, 0.25],
+        [0.05, 0.4, 0.15, 0.1, 1.0],
+    ];
+    let delay_ms = [[0.0, 2.0, 2.5, 2.2, 3.0], [0.8, 2.6, 3.0, 2.6, 3.4], [2.0, 0.0, 1.4, 2.0, 1.2], [1.6, 0.4, 1.6, 2.0, 1.6], [2.5, 1.4, 0.0, 1.0, 1.8], [2.2, 2.0, 1.0, 0.0, 2.6], [3.0, 1.2, 1.8, 2.6, 0.0]];
+    // The sub mic: a low-pass at 150 Hz on all it hears.
+    let lows = [None, Some(150.0f32), None, None, None, None, None];
+    let mut r = Rng(seed);
+    let p = pattern(&mut r);
+    let n = (42.0 * FS) as usize;
+    let mut mics = vec![vec![0.0f32; n]; 7];
+    for &(d, at, v) in &p {
+        let di = drums.iter().position(|&x| x == d).unwrap();
+        let dry = voice(d, v, &mut r);
+        for m in 0..7 {
+            let own = matches!((m, di), (0 | 1, 0) | (2 | 3, 1) | (4, 2) | (5, 3) | (6, 4));
+            let g = bleed[m][di] * if own { 1.0 } else { 10f32.powf(1.5 * r.bi() / 20.0) };
+            if g == 0.0 {
+                continue;
+            }
+            let off = at + (delay_ms[m][di] * 1e-3 * FS) as usize;
+            let cut = lows[m].unwrap_or(if own { 24_000.0 } else { 2500.0 });
+            let k = 1.0 - (-std::f32::consts::TAU * cut / FS).exp();
+            let mut s = 0.0f32;
+            for (i, &x) in dry.iter().enumerate() {
+                s += k * (x - s);
+                if off + i < n {
+                    mics[m][off + i] += g * s;
+                }
+            }
+        }
+    }
+    for m in &mut mics {
+        for v in m.iter_mut() {
+            *v += 3e-4 * r.bi();
+        }
+    }
+    (mics, p)
+}
+
+#[test]
+fn two_mics_on_one_drum_decide_together_and_open_together() {
+    // (User, 2026-11-27: "i have kick in and kick sub so that they enhance each other in a clear
+    // everything else way … also for snare top vs snare bot".)
+    let roles = [Role::Kick, Role::Kick, Role::Snare, Role::Snare, Role::Tom, Role::Tom, Role::Hat];
+    let names = ["kick in", "kick sub", "snare top", "snare bottom"];
+    let mut summary = Vec::new();
+    for seed in [91, 7, 3] {
+        let (mics, truth) = kit_two_mics(seed);
+        let tracks: Vec<(&[f32], Role)> = mics.iter().zip(roles).map(|(m, r)| (m.as_slice(), r)).collect();
+        let s = Settings::default();
+        // Each mic its own drum (as before): the kick in reads the sub's kick as bleed.
+        let apart = detect(&tracks, FS);
+        let apart_scores: Vec<Score> = (0..4).map(|i| {
+            let hits = apart[i].hits(&s, &[]);
+            score(&hits, &apart[i].curve(&hits, &s), &truth, if i < 2 { Drum::Kick } else { Drum::Snare })
+        }).collect();
+        // One drum each: decided together.
+        let det = detect_linked(&tracks, &[0, 0, 1, 1, 2, 3, 4], FS);
+        for (pair, drum) in [([0usize, 1], Drum::Kick), ([2, 3], Drum::Snare)] {
+            let mut hits: Vec<Vec<Hit>> = pair.iter().map(|&i| det[i].hits(&s, &[])).collect();
+            link(&mut hits, FS);
+            let curves: Vec<Curve> = pair.iter().zip(&hits).map(|(&i, h)| det[i].curve(h, &s)).collect();
+            for (k, &i) in pair.iter().enumerate() {
+                let sc = score(&hits[k], &curves[k], &truth, drum);
+                let was = &apart_scores[i];
+                println!("kit {seed} {}: apart precision {:.3} sounding {:.3} → together precision {:.3} sounding {:.3}", names[i], was.precision, was.sounding, sc.precision, sc.sounding);
+                for n in sc.notes.iter().filter(|n| n.contains("CUT") || n.contains("false")).take(4) {
+                    println!("  {n}");
+                }
+                assert!(sc.sounding >= 0.99, "kit {seed} {}: real hits cut", names[i]);
+                assert!(sc.precision >= 0.95, "kit {seed} {}: precision {:.3}", names[i], sc.precision);
+                summary.push((sc.precision, sc.sounding));
+            }
+            // They open and close together: the same regions on both mics.
+            let a: Vec<(usize, usize)> = curves[0].regions().collect();
+            let b: Vec<(usize, usize)> = curves[1].regions().collect();
+            assert_eq!(a, b, "kit {seed}: {} and {} cut differently", names[pair[0]], names[pair[1]]);
+        }
+    }
+    println!("{summary:?}");
 }

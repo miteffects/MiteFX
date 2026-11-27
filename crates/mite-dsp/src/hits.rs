@@ -87,6 +87,8 @@ const ALONE_BOUNDARY_DB: f32 = -6.0;
 const LIKENESS_BAND: f32 = 0.3;
 /// Sensitivity moves the threshold this far either way, dB.
 const SENSITIVITY_DB: f32 = 24.0;
+/// One drum's mics: hits this close are one hit (mic-to-mic distance, onset spread), s.
+const LINK_S: f32 = 0.008;
 /// A hit's peak is its largest sample this long from its onset, s.
 const PEAK_S: f32 = 0.03;
 /// Alone, the auto threshold: a gap at least this wide, dB, between this far under the loud hits
@@ -289,6 +291,9 @@ pub struct Hit {
     pub forced: bool,
     /// Not kept as a hit of its own, but inside a louder kept hit's ring: it sounds.
     pub inside: bool,
+    /// Decided with the drum's other mics ([`link`]); with no `score_db` of its own (`-inf`),
+    /// heard only on them.
+    pub linked: bool,
 }
 
 /// The user's hand on one hit: found again by position after every re-detection.
@@ -303,6 +308,13 @@ pub struct Override {
 /// Every track's candidates and bleed model. `tracks`: each mono, with its role; the same rate
 /// and timeline (sample 0 is the same moment in each).
 pub fn detect(tracks: &[(&[f32], Role)], fs: f32) -> Vec<TrackDetection> {
+    let drums: Vec<usize> = (0..tracks.len()).collect();
+    detect_linked(tracks, &drums, fs)
+}
+
+/// [`detect`], with each track's drum: tracks of one drum (kick in and kick sub, snare top and
+/// bottom) are not each other's bleed. Their hits are decided together by [`link`].
+pub fn detect_linked(tracks: &[(&[f32], Role)], drums: &[usize], fs: f32) -> Vec<TrackDetection> {
     let mut bands = Bands::new(fs);
     let mut dets: Vec<TrackDetection> = tracks
         .iter()
@@ -327,7 +339,7 @@ pub fn detect(tracks: &[(&[f32], Role)], fs: f32) -> Vec<TrackDetection> {
             }
         })
         .collect();
-    compare(&mut dets, tracks, fs, &mut bands);
+    compare(&mut dets, tracks, drums, fs, &mut bands);
     learn_gains_seed(&mut dets);
     let mut own = seed_own(&dets);
     learn_templates(&mut dets, &own);
@@ -441,6 +453,7 @@ impl TrackDetection {
                     kept: sc >= threshold,
                     forced: false,
                     inside: false,
+                    linked: false,
                 }
             })
             .collect();
@@ -470,6 +483,7 @@ impl TrackDetection {
                         kept: true,
                         forced: true,
                         inside: false,
+                        linked: false,
                     });
                     hits.len() - 1
                 }
@@ -678,6 +692,61 @@ impl TrackDetection {
     }
 }
 
+/// One drum's mics (kick in and kick sub; snare top and bottom), each's hits on one timeline,
+/// decided together: their hits within [`LINK_S`] of each other are one hit of the drum, kept
+/// if any mic keeps it (a hand's verdict on any mic wins), and every mic gets it, over the same
+/// stretch (the earliest start, the latest end): the drum's mics open and close together. A
+/// mic that found no hit there gets one (`linked`, no score of its own).
+pub fn link(members: &mut [Vec<Hit>], fs: f32) {
+    if members.len() < 2 {
+        return;
+    }
+    let reach = (LINK_S * fs) as usize;
+    let mut events: Vec<(usize, usize, usize)> = members.iter().enumerate().flat_map(|(m, v)| v.iter().enumerate().filter(|(_, h)| !h.inside).map(move |(i, h)| (h.onset, m, i))).collect();
+    events.sort_unstable();
+    let mut clusters: Vec<Vec<(usize, usize, usize)>> = Vec::new();
+    for e in events {
+        match clusters.last_mut() {
+            Some(c) if e.0 <= c[0].0 + reach => c.push(e),
+            _ => clusters.push(vec![e]),
+        }
+    }
+    let thresholds: Vec<f32> = members.iter().map(|v| v.first().map_or(0.0, |h| h.threshold_db)).collect();
+    let mut added: Vec<Vec<Hit>> = vec![Vec::new(); members.len()];
+    for c in clusters {
+        let hs: Vec<Hit> = c.iter().map(|&(_, m, i)| members[m][i]).collect();
+        let by_hand: Vec<&Hit> = hs.iter().filter(|h| h.forced).collect();
+        let keep = if by_hand.is_empty() { hs.iter().any(|h| h.kept) } else { by_hand.iter().any(|h| h.kept) };
+        let best = hs.iter().copied().max_by(|a, b| (a.score_db - a.threshold_db).total_cmp(&(b.score_db - b.threshold_db))).expect("a hit");
+        let start = hs.iter().map(|h| h.start).min().unwrap_or(best.start);
+        let end = hs.iter().map(|h| h.end).max().unwrap_or(best.end);
+        let onset = hs.iter().map(|h| h.onset).min().unwrap_or(best.onset);
+        let shared = c.len() > 1 || members.len() > 1;
+        for m in 0..members.len() {
+            match c.iter().find(|e| e.1 == m) {
+                Some(&(_, _, i)) => {
+                    let h = &mut members[m][i];
+                    h.kept = keep;
+                    h.linked = shared;
+                    if keep {
+                        h.start = start;
+                        h.end = end;
+                    }
+                    if !h.forced {
+                        h.confidence = best.confidence;
+                    }
+                }
+                None if keep => added[m].push(Hit { onset, peak: onset, start, end, level_db: f32::NEG_INFINITY, dominance_db: 0.0, peak_db: f32::NEG_INFINITY, score_db: f32::NEG_INFINITY, threshold_db: thresholds[m], confidence: best.confidence, kept: true, forced: false, inside: false, linked: true }),
+                None => {}
+            }
+        }
+    }
+    for (v, a) in members.iter_mut().zip(added) {
+        v.extend(a);
+        v.sort_by_key(|h| h.onset);
+    }
+}
+
 /// Kept regions as gain, read by the player block by block without allocating.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Curve {
@@ -874,13 +943,13 @@ fn seed_own(dets: &[TrackDetection]) -> Vec<Vec<usize>> {
 
 /// Every cutting track's candidates: what every other cutting track adds there, all it sounds
 /// there, and how much earlier it heard an onset.
-fn compare(dets: &mut [TrackDetection], tracks: &[(&[f32], Role)], fs: f32, bands: &mut Bands) {
+fn compare(dets: &mut [TrackDetection], tracks: &[(&[f32], Role)], drums: &[usize], fs: f32, bands: &mut Bands) {
     for t in 0..tracks.len() {
         if !tracks[t].1.cuts() {
             continue;
         }
         let compared: Vec<usize> = (0..tracks.len())
-            .filter(|&o| o != t && tracks[o].1.cuts())
+            .filter(|&o| o != t && tracks[o].1.cuts() && drums.get(o) != drums.get(t))
             .collect();
         let others: Vec<Vec<([f32; BANDS], f32)>> = dets[t]
             .candidates

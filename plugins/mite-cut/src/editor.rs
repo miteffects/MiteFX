@@ -359,7 +359,11 @@ impl CutView {
             _ => "passes".to_owned(),
         };
         cx.text.draw(cx.scene, &note, 14.0, r.y0 + 29.0, TextStyle::BODY.sized(10.0), theme.text_lo, Align::Left);
-        if cuts && t.compared == 0 && r.height() >= 58.0 {
+        if cuts && !t.linked.is_empty() && r.height() >= 58.0 {
+            cx.begin_clip(&Rect::new(10.0, r.y0, NAMES_W - 6.0, r.y1));
+            cx.text.draw(cx.scene, &format!("with {}", t.linked.join(", ")), 14.0, r.y0 + 43.0, TextStyle::BODY.sized(10.0), theme.accent, Align::Left);
+            cx.end_clip();
+        } else if cuts && t.compared == 0 && r.height() >= 58.0 {
             cx.text.draw(cx.scene, "judged alone", 14.0, r.y0 + 43.0, TextStyle::BODY.sized(10.0), theme.warn, Align::Left);
         }
         // The waveform (scaled to the track's loudest peak): dim all of it, lit where the cut
@@ -450,12 +454,16 @@ impl CutView {
                 let state = if h.forced { "set by hand" } else if h.kept { "kept" } else { "cut" };
                 let action = if h.kept { "click: cut it" } else { "click: keep it" };
                 let back = if h.forced { " · double-click: as detected" } else { "" };
+                if h.linked && h.score_db == f32::NEG_INFINITY {
+                    return Help::default().text(format!("A hit heard on this drum's other mic, {state} with it · {action}{back}"));
+                }
                 let over = h.score_db - h.threshold_db;
                 let bleed = if h.dominance_db < -0.5 { format!(" ({:.1} dB of it bleed)", -h.dominance_db) } else { String::new() };
                 Help::default().text(format!("A hit, {state} · peaks {:.1} dBFS{bleed}, {:.1} dB {} the threshold · {action}{back}", h.peak_db, over.abs(), if over >= 0.0 { "over" } else { "under" }))
             }
             Hot::Chip(_) => Help::default().text("The track's role: click for the next, Shift-click for the one before · OH and Room are never cut, Off passes"),
             Hot::Name(row) if tracks.get(row).is_some_and(|t| t.role.cuts() && t.compared == 0) => Help::default().text("Judged alone, by its own sound: no other drum track has Mite Cut. Put it on the kit's other tracks (kick, snare, toms, hats) and each is judged against the others"),
+            Hot::Name(row) if tracks.get(row).is_some_and(|t| !t.linked.is_empty()) => Help::default().text(format!("One drum with {}: each hit is decided on all its mics together (kept if any mic keeps it) and they open and close together · click to tune this track", tracks[row].linked.join(", "))),
             Hot::Name(_) => Help::default().text("Click to tune this track with the dials below"),
             Hot::Lane(..) => Help::default().text("Wheel: zoom · drag: pan · double-click: add a hit here (where none was found)"),
             Hot::Ruler => Help::default().text("Wheel: zoom · drag: pan · double-click: the whole song"),

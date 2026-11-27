@@ -763,6 +763,18 @@ of it is bleed, how far over or under the threshold.
 untouched it follows the automatic one (AUTO under it), turned it is set by hand
 (`Settings::threshold_db`, saved with the track), double-click: automatic again.
 
+**One drum, several mics (2026-11-27, user: "kick in and kick sub so that they enhance each
+other … also for snare top vs snare bot"):** each mic had been its own drum, so a kick in read
+the sub's kick as bleed (on a test kit with both, the kick in cut every kick; the snare bottom,
+every snare). Now tracks of one drum (`session::drum_of`: every kick track one kick, every
+snare one snare, every hat one hat; toms and cymbals by name less the mic's words, "Tom 1 Top"
+with "Tom 1 Bot") are not each other's bleed (`hits::detect_linked`), and `hits::link` decides
+each hit on all of them together: kept if any mic keeps it (a hand's verdict wins), the same
+stretch on every mic (the earliest start, the latest end), a mic that heard no onset there
+given the hit too. Kick in + sub, snare top + bottom: every hit kept on both, precision 0.98 and
+up, identical regions. A hit kept or cut by hand on one mic is on all of them (at the same song
+time). The lane says "with Kick Sub".
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

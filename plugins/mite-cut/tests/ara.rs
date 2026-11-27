@@ -292,3 +292,64 @@ fn only_the_kick_track_has_it_and_still_drops_the_snares_bleed() {
     let ratio = peak(&out, at) / peak(&mics[0], at);
     assert!((ratio - 0.1).abs() < 0.01, "floor −20 dB: {ratio}");
 }
+
+#[test]
+fn the_drum_a_track_mics() {
+    use mite_cut::session::drum_of;
+    assert_eq!(drum_of(Role::Kick, "Kick In", 1), drum_of(Role::Kick, "Kick Sub", 2));
+    assert_eq!(drum_of(Role::Snare, "Snare Top", 1), drum_of(Role::Snare, "Snr Bot", 2));
+    assert_eq!(drum_of(Role::Tom, "Tom 1 Top", 1), drum_of(Role::Tom, "Tom 1 Bot", 2));
+    assert_ne!(drum_of(Role::Tom, "Tom 1", 1), drum_of(Role::Tom, "Tom 2", 2));
+    assert_ne!(drum_of(Role::Tom, "Rack Tom", 1), drum_of(Role::Tom, "Floor Tom", 2));
+    assert_ne!(drum_of(Role::Overhead, "OH L", 1), drum_of(Role::Overhead, "OH L", 2));
+}
+
+#[test]
+fn kick_in_and_sub_snare_top_and_bottom_cut_as_one_drum_each() {
+    let (mics, truth) = kit_two_mics(91);
+    let names = ["Kick In", "Kick Sub", "Snare Top", "Snare Bot", "Tom 1", "Tom 2", "HH"];
+    let mut host = TestHost::new(mite_ara::factory(&mite_cut::ara::INFO));
+    let mut regions = Vec::new();
+    for (i, (m, name)) in mics.iter().zip(names).enumerate() {
+        let seq = host.add_track(name);
+        let dur = m.len() as f64 / f64::from(FS);
+        let (_s, _m, rg) = host.add_clip_to(seq, Audio { fs: f64::from(FS), l: m.clone(), r: m.clone() }, mite_ara::document::leak(&format!("two-src-{i}")), mite_ara::document::leak(&format!("two-mod-{i}")), 0.0, 0.0, dur);
+        regions.push(rg);
+    }
+    let s = Session::new();
+    s.set_sample_rate(FS);
+    let inst = unsafe { mite_ara::bind(host.dc, 7, 7) };
+    host.give(inst.extension(), regions[0]);
+    assert!(inst.document.wait_reads(Duration::from_secs(20)));
+    s.bind_ara(inst);
+    assert!(s.wait_idle(Duration::from_secs(60)));
+    let tracks = s.tracks();
+    let get = |n: &str| tracks.iter().find(|t| t.name == n).cloned().expect(n);
+    assert_eq!(get("Kick In").linked, ["Kick Sub"]);
+    assert_eq!(get("Snare Bot").linked, ["Snare Top"]);
+    assert!(get("Tom 1").linked.is_empty());
+    for (a, b, drum) in [("Kick In", "Kick Sub", Drum::Kick), ("Snare Top", "Snare Bot", Drum::Snare)] {
+        let (ta, tb) = (get(a), get(b));
+        let ra: Vec<(usize, usize)> = ta.clips[0].curve.regions().collect();
+        let rb: Vec<(usize, usize)> = tb.clips[0].curve.regions().collect();
+        assert_eq!(ra, rb, "{a} and {b} open together");
+        // Every hit of the drum sounds, on both.
+        for t in truth.iter().filter(|t| t.0 == drum) {
+            assert!(ta.clips[0].curve.at(t.1 + 300) > 0.99, "{a}: a hit at {} cut", t.1);
+        }
+        let open = truth.iter().filter(|t| t.0 != drum && !truth.iter().any(|u| u.0 == drum && u.1.abs_diff(t.1) < (0.5 * FS) as usize)).filter(|t| ta.clips[0].curve.at(t.1 + 300) > 0.5).count();
+        println!("{a} + {b}: {} regions, other drums open away from its hits: {open}", ra.len());
+    }
+    // A hit cut by hand on one mic is cut on both.
+    let sub = get("Kick Sub");
+    let h = *sub.clips[0].hits.iter().find(|h| h.kept && !h.inside).expect("a kept kick");
+    s.set_override(sub.clips[0].modification, mite_cut::session::OverrideState { at: h.onset, keep: Some(false), start: None, end: None });
+    assert!(s.wait_idle(Duration::from_secs(60)));
+    s.sync_ara();
+    assert!(s.wait_idle(Duration::from_secs(60)));
+    let tracks = s.tracks();
+    for n in ["Kick In", "Kick Sub"] {
+        let t = tracks.iter().find(|t| t.name == n).expect(n);
+        assert!(t.clips[0].curve.at(h.onset + 300) < 1e-3, "{n}: the hit cut by hand still sounds");
+    }
+}

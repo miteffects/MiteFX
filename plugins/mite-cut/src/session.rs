@@ -19,7 +19,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
 
 use mite_core::Handover;
-use mite_dsp::hits::{Curve, Hit, Override, Role, Settings, TrackDetection, detect};
+use mite_dsp::hits::{Curve, Hit, Override, Role, Settings, TrackDetection, detect_linked, link};
 use mite_dsp::resample::SincTable;
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +37,9 @@ pub struct Track {
     pub settings: Settings,
     /// How many other tracks it was judged against (0: alone, by its own sound only).
     pub compared: usize,
+    /// The other tracks miking the same drum (kick in with kick sub): their hits are decided
+    /// together and they open together.
+    pub linked: Vec<String>,
     /// Its clips' hits (kept or not), each clip's in its own samples.
     pub clips: Vec<Clip>,
 }
@@ -438,10 +441,12 @@ struct Unit {
     song_s: f64,
     role: Role,
     state: ModState,
+    /// Which drum it is (its mics share it: see [`drum_of`]).
+    drum: String,
 }
 
-/// What a detection ran on: (source, its audio, role, its song start in samples, rate).
-type DetKey = Vec<(u64, usize, Role, i64, u64)>;
+/// What a detection ran on: (source, its audio, role, its song start in samples, rate, drum).
+type DetKey = Vec<(u64, usize, Role, i64, u64, String)>;
 
 /// A detection over a document's clips: per clip (by source), its detection and how many
 /// samples it was padded in front.
@@ -469,7 +474,7 @@ fn slot_of(doc: &Arc<mite_ara::Document>) -> Slot {
 }
 
 fn key_of(units: &[Unit]) -> DetKey {
-    let mut k: DetKey = units.iter().map(|u| (u.source, Arc::as_ptr(&u.audio) as usize, u.role, (u.song_s * u.fs).round() as i64, u.fs.to_bits())).collect();
+    let mut k: DetKey = units.iter().map(|u| (u.source, Arc::as_ptr(&u.audio) as usize, u.role, (u.song_s * u.fs).round() as i64, u.fs.to_bits(), u.drum.clone())).collect();
     k.sort_unstable_by_key(|e| e.0);
     k.dedup_by_key(|e| e.0);
     k
@@ -506,7 +511,10 @@ fn run_detection(units: &[Unit], key: DetKey) -> Detected {
             })
             .collect();
         let tracks: Vec<(&[f32], Role)> = padded.iter().zip(&group).map(|((_, a), u)| (a.as_ref(), u.role)).collect();
-        let dets = detect(&tracks, f64::from_bits(rate) as f32);
+        // Mics of one drum are not each other's bleed.
+        let names: Vec<&String> = group.iter().map(|u| &u.drum).collect();
+        let drums: Vec<usize> = names.iter().map(|n| names.iter().position(|m| m == n).unwrap_or(0)).collect();
+        let dets = detect_linked(&tracks, &drums, f64::from_bits(rate) as f32);
         for ((d, (pad, _)), u) in dets.into_iter().zip(&padded).zip(&group) {
             per_source.insert(u.source, (Arc::new(d), *pad));
         }
@@ -514,18 +522,40 @@ fn run_detection(units: &[Unit], key: DetKey) -> Detected {
     Detected { key, per_source }
 }
 
-/// A clip's hits and cut: `det`'s reading under `settings` with the clip's overrides, moved
-/// from the padded timeline to the clip's samples.
-fn cut_of(det: &TrackDetection, pad: usize, settings: &Settings, overrides: &[Override], len: usize, fs: f64) -> (Vec<Hit>, Curve) {
-    if !det.role.cuts() {
-        // Off, overheads, room: they pass as they are.
+/// A clip's hits as `det` reads them under `settings` with the clip's overrides, on the padded
+/// timeline its detection ran on.
+fn padded_hits(det: &TrackDetection, pad: usize, settings: &Settings, overrides: &[Override]) -> Vec<Hit> {
+    let shifted: Vec<Override> = overrides.iter().map(|o| Override { at: o.at + pad, start: o.start.map(|v| v + pad), end: o.end.map(|v| v + pad), keep: o.keep }).collect();
+    det.hits(settings, &shifted)
+}
+
+/// Hits on the padded timeline moved to the clip's samples, and its cut. A role that does not
+/// cut (Off, overheads, room) passes as it is.
+fn clip_cut(role: Role, hits: Vec<Hit>, pad: usize, settings: &Settings, len: usize, fs: f64) -> (Vec<Hit>, Curve) {
+    if !role.cuts() {
         return (Vec::new(), Curve::new(&[], &Settings { floor_db: 0.0, ..*settings }, fs as f32));
     }
-    let shifted: Vec<Override> = overrides.iter().map(|o| Override { at: o.at + pad, start: o.start.map(|v| v + pad), end: o.end.map(|v| v + pad), keep: o.keep }).collect();
     let back = |v: usize| v.saturating_sub(pad).min(len);
-    let hits: Vec<Hit> = det.hits(settings, &shifted).into_iter().filter(|h| h.onset >= pad).map(|h| Hit { onset: back(h.onset), peak: back(h.peak), start: back(h.start), end: back(h.end), ..h }).collect();
+    let hits: Vec<Hit> = hits.into_iter().filter(|h| h.onset >= pad).map(|h| Hit { onset: back(h.onset), peak: back(h.peak), start: back(h.start), end: back(h.end), ..h }).collect();
     let curve = Curve::new(&hits, settings, fs as f32);
     (hits, curve)
+}
+
+/// Which drum a track is, by its role and name: every kick track is the kick (in, out, sub),
+/// every snare the snare (top, bottom), every hat the hat; toms and cymbals are told apart by
+/// their names less the words naming the mic ("Tom 1 Top" and "Tom 1 Bot" are one drum, "Tom
+/// 1" and "Tom 2" two). Tracks that do not cut are each their own.
+pub fn drum_of(role: Role, name: &str, id: u64) -> String {
+    match role {
+        Role::Kick | Role::Snare | Role::Hat => role.name().to_owned(),
+        Role::Tom | Role::Cymbal => {
+            const MIC: [&str; 16] = ["top", "bot", "btm", "bottom", "in", "out", "sub", "inside", "outside", "up", "down", "dn", "under", "over", "reso", "batter"];
+            let lower = name.to_lowercase();
+            let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty() && !MIC.contains(w)).collect();
+            format!("{}:{}", role.name(), words.join(" "))
+        }
+        _ => format!("track:{id}"),
+    }
 }
 
 /// A clip's cut: the state (and role) it was read with, its hits, its curve.
@@ -547,6 +577,8 @@ struct AraState {
     /// Each clip's waveform, with the audio it came from.
     peaks: HashMap<u64, (Arc<Vec<f32>>, Peaks)>,
     renders: bool,
+    /// Each clip's drum, where its sample 0 is on the song (s) and its rate.
+    clips: HashMap<u64, (String, f64, f64)>,
 }
 
 impl AraState {
@@ -575,7 +607,8 @@ impl AraState {
             let state = ModState::parse(&md.state);
             let name = model.sequences.get(&r.sequence).cloned().unwrap_or_default();
             let role = state.role().unwrap_or_else(|| guess_role(&name));
-            units.push(Unit { modification: md.id, source: src.id, sequence: r.sequence, audio, fs: src.sample_rate, song_s: r.start_in_playback - r.start_in_modification, role, state });
+            let drum = drum_of(role, &name, r.sequence);
+            units.push(Unit { modification: md.id, source: src.id, sequence: r.sequence, audio, fs: src.sample_rate, song_s: r.start_in_playback - r.start_in_modification, role, state, drum });
         }
         if pending && units.is_empty() {
             s.lock().status = Status::Reading;
@@ -603,23 +636,39 @@ impl AraState {
             self.cuts.clear();
         }
         let det = self.detected.clone().expect("detected");
-        // Each clip's cut.
+        // Each clip's cut, the mics of one drum together (their states are its key: one of
+        // them edited, all of them are read again).
         let mut changed = false;
+        let settings_of = |u: &Unit| -> Settings { units.iter().filter(|v| v.sequence == u.sequence).find_map(|v| v.state.settings).map(Settings::from).unwrap_or_default() };
+        let mut done: Vec<u64> = Vec::new();
         for u in &units {
-            let Some((d, pad)) = det.per_source.get(&u.source) else { continue };
-            let state_json = u.state.to_json() + u.role.name();
-            if self.cuts.get(&u.modification).is_some_and(|c| c.0 == state_json) {
+            if done.contains(&u.modification) {
                 continue;
             }
-            // The track's settings are any of its clips' (they are kept alike).
-            let settings: Settings = units.iter().filter(|v| v.sequence == u.sequence).find_map(|v| v.state.settings).map(Settings::from).unwrap_or_default();
-            // (The detection ran with this role: the role is in its key.)
-            let (hits, curve) = cut_of(d, *pad, &settings, &u.state.overrides(), u.audio.len(), u.fs);
-            self.cuts.insert(u.modification, (state_json, Arc::new(hits), Arc::new(curve)));
+            // The drum's mics on this clip's timeline (one rate).
+            let members: Vec<&Unit> = units.iter().filter(|v| v.drum == u.drum && v.fs.to_bits() == u.fs.to_bits() && det.per_source.contains_key(&v.source)).collect();
+            done.extend(members.iter().map(|v| v.modification));
+            let key: String = members.iter().map(|v| format!("{}{}|{}", v.state.to_json(), v.role.name(), v.drum)).collect::<Vec<_>>().join("\n");
+            if members.iter().all(|v| self.cuts.get(&v.modification).is_some_and(|c| c.0 == key)) {
+                continue;
+            }
+            let mut hits: Vec<Vec<Hit>> = members.iter().map(|v| {
+                let (d, pad) = &det.per_source[&v.source];
+                padded_hits(d, *pad, &settings_of(v), &v.state.overrides())
+            }).collect();
+            if u.role.cuts() {
+                link(&mut hits, u.fs as f32);
+            }
+            for (v, h) in members.iter().zip(hits) {
+                let pad = det.per_source[&v.source].1;
+                let (h, curve) = clip_cut(v.role, h, pad, &settings_of(v), v.audio.len(), v.fs);
+                self.cuts.insert(v.modification, (key.clone(), Arc::new(h), Arc::new(curve)));
+            }
             changed = true;
         }
         self.cuts.retain(|m, _| units.iter().any(|u| u.modification == *m));
         self.audio = units.iter().map(|u| (u.modification, u.audio.clone())).collect();
+        self.clips = units.iter().map(|u| (u.modification, (u.drum.clone(), u.song_s, u.fs))).collect();
         self.peaks.retain(|m, _| units.iter().any(|u| u.modification == *m));
         // The tracks for the editor.
         let mut tracks: Vec<Track> = Vec::new();
@@ -640,9 +689,18 @@ impl AraState {
                     let name = model.sequences.get(&u.sequence).cloned().unwrap_or_default();
                     let settings = u.state.settings.map(Settings::from).unwrap_or_default();
                     let compared = det.per_source.get(&u.source).map_or(0, |(d, _)| d.compared.len());
-                    tracks.push(Track { sequence: u.sequence, guessed: u.state.role().is_none(), name, role: u.role, settings, compared, clips: vec![clip] });
+                    tracks.push(Track { sequence: u.sequence, guessed: u.state.role().is_none(), name, role: u.role, settings, compared, linked: Vec::new(), clips: vec![clip] });
                 }
             }
+        }
+        // The other mics of each track's drum.
+        let drums: Vec<(u64, String)> = units.iter().filter(|u| u.role.cuts()).map(|u| (u.sequence, u.drum.clone())).collect();
+        let names: Vec<(u64, String)> = tracks.iter().map(|t| (t.sequence, t.name.clone())).collect();
+        for t in &mut tracks {
+            let Some((_, d)) = drums.iter().find(|(q, _)| *q == t.sequence) else { continue };
+            let mut others: Vec<String> = drums.iter().filter(|(q, e)| e == d && *q != t.sequence).filter_map(|(q, _)| names.iter().find(|(n, _)| n == q).map(|(_, name)| name.clone())).collect();
+            others.dedup();
+            t.linked = others;
         }
         // Where each played region sits (the host's samples on the timeline, the clip's in it).
         self.host = host;
@@ -767,16 +825,31 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                     s.version.fetch_add(1, Ordering::AcqRel);
                 }
                 Job::Override(m, o) => {
-                    ara.write(
-                        &s,
-                        |r| r.modification == m,
-                        |st| {
-                            st.overrides.retain(|x| x.at.abs_diff(o.at) > 480);
-                            if o.keep.is_some() || o.start.is_some() || o.end.is_some() {
-                                st.overrides.push(o);
-                            }
-                        },
-                    );
+                    // On every mic of the clip's drum, at the same moment of the song.
+                    let targets: Vec<(u64, OverrideState)> = match ara.clips.get(&m).cloned() {
+                        Some((drum, song, fs)) => ara
+                            .clips
+                            .iter()
+                            .filter(|(_, c)| c.0 == drum)
+                            .map(|(&m2, &(_, song2, fs2))| {
+                                let to = |v: usize| ((song + v as f64 / fs - song2) * fs2).round().max(0.0) as usize;
+                                (m2, OverrideState { at: to(o.at), keep: o.keep, start: o.start.map(to), end: o.end.map(to) })
+                            })
+                            .collect(),
+                        None => vec![(m, o)],
+                    };
+                    for (m2, o2) in targets {
+                        ara.write(
+                            &s,
+                            |r| r.modification == m2,
+                            |st| {
+                                st.overrides.retain(|x| x.at.abs_diff(o2.at) > 480);
+                                if o2.keep.is_some() || o2.start.is_some() || o2.end.is_some() {
+                                    st.overrides.push(o2);
+                                }
+                            },
+                        );
+                    }
                     force = true;
                 }
             }

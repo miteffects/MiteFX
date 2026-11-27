@@ -157,3 +157,54 @@ pub fn kit(seed: u32) -> (Vec<Vec<f32>>, Truth) {
     (mics, p)
 }
 
+
+/// A kit with two mics on the kick (in; sub, hearing only the lows) and two on the snare (top;
+/// bottom, its polarity inverted, more of the kick): kick in, kick sub, snare top, snare bottom,
+/// tom 1, tom 2, hat.
+pub fn kit_two_mics(seed: u32) -> (Vec<Vec<f32>>, Truth) {
+    let drums = [Drum::Kick, Drum::Snare, Drum::Tom1, Drum::Tom2, Drum::Hat];
+    let bleed: [[f32; 5]; 7] = [
+        [1.0, 0.25, 0.15, 0.2, 0.05],
+        [1.2, 0.12, 0.15, 0.25, 0.0],
+        [0.2, 1.0, 0.3, 0.25, 0.4],
+        [0.35, -0.8, 0.25, 0.2, 0.15],
+        [0.2, 0.55, 1.0, 0.4, 0.3],
+        [0.25, 0.5, 0.4, 1.0, 0.25],
+        [0.05, 0.4, 0.15, 0.1, 1.0],
+    ];
+    let delay_ms = [[0.0, 2.0, 2.5, 2.2, 3.0], [0.8, 2.6, 3.0, 2.6, 3.4], [2.0, 0.0, 1.4, 2.0, 1.2], [1.6, 0.4, 1.6, 2.0, 1.6], [2.5, 1.4, 0.0, 1.0, 1.8], [2.2, 2.0, 1.0, 0.0, 2.6], [3.0, 1.2, 1.8, 2.6, 0.0]];
+    // The sub mic: a low-pass at 150 Hz on all it hears.
+    let lows = [None, Some(150.0f32), None, None, None, None, None];
+    let mut r = Rng(seed);
+    let p = pattern(&mut r);
+    let n = (42.0 * FS) as usize;
+    let mut mics = vec![vec![0.0f32; n]; 7];
+    for &(d, at, v) in &p {
+        let di = drums.iter().position(|&x| x == d).unwrap();
+        let dry = voice(d, v, &mut r);
+        for m in 0..7 {
+            let own = matches!((m, di), (0 | 1, 0) | (2 | 3, 1) | (4, 2) | (5, 3) | (6, 4));
+            let g = bleed[m][di] * if own { 1.0 } else { 10f32.powf(1.5 * r.bi() / 20.0) };
+            if g == 0.0 {
+                continue;
+            }
+            let off = at + (delay_ms[m][di] * 1e-3 * FS) as usize;
+            let cut = lows[m].unwrap_or(if own { 24_000.0 } else { 2500.0 });
+            let k = 1.0 - (-std::f32::consts::TAU * cut / FS).exp();
+            let mut s = 0.0f32;
+            for (i, &x) in dry.iter().enumerate() {
+                s += k * (x - s);
+                if off + i < n {
+                    mics[m][off + i] += g * s;
+                }
+            }
+        }
+    }
+    for m in &mut mics {
+        for v in m.iter_mut() {
+            *v += 3e-4 * r.bi();
+        }
+    }
+    (mics, p)
+}
+
