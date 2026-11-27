@@ -18,3 +18,6 @@ clap-sys.workspace = true
 nih_plug.workspace = true
 serde_json.workspace = true
 raw-window-handle.workspace = true
+
+[dev-dependencies]
+libloading = "0.8"
