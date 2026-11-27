@@ -174,6 +174,9 @@ pub struct Settings {
     /// 0…1: moves the threshold on each hit's score (how loud the drum's own part of it is)
     /// 24 dB either way of the automatic one (0.5): lower cuts more, the lowest scores first.
     pub sensitivity: f32,
+    /// The threshold on the scores, dB, set by hand (alone, a peak in dBFS); `None`: the
+    /// automatic one, moved by `sensitivity`.
+    pub threshold_db: Option<f32>,
     /// 0…1: how loud the other tracks' bleed is taken to be (0.5: as learned; each hit's may
     /// still be 6 dB louder or softer).
     pub bleed: f32,
@@ -195,6 +198,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             sensitivity: 0.5,
+            threshold_db: None,
             bleed: 0.5,
             pre_roll_ms: 2.0,
             fade_in_ms: 1.0,
@@ -416,7 +420,7 @@ impl TrackDetection {
         // threshold would), if there is a clear one.
         let loud_peak = self.loud_peak_db();
         let auto = if compare { None } else { widest_gap(&score, (loud_peak - ALONE_GAP_RANGE_DB.0, loud_peak - ALONE_GAP_RANGE_DB.1)) }.unwrap_or_else(|| threshold(&score, &labels));
-        let threshold = auto - (s.sensitivity.clamp(0.0, 1.0) - 0.5) * 2.0 * SENSITIVITY_DB;
+        let threshold = s.threshold_db.unwrap_or(auto - (s.sensitivity.clamp(0.0, 1.0) - 0.5) * 2.0 * SENSITIVITY_DB);
         let mut hits: Vec<Hit> = self
             .candidates
             .iter()

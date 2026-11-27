@@ -758,6 +758,11 @@ THRESH, dB from the automatic threshold (+ cuts more); alone, the threshold is d
 the waveform (scaled to the track's loudest peak), as a gate's. A hit's help: its peak, how much
 of it is bleed, how far over or under the threshold.
 
+**THRESH is the threshold itself (2026-11-27, user: "why would you limit fucking threshold to
+-24"):** −100 to 0 dB, showing the threshold the hits are read with (alone a peak in dBFS):
+untouched it follows the automatic one (AUTO under it), turned it is set by hand
+(`Settings::threshold_db`, saved with the track), double-click: automatic again.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

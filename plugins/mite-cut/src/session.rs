@@ -97,6 +97,9 @@ pub struct ModState {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct SettingsState {
     pub sensitivity: f32,
+    /// Set by hand, dB (none: automatic).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f32>,
     pub bleed: f32,
     pub pre_roll_ms: f32,
     pub fade_in_ms: f32,
@@ -110,13 +113,13 @@ pub struct SettingsState {
 
 impl From<Settings> for SettingsState {
     fn from(s: Settings) -> Self {
-        Self { sensitivity: s.sensitivity, bleed: s.bleed, pre_roll_ms: s.pre_roll_ms, fade_in_ms: s.fade_in_ms, hold_ms: s.hold_ms, release_db: s.release_db, fade_out_ms: s.fade_out_ms, floor_db: s.floor_db, min_gap_ms: s.min_gap_ms, min_length_ms: s.min_length_ms }
+        Self { sensitivity: s.sensitivity, threshold_db: s.threshold_db, bleed: s.bleed, pre_roll_ms: s.pre_roll_ms, fade_in_ms: s.fade_in_ms, hold_ms: s.hold_ms, release_db: s.release_db, fade_out_ms: s.fade_out_ms, floor_db: s.floor_db, min_gap_ms: s.min_gap_ms, min_length_ms: s.min_length_ms }
     }
 }
 
 impl From<SettingsState> for Settings {
     fn from(s: SettingsState) -> Self {
-        Self { sensitivity: s.sensitivity, bleed: s.bleed, pre_roll_ms: s.pre_roll_ms, fade_in_ms: s.fade_in_ms, hold_ms: s.hold_ms, release_db: s.release_db, fade_out_ms: s.fade_out_ms, floor_db: s.floor_db, min_gap_ms: s.min_gap_ms, min_length_ms: s.min_length_ms }
+        Self { sensitivity: s.sensitivity, threshold_db: s.threshold_db, bleed: s.bleed, pre_roll_ms: s.pre_roll_ms, fade_in_ms: s.fade_in_ms, hold_ms: s.hold_ms, release_db: s.release_db, fade_out_ms: s.fade_out_ms, floor_db: s.floor_db, min_gap_ms: s.min_gap_ms, min_length_ms: s.min_length_ms }
     }
 }
 

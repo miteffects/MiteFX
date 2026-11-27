@@ -63,7 +63,7 @@ const fn spec(id: &'static str, name: &'static str, unit: &'static str, min: f32
 
 // The selected track's tuning (`mite_dsp::hits::Settings`), on the editor's own dials: they
 // live with the track in the document, not in the host's parameters.
-const THRESH: ParamSpec = spec("threshold", "Threshold", "dB", -24.0, 24.0, 0.0, ParamScale::Linear, 1, ParamDisplay::Number);
+const THRESH: ParamSpec = spec("threshold", "Threshold", "dB", -100.0, 0.0, -40.0, ParamScale::Linear, 1, ParamDisplay::Number);
 const BLEED: ParamSpec = spec("bleed", "Bleed", "%", 0.0, 100.0, 50.0, ParamScale::Linear, 0, ParamDisplay::Number);
 const PRE_ROLL: ParamSpec = spec("pre_roll", "Pre-roll", "ms", 0.0, 20.0, 2.0, ParamScale::Linear, 1, ParamDisplay::Time);
 const HOLD: ParamSpec = spec("hold", "Hold", "ms", 0.0, 250.0, 10.0, ParamScale::Linear, 0, ParamDisplay::Time);
@@ -72,20 +72,35 @@ const FADE_OUT: ParamSpec = spec("fade_out", "Fade out", "ms", 1.0, 500.0, 40.0,
 const FLOOR: ParamSpec = spec("floor", "Floor", "dB", -80.0, 0.0, -80.0, ParamScale::Linear, 1, ParamDisplay::Number);
 const DIAL_SPECS: [ParamSpec; 7] = [THRESH, BLEED, PRE_ROLL, HOLD, RELEASE, FADE_OUT, FLOOR];
 
-fn settings_of(h: &MemoryParamHost) -> Settings {
+/// The dials' settings. `auto`: the automatic threshold the THRESH dial was put on (the track
+/// has none set by hand); the dial still there, it stays automatic.
+fn settings_of(h: &MemoryParamHost, auto: Option<f32>) -> Settings {
     let p = |s: &ParamSpec| h.plain(s.id, h.normalized(s.id));
-    let floor = p(&FLOOR);
-    Settings { sensitivity: 0.5 - p(&THRESH) / 48.0, bleed: p(&BLEED) / 100.0, pre_roll_ms: p(&PRE_ROLL), hold_ms: p(&HOLD), release_db: p(&RELEASE), fade_out_ms: p(&FADE_OUT), floor_db: floor, ..Settings::default() }
+    let thr = p(&THRESH);
+    let threshold_db = match auto {
+        Some(a) if (thr - a).abs() < 0.05 => None,
+        _ => Some(thr),
+    };
+    Settings { threshold_db, bleed: p(&BLEED) / 100.0, pre_roll_ms: p(&PRE_ROLL), hold_ms: p(&HOLD), release_db: p(&RELEASE), fade_out_ms: p(&FADE_OUT), floor_db: p(&FLOOR), ..Settings::default() }
 }
 
-fn load_settings(h: &MemoryParamHost, s: &Settings) {
-    h.set_plain(THRESH.id, (0.5 - s.sensitivity) * 48.0);
+/// Puts `s` on the dials, THRESH on `threshold` (what the track's hits read now); returns the
+/// automatic threshold shown, if the track has none set by hand.
+fn load_settings(h: &MemoryParamHost, s: &Settings, threshold: f32) -> Option<f32> {
+    h.set_plain(THRESH.id, s.threshold_db.unwrap_or(threshold).clamp(THRESH.min, THRESH.max));
     h.set_plain(BLEED.id, s.bleed * 100.0);
     h.set_plain(PRE_ROLL.id, s.pre_roll_ms);
     h.set_plain(HOLD.id, s.hold_ms);
     h.set_plain(RELEASE.id, s.release_db);
     h.set_plain(FADE_OUT.id, s.fade_out_ms);
     h.set_plain(FLOOR.id, s.floor_db.max(FLOOR.min));
+    s.threshold_db.is_none().then(|| h.plain(THRESH.id, h.normalized(THRESH.id)))
+}
+
+/// Settings equal but for a dial's rounding.
+fn alike(a: &Settings, b: &Settings) -> bool {
+    let v = |s: &Settings| [s.bleed, s.pre_roll_ms, s.hold_ms, s.release_db, s.fade_out_ms, s.floor_db.max(-80.0), s.threshold_db.unwrap_or(1.0)];
+    a.threshold_db.is_some() == b.threshold_db.is_some() && v(a).iter().zip(v(b)).all(|(x, y)| (x - y).abs() <= 1e-3 * (1.0 + x.abs()))
 }
 
 /// The plugin's parameters as a host in memory holds them (tests, snapshots): its two
@@ -95,10 +110,12 @@ pub fn memory_host() -> MemoryParamHost {
     MemoryParamHost::new().with(switch(BYPASS)).with(switch(REMOVED))
 }
 
-/// Settings equal but for a dial's rounding.
-fn alike(a: &Settings, b: &Settings) -> bool {
-    let v = |s: &Settings| [s.sensitivity, s.bleed, s.pre_roll_ms, s.hold_ms, s.release_db, s.fade_out_ms, s.floor_db.max(-80.0)];
-    v(a).iter().zip(v(b)).all(|(x, y)| (x - y).abs() <= 1e-3 * (1.0 + x.abs()))
+
+/// Where the THRESH dial is (the first of the dials; as `Footer::new` lays them out).
+fn thresh_dial() -> Rect {
+    let x = WIDTH - 84.0 - 92.0 * (DIAL_SPECS.len() - 1) as f64;
+    let y = HEIGHT - FOOTER - DIALS + 28.0;
+    Rect::new(x - 20.0, y - 20.0, x + 20.0, y + 20.0)
 }
 
 /// The next role (or the one before), as a click on the chip moves it.
@@ -134,6 +151,8 @@ pub struct CutView {
     /// The selected track (its sequence), and the settings last written to it.
     selected: Option<u64>,
     shown_settings: Option<(u64, Settings)>,
+    /// The automatic threshold THRESH shows (the selected track has none set by hand).
+    auto_shown: Option<f32>,
     /// Song time across the lanes, s; `None` until there is a song (then the whole of it).
     view: Option<(f64, f64)>,
     first_row: usize,
@@ -146,7 +165,7 @@ impl CutView {
     pub fn new(shared: Arc<CutShared>) -> Self {
         let local = DIAL_SPECS.iter().fold(MemoryParamHost::new(), |h, s| h.with(*s));
         let words = [
-            "The threshold (the line on the lanes), from the automatic one: a hit must peak over it in its own drum (less what of it is bleed); higher cuts more, lowest peaks first",
+            "The threshold: a hit must reach it in its own drum (alone: its peak, the line on the lane); higher cuts more, the lowest first · double-click: automatic",
             "How loud the other tracks' bleed is taken to be (more: cuts more of what they play)",
             "How long before each hit the cut opens",
             "How long a hit is held after it ends",
@@ -162,7 +181,7 @@ impl CutView {
             FooterToggle { id: BYPASS.id, glyph: ToggleGlyph::Bypass, words: "Bypass: every track as it is" },
         ];
         let footer = Footer::new(HEIGHT - FOOTER, (WIDTH, HEIGHT), toggles, Vec::new());
-        Self { shared, seen: u64::MAX, local, dials, footer, selected: None, shown_settings: None, view: None, first_row: 0, hot: Hot::None, pan: None }
+        Self { shared, seen: u64::MAX, local, dials, footer, selected: None, shown_settings: None, auto_shown: None, view: None, first_row: 0, hot: Hot::None, pan: None }
     }
 
     fn lane_h(&self, n: usize) -> f64 {
@@ -527,6 +546,10 @@ impl View for CutView {
                 cx.text.draw(cx.scene, &t.name, 14.0, top + 28.0, TextStyle::BODY.sized(13.0), theme.text_hi, Align::Left);
                 let mut sub = DrawCx { scene: &mut *cx.scene, theme: cx.theme, text: &mut *cx.text, host: &self.local, size: cx.size, fx: &mut *cx.fx };
                 self.dials.draw_controls(&mut sub);
+                if t.settings.threshold_db.is_none() {
+                    let r = thresh_dial();
+                    cx.text.draw(cx.scene, "AUTO", r.center().x + 22.0, r.center().y + 14.0, TextStyle::LABEL.sized(8.0), theme.text_lo, Align::Left);
+                }
             }
             _ => {
                 cx.text.draw(cx.scene, "Click a drum track's name to tune it", 14.0, top + 22.0, TextStyle::BODY.sized(12.0), theme.text_lo, Align::Left);
@@ -542,6 +565,16 @@ impl View for CutView {
     fn event(&mut self, event: &UiEvent, host: &dyn ParamHost) -> bool {
         let s = self.shared.session.clone();
         let tracks = s.tracks();
+        // A double-click on THRESH: back to the automatic threshold.
+        if let UiEvent::DoubleClick { pos, .. } = *event {
+            if thresh_dial().contains(pos) {
+                if let Some(t) = self.selected_track(&tracks).filter(|t| t.role.cuts()) {
+                    s.set_settings(t.sequence, Settings { threshold_db: None, ..t.settings });
+                    self.shown_settings = None;
+                    return true;
+                }
+            }
+        }
         if self.selected_track(&tracks).is_some_and(|t| t.role.cuts()) && self.dials.event(event, &self.local) {
             return true;
         }
@@ -653,27 +686,35 @@ impl View for CutView {
         if self.selected_track(&tracks).is_none() {
             self.selected = tracks.iter().find(|t| t.role.cuts()).or(tracks.first()).map(|t| t.sequence);
         }
-        // The dials follow the selected track; a turn writes to it.
+        // The dials follow the selected track; a turn writes to it. THRESH shows the threshold
+        // its hits are read with: the automatic one until turned.
         if let Some(t) = self.selected_track(&tracks) {
-            match self.shown_settings {
+            let current = t.clips.iter().flat_map(|c| c.hits.first()).map(|h| h.threshold_db).next().unwrap_or(THRESH.default);
+            let reload = match self.shown_settings {
                 Some((seq, shown)) if seq == t.sequence => {
-                    let now = settings_of(&self.local);
+                    // (Sensitivity is no dial now: an older session's stays as it was.)
+                    let now = Settings { sensitivity: t.settings.sensitivity, ..settings_of(&self.local, self.auto_shown) };
                     if now != shown {
                         s.set_settings(seq, now);
+                        if now.threshold_db.is_some() {
+                            self.auto_shown = None;
+                        }
                         self.shown_settings = Some((seq, now));
                         redraw = true;
-                    } else if !alike(&t.settings, &shown) && !self.dials.busy() {
-                        // Changed elsewhere (another instance's editor, the host's undo).
-                        load_settings(&self.local, &t.settings);
-                        self.shown_settings = Some((seq, settings_of(&self.local)));
-                        redraw = true;
+                        false
+                    } else {
+                        // Changed elsewhere (another editor, the host's undo), or the automatic
+                        // threshold moved (other settings, a role).
+                        let moved = t.settings.threshold_db.is_none() && self.auto_shown.is_some_and(|a| (a - current).abs() > 0.05);
+                        !self.dials.busy() && (!alike(&t.settings, &shown) || moved)
                     }
                 }
-                _ => {
-                    load_settings(&self.local, &t.settings);
-                    self.shown_settings = Some((t.sequence, settings_of(&self.local)));
-                    redraw = true;
-                }
+                _ => true,
+            };
+            if reload {
+                self.auto_shown = load_settings(&self.local, &t.settings, current);
+                self.shown_settings = Some((t.sequence, Settings { sensitivity: t.settings.sensitivity, ..settings_of(&self.local, self.auto_shown) }));
+                redraw = true;
             }
         }
         // The playhead moves while the host plays.
