@@ -14,15 +14,13 @@
 //! (all of it), redesigned every sample (RBJ: at 0 dB both filters are exactly the identity, so
 //! nothing is touched while nothing is reduced — tested bit for bit).
 //!
-//! **Lookahead:** the detection runs ahead of the audio by the lookahead (3 ms by default). Since
-//! 2026-11-26 the latency is the longest lookahead (10 ms) whenever it is on and the detection is
-//! delayed by the rest (`crate::lookahead`), so turning it never changes the latency; switching it
-//! on or off (or the spectral mode) fades out, changes, fades in (5 ms each). **Listen:** the trigger band alone.
+//! **Lookahead:** the audio is delayed 3 ms behind the detection (that is the latency); switching
+//! it fades out, changes, fades in (5 ms each). **Listen:** the trigger band alone.
 
 /// The lookahead's reach, ms (user, 2026-11-05: "dynamic lookahead" → a time, not on/off).
 pub const MAX_LOOKAHEAD_MS: f32 = 10.0;
-/// Switching lookahead on or off (a latency change, a dip) waits until the dial has stayed put
-/// this long, ms (one dip, not a stutter); turning it while on changes no latency.
+/// A new lookahead time is put in once it has stayed put this long, ms: turning the dial changes
+/// the latency, and each change is a dip, so it waits for the hand to stop (one dip, not a stutter).
 const LOOK_SETTLE_MS: f32 = 150.0;
 const RMS_MS: f32 = 2.0;
 const ATTACK_MS: f32 = 0.5;
@@ -368,8 +366,6 @@ pub struct DeEsser {
     pos: usize,
     /// Samples of lookahead in use, and the dip while it changes (gain 1 → 0 → 1).
     look: usize,
-    /// The detection, delayed by the latency less the lookahead.
-    key_delay: crate::lookahead::KeyDelay,
     /// The lookahead asked for, and for how many samples it has been asked (`LOOK_SETTLE_MS`).
     pending: usize,
     pending_age: u32,
@@ -564,7 +560,6 @@ impl DeEsser {
             delay: [vec![0.0; len], vec![0.0; len]],
             pos: 0,
             look: 0,
-            key_delay: crate::lookahead::KeyDelay::new(((MAX_LOOKAHEAD_MS * 0.001 * fs).ceil() as usize) + 1),
             pending: 0,
             pending_age: 0,
             settle: (LOOK_SETTLE_MS * 0.001 * fs) as u32,
@@ -593,19 +588,8 @@ impl DeEsser {
         if s.reduce == Reduce::Spectral {
             spectral_size(fs)
         } else {
-            crate::lookahead::constant_latency(Self::lookahead_for(s, fs), (MAX_LOOKAHEAD_MS * 0.001 * fs).round() as usize)
+            (s.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * fs).round() as usize
         }
-    }
-
-    /// The lookahead for `s`, samples: how far the detection runs ahead of the audio.
-    pub fn lookahead_for(s: &DeEssSettings, fs: f32) -> usize {
-        (s.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * fs).round() as usize
-    }
-
-    /// How far the detection runs behind the input at latency `look`: the latency less the
-    /// lookahead (none in the spectral mode, whose latency is its frame).
-    fn key_lag(&self, s: &DeEssSettings, look: usize) -> usize {
-        if self.spectral_on { 0 } else { look.saturating_sub(Self::lookahead_for(s, self.fs)) }
     }
 
     /// The latency now, samples.
@@ -625,8 +609,6 @@ impl DeEsser {
         }
         self.pos = 0;
         self.look = Self::latency_for(s, self.fs);
-        self.spectral_on = s.reduce == Reduce::Spectral;
-        self.key_delay.reset(self.key_lag(s, self.look));
         self.pending = self.look;
         self.pending_age = 0;
         self.dip = 1.0;
@@ -748,7 +730,6 @@ impl DeEsser {
                         self.dip_dir = 0.0;
                     }
                 }
-                self.key_delay.set(self.key_lag(s, self.look));
                 self.threshold += (s.threshold_db - self.threshold) * self.k_glide;
                 self.absolute += (f32::from(u8::from(s.detection == Detection::Absolute))
                     - self.absolute)
@@ -768,7 +749,7 @@ impl DeEsser {
                 let mut nearest = f32::MIN;
                 let mut band_out = [0.0f32; 2];
                 for c in 0..n_ch {
-                    let x = f64::from(self.key_delay.process(c, channels[c][i]));
+                    let x = f64::from(channels[c][i]);
                     let st = &mut self.band_s[c];
                     let mut b = st[0].run(&self.band_c[0], x);
                     b = st[1].run(&self.band_c[0], b);
@@ -789,7 +770,6 @@ impl DeEsser {
                     over = over.max(over_db(level, self.threshold));
                     nearest = nearest.max(level - self.threshold);
                 }
-                self.key_delay.advance();
                 let target = if over == f32::MIN {
                     0.0
                 } else {

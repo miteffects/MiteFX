@@ -12,10 +12,7 @@
 //! - **Motion:** the target gain through two one-pole stages in series (each at half the time), so
 //!   every opening and closing is S-shaped: attack towards the mode's active state (open for the
 //!   Gate and Expander, ducked for the Ducker), release back.
-//! - **Lookahead** delays the audio, not the key. Whenever it is on, the audio is delayed by the
-//!   longest lookahead ([`MAX_LOOKAHEAD_MS`], the latency, constant) and the key by the rest, so
-//!   turning it never changes the latency (each change used to dip the sound and make the host
-//!   realign every track mid-song); 0 is no latency at all.
+//! - **Lookahead** delays the audio, not the key.
 //!
 //! [`transfer_db`] is the static curve the editor's square draws. Nothing allocates outside
 //! [`Gate::new`].
@@ -236,8 +233,6 @@ struct Channel {
     held_db: f32,
     stages: [f32; 2],
     delay: Vec<f32>,
-    /// The key, delayed by the latency less the lookahead.
-    key_line: Vec<f32>,
 }
 
 impl Channel {
@@ -251,7 +246,6 @@ impl Channel {
             held_db: 0.0,
             stages: [1.0; 2],
             delay: vec![0.0; len],
-            key_line: vec![0.0; len],
         }
     }
 
@@ -268,7 +262,6 @@ impl Channel {
         self.held_db = 0.0;
         self.stages = [rest; 2];
         self.delay.fill(0.0);
-        self.key_line.fill(0.0);
     }
 }
 
@@ -278,10 +271,6 @@ pub struct Gate {
     sections: [Sections; KEY_BANDS],
     designed: [BandSettings; KEY_BANDS],
     write: usize,
-    /// The key's delay now, samples (gliding to the latency less the lookahead), and the
-    /// lookahead it is aiming for (`None`: not yet set: it starts there).
-    key_delay: f64,
-    key_aim: Option<usize>,
     /// Samples left of the velocity window after an opening (0: none running), and its peak.
     vel_left: usize,
     vel_peak: f32,
@@ -297,8 +286,6 @@ impl Gate {
             sections: [Sections::default(); KEY_BANDS],
             designed: [BandSettings::default(); KEY_BANDS],
             write: 0,
-            key_delay: 0.0,
-            key_aim: None,
             vel_left: 0,
             vel_peak: 0.0,
         };
@@ -325,8 +312,6 @@ impl Gate {
             c.reset(rest);
         }
         self.write = 0;
-        self.key_delay = Self::latency_for(s, self.sample_rate).saturating_sub(Self::lookahead_for(s, self.sample_rate)) as f64;
-        self.key_aim = None;
         self.vel_left = 0;
         self.vel_peak = 0.0;
         self.design(s, true);
@@ -341,18 +326,8 @@ impl Gate {
         }
     }
 
-    /// The latency, samples: the longest lookahead whenever lookahead is on (constant, however
-    /// far it is turned), else none.
+    /// The lookahead in samples.
     pub fn latency_for(s: &GateSettings, sample_rate: f32) -> usize {
-        if s.lookahead_ms > 0.0 {
-            (MAX_LOOKAHEAD_MS * 0.001 * sample_rate).round() as usize
-        } else {
-            0
-        }
-    }
-
-    /// The lookahead, samples: how far ahead of the audio the detector hears.
-    pub fn lookahead_for(s: &GateSettings, sample_rate: f32) -> usize {
         (s.lookahead_ms.clamp(0.0, MAX_LOOKAHEAD_MS) * 0.001 * sample_rate).round() as usize
     }
 
@@ -381,11 +356,6 @@ impl Gate {
         let (att, rel) = (coef(0.5 * s.attack_ms), coef(0.5 * s.release_ms));
         let hold = (s.hold_ms.max(0.0) * 0.001 * fs) as usize;
         let look = Self::latency_for(s, fs);
-        let key_to = look - Self::lookahead_for(s, fs).min(look);
-        if self.key_aim.is_none() {
-            self.key_delay = key_to as f64;
-        }
-        self.key_aim = Some(key_to);
         let dlen = self.chans[0].delay.len();
         let range = s.range_db.min(0.0);
         let floor = db_to_gain(range);
@@ -404,10 +374,6 @@ impl Gate {
             }
         };
         for i in 0..len {
-            // The key's delay glides (at most half a sample a sample) to its new length.
-            let d = key_to as f64 - self.key_delay;
-            self.key_delay += d.clamp(-0.5, 0.5);
-            let (kd, kf) = (self.key_delay.floor() as usize, self.key_delay - self.key_delay.floor());
             // The key, filtered, per channel.
             let mut det = [0.0f32; 2];
             for c in 0..n_ch {
@@ -421,12 +387,6 @@ impl Gate {
                 } else {
                     x
                 };
-                // Delayed by the latency less the lookahead (exact at a whole sample).
-                let w = self.write;
-                let line = &mut self.chans[c].key_line;
-                line[w] = k;
-                let at = |j: usize| line[(w + dlen - j % dlen) % dlen];
-                let k = if kf == 0.0 { at(kd) } else { at(kd) + (at(kd + 1) - at(kd)) * kf as f32 };
                 let mut y = f64::from(k);
                 for (b, sections) in self.sections.iter().enumerate() {
                     for (st, coeffs) in self.chans[c].key[b].iter_mut().zip(sections.as_slice()) {
@@ -586,47 +546,11 @@ mod tests {
             let x = tone(8000, -50.0);
             let mut y = x.clone();
             run(&mut g, &s, &mut y);
-            // The latency is the longest lookahead whenever lookahead is on (10 ms).
             let d = Gate::latency_for(&s, FS);
-            assert_eq!(d, (MAX_LOOKAHEAD_MS * 0.001 * FS).round() as usize);
+            assert_eq!(d, 96);
             for i in d..x.len() {
                 assert_eq!(y[i], x[i - d], "{mode:?} sample {i}");
             }
-        }
-    }
-
-    /// The lookahead turned while playing: the latency stays, the gain opens the lookahead before
-    /// the delayed hit both before and after the turn, and the audio never jumps.
-    #[test]
-    fn turning_the_lookahead_keeps_the_latency_and_moves_the_opening() {
-        let lat = Gate::latency_for(&GateSettings { lookahead_ms: 1.0, ..GateSettings::default() }, FS);
-        assert_eq!(lat, Gate::latency_for(&GateSettings { lookahead_ms: 9.0, ..GateSettings::default() }, FS));
-        assert_eq!(Gate::latency_for(&GateSettings::default(), FS), 0, "off: no latency");
-        // A hit every 0.25 s; the gain is read from the output against the delayed input.
-        let n = (FS * 2.0) as usize;
-        let hit = (FS * 0.25) as usize;
-        let x: Vec<f32> = (0..n).map(|i| if i % hit < (0.05 * FS) as usize && i >= hit { 0.5 * (i as f32 * 0.2).sin() } else { 0.0 }).collect();
-        let mut g = Gate::new(FS);
-        let mut s = GateSettings { lookahead_ms: 2.0, attack_ms: 0.05, hold_ms: 0.0, ..GateSettings::default() };
-        g.reset(&s);
-        let mut y = x.clone();
-        for (k, chunk) in y.chunks_mut(256).enumerate() {
-            if k * 256 >= n / 2 {
-                s.lookahead_ms = 8.0;
-            }
-            g.process(&mut [chunk], None, &s);
-        }
-        // Each delayed hit arrives at its place (the input delayed by the latency) and the gate
-        // is already open for it (the lookahead before), before and after the turn.
-        for h in [2, 3, 6, 7] {
-            let at = h * hit + lat;
-            for k in 1..8 {
-                let (out, inp) = (y[at + k], x[at + k - lat]);
-                if inp.abs() > 0.05 {
-                    assert!((out / inp - 1.0).abs() < 0.05, "hit {h}, sample {k}: gain {}", out / inp);
-                }
-            }
-            assert!(y[at - 1].abs() < 1e-6, "hit {h}: nothing early");
         }
     }
 

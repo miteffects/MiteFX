@@ -57,8 +57,6 @@ pub const HISTORY_SLICE_MS: f32 = 5.0;
 pub const HISTORY_RECORDS: usize = 6000;
 /// The longest lookahead, ms (`params::LOOKAHEAD`'s top).
 pub const MAX_LOOKAHEAD_MS: f32 = 10.0;
-/// A lookahead turned while on is put in once it has stayed put this long, ms.
-const LOOK_SETTLE_MS: f32 = 150.0;
 /// Longest chunk the engine processes at once.
 const CHUNK: usize = 512;
 /// Switch fades (delta, bypass, the latency dip) and glides (gain, ceiling), ms.
@@ -241,20 +239,13 @@ fn protect_samples(ms: f32, sample_rate: f32) -> usize {
     lookahead_samples(ms, sample_rate, 1, false)
 }
 
-/// The lookahead the latency follows, ms: the longest whenever lookahead is on (2026-11-26, as
-/// Gate's, Comp's and Shape's: turning it never moves the latency, so the host never realigns
-/// the session; the limiter hears the input the rest later), else none.
-fn span_ms(lookahead_ms: f32) -> f32 {
-    if lookahead_ms > 0.0 { MAX_LOOKAHEAD_MS } else { 0.0 }
-}
-
 /// The latency (base-rate samples) of `s` at `sample_rate`.
 pub fn latency_for(s: &LimitSettings, sample_rate: f32) -> usize {
     let f = s.oversampling;
-    let span = lookahead_samples(span_ms(s.lookahead_ms), sample_rate, f, s.true_peak);
+    let l = lookahead_samples(s.lookahead_ms, sample_rate, f, s.true_peak);
     let guard = if f > 1 { Limiter::latency_for(guard_samples(sample_rate), s.true_peak) } else { 0 };
-    let protect = if s.protect > 0.0 { Protect::latency_for(protect_samples(span_ms(s.lookahead_ms), sample_rate)) } else { 0 };
-    protect + Limiter::latency_for(span, s.true_peak) / f + Oversampler::latency_for(f) + guard
+    let protect = if s.protect > 0.0 { Protect::latency_for(protect_samples(s.lookahead_ms, sample_rate)) } else { 0 };
+    protect + Limiter::latency_for(l, s.true_peak) / f + Oversampler::latency_for(f) + guard
 }
 
 /// The DC filter's sections (Butterworth, as the crossovers' high-pass).
@@ -343,11 +334,6 @@ pub struct LimitEngine {
     dip: LinearSmoother,
     /// Samples left before a dip may fade back in (the new delay lines filling).
     refill: usize,
-    /// The lookahead asked for and for how many samples it has stayed put: a new one that keeps
-    /// the latency (the limiter still rebuilds, behind the dip) waits for the hand to stop, so a
-    /// drag is one dip, not a stutter.
-    look_asked: f32,
-    look_age: usize,
     active: LimitSettings,
     meter: [TruePeak; 2],
     /// The input's true peak (after the gain), for the history.
@@ -396,8 +382,6 @@ impl LimitEngine {
             dither: Dither::new(),
             dip: LinearSmoother::new_s_curve(1.0),
             refill: 0,
-            look_asked: f32::NAN,
-            look_age: 0,
             active: *s,
             meter: [TruePeak::new(4), TruePeak::new(4)],
             in_meter: [TruePeak::new(4), TruePeak::new(4)],
@@ -488,11 +472,10 @@ impl LimitEngine {
         let f = FACTORS[Self::index(s.oversampling)];
         self.os.set_factor(f);
         let l = lookahead_samples(s.lookahead_ms, self.sample_rate, f, s.true_peak);
-        let span = lookahead_samples(span_ms(s.lookahead_ms), self.sample_rate, f, s.true_peak);
-        self.limiters[Self::index(f)].configure_within(l, span, s.true_peak, s.core());
+        self.limiters[Self::index(f)].configure(l, s.true_peak, s.core());
         self.guard.configure(guard_samples(self.sample_rate), s.true_peak, guard_settings());
         self.protecting = s.protect > 0.0;
-        self.protect.configure_within(protect_samples(s.lookahead_ms, self.sample_rate), protect_samples(span_ms(s.lookahead_ms), self.sample_rate), s.core());
+        self.protect.configure(protect_samples(s.lookahead_ms, self.sample_rate), s.core());
         let latency = self.latency();
         self.dry.set_delay(latency);
         self.scale.set_delay(latency);
@@ -552,15 +535,7 @@ impl LimitEngine {
         let mut start = 0;
         while start < len {
             // A lookahead, detector or oversampling change: fade out, switch once silent, back in.
-            // A lookahead that keeps the latency waits until it has stayed put (LOOK_SETTLE_MS).
-            if s.lookahead_ms != self.look_asked {
-                self.look_asked = s.lookahead_ms;
-                self.look_age = 0;
-            }
-            let others = (s.true_peak, s.oversampling, s.protect > 0.0) != (self.active.true_peak, self.active.oversampling, self.protecting);
-            let latency_moves = others || latency_for(s, self.sample_rate) != latency_for(&LimitSettings { lookahead_ms: self.active.lookahead_ms, ..*s }, self.sample_rate);
-            let settled = self.look_age as f32 >= LOOK_SETTLE_MS * 0.001 * self.sample_rate;
-            if s.structure() != (self.active.lookahead_ms, self.active.true_peak, self.active.oversampling, self.protecting) && (latency_moves || settled) {
+            if s.structure() != (self.active.lookahead_ms, self.active.true_peak, self.active.oversampling, self.protecting) {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
                     self.active = *s;
@@ -582,7 +557,6 @@ impl LimitEngine {
             self.protect_amount.set_target(if self.protecting { s.protect } else { 0.0 });
 
             let n = (len - start).min(CHUNK).min(self.slice_len - self.slice_pos);
-            self.look_age = self.look_age.saturating_add(n);
             let end = start + n;
             // The DC filter, then gain in, ceiling out: the limiter works at a ceiling of 1.
             let dc_wanted = s.dc_filter;
@@ -941,35 +915,6 @@ mod tests {
         assert!(l.iter().all(|v| v.is_finite() && v.abs() <= db_to_gain(-1.0)));
     }
 
-    /// Turning the lookahead while it is on keeps the latency (the host never realigns); the
-    /// limiter rebuilds behind one dip once the dial has stayed put, and the ceiling holds.
-    #[test]
-    fn turning_the_lookahead_keeps_the_latency_and_dips_once_when_it_stops() {
-        let fs = 48000.0;
-        let mut s = LimitSettings { ceiling_db: -1.0, ..LimitSettings::default() };
-        let mut e = LimitEngine::new(fs, &s);
-        let before = e.latency();
-        let x = material(48_000, -6.0);
-        let (mut l, mut r) = (x.clone(), x.clone());
-        let tap_l: Vec<f32>;
-        // A drag: a new time every 10 ms for 200 ms, then still.
-        let mut chunks = 0;
-        for (a, b) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
-            if chunks < 20 {
-                s.lookahead_ms = 1.0 + 0.4 * chunks as f32;
-            }
-            chunks += 1;
-            run(&mut e, &s, a, b, 480);
-            assert_eq!(e.latency(), before, "the latency never moves");
-        }
-        tap_l = l;
-        assert!(tap_l.iter().all(|v| v.is_finite() && v.abs() <= db_to_gain(-1.0) + 1e-6), "under the ceiling");
-        // One dip: the output goes silent in one stretch only.
-        let silent: Vec<bool> = tap_l.chunks(48).map(|c| c.iter().all(|v| v.abs() < 1e-6)).collect();
-        let stretches = silent.windows(2).filter(|w| !w[0] && w[1]).count();
-        assert!(stretches <= 1, "{stretches} dips");
-    }
-
     #[test]
     fn protection_adds_its_lookahead_to_the_latency_and_the_ceiling_holds() {
         let fs = 48000.0;
@@ -977,8 +922,7 @@ mod tests {
             let s = LimitSettings { oversampling: f, protect: 0.7, ceiling_db: 0.0, ..LimitSettings::default() };
             let mut e = LimitEngine::new(fs, &s);
             assert_eq!(e.latency(), latency_for(&s, fs));
-            // The protection's span: the longest lookahead (it is on).
-            assert_eq!(e.latency(), latency_for(&LimitSettings { protect: 0.0, ..s }, fs) + protect_samples(MAX_LOOKAHEAD_MS, fs) - 1);
+            assert_eq!(e.latency(), latency_for(&LimitSettings { protect: 0.0, ..s }, fs) + protect_samples(s.lookahead_ms, fs) - 1);
             // An impulse comes out at the latency, through the bands' allpass (which has no one
             // delay: it lags the lows; measured 2026-11-09, its peak lands a sample late).
             let mut l = vec![0.0f32; 4096];

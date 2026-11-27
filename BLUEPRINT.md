@@ -362,20 +362,6 @@ dial, applied once the dial stops; state 4). Next: mid/side detection.
 
 **Status (2026-11-03): designed in-house** (user decision): `docs/design/gate-brief.md`. Scope: Pro-G parity baseline (gate, expander, ducker; hysteresis, hold, lookahead; sidechain with Comp's EQ; MIDI trigger); main view in Comp's frame (history plus transfer square). Transient trigger and spectral denoise later. DSP in `mite_dsp::gate`. **MIDI trigger (slice 3, 2026-11-23):** a note at each opening, its note off at each closing (the expander: crossing half its range), sent where the delayed audio opens (the lookahead's latency after the key), the same at every block size; the held note is remembered, so a change of note or channel, switching the trigger off, bypass or a reset let go of the note that sounds. Velocity fixed, or from the hit's peak over the 2 ms after the opening (`mite_dsp::gate::EventKind::Peak`; 1 at the threshold, 127 at full scale, straight in dB): with at least 2 ms of lookahead the note still lands on the opening, without it 2 ms late. Editor: a MIDI button in the footer opens a panel docked like the sidechain EQ's (power, an octave of keys and the octave cells for the note, the sixteen channels, Fixed/Level glyphs, the velocity dial or the level mapping); the note sent lights its key, and the history marks each note with a tick as long as its velocity (`record::NOTE`). Untried in REAPER.
 
-**Lookahead at a constant latency (2026-11-26, user: "gate's lookahead was doing some delays"):**
-measured in a private REAPER render of the user's KICK IN, the delay compensation was exact with
-the lookahead left alone (0 samples off over the song), but every turn of the knob changed the
-latency: a dip and the host realigning all tracks mid-song. Now, whenever lookahead is on, the
-audio is delayed by the longest lookahead (10 ms, reported once) and the key by the rest; the
-knob moves only the key's delay (gliding ½ sample per sample), so it never dips or changes the
-latency. 0 is no latency. MIDI notes land the lookahead after the key's event, where the delayed
-audio opens. **The same in every plugin with a lookahead (2026-11-26):** `mite_dsp::lookahead`
-(`constant_latency`, `KeyDelay`) in Comp, Multiband and Rig (20 ms), DeEss (10 ms; spectral mode
-keeps its frame), Shape (5 ms; each band's key in its own ring, and a new structure fades in only
-once its delay has filled) and Limit (10 ms; `Limiter::configure_within` hears the input the rest
-late in whole samples, so the no-overshoot proof holds; the limiter still rebuilds for a new
-lookahead, behind one dip once the dial has stayed put 150 ms, but the latency never moves).
-
 ### 10. Mite Shape. Rival: none from FabFilter (SPL Transient Designer, Kilohearts)
 
 Nova Shaper ported:

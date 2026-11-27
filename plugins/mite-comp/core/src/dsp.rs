@@ -182,14 +182,7 @@ impl CompEngine {
 
         let mut start = 0;
         while start < len {
-            // A lookahead that keeps the latency (it is constant while lookahead is on) is taken
-            // at once: only the detector's key moves, gliding. Switching it on or off, or the
-            // oversampling, moves the latency: fade out, switch once silent, fade back in.
-            let rate = self.sample_rate;
-            let latency_of = |ms: f32| CompSettings { lookahead_ms: ms, ..CompSettings::default() }.latency(rate);
-            if s.lookahead_ms != self.lookahead_ms && s.oversampling == self.oversampling && latency_of(s.lookahead_ms) == latency_of(self.lookahead_ms) {
-                self.lookahead_ms = s.lookahead_ms;
-            }
+            // A lookahead or oversampling change: fade out, switch once silent, fade back in.
             if s.lookahead_ms != self.lookahead_ms || s.oversampling != self.oversampling {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
@@ -394,15 +387,7 @@ mod tests {
         assert_eq!(e.latency(), 0);
         s.lookahead_ms = 5.0;
         run(&mut e, &input, &s, &Output::default(), 480);
-        // Switched on: the longest lookahead (20 ms), whatever it is set to.
-        assert_eq!(e.latency(), 960);
-        // Turned while on: the latency stays, taken at once (no dip).
-        s.lookahead_ms = 12.0;
-        let mut y = input.clone();
-        let tap = HistoryTap::new(64);
-        e.process(&mut [&mut y[..480]], None, &s, &Output::default(), &tap);
-        assert_eq!(e.latency(), 960);
-        assert!(y[..480].iter().any(|v| v.abs() > 1e-4), "no dip");
+        assert_eq!(e.latency(), 240);
     }
 
     /// A sum of tones well inside the band (oversampling passes it as a pure delay).

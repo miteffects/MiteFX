@@ -445,13 +445,6 @@ impl Multiband {
             // their delay lines are always written, so the new lookahead reads real audio (a
             // reset emptied them, and the sound jumped back in a lookahead after the switch,
             // half way up the fade: the §10 ramp test).
-            // A lookahead that keeps the latency (constant while lookahead is on) is taken at
-            // once: only the detectors' keys move, gliding (`crate::lookahead`).
-            let rate = self.fs as f32;
-            let latency_of = |ms: f32| CompSettings { lookahead_ms: ms, ..CompSettings::default() }.latency(rate);
-            if s.lookahead_ms != self.lookahead_ms && latency_of(s.lookahead_ms) == latency_of(self.lookahead_ms) {
-                self.lookahead_ms = s.lookahead_ms;
-            }
             if s.lookahead_ms != self.lookahead_ms {
                 self.dip.set_target(0.0);
                 if self.dip.current() == 0.0 {
@@ -674,9 +667,8 @@ mod tests {
         m.reset(&s);
         let x = noise(9600, -12.0);
         let y = run(&mut m, &s, &x, 333);
-        // The longest lookahead (20 ms) whenever lookahead is on.
         let d = m.latency();
-        assert_eq!(d, 960);
+        assert_eq!(d, 96);
         for i in d..x.len() {
             assert_eq!(y[i], x[i - d], "sample {i}");
         }

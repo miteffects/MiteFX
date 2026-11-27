@@ -1154,7 +1154,7 @@ fn knob_words(id: &str) -> &'static str {
         "attack" => " — how fast it opens",
         "hold" => " — how long it stays open after the key drops under the dashed line",
         "release" => " — how fast it closes",
-        "lookahead" => " — opens this much before a transient. While it is on the latency is a constant 10 ms (the host compensates it), so turning it never moves the track; 0: no latency",
+        "lookahead" => " — opens this much before a transient (it is the latency)",
         _ => "",
     }
 }
