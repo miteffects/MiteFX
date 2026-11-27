@@ -35,6 +35,8 @@ pub struct Track {
     /// The role was guessed from the name (the user has not chosen one).
     pub guessed: bool,
     pub settings: Settings,
+    /// How many other tracks it was judged against (0: alone, by its own sound only).
+    pub compared: usize,
     /// Its clips' hits (kept or not), each clip's in its own samples.
     pub clips: Vec<Clip>,
 }
@@ -634,7 +636,8 @@ impl AraState {
                 None => {
                     let name = model.sequences.get(&u.sequence).cloned().unwrap_or_default();
                     let settings = u.state.settings.map(Settings::from).unwrap_or_default();
-                    tracks.push(Track { sequence: u.sequence, guessed: u.state.role().is_none(), name, role: u.role, settings, clips: vec![clip] });
+                    let compared = det.per_source.get(&u.source).map_or(0, |(d, _)| d.compared.len());
+                    tracks.push(Track { sequence: u.sequence, guessed: u.state.role().is_none(), name, role: u.role, settings, compared, clips: vec![clip] });
                 }
             }
         }

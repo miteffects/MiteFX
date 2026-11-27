@@ -457,3 +457,30 @@ fn a_clip_cut_right_on_a_hit_keeps_it() {
     let curve = det[0].curve(&hits, &Settings::default());
     assert!(curve.at(10) > 0.99, "and open from the clip's start");
 }
+
+#[test]
+fn a_kick_mic_alone_drops_the_snares_bleed_by_its_sound() {
+    // (Mite Cut on the kick track only, user 2026-11-27: "i cant remove silent snare bleeds from
+    // kick track". No snare track to compare: the snare's bleed sounds nothing like a kick.)
+    for seed in [91, 7, 3] {
+        let (mics, truth) = kit(seed);
+        let det = detect(&[(&mics[0], Role::Kick)], FS);
+        let s = Settings::default();
+        let hits = det[0].hits(&s, &[]);
+        let curve = det[0].curve(&hits, &s);
+        let sc = score(&hits, &curve, &truth, Drum::Kick);
+        let near_kick = |at: usize| truth.iter().any(|t| t.0 == Drum::Kick && at + 2400 > t.1 && at < t.1 + (0.4 * FS) as usize);
+        let snares: Vec<usize> = truth.iter().filter(|t| t.0 == Drum::Snare && !near_kick(t.1)).map(|t| t.1).collect();
+        let open = snares.iter().filter(|&&t| curve.at(t + 300) > 0.5).count();
+        println!("kit {seed}, kick alone: precision {:.3} recall {:.3} sounding {:.3}; snare bleed open {open} of {}", sc.precision, sc.recall, sc.sounding, snares.len());
+        for n in sc.notes.iter().take(6) {
+            println!("  {n}");
+        }
+        assert!(sc.sounding >= 0.99, "kicks cut");
+        assert!(open * 10 <= snares.len(), "the snare's bleed kept: {open} of {}", snares.len());
+        // Sensitivity moves it: at the top, more is kept.
+        let more = det[0].hits(&Settings { sensitivity: 1.0, ..s }, &[]).iter().filter(|h| h.kept).count();
+        let less = det[0].hits(&Settings { sensitivity: 0.0, ..s }, &[]).iter().filter(|h| h.kept).count();
+        assert!(more > less, "sensitivity does something: {less} → {more}");
+    }
+}

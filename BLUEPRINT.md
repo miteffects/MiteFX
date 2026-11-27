@@ -724,6 +724,16 @@ time>/` (the home folder's `Mite Cut` without a Music folder); the header says w
 dependency: `session::write_wav` (ffprobe reads it: pcm_f32le, the time reference, the tags).
 Not yet: MIDI of the hits (for drum replacement), offered.
 
+**Alone (2026-11-27, user: "i cant remove silent snare bleeds from kick track, neither floor
+neither sens does anything"):** with Mite Cut on the kick only, the kick was judged by level
+alone, the boundary sat at keep-everything, so Sensitivity and Floor (no gaps left) did nothing.
+Now a track with no other to compare is judged by its own sound: the share of what a candidate
+adds (over the window just before it) that lies in the drum's own bands (those holding 30 % of
+its loudest), boundary −6 dB, Sensitivity moving it ±12 dB. A kick mic alone keeps its kicks
+(−0.3 dB) and drops the snare's bleed (−6.4 dB and under; 3 of 91 left over three kits); the
+floor tom's bleed, kick-like, stays. The editor marks such a track "judged alone" and says so
+in the header when only one track has the plugin.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

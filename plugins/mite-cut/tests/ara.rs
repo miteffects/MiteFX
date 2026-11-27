@@ -252,3 +252,43 @@ fn a_clip_later_on_the_song_is_stamped_there() {
     assert_eq!(u32::from_le_bytes(fact[..4].try_into().unwrap()), 4800);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn only_the_kick_track_has_it_and_still_drops_the_snares_bleed() {
+    // (User, 2026-11-27: "i cant remove silent snare bleeds from kick track, neither floor
+    // neither sens does anything", the kick the only track with Mite Cut.)
+    let (mics, truth) = kit(91);
+    let mut host = TestHost::new(mite_ara::factory(&mite_cut::ara::INFO));
+    let seq = host.add_track("Kick In");
+    let dur = mics[0].len() as f64 / f64::from(FS);
+    let (_s, _m, rg) = host.add_clip_to(seq, Audio { fs: f64::from(FS), l: mics[0].clone(), r: mics[0].clone() }, c"k-src", c"k-mod", 0.0, 0.0, dur);
+    let s = Session::new();
+    s.set_sample_rate(FS);
+    let inst = unsafe { mite_ara::bind(host.dc, 7, 7) };
+    host.give(inst.extension(), rg);
+    assert!(inst.document.wait_reads(Duration::from_secs(20)));
+    s.bind_ara(inst);
+    assert!(s.wait_idle(Duration::from_secs(60)));
+    let t = s.tracks()[0].clone();
+    assert_eq!((t.role, t.compared), (Role::Kick, 0), "judged alone");
+    let mut e = CutEngine::new(FS);
+    song(&mut e, &s, 0, 480, false);
+    let out = song(&mut e, &s, 0, mics[0].len(), false);
+    let near_kick = |at: usize| truth.iter().any(|t| t.0 == Drum::Kick && at + 2400 > t.1 && at < t.1 + (0.4 * FS) as usize);
+    let snares: Vec<usize> = truth.iter().filter(|t| t.0 == Drum::Snare && !near_kick(t.1)).map(|t| t.1 + 300).collect();
+    let open = snares.iter().filter(|&&at| peak(&out, at) > 0.5 * peak(&mics[0], at)).count();
+    println!("kick alone in the plugin: snare bleed sounding {open} of {}", snares.len());
+    // (Over 20 ms a peak can catch a neighbouring kept region's edge: the floor tom's bleed,
+    // which sounds like a kick, is kept alone.)
+    assert!(open * 100 <= snares.len() * 15, "{open} of {}", snares.len());
+    for k in truth.iter().filter(|t| t.0 == Drum::Kick) {
+        assert!(peak(&out, k.1) > 0.9 * peak(&mics[0], k.1), "kick at {}", k.1);
+    }
+    // And the floor is heard between the hits when raised.
+    let at = *snares.iter().filter(|&&at| peak(&out, at) == 0.0).nth(10).expect("a bleed cut");
+    s.set_settings(t.sequence, mite_dsp::hits::Settings { floor_db: -20.0, ..t.settings });
+    assert!(s.wait_idle(Duration::from_secs(60)));
+    let out = song(&mut e, &s, 0, mics[0].len(), false);
+    let ratio = peak(&out, at) / peak(&mics[0], at);
+    assert!((ratio - 0.1).abs() < 0.01, "floor −20 dB: {ratio}");
+}

@@ -339,6 +339,9 @@ impl CutView {
             _ => "passes".to_owned(),
         };
         cx.text.draw(cx.scene, &note, 14.0, r.y0 + 29.0, TextStyle::BODY.sized(10.0), theme.text_lo, Align::Left);
+        if cuts && t.compared == 0 && r.height() >= 58.0 {
+            cx.text.draw(cx.scene, "judged alone", 14.0, r.y0 + 43.0, TextStyle::BODY.sized(10.0), theme.warn, Align::Left);
+        }
         // The waveform: dim all of it, lit where the cut keeps it (its regions, as played).
         cx.begin_clip(&lane);
         let dim = theme.text_lo.multiply_alpha(0.55);
@@ -414,6 +417,7 @@ impl CutView {
                 Help::default().text(format!("A hit, {state} · {:.0} % sure it is this drum's · {action}{back}", 100.0 * h.confidence))
             }
             Hot::Chip(_) => Help::default().text("The track's role: click for the next, Shift-click for the one before · OH and Room are never cut, Off passes"),
+            Hot::Name(row) if tracks.get(row).is_some_and(|t| t.role.cuts() && t.compared == 0) => Help::default().text("Judged alone, by its own sound: no other drum track has Mite Cut. Put it on the kit's other tracks (kick, snare, toms, hats) and each is judged against the others"),
             Hot::Name(_) => Help::default().text("Click to tune this track with the dials below"),
             Hot::Lane(..) => Help::default().text("Wheel: zoom · drag: pan · double-click: add a hit here (where none was found)"),
             Hot::Ruler => Help::default().text("Wheel: zoom · drag: pan · double-click: the whole song"),
@@ -487,6 +491,8 @@ impl View for CutView {
             Some(Export::Failed(e)) => Some((format!("Not exported: {e}"), theme.warn)),
             None => None,
         };
+        let alone = tracks.iter().filter(|t| t.role.cuts()).count() == 1 && tracks.iter().any(|t| t.role.cuts() && t.compared == 0);
+        let said = said.or_else(|| alone.then(|| ("Judged alone: no other drum track with Mite Cut reaches this one. Put it on the kit's other tracks too".to_owned(), theme.warn)));
         if let Some((text, ink)) = said {
             cx.begin_clip(&Rect::new(160.0, 0.0, EXPORT.x0 - 12.0, HEADER));
             cx.text.draw(cx.scene, &text, EXPORT.x0 - 14.0, 17.0, TextStyle::BODY.sized(11.0), ink, Align::Right);

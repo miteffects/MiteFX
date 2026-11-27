@@ -21,9 +21,11 @@
 //! - **Who heard it first:** a drum reaches its own close mic first; a candidate another track
 //!   heard more than 0.2 ms earlier loses up to 12 dB of dominance, as far as that track's bleed
 //!   accounts for it.
-//! - **The boundary:** −7 dB of dominance, or a clear gap between −12 and −5 dB. With no tracks
-//!   to compare, the level: only what is 30 dB or more under the track's loud hits is cut. A
-//!   candidate inside a louder kept hit's ring is part of it.
+//! - **Alone** (no other track to compare, e.g. only the kick has the plugin): a candidate's
+//!   dominance is how much of what it adds the drum's own sound explains, over all bands (a
+//!   snare's bleed in a kick mic is mostly where a kick has nothing).
+//! - **The boundary:** −7 dB of dominance, or a clear gap between −12 and −5 dB. A candidate
+//!   inside a louder kept hit's ring is part of it.
 //! - **Ends:** a hit lasts until its envelope comes down to the track's floor (a low percentile
 //!   of the envelope around it: the bleed and room under everything) plus a margin, then holds.
 //! - **Render:** each kept hit opens a pre-roll before its onset, holds and fades out; regions
@@ -70,11 +72,13 @@ const ARRIVAL_WINDOW_S: f32 = 0.006;
 const ARRIVAL_MIN_S: f32 = 0.0002;
 const ARRIVAL_FULL_S: f32 = 0.0008;
 const ARRIVAL_DB: f32 = 12.0;
-/// Alone (no tracks to compare), nothing within this of the track's loud hits is cut: a soft
-/// hit and bleed cannot be told apart by level, and a hit cut is worse than bleed kept, dB.
-const ALONE_KEEP_DB: f32 = 30.0;
 /// A kept hit this much softer than the hit whose region it starts in is part of that hit, dB.
 const SHADOW_DB: f32 = 12.0;
+/// Alone, the boundary (a kick's hits lie in its bands within a dB; a snare's bleed in its mic 6 dB
+/// and more outside them), dB.
+const ALONE_BOUNDARY_DB: f32 = -6.0;
+/// Alone, a band counts as the drum's in full from this share of its loudest band.
+const LIKENESS_BAND: f32 = 0.3;
 /// Where the own/bleed boundary may lie (dominance), dB.
 const DOMINANCE_RANGE_DB: (f32, f32) = (-12.0, -5.0);
 /// The narrowest gap that tells two groups apart, dB.
@@ -208,6 +212,8 @@ pub struct Candidate {
     /// Band power over [`SPEC`] from the onset, weighted by the track's own sound, dBFS.
     pub level_db: f32,
     power: [f32; BANDS],
+    /// What it adds over the window just before it (see `Bands::near`).
+    near: [f32; BANDS],
     /// The compared tracks' band powers at the same moment, and all they sound there (a ring
     /// adds nothing, but is there).
     others: Vec<[f32; BANDS]>,
@@ -243,7 +249,8 @@ pub struct Hit {
     pub start: usize,
     pub end: usize,
     pub level_db: f32,
-    /// What is left after the other tracks' bleed, against what the mic heard, dB (0: all its own).
+    /// What is this drum's own, against what the mic heard, dB (0: all its own): after the
+    /// other tracks' bleed, or alone, as far as its own sound explains it.
     pub dominance_db: f32,
     /// 0…1: how surely it is this drum's own hit.
     pub confidence: f32,
@@ -373,27 +380,21 @@ impl TrackDetection {
             )
             .copied()
             .unwrap_or(0.0);
+        // With tracks to compare, the dominance; alone, how much of what the candidate adds
+        // this drum's own sound explains (a snare's bleed in a kick mic is mostly where a kick
+        // has nothing). Either less how far it is under the track's loud hits beyond
+        // [`LEVEL_RANGE_DB`] (a tiny increment's shape means nothing).
         let feature: Vec<f32> = self
             .candidates
             .iter()
             .map(|c| {
-                if compare {
-                    self.dominance(c, beta) + (c.level_db - (loud - LEVEL_RANGE_DB)).min(0.0)
-                } else {
-                    c.level_db
-                }
+                let own = if compare { self.dominance(c, beta) } else { self.likeness(c) };
+                own + (c.level_db - (loud - LEVEL_RANGE_DB)).min(0.0)
             })
             .collect();
-        let range = if compare {
-            (DOMINANCE_RANGE_DB.0, DOMINANCE_RANGE_DB.1)
-        } else {
-            (loud - LEVEL_RANGE_DB - 15.0, loud - ALONE_KEEP_DB)
-        };
-        let (boundary, width) = boundary(&feature, range).unwrap_or(if compare {
-            (DEFAULT_DOMINANCE_DB, 2.0 * CONFIDENCE_DB)
-        } else {
-            (f32::NEG_INFINITY, 0.0)
-        });
+        // (Alone, a fixed boundary: own hits spread over a few dB, and a gap among them is no
+        // boundary.)
+        let (boundary, width) = if compare { boundary(&feature, DOMINANCE_RANGE_DB).unwrap_or((DEFAULT_DOMINANCE_DB, 2.0 * CONFIDENCE_DB)) } else { (ALONE_BOUNDARY_DB, 2.0 * CONFIDENCE_DB) };
         let scale = (width / 4.0).max(0.5 * CONFIDENCE_DB);
         let shift = (s.sensitivity.clamp(0.0, 1.0) - 0.5) * 24.0;
         let mut hits: Vec<Hit> = self
@@ -412,7 +413,7 @@ impl TrackDetection {
                     start: usize::MAX,
                     end: usize::MAX,
                     level_db: c.level_db,
-                    dominance_db: if compare { f } else { 0.0 },
+                    dominance_db: f,
                     confidence,
                     kept: confidence > 0.5,
                     forced: false,
@@ -504,6 +505,19 @@ impl TrackDetection {
             }
         }
         hits
+    }
+
+    /// How much of what `c` adds lies where this drum sounds, dB (≤ 0): its share in the bands
+    /// holding at least [`LIKENESS_BAND`] of the drum's loudest band (less, in proportion, in
+    /// fainter ones), over the window just before it. Not a fit to the drum's spectrum: a soft hit
+    /// into the drum's own ring adds nothing where the ring is loudest, all in its other bands.
+    fn likeness(&self, c: &Candidate) -> f32 {
+        // (Over the window just before it: see `Bands::near`.)
+        let p = &c.near;
+        let all: f32 = p.iter().sum::<f32>().max(1e-30);
+        let peak = self.template.iter().copied().fold(0.0f32, f32::max).max(1e-30);
+        let own: f32 = (0..BANDS).map(|b| p[b] * (self.template[b] / (LIKENESS_BAND * peak)).min(1.0)).sum();
+        10.0 * (own.max(all * 1e-6) / all).log10()
     }
 
     /// `c`'s band powers as this drum's own sound (the template, scaled by `a ≥ 0`) plus each
@@ -956,6 +970,15 @@ impl Bands {
         )
     }
 
+    /// What a hit at `onset` adds over the window just before it (no further back: a soft hit
+    /// into its own drum's louder ring still adds its own sound there).
+    fn near(&mut self, x: &[f32], onset: usize) -> [f32; BANDS] {
+        let a = onset as isize - SPEC_LEAD as isize;
+        let post = self.raw(x, a);
+        let pre = self.raw(x, a - SPEC as isize);
+        std::array::from_fn(|b| (post[b] - pre[b]).max(0.0))
+    }
+
     fn raw(&mut self, x: &[f32], a: isize) -> [f32; BANDS] {
         for (i, v) in self.input.iter_mut().enumerate() {
             let n = a + i as isize;
@@ -1171,11 +1194,13 @@ fn candidates(x: &[f32], fs: f32, bands: &mut Bands) -> Vec<Candidate> {
         if power.iter().sum::<f32>() < NOVELTY * after {
             continue; // a ring or a tail moving, nothing new
         }
+        let near = bands.near(x, onset);
         out.push(Candidate {
             onset,
             peak,
             level_db: 0.0,
             power,
+            near,
             others: Vec::new(),
             others_after: Vec::new(),
             earlier: Vec::new(),
