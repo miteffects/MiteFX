@@ -122,9 +122,7 @@ fn report(name: &str, pts: &[Vec<TransferPoint>; 3]) {
         let (p, l, q) = (pts[0][i], pts[1][i], pts[2][i]);
         let h = |p: &TransferPoint| realfft::num_complex::Complex::from_polar(10f64.powf(p.magnitude_db / 20.0), p.phase);
         let spread = (h(&l) - h(&q)).norm() / h(&p).norm().max(1e-9);
-        let ss = |t: f64| { let t = t.clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) };
-        let shown = ss((p.coherence - 0.6) / 0.35) * (1.0 - ss((spread - 0.04) / 0.11));
-        println!("{:>6.0} Hz  gd {:>7.2} ms  γ² {:.3}  {:>6.1} dB  spread {:.3}  phase shown {:>3.0} %", p.freq, p.group_delay * 1e3, p.coherence, p.magnitude_db, spread, 100.0 * shown);
+        println!("{:>6.0} Hz  gd {:>7.2} ms  γ² {:.3}  {:>6.1} dB  spread {:.3} (own {:.3})  its noise {:.3}", p.freq, p.group_delay * 1e3, p.coherence, p.magnitude_db, spread, p.level_spread, p.level_noise);
     }
 }
 

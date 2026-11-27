@@ -203,6 +203,12 @@ pub struct TransferPoint {
     /// ones. 0 for a filter (to the measurement's noise, about 0.04 at γ² 0.996); a dynamics
     /// processor or a saturator reads more, and its phase there is not a filter's.
     pub level_spread: f64,
+    /// The spread the measurement's own noise would give, the same scale: each class's random
+    /// error of H, |H|·√((1−γ²)/(γ²·n)) with its own coherence and number of averages (Bendat &
+    /// Piersol), joined. Only spread well above this says the chain changes with level
+    /// (2026-11-27, user: behind ordinary plugins on music the phase page went blank; quiet
+    /// passages under a plugin's hiss read γ² far under the loud ones, so their H wanders).
+    pub level_noise: f64,
 }
 
 pub struct Transfer {
@@ -226,6 +232,9 @@ pub struct Transfer {
     class_gxx: [Vec<f64>; 2],
     class_gyy: [Vec<f64>; 2],
     class_fed: [bool; 2],
+    /// Frames each class has averaged (up to its average's length), and that length in frames.
+    class_frames: [f64; 2],
+    frames_full: f64,
     level_db: Option<f64>,
     /// The points' frequencies and, per point, its run of (bin, weight) in `weights`.
     freqs: Vec<f64>,
@@ -260,6 +269,8 @@ impl Transfer {
             class_gxx: [vec![0.0; n / 2 + 1], vec![0.0; n / 2 + 1]],
             class_gyy: [vec![0.0; n / 2 + 1], vec![0.0; n / 2 + 1]],
             class_fed: [false; 2],
+            class_frames: [0.0; 2],
+            frames_full: 1.0,
             level_db: None,
             window: hann(n),
             buf: vec![0.0; n],
@@ -311,6 +322,7 @@ impl Transfer {
             self.class_gyy[c].fill(0.0);
         }
         self.class_fed = [false; 2];
+        self.class_frames = [0.0; 2];
         self.level_db = None;
     }
 
@@ -382,6 +394,9 @@ impl Transfer {
         self.level_db = Some(mean + (level - mean) * a_all);
         let ac = if self.class_fed[class] { a_all } else { 1.0 };
         self.class_fed[class] = true;
+        // An exponential average of weight a holds (2 − a)/a frames' worth.
+        self.frames_full = (2.0 - a_all) / a_all.max(1e-9);
+        self.class_frames[class] = (self.class_frames[class] + 1.0).min(self.frames_full);
         let ckeep = 1.0 - ac;
         for g in &mut self.class_gxy[class] {
             *g *= ckeep;
@@ -427,12 +442,23 @@ impl Transfer {
             let f = self.freqs[i];
             let turn = Complex::from_polar(1.0, TAU * f * delay_frac / self.fs);
             self.smoothed[i] = (h * turn, xx, yy, xy2);
-            out[i].level_spread = if split && h.norm() > 1e-12 {
-                let loud = point_h(run, &self.class_gxy[0], &self.class_gxx[0], &self.class_gyy[0]).0;
-                let quiet = point_h(run, &self.class_gxy[1], &self.class_gxx[1], &self.class_gyy[1]).0;
-                (loud - quiet).norm() / h.norm()
+            (out[i].level_spread, out[i].level_noise) = if split && h.norm() > 1e-12 {
+                // Independent looks: the window's bins (its weights' effective count), times the
+                // class's frames, halved for the frames' 75 % overlap.
+                let (sw, sw2) = run.iter().fold((0.0, 0.0), |(a, b), &(_, w)| (a + w, b + w * w));
+                let bins = if sw2 > 0.0 { sw * sw / sw2 } else { 1.0 };
+                let mut var = 0.0;
+                let mut hs = [Complex::new(0.0, 0.0); 2];
+                for c in 0..2 {
+                    let (hc, xx, yy, xy2) = point_h(run, &self.class_gxy[c], &self.class_gxx[c], &self.class_gyy[c]);
+                    let g = if xx > 1e-30 && yy > 1e-30 { (xy2 / (xx * yy)).clamp(1e-6, 1.0) } else { 1e-6 };
+                    let n = (bins * 0.5 * self.class_frames[c]).max(1.0);
+                    var += hc.norm_sqr() * (1.0 - g) / (g * n);
+                    hs[c] = hc;
+                }
+                ((hs[0] - hs[1]).norm() / h.norm(), var.sqrt() / h.norm())
             } else {
-                0.0
+                (0.0, 0.0)
             };
         }
         let m = self.freqs.len();
@@ -527,6 +553,7 @@ pub fn blend(low: &[TransferPoint], high: &[TransferPoint], from: f64, to: f64, 
             group_delay: l.group_delay * (1.0 - u) + h.group_delay * u,
             coherence: l.coherence * (1.0 - u) + h.coherence * u,
             level_spread: l.level_spread * (1.0 - u) + h.level_spread * u,
+            level_noise: l.level_noise * (1.0 - u) + h.level_noise * u,
         };
     }
 }

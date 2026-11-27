@@ -127,20 +127,15 @@ fn trust(coherence: f64) -> f64 {
     smoothstep((coherence - 0.3) / 0.55)
 }
 
-/// How much a point reads as a filter: 1 while loud and quiet passages give the same H (a
-/// filter: spread under 0.03, the measurement's noise), nothing from 0.09 on (a gate, compressor,
-/// limiter or saturator: they read 0.05–0.4 where they draw delays that are not there).
-fn linear(spread: f64) -> f64 {
-    1.0 - smoothstep((spread - 0.03) / 0.06)
-}
-
-/// How much the phase and group delay are believed (2026-11-27, user: the group delay behind a
-/// gate "is still messy in lows"): a derivative of phase needs more than the magnitude, so all
-/// of the coherence from 0.95 and none under 0.6, and only where the chain acts as a filter. A
-/// tail-cutting gate read γ² 0.78 at 30–40 Hz, drawn at 94 % before; a compressor's lows γ²
-/// 0.99 with a fake 25 ms (its spread says so). `examples/tv_probe` in mite-dsp.
-fn phase_trust(coherence: f64, spread: f64) -> f64 {
-    smoothstep((coherence - 0.6) / 0.35) * linear(spread)
+/// How surely the chain changes with level at a point, 0…1, from the loud/quiet spread and the
+/// spread the measurement's own noise gives (each over ±1/3 octave): none up to 2 times the
+/// noise, all of it from 2.8, and never under a spread of 0.02. A filter, also under hiss that
+/// takes γ² to 0.85, reads 1–1.7 times its noise; a gate, compressor or limiter 2–14 where it
+/// draws delays that are not there (`tests/phase_level.rs`). Only marks the curves: they are
+/// always drawn (2026-11-27, user, after a first cut hid them: "why would you think that
+/// smartest way to handle this is to just hide").
+fn level_mark(spread: f64, noise: f64) -> f64 {
+    smoothstep((spread / noise.max(1e-4) - 2.0) / 0.8) * smoothstep((spread - 0.02) / 0.04)
 }
 
 /// Where the reference comes from.
@@ -200,14 +195,14 @@ pub struct PhaseLab {
     /// As drawn: H (complex, eased), coherence, total group delay (s).
     eased_h: Vec<Complex<f64>>,
     eased_coh: Vec<f64>,
-    /// The loud/quiet spread as drawn (eased), and how much the impulse is believed: the share
-    /// of the coherent band that acts as a filter.
+    /// The loud/quiet spread and its noise as drawn (eased), their means over ±1/3 octave, and
+    /// from them where the curves are marked as changing with level.
     eased_spread: Vec<f64>,
-    /// The largest eased spread within ±1/3 octave: level dependence is the chain's across a
-    /// range, and a kick's own steady pitch can read low on its own (a limiter: 0.04 at 50 Hz,
-    /// 0.12–0.21 either side).
-    wide_spread: Vec<f64>,
-    ir_trust: f64,
+    eased_noise: Vec<f64>,
+    spread_mean: Vec<f64>,
+    noise_mean: Vec<f64>,
+    mark: Vec<f64>,
+    closed: Vec<f64>,
     eased_gd: Vec<f64>,
     ir: Vec<f64>,
     /// The impulse as drawn (eased like the curves) and its held peak (the drawing's scale).
@@ -269,8 +264,11 @@ impl PhaseLab {
             eased_h: vec![Complex::new(0.0, 0.0); POINTS],
             eased_coh: vec![0.0; POINTS],
             eased_spread: vec![0.0; POINTS],
-            wide_spread: vec![0.0; POINTS],
-            ir_trust: 1.0,
+            eased_noise: vec![0.0; POINTS],
+            spread_mean: vec![0.0; POINTS],
+            noise_mean: vec![0.0; POINTS],
+            mark: vec![0.0; POINTS],
+            closed: vec![0.0; POINTS],
             eased_gd: vec![0.0; POINTS],
             ir_span: (IR_SPAN_MS, IR_SPAN_MS),
             ir_target: (IR_SPAN_MS, IR_SPAN_MS),
@@ -328,11 +326,20 @@ impl PhaseLab {
         (p.magnitude_db, p.phase.to_degrees(), (p.group_delay + self.delay / fs) * 1000.0, p.coherence)
     }
 
-    /// How strongly the phase and group delay are drawn at `hz` (nearest point), 0…1: the
-    /// coherence and whether the chain acts as a filter there.
-    pub fn phase_shown(&self, hz: f64) -> f64 {
+    /// How strongly the curves are drawn at `hz` (nearest point), 0…1: the coherence's trust.
+    pub fn shown(&self, hz: f64) -> f64 {
+        trust(self.eased_coh[self.index(hz)])
+    }
+
+    /// The loud/quiet spread and its noise at `hz` (nearest point) as the mark reads them.
+    pub fn level_reading(&self, hz: f64) -> (f64, f64) {
         let i = self.index(hz);
-        phase_trust(self.eased_coh[i], self.wide_spread[i])
+        (self.spread_mean[i], self.noise_mean[i])
+    }
+
+    /// How strongly the phase and group delay are marked as changing with level at `hz`, 0…1.
+    pub fn level_marked(&self, hz: f64) -> f64 {
+        self.mark[self.index(hz)]
     }
 
     /// The loud/quiet spread at `hz` (nearest point), as measured.
@@ -361,8 +368,8 @@ impl PhaseLab {
         self.fresh = false;
         self.eased_coh.fill(0.0);
         self.eased_spread.fill(0.0);
-        self.wide_spread.fill(0.0);
-        self.ir_trust = 1.0;
+        self.eased_noise.fill(0.0);
+        self.mark.fill(0.0);
         if !matches!(self.status, Status::NoReference | Status::RateMismatch) {
             self.status = Status::Searching;
         }
@@ -633,23 +640,34 @@ impl PhaseLab {
             self.eased_coh[i] += (coh - self.eased_coh[i]) * k;
             let spread = if self.status == Status::Measuring { p.level_spread } else { 0.0 };
             self.eased_spread[i] += (spread - self.eased_spread[i]) * k;
+            let noise = if self.status == Status::Measuring { p.level_noise } else { 0.0 };
+            self.eased_noise[i] += (noise - self.eased_noise[i]) * k;
             self.eased_gd[i] += (p.group_delay + self.delay / self.sample_rate - self.eased_gd[i]) * k;
         }
-        // POINTS are 1/60 octave apart: ±20 is ±1/3 octave.
-        const WIDE: usize = 20;
-        for i in 0..self.eased_spread.len() {
-            let (a, b) = (i.saturating_sub(WIDE), (i + WIDE).min(self.eased_spread.len() - 1));
-            self.wide_spread[i] = self.eased_spread[a..=b].iter().copied().fold(0.0, f64::max);
+        // POINTS are 1/60 octave apart: ±20 is ±1/3 octave. Means, not a single point: each
+        // reading is noisy on its own.
+        let m = self.eased_spread.len();
+        let mean = |v: &[f64], i: usize, w: usize| {
+            let (a, b) = (i.saturating_sub(w), (i + w).min(m - 1));
+            v[a..=b].iter().sum::<f64>() / (b - a + 1) as f64
+        };
+        for i in 0..m {
+            self.spread_mean[i] = mean(&self.eased_spread, i, 20);
+            self.noise_mean[i] = mean(&self.eased_noise, i, 20);
+            self.mark[i] = level_mark(self.spread_mean[i], self.noise_mean[i]);
         }
-        // The impulse is a filter's: drawn as strongly as the coherent band acts as one.
-        let (mut num, mut den) = (0.0, 0.0);
-        for i in 0..self.points.len() {
-            let w = trust(self.eased_coh[i]);
-            num += w * linear(self.wide_spread[i]);
-            den += w;
+        // A gap under 2/3 octave between marked stretches is marked too: around a kick's
+        // own steady pitch the spread reads low while the delay drawn is the most wrong (a
+        // compressor: −31 ms at 45 Hz, marked either side).
+        const GAP: usize = 40;
+        for i in 0..m {
+            let left = self.mark[i.saturating_sub(GAP)..i].iter().copied().fold(0.0, f64::max);
+            let right = self.mark[(i + 1).min(m)..(i + 1 + GAP).min(m)].iter().copied().fold(0.0, f64::max);
+            // Only between clear marks: two faint blips do not make a stretch.
+            let bridge = left.min(right);
+            self.closed[i] = self.mark[i].max(if bridge > 0.5 { bridge } else { 0.0 });
         }
-        let ir_trust = if den > 1e-9 { num / den } else { 1.0 };
-        self.ir_trust += (ir_trust - self.ir_trust) * k;
+        std::mem::swap(&mut self.mark, &mut self.closed);
         // The impulse eases as the curves do (its fractional alignment, drawn later, is the
         // delay's, which is steady).
         if self.eased_ir.len() != self.ir.len() {
@@ -895,15 +913,14 @@ impl PhaseLab {
             let x = freq_x(f);
             let h = self.eased_h[i];
             let t = trust(self.eased_coh[i]);
-            let tp = phase_trust(self.eased_coh[i], self.wide_spread[i]);
             let deg = h.arg().to_degrees();
             if let Some(l) = last_deg {
                 wrapped[i] = (deg - l).abs() > 180.0;
             }
             last_deg = Some(deg);
             mag.push((Point::new(x, self.mag_y(20.0 * h.norm().max(1e-6).log10())), t));
-            ph.push((Point::new(x, Self::phase_y(deg)), tp));
-            gd.push((Point::new(x, self.gd_y(self.eased_gd[i] * 1000.0)), tp));
+            ph.push((Point::new(x, Self::phase_y(deg)), t));
+            gd.push((Point::new(x, self.gd_y(self.eased_gd[i] * 1000.0)), t));
         }
         let ph_color = theme.accent;
         let mag_color = theme.curve;
@@ -911,11 +928,16 @@ impl PhaseLab {
         cx.begin_clip(&MAG);
         Self::faded_curve(cx, &mag, mag_color, 1.8, false, |_| false);
         cx.end_clip();
+        // Where the chain changes with level the phase and group delay are not a filter's: the
+        // same curves, drawn over in the warning colour there.
+        let marked = |v: &[(Point, f64)]| -> Vec<(Point, f64)> { v.iter().zip(&self.mark).map(|(&(q, t), &m)| (q, t * m)).collect() };
         cx.begin_clip(&PHASE);
         Self::faded_curve(cx, &ph, ph_color, 2.2, true, |i| wrapped[i]);
+        Self::faded_curve(cx, &marked(&ph), theme.danger, 2.2, false, |i| wrapped[i]);
         cx.end_clip();
         cx.begin_clip(&GD);
         Self::faded_curve(cx, &gd, gd_color, 1.8, false, |_| false);
+        Self::faded_curve(cx, &marked(&gd), theme.danger, 1.8, false, |_| false);
         cx.end_clip();
         // Nothing to show yet: say why, in the phase plot's middle.
         let words = match self.status {
@@ -927,21 +949,6 @@ impl PhaseLab {
         };
         if let Some(w) = words {
             cx.text.draw(cx.scene, w, PHASE.center().x, PHASE.center().y - 30.0, BODY, theme.text_mid, Align::Center);
-        }
-        // Most of what is coherent is hidden because the chain changes with level: say so, or
-        // the plots look broken.
-        if self.status == Status::Measuring {
-            let (mut coherent, mut hidden) = (0.0, 0.0);
-            for i in 0..POINTS {
-                let t = trust(self.eased_coh[i]);
-                coherent += t;
-                hidden += t * (1.0 - linear(self.wide_spread[i]));
-            }
-            if coherent > 0.0 && hidden / coherent > 0.6 {
-                let y = PHASE.center().y - 30.0;
-                cx.text.draw(cx.scene, "The chain changes with level here: a gate, compressor, limiter or saturator", PHASE.center().x, y, BODY, theme.text_mid, Align::Center);
-                cx.text.draw(cx.scene, "has no one phase response, so none is drawn", PHASE.center().x, y + 26.0, BODY, theme.text_mid, Align::Center);
-            }
         }
         if let Status::Upstream(n) = self.status {
             cx.text.draw(cx.scene, &format!("This is the reference: Analyzer {n} measures the chain after it"), PHASE.center().x, PHASE.center().y - 30.0, BODY, theme.text_mid, Align::Center);
@@ -1013,7 +1020,7 @@ impl PhaseLab {
         if measuring {
             let step = 3;
             for i in (0..POINTS).step_by(step) {
-                let off = (1.0 - linear(self.wide_spread[i])) * trust(self.eased_coh[i]);
+                let off = self.mark[i] * trust(self.eased_coh[i]);
                 if off > 0.02 {
                     let x0 = sx(self.points[i].freq.max(20.0));
                     let x1 = sx(self.points[(i + step).min(POINTS - 1)].freq.max(20.0)) + 0.5;
@@ -1127,9 +1134,8 @@ impl PhaseLab {
         }
         shape.close_path();
         cx.begin_clip(&r);
-        let a = (0.15 + 0.85 * self.ir_trust) as f32;
-        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.35 * a), None, &shape);
-        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.accent.multiply_alpha(a), None, &shape);
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.accent.multiply_alpha(0.35), None, &shape);
+        cx.scene.stroke(&Stroke::new(1.2), Affine::IDENTITY, theme.accent, None, &shape);
         cx.end_clip();
     }
 
@@ -1152,7 +1158,7 @@ impl PhaseLab {
         let coh = self.points[i].coherence;
         let db = 20.0 * h.norm().max(1e-6).log10();
         let hint = if GD.contains(p) { " — wheel: zoom, Alt+wheel or drag: scroll, double-click: as it was" } else { "" };
-        let level = if linear(self.wide_spread[i]) < 0.5 && trust(self.eased_coh[i]) > 0.5 {
+        let level = if self.mark[i] > 0.5 && trust(self.eased_coh[i]) > 0.5 {
             " · changes with level here (a gate, compressor or saturator): not a filter's phase"
         } else {
             ""
