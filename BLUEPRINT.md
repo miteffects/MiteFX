@@ -715,6 +715,15 @@ document): SENS, BLEED, PRE, HOLD, ENDS (above the floor), FADE, FLOOR (−80 dB
 (onsets from frame 0; a region from a clip's first sample opens without a fade). Drawing costs
 the same at 8 s and 4 min (`examples/snapshot.rs`, `MITE_CUT_SNAP_SECONDS`).
 
+**Export (slice 5, 2026-11-27):** EXPORT in the header writes every cut track (roles that cut;
+Off, OH and Room are unchanged, so not written) as it plays: one WAV a clip, named by its track
+(numbered when a track has several clips), 32-bit float, mono, at the clip's rate, from its
+first sample, with a broadcast-wave (`bext`) time reference at the clip's place on the song, so
+hosts that read it (REAPER, Pro Tools, Cubase) place it there. Into `~/Music/Mite Cut/<date
+time>/` (the home folder's `Mite Cut` without a Music folder); the header says where. No new
+dependency: `session::write_wav` (ffprobe reads it: pcm_f32le, the time reference, the tags).
+Not yet: MIDI of the hits (for drum replacement), offered.
+
 ## 7. Shared UX system (Claude Design brief)
 
 ### 7.1 What we want to beat

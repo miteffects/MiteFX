@@ -180,6 +180,7 @@ pub fn guess_role(name: &str) -> Role {
 pub struct State {
     pub status: Status,
     pub tracks: Arc<Vec<Track>>,
+    pub export: Option<Export>,
 }
 
 enum Job {
@@ -191,6 +192,17 @@ enum Job {
     Settings(u64, Settings),
     /// The user kept, removed or moved a hit of clip `modification`.
     Override(u64, OverrideState),
+    /// Write every cut track to WAV files in this folder.
+    Export(std::path::PathBuf),
+}
+
+/// An export of the cut tracks as audio files.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Export {
+    Writing,
+    /// The folder, and the files written there.
+    Done(std::path::PathBuf, Vec<String>),
+    Failed(String),
 }
 
 pub struct Session {
@@ -214,7 +226,7 @@ pub struct Session {
 impl Session {
     pub fn new() -> Arc<Self> {
         let s = Arc::new(Self {
-            state: Mutex::new(State { status: Status::Unbound, tracks: Arc::new(Vec::new()) }),
+            state: Mutex::new(State { status: Status::Unbound, tracks: Arc::new(Vec::new()), export: None }),
             renders: Handover::new(),
             jobs: Mutex::new(None),
             busy: AtomicUsize::new(0),
@@ -305,6 +317,102 @@ impl Session {
     pub fn set_override(&self, modification: u64, o: OverrideState) {
         self.send(Job::Override(modification, o));
     }
+
+    /// Writes every cut track as WAV files into `dir` (by default a new folder, named by the
+    /// time, in [`export_root`]).
+    pub fn export(&self, dir: Option<std::path::PathBuf>) {
+        let dir = dir.unwrap_or_else(|| export_root().join(stamp(std::time::SystemTime::now()).replace(':', "-")));
+        self.lock().export = Some(Export::Writing);
+        self.version.fetch_add(1, Ordering::AcqRel);
+        self.send(Job::Export(dir));
+    }
+
+    /// The last export, if any.
+    pub fn exported(&self) -> Option<Export> {
+        self.lock().export.clone()
+    }
+}
+
+/// Where exports go: `~/Music/Mite Cut` (or the home folder's `Mite Cut` without a Music
+/// folder).
+pub fn export_root() -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let music = home.join("Music");
+    if music.is_dir() { music.join("Mite Cut") } else { home.join("Mite Cut") }
+}
+
+/// `t` as `YYYY-MM-DD HH:MM:SS` (UTC).
+pub fn stamp(t: std::time::SystemTime) -> String {
+    let secs = t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
+    let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Days to the civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", rest / 3600, rest / 60 % 60, rest % 60)
+}
+
+/// A track's name as a file name (no path separators or characters file systems refuse).
+fn file_name(name: &str) -> String {
+    let n: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c }).collect();
+    let n = n.trim().trim_matches('.').to_owned();
+    if n.is_empty() { "Track".to_owned() } else { n }
+}
+
+/// Writes `x` (mono, `fs`) as a 32-bit float WAV with a broadcast-wave chunk whose time
+/// reference is `song_at` (samples since the song's start: hosts that read it place the file
+/// where its clip was).
+pub fn write_wav(path: &std::path::Path, x: &[f32], fs: u32, song_at: u64, description: &str) -> std::io::Result<()> {
+    let mut b: Vec<u8> = Vec::with_capacity(x.len() * 4 + 1024);
+    let chunk = |b: &mut Vec<u8>, id: &[u8; 4], body: &[u8]| {
+        b.extend_from_slice(id);
+        b.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        b.extend_from_slice(body);
+        if body.len() % 2 == 1 {
+            b.push(0);
+        }
+    };
+    let mut fmt = Vec::new();
+    fmt.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+    fmt.extend_from_slice(&1u16.to_le_bytes());
+    fmt.extend_from_slice(&fs.to_le_bytes());
+    fmt.extend_from_slice(&(fs * 4).to_le_bytes());
+    fmt.extend_from_slice(&4u16.to_le_bytes());
+    fmt.extend_from_slice(&32u16.to_le_bytes());
+    fmt.extend_from_slice(&0u16.to_le_bytes());
+    // bext (EBU Tech 3285): description, originator, its reference, date, time, the time
+    // reference (low, high), version, UMID, loudness, reserved.
+    let mut bext = vec![0u8; 602];
+    let put = |b: &mut [u8], at: usize, len: usize, s: &str| {
+        let s = s.as_bytes();
+        b[at..at + s.len().min(len)].copy_from_slice(&s[..s.len().min(len)]);
+    };
+    put(&mut bext, 0, 256, description);
+    put(&mut bext, 256, 32, "Mite Cut");
+    let now = stamp(std::time::SystemTime::now());
+    put(&mut bext, 320, 10, &now[..10]);
+    put(&mut bext, 330, 8, &now[11..].replace(':', "-"));
+    bext[338..342].copy_from_slice(&(song_at as u32).to_le_bytes());
+    bext[342..346].copy_from_slice(&((song_at >> 32) as u32).to_le_bytes());
+    bext[346..348].copy_from_slice(&1u16.to_le_bytes());
+    let data: Vec<u8> = x.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let mut body = Vec::new();
+    body.extend_from_slice(b"WAVE");
+    chunk(&mut body, b"fmt ", &fmt);
+    chunk(&mut body, b"fact", &(x.len() as u32).to_le_bytes());
+    chunk(&mut body, b"bext", &bext);
+    chunk(&mut body, b"data", &data);
+    chunk(&mut b, b"RIFF", &body);
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    std::fs::write(path, b)
 }
 
 /// Where Mite Cut keeps its log.
@@ -577,6 +685,31 @@ impl AraState {
             .collect()
     }
 
+    /// Writes every cut track's clips, as they play, into `dir`: one file a clip, named by its
+    /// track (and numbered when a track has more than one), at the clip's rate, from its first
+    /// sample, stamped with where it sits on the song.
+    fn export(&self, s: &Session, dir: &std::path::Path) -> Result<Vec<String>, String> {
+        let tracks = s.tracks();
+        let mut files = Vec::new();
+        for t in tracks.iter().filter(|t| t.role.cuts()) {
+            for (i, c) in t.clips.iter().enumerate() {
+                let Some(audio) = self.audio.get(&c.modification) else { continue };
+                let mut gain = vec![0.0f32; audio.len()];
+                c.curve.fill(0, &mut gain);
+                let out: Vec<f32> = audio.iter().zip(&gain).map(|(x, g)| x * g).collect();
+                let base = file_name(&t.name);
+                let name = if t.clips.len() > 1 { format!("{base} {}.wav", i + 1) } else { format!("{base}.wav") };
+                let song_at = (c.song_s * c.fs).round().max(0.0) as u64;
+                write_wav(&dir.join(&name), &out, c.fs.round() as u32, song_at, &format!("{} cut by Mite Cut", t.name)).map_err(|e| format!("{}: {e}", dir.join(&name).display()))?;
+                files.push(name);
+            }
+        }
+        if files.is_empty() {
+            return Err("no track is cut: give the drum tracks a role first".to_owned());
+        }
+        Ok(files)
+    }
+
     /// Writes `change` into the state of every clip `pick` selects (the host keeps it).
     fn write(&mut self, s: &Session, pick: impl Fn(&mite_ara::PlaybackRegion) -> bool, change: impl Fn(&mut ModState)) {
         let Some(inst) = s.ara() else { return };
@@ -618,6 +751,14 @@ fn worker(session: Weak<Session>, rx: mpsc::Receiver<Job>) {
                 Job::Settings(seq, settings) => {
                     ara.write(&s, |r| r.sequence == seq, |st| st.settings = Some(settings.into()));
                     force = true;
+                }
+                Job::Export(dir) => {
+                    let result = ara.export(&s, &dir);
+                    s.lock().export = Some(match result {
+                        Ok(files) => Export::Done(dir, files),
+                        Err(e) => Export::Failed(e),
+                    });
+                    s.version.fetch_add(1, Ordering::AcqRel);
                 }
                 Job::Override(m, o) => {
                     ara.write(

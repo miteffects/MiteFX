@@ -60,6 +60,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     session.bind_ara(inst);
     session.wait_idle(Duration::from_secs(60));
 
+    // MITE_CUT_SNAP_EXPORT=<folder>: export there first (to see the header say so).
+    if let Some(dir) = std::env::var_os("MITE_CUT_SNAP_EXPORT") {
+        session.export(Some(dir.into()));
+        session.wait_idle(Duration::from_secs(60));
+    }
     let host_params = mite_cut::editor::memory_host();
     let mut view = CutView::new(std::sync::Arc::new(CutShared { session }));
     view.tick(&host_params);

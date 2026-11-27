@@ -191,3 +191,64 @@ fn an_editor_instance_passes_and_the_player_never_allocates() {
     let stopped = Transport { playing: false, pos: Some(0) };
     assert_no_alloc::assert_no_alloc(|| e_pl.process(&mut [&mut l[..64], &mut r[..64]], stopped, false, false, &pl));
 }
+
+/// A WAV's chunks: id → body.
+fn chunks(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+    assert_eq!(&bytes[0..4], b"RIFF");
+    assert_eq!(&bytes[8..12], b"WAVE");
+    let mut out = Vec::new();
+    let mut at = 12;
+    while at + 8 <= bytes.len() {
+        let id: [u8; 4] = bytes[at..at + 4].try_into().unwrap();
+        let len = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()) as usize;
+        out.push((id, bytes[at + 8..at + 8 + len].to_vec()));
+        at += 8 + len + len % 2;
+    }
+    out
+}
+
+#[test]
+fn export_writes_each_cut_track_as_it_plays_stamped_with_its_place() {
+    let k = kit_in_host(91);
+    let (s, _e) = instance(&k, 2, 7);
+    let dir = std::env::temp_dir().join(format!("mite-cut-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    s.export(Some(dir.clone()));
+    assert!(s.wait_idle(Duration::from_secs(60)));
+    let Some(mite_cut::session::Export::Done(at, files)) = s.exported() else { panic!("{:?}", s.exported()) };
+    assert_eq!(at, dir);
+    let mut names = files.clone();
+    names.sort();
+    assert_eq!(names, ["Floor Tom.wav", "HH.wav", "Kick In.wav", "Snare Top.wav", "Tom 1.wav"]);
+    // Tom 1: 32-bit float, mono, 48 kHz, the clip through its cut, stamped at song time 0.
+    let bytes = std::fs::read(dir.join("Tom 1.wav")).expect("the file");
+    let c = chunks(&bytes);
+    let get = |id: &[u8; 4]| c.iter().find(|(i, _)| i == id).map(|(_, b)| b.clone()).expect("chunk");
+    let fmt = get(b"fmt ");
+    assert_eq!((u16::from_le_bytes([fmt[0], fmt[1]]), u16::from_le_bytes([fmt[2], fmt[3]]), u32::from_le_bytes(fmt[4..8].try_into().unwrap())), (3, 1, 48_000));
+    let bext = get(b"bext");
+    assert_eq!(u32::from_le_bytes(bext[338..342].try_into().unwrap()), 0);
+    let data: Vec<f32> = get(b"data").chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+    let tom = s.tracks().iter().find(|t| t.name == "Tom 1").cloned().expect("tom 1");
+    let x = &k.mics[2];
+    assert_eq!(data.len(), x.len());
+    let worst = data.iter().zip(x).enumerate().map(|(i, (d, v))| (d - v * tom.clips[0].curve.at(i)).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-6, "{worst}");
+    assert!(data.iter().any(|v| *v != 0.0) && data.iter().filter(|v| **v == 0.0).count() > x.len() / 4, "hits kept, the rest cut");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_clip_later_on_the_song_is_stamped_there() {
+    let dir = std::env::temp_dir().join(format!("mite-cut-wav-{}", std::process::id()));
+    let x: Vec<f32> = (0..4800).map(|i| (i as f32 * 0.01).sin()).collect();
+    mite_cut::session::write_wav(&dir.join("t.wav"), &x, 44_100, 3 * 44_100 + 7, "test").expect("written");
+    let bytes = std::fs::read(dir.join("t.wav")).expect("read");
+    let c = chunks(&bytes);
+    let bext = &c.iter().find(|(i, _)| i == b"bext").expect("bext").1;
+    assert_eq!(u32::from_le_bytes(bext[338..342].try_into().unwrap()), 3 * 44_100 + 7);
+    assert_eq!(&bext[256..264], b"Mite Cut");
+    let fact = &c.iter().find(|(i, _)| i == b"fact").expect("fact").1;
+    assert_eq!(u32::from_le_bytes(fact[..4].try_into().unwrap()), 4800);
+    let _ = std::fs::remove_dir_all(&dir);
+}

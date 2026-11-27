@@ -13,6 +13,7 @@
 //!   shows the whole song; the host's playhead runs across.
 //! - **Dials:** the selected track's tuning (sensitivity, bleed, pre-roll, hold, where a hit
 //!   ends, fade out, floor). **Footer:** Listen Removed (only what is cut) and Bypass.
+//! - **Export:** every cut track as a WAV file, for any DAW.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -28,7 +29,7 @@ use mite_ui::{Align, DrawCx, MemoryParamHost, MouseButton, ParamHost, TextStyle,
 
 use crate::CutShared;
 use crate::params::{BYPASS, REMOVED};
-use crate::session::{Clip, OverrideState, PEAK_HOP, Status, Track};
+use crate::session::{Clip, Export, OverrideState, PEAK_HOP, Status, Track};
 
 /// Cut is a gate at heart: it wears the Gate accent.
 pub const ACCENT: &str = "gate";
@@ -47,6 +48,8 @@ const LANES_BOTTOM: f64 = HEIGHT - FOOTER - DIALS;
 const LANE_MIN: f64 = 44.0;
 const LANE_MAX: f64 = 110.0;
 const CHIP_W: f64 = 70.0;
+/// The export button, in the header.
+const EXPORT: Rect = Rect::new(WIDTH - 126.0, 10.0, WIDTH - 16.0, 38.0);
 /// A hit mark is this close to the pointer to be under it, px.
 const MARK_REACH: f64 = 6.0;
 /// Marks are drawn when the kept hits in view are at least this far apart on average, px.
@@ -117,6 +120,7 @@ enum Hot {
     /// Track `row`'s lane, at song time `t`.
     Lane(usize, f64),
     Ruler,
+    Export,
 }
 
 pub struct CutView {
@@ -206,6 +210,9 @@ impl CutView {
     }
 
     fn hot_at(&self, p: Point, tracks: &[Track]) -> Hot {
+        if EXPORT.contains(p) {
+            return Hot::Export;
+        }
         if p.y >= HEADER && p.y < LANES_TOP && p.x >= LANES_X {
             return Hot::Ruler;
         }
@@ -410,6 +417,7 @@ impl CutView {
             Hot::Name(_) => Help::default().text("Click to tune this track with the dials below"),
             Hot::Lane(..) => Help::default().text("Wheel: zoom · drag: pan · double-click: add a hit here (where none was found)"),
             Hot::Ruler => Help::default().text("Wheel: zoom · drag: pan · double-click: the whole song"),
+            Hot::Export => Help::default().text(format!("Write each cut track as a WAV file (32-bit float, stamped with its place on the song) into {}", crate::session::export_root().display())),
             Hot::None => Help::default().text("Each track is judged against the others · lit: kept · dim: cut · amber marks: unsure, check those"),
         }
     }
@@ -469,6 +477,21 @@ impl View for CutView {
         cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, theme.line, None, &Line::new((0.0, HEADER - 0.5), (WIDTH, HEADER - 0.5)));
         draw_mark(cx, 14.0, 11.0, 26.0);
         draw_title(cx, 48.0, 14.0, "Cut");
+        let hot = self.hot == Hot::Export;
+        cx.scene.fill(Fill::NonZero, Affine::IDENTITY, if hot { theme.panel_control } else { theme.control }, None, &RoundedRect::from_rect(EXPORT, 5.0));
+        cx.scene.stroke(&Stroke::new(1.0), Affine::IDENTITY, if hot { theme.text_mid } else { theme.control_border }, None, &RoundedRect::from_rect(EXPORT, 5.0));
+        cx.text.draw(cx.scene, "EXPORT", EXPORT.center().x, EXPORT.y0 + 8.0, TextStyle::LABEL.sized(10.0), theme.text_hi, Align::Center);
+        let said = match s.exported() {
+            Some(Export::Writing) => Some(("Writing the cut tracks…".to_owned(), theme.text_mid)),
+            Some(Export::Done(dir, files)) => Some((format!("{} {} written to {}", files.len(), if files.len() == 1 { "file" } else { "files" }, dir.display()), theme.text_mid)),
+            Some(Export::Failed(e)) => Some((format!("Not exported: {e}"), theme.warn)),
+            None => None,
+        };
+        if let Some((text, ink)) = said {
+            cx.begin_clip(&Rect::new(160.0, 0.0, EXPORT.x0 - 12.0, HEADER));
+            cx.text.draw(cx.scene, &text, EXPORT.x0 - 14.0, 17.0, TextStyle::BODY.sized(11.0), ink, Align::Right);
+            cx.end_clip();
+        }
         // The dials, for the selected track.
         let top = HEIGHT - FOOTER - DIALS;
         cx.scene.fill(Fill::NonZero, Affine::IDENTITY, theme.window, None, &Rect::new(0.0, top, WIDTH, HEIGHT - FOOTER));
@@ -514,6 +537,12 @@ impl View for CutView {
             }
             UiEvent::PointerLeft => std::mem::replace(&mut self.hot, Hot::None) != Hot::None,
             UiEvent::PointerDown { pos, button: MouseButton::Left, mods } => match self.hot_at(pos, &tracks) {
+                Hot::Export => {
+                    if s.exported() != Some(Export::Writing) {
+                        s.export(None);
+                    }
+                    true
+                }
                 Hot::Chip(row) => {
                     let t = &tracks[row];
                     s.set_role(t.sequence, next_role(t.role, mods.shift));
