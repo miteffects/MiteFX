@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use mite_analyzer::dsp::AnalyzerEngine;
-use mite_analyzer::editor::phase::Status;
+use mite_analyzer::editor::phase::{Polarity, Status};
 use mite_analyzer::editor::{memory_host, AnalyzerView};
 use mite_analyzer::params::PAGE;
 use mite_analyzer::{AnalyzerShared, SOURCE_SIDECHAIN};
@@ -62,6 +62,26 @@ fn a_delayed_inverted_chain_reads_its_delay_polarity_and_flat_magnitude() {
         assert!((gd_ms - 256.0 / 48.0).abs() < 0.02, "{hz} Hz: group delay {gd_ms} ms");
         assert!(coh > 0.98, "{hz} Hz: coherence {coh}");
     }
+}
+
+#[test]
+fn a_phase_that_turns_across_the_band_is_rotated_not_inverted() {
+    // A Hilbert shift (−90° everywhere, 255 taps, Blackman): its impulse is two spikes of
+    // opposite sign either side of the centre, so the correlation peak's sign is a coin toss.
+    let taps: Vec<f64> = (0..255)
+        .map(|k| {
+            let m = k as f64 - 127.0;
+            let w = 0.42 - 0.5 * (std::f64::consts::TAU * k as f64 / 254.0).cos() + 0.08 * (2.0 * std::f64::consts::TAU * k as f64 / 254.0).cos();
+            if (k as i64 - 127) % 2 == 0 { 0.0 } else { 2.0 / (std::f64::consts::PI * m) * w }
+        })
+        .collect();
+    let view = measure(5.0, |x| (0..x.len()).map(|i| taps.iter().enumerate().filter(|(k, _)| i >= *k).map(|(k, t)| t * f64::from(x[i - k])).sum::<f64>() as f32).collect());
+    let lab = view.phase();
+    assert_eq!(lab.status(), Status::Measuring);
+    assert_eq!(lab.polarity(), Polarity::Rotated);
+    // A plain flip still reads Inverted, a plain delay Normal (the test above, and this one).
+    let view = measure(5.0, |x| (0..x.len()).map(|i| if i >= 100 { x[i - 100] } else { 0.0 }).collect());
+    assert_eq!(view.phase().polarity(), Polarity::Normal);
 }
 
 #[test]

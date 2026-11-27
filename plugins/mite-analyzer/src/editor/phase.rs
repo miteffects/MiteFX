@@ -175,11 +175,22 @@ pub enum Status {
     Measuring,
 }
 
+/// The chain's polarity as read from its phase across the band.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Polarity {
+    #[default]
+    Normal,
+    Inverted,
+    /// The phase turns across the band (crossovers, allpasses, a Hilbert shift): no one sign
+    /// describes it, and flipping it would help some frequencies and hurt others.
+    Rotated,
+}
+
 /// The numbers as shown (held for the editor's readout time).
 #[derive(Debug, Clone, Copy, Default)]
 struct Shown {
     delay: Option<f64>,
-    inverted: bool,
+    polarity: Polarity,
     coherence: f64,
 }
 
@@ -236,6 +247,9 @@ pub struct PhaseLab {
     delay_int: Option<isize>,
     delay: f64,
     inverted: bool,
+    /// The coherence-weighted mean of cos φ across the band (eased with the curves), or None
+    /// while too little of the band is coherent.
+    polarity_score: Option<f64>,
     confidence: f64,
     lost: usize,
     status: Status,
@@ -290,6 +304,7 @@ impl PhaseLab {
             delay_int: None,
             delay: 0.0,
             inverted: false,
+            polarity_score: None,
             confidence: 0.0,
             lost: 0,
             status: Status::NoReference,
@@ -313,8 +328,25 @@ impl PhaseLab {
         (self.status == Status::Measuring).then_some(self.delay)
     }
 
+    /// Inverted as [`Self::polarity`] reads it.
     pub fn inverted(&self) -> bool {
-        self.inverted
+        self.polarity() == Polarity::Inverted
+    }
+
+    /// The polarity from the phase across the coherent band: the mean of cos φ (after the delay)
+    /// over 40 Hz–16 kHz, each point (1/60 octave) weighted by its coherence's trust; Normal from
+    /// +0.4, Inverted from −0.4, Rotated between. The correlation peak's sign alone (GCC-PHAT)
+    /// read "Inverted" behind Mite Sat's crossovers at 2× oversampling, whose impulse is smeared
+    /// with its largest spike negative (−0.40 against +0.2 around it) while the highs come out
+    /// near 0° (2026-11-27, user's kick chain). Until the band has a say, the peak's sign.
+    pub fn polarity(&self) -> Polarity {
+        match self.polarity_score {
+            Some(c) if c >= 0.4 => Polarity::Normal,
+            Some(c) if c <= -0.4 => Polarity::Inverted,
+            Some(_) => Polarity::Rotated,
+            None if self.inverted => Polarity::Inverted,
+            None => Polarity::Normal,
+        }
     }
 
     /// The reading at `hz` (nearest point): magnitude dB, phase degrees, total group delay ms,
@@ -668,6 +700,19 @@ impl PhaseLab {
             self.closed[i] = self.mark[i].max(if bridge > 0.5 { bridge } else { 0.0 });
         }
         std::mem::swap(&mut self.mark, &mut self.closed);
+        // The polarity from the phase across the band.
+        let (mut c, mut wsum) = (0.0, 0.0);
+        for i in 0..self.points.len() {
+            let f = self.points[i].freq;
+            let h = self.eased_h[i];
+            if (40.0..=16_000.0).contains(&f) && h.norm() > 1e-9 {
+                let w = trust(self.eased_coh[i]);
+                c += w * h.re / h.norm();
+                wsum += w;
+            }
+        }
+        // At least a twentieth of the points coherent.
+        self.polarity_score = (wsum > 0.05 * self.points.len() as f64).then(|| c / wsum);
         // The impulse eases as the curves do (its fractional alignment, drawn later, is the
         // delay's, which is steady).
         if self.eased_ir.len() != self.ir.len() {
@@ -782,7 +827,7 @@ impl PhaseLab {
 
     /// The numbers, now (they then hold).
     pub fn take_readings(&mut self) {
-        self.shown = Shown { delay: self.delay(), inverted: self.inverted, coherence: self.mean_coherence };
+        self.shown = Shown { delay: self.delay(), polarity: self.polarity(), coherence: self.mean_coherence };
     }
 
     // ---- drawing ------------------------------------------------------------------------------
@@ -990,10 +1035,11 @@ impl PhaseLab {
         // Polarity and coherence.
         let row = CHAIN.y0 + 196.0;
         let measuring = n.delay.is_some();
-        let (pol, pol_color) = match (measuring, n.inverted) {
+        let (pol, pol_color) = match (measuring, n.polarity) {
             (false, _) => ("—", theme.text_strong),
-            (true, false) => ("Normal", theme.text_strong),
-            (true, true) => ("Inverted", theme.danger),
+            (true, Polarity::Normal) => ("Normal", theme.text_strong),
+            (true, Polarity::Inverted) => ("Inverted", theme.danger),
+            (true, Polarity::Rotated) => ("Rotated", theme.text_mid),
         };
         let w = (CHAIN.width() - 32.0) / 2.0;
         cx.text.draw(cx.scene, pol, CHAIN.x0 + 16.0 + w - 16.0, row, VALUE, pol_color, Align::Right);

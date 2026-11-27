@@ -836,7 +836,7 @@ impl AnalyzerView {
             Some(Hot::Page(_)) => Help::default().text("Phase — what a chain does: put a Mite Analyzer before it (or feed its input to the sidechain), this one after it."),
             Some(Hot::PhasePlots) if self.pointer.is_some_and(|p| phase::IR_LIN_BUTTON.contains(p) || phase::IR_DB_BUTTON.contains(p)) => Help::default().text("The impulse linear, or its envelope in dB under the peak (−60 to 0): anything before 0 under about −40 dB is measurement or harmless pre-ringing"),
             Some(Hot::PhasePlots) => Help::default().text(self.pointer.and_then(|p| self.phase.help(p)).unwrap_or_default()),
-            Some(Hot::Chain) => Help::default().text("The chain's delay (its latency, as heard), its polarity, and how well the two signals explain each other across the band; curves fade where they don't."),
+            Some(Hot::Chain) => Help::default().text("The chain's delay (its latency, as heard), its polarity (Rotated: the phase turns across the band, as crossovers and allpasses make it, so no one flip fixes it), and how well the two signals explain each other across the band; curves fade where they don't."),
             Some(Hot::Impulse) => Help::default().text("The chain's impulse response around its delay: ringing before 0 is a linear-phase filter's pre-ring."),
             Some(Hot::Menu(Menu::Smooth)) => Help::default().text("Smoothing — across frequency: finer shows more detail, wider settles noisy material."),
             Some(Hot::Menu(Menu::Average)) => Help::default().text("Average — how long the measurement remembers: Fast follows changes, Long steadies music."),
