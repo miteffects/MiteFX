@@ -861,7 +861,7 @@ impl AnalyzerView {
             Some(Hot::Menu(Menu::View)) => Help::default().text("View — the spectrum of the sum, of mid and side, or of left and right."),
             Some(Hot::Menu(Menu::Tilt)) => Help::default().text("Tilt — 4.5 dB/oct reads a balanced mix (and pink noise) level; Flat is the raw spectrum."),
             Some(Hot::Menu(Menu::Speed)) => Help::default().text("Speed — how fast the spectrum follows the music."),
-            None if self.phase_open => Help::default().text("A chain's magnitude, phase and group delay, against the reference before it; curves fade where the two signals don't explain each other."),
+            None if self.phase_open => Help::default().text("A chain's magnitude, phase and group delay, against the reference before it; curves fade where the two signals don't explain each other, and phase and group delay where the chain changes with level (the shaded part of the coherence strip)."),
             None => Help::default().text("Spectrum and spectrogram on the left; loudness and the stereo field on the right."),
         }
     }

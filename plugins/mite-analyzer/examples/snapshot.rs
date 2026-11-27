@@ -6,7 +6,8 @@
 //! SNAPSHOT_VARIANT (phase-db: the impulse in dB): default, ms (Mid / Side), lr (Left / Right), menu (the target list open),
 //! phase (the phase page: the music through a test chain, a 60 Hz high-pass, a 12 kHz low-pass
 //! and 128 samples of delay, against the dry music on the sidechain), phase-menu (its reference
-//! list open).
+//! list open), phase-comp (the phase page through a compressor instead: where it changes with
+//! level the phase and group delay fade and the coherence strip shades).
 //! SNAPSHOT_HOVER=x,y hovers a point.
 
 #[path = "common/music.rs"]
@@ -51,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host.set_plain(PAGE.id, 1.0);
         let dry = [l.clone(), r.clone()];
         for x in [&mut l, &mut r] {
-            *x = chain(x, fs);
+            *x = if variant == "phase-comp" { compressed(x, fs) } else { chain(x, fs) };
         }
         for (i, (a, b)) in l.chunks_mut(480).zip(r.chunks_mut(480)).enumerate() {
             let sc: [&[f32]; 2] = [&dry[0][i * 480..i * 480 + a.len()], &dry[1][i * 480..i * 480 + a.len()]];
@@ -94,6 +95,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.write_header()?.write_image_data(&image.rgba)?;
     println!("wrote {path} ({}×{})", image.width, image.height);
     Ok(())
+}
+
+/// phase-comp's chain: one compressor stage, −24 dB 6:1, 1 ms attack, 60 ms release.
+fn compressed(x: &[f32], fs: f32) -> Vec<f32> {
+    use mite_dsp::dynamics::{CompSettings, Compressor};
+    let mut c = Compressor::new(fs);
+    let mut s = CompSettings::default();
+    s.stages[0].on = true;
+    s.stages[0].threshold_db = -24.0;
+    s.stages[0].ratio = 6.0;
+    s.stages[0].attack_ms = 1.0;
+    s.stages[0].release_ms = 60.0;
+    c.prepare(fs, &s);
+    let mut y = x.to_vec();
+    for b in y.chunks_mut(480) {
+        c.process(&mut [b], None, &s);
+    }
+    y
 }
 
 /// The phase variant's test chain: RBJ high-pass 60 Hz and low-pass 12 kHz (Q 0.707), then 128

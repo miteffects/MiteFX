@@ -10,6 +10,15 @@
 //!   the spectra (before the division, so noise averages out rather than into the result), as
 //!   magnitude, phase and group delay; and the impulse response.
 //!
+//! - **Level dependence** ([`TransferPoint::level_spread`]): H measured twice more, over the
+//!   frames louder than the running mean level and over the quieter ones. A filter gives both
+//!   the same H whatever plays; a gate, compressor, limiter or saturator does something else to
+//!   loud and soft passages, so the two disagree. Coherence alone misses these: on a drum loop a
+//!   compressor's output is explained by one filter to γ² 0.99, a filter with a 25 ms group delay
+//!   at 50 Hz (the kick's tail came through louder than its body), which the chain does not have
+//!   (`examples/tv_probe`, 2026-11-27: every filter reads a spread of 0.000, the gate, compressor
+//!   and saturator 0.05–0.4 where they draw a delay that is not there).
+//!
 //! The editor aligns the reference by the integer part of the delay before feeding [`Transfer`],
 //! and removes the fraction when it reads the phase, so the phase shown is what the chain does on
 //! top of its latency.
@@ -190,6 +199,10 @@ pub struct TransferPoint {
     pub group_delay: f64,
     /// γ², 0…1.
     pub coherence: f64,
+    /// |H_loud − H_quiet| / |H|: how far H over the loud frames differs from H over the quiet
+    /// ones. 0 for a filter (to the measurement's noise, about 0.04 at γ² 0.996); a dynamics
+    /// processor or a saturator reads more, and its phase there is not a filter's.
+    pub level_spread: f64,
 }
 
 pub struct Transfer {
@@ -207,6 +220,13 @@ pub struct Transfer {
     gxx: Vec<f64>,
     gyy: Vec<f64>,
     fed: bool,
+    /// The same spectra over the loud frames [0] and the quiet ones [1] (each averaged over its
+    /// own frames), and the running mean level that splits them, dB.
+    class_gxy: [Vec<Complex<f64>>; 2],
+    class_gxx: [Vec<f64>; 2],
+    class_gyy: [Vec<f64>; 2],
+    class_fed: [bool; 2],
+    level_db: Option<f64>,
     /// The points' frequencies and, per point, its run of (bin, weight) in `weights`.
     freqs: Vec<f64>,
     runs: Vec<(usize, usize)>,
@@ -236,6 +256,11 @@ impl Transfer {
             gxy: vec![Complex::new(0.0, 0.0); n / 2 + 1],
             gxx: vec![0.0; n / 2 + 1],
             gyy: vec![0.0; n / 2 + 1],
+            class_gxy: [vec![Complex::new(0.0, 0.0); n / 2 + 1], vec![Complex::new(0.0, 0.0); n / 2 + 1]],
+            class_gxx: [vec![0.0; n / 2 + 1], vec![0.0; n / 2 + 1]],
+            class_gyy: [vec![0.0; n / 2 + 1], vec![0.0; n / 2 + 1]],
+            class_fed: [false; 2],
+            level_db: None,
             window: hann(n),
             buf: vec![0.0; n],
             fed: false,
@@ -280,6 +305,13 @@ impl Transfer {
         self.gxx.fill(0.0);
         self.gyy.fill(0.0);
         self.fed = false;
+        for c in 0..2 {
+            self.class_gxy[c].fill(Complex::new(0.0, 0.0));
+            self.class_gxx[c].fill(0.0);
+            self.class_gyy[c].fill(0.0);
+        }
+        self.class_fed = [false; 2];
+        self.level_db = None;
     }
 
     /// Each point's window: a raised cosine `oct` octaves wide (as Hz either side of the point),
@@ -333,6 +365,7 @@ impl Transfer {
         if energy / (refs.len().max(1) as f64) < SILENT_MS {
             return false;
         }
+        let a_all = a;
         let a = if self.fed { a } else { 1.0 };
         self.fed = true;
         let keep = 1.0 - a;
@@ -341,6 +374,20 @@ impl Transfer {
         }
         for g in self.gxx.iter_mut().chain(self.gyy.iter_mut()) {
             *g *= keep;
+        }
+        // Louder or quieter than the running mean (which follows over the same time).
+        let level = 10.0 * (energy / refs.len().max(1) as f64).log10();
+        let mean = *self.level_db.get_or_insert(level);
+        let class = usize::from(level < mean);
+        self.level_db = Some(mean + (level - mean) * a_all);
+        let ac = if self.class_fed[class] { a_all } else { 1.0 };
+        self.class_fed[class] = true;
+        let ckeep = 1.0 - ac;
+        for g in &mut self.class_gxy[class] {
+            *g *= ckeep;
+        }
+        for g in self.class_gxx[class].iter_mut().chain(self.class_gyy[class].iter_mut()) {
+            *g *= ckeep;
         }
         for (r, m) in refs.iter().zip(meas) {
             for (s, x) in [r, m].into_iter().enumerate() {
@@ -352,9 +399,13 @@ impl Transfer {
             }
             for k in 0..self.gxy.len() {
                 let (x, y) = (self.spec[0][k], self.spec[1][k]);
-                self.gxy[k] += x.conj() * y * a;
-                self.gxx[k] += x.norm_sqr() * a;
-                self.gyy[k] += y.norm_sqr() * a;
+                let (xy, xx, yy) = (x.conj() * y, x.norm_sqr(), y.norm_sqr());
+                self.gxy[k] += xy * a;
+                self.gxx[k] += xx * a;
+                self.gyy[k] += yy * a;
+                self.class_gxy[class][k] += xy * ac;
+                self.class_gxx[class][k] += xx * ac;
+                self.class_gyy[class][k] += yy * ac;
             }
         }
         true
@@ -368,25 +419,21 @@ impl Transfer {
         // and its coherence: every bin that hears the reference counts alike. The ratio of the
         // smoothed spectra (what the coherence uses) lets the loudest bin win, so on music H
         // would stick to the notes and step between them at the low end.
+        let split = self.class_fed[0] && self.class_fed[1];
         for (i, &(start, len)) in self.runs.iter().enumerate() {
-            let (mut xy, mut xx, mut yy) = (Complex::new(0.0, 0.0), 0.0, 0.0);
-            let (mut h, mut wsum) = (Complex::new(0.0, 0.0), 0.0);
-            for &(k, w) in &self.weights[start..start + len] {
-                let (gxy, gxx, gyy) = (self.gxy[k], self.gxx[k], self.gyy[k]);
-                xy += gxy * w;
-                xx += gxx * w;
-                yy += gyy * w;
-                if gxx > 1e-30 && gyy > 1e-30 {
-                    let c = w * gxy.norm_sqr() / (gxx * gyy);
-                    h += gxy / gxx * c;
-                    wsum += c;
-                }
-            }
-            let h = if wsum > 1e-12 { h / wsum } else if xx > 1e-30 { xy / xx } else { Complex::new(0.0, 0.0) };
+            let run = &self.weights[start..start + len];
+            let (h, xx, yy, xy2) = point_h(run, &self.gxy, &self.gxx, &self.gyy);
             // The fraction out: H·e^{+jωτ}.
             let f = self.freqs[i];
             let turn = Complex::from_polar(1.0, TAU * f * delay_frac / self.fs);
-            self.smoothed[i] = (h * turn, xx, yy, xy.norm_sqr());
+            self.smoothed[i] = (h * turn, xx, yy, xy2);
+            out[i].level_spread = if split && h.norm() > 1e-12 {
+                let loud = point_h(run, &self.class_gxy[0], &self.class_gxx[0], &self.class_gyy[0]).0;
+                let quiet = point_h(run, &self.class_gxy[1], &self.class_gxx[1], &self.class_gyy[1]).0;
+                (loud - quiet).norm() / h.norm()
+            } else {
+                0.0
+            };
         }
         let m = self.freqs.len();
         for i in 0..m {
@@ -397,6 +444,7 @@ impl Transfer {
                 *p = TransferPoint { freq: p.freq, magnitude_db: -120.0, ..Default::default() };
                 continue;
             }
+            // (level_spread was written in the first pass.)
             p.magnitude_db = 20.0 * h.norm().max(1e-6).log10();
             p.phase = h.arg();
             p.coherence = (xy2 / (xx * yy)).clamp(0.0, 1.0);
@@ -434,6 +482,26 @@ impl Transfer {
     }
 }
 
+/// H at one point from spectra: the mean of the bins' own H (Gxy/Gxx), each weighted by its
+/// window and its coherence, with the window's sums (Gxx, Gyy, |Gxy|²) for the coherence.
+fn point_h(run: &[(usize, f64)], gxy: &[Complex<f64>], gxx: &[f64], gyy: &[f64]) -> (Complex<f64>, f64, f64, f64) {
+    let (mut xy, mut xx, mut yy) = (Complex::new(0.0, 0.0), 0.0, 0.0);
+    let (mut h, mut wsum) = (Complex::new(0.0, 0.0), 0.0);
+    for &(k, w) in run {
+        let (gxy, gxx, gyy) = (gxy[k], gxx[k], gyy[k]);
+        xy += gxy * w;
+        xx += gxx * w;
+        yy += gyy * w;
+        if gxx > 1e-30 && gyy > 1e-30 {
+            let c = w * gxy.norm_sqr() / (gxx * gyy);
+            h += gxy / gxx * c;
+            wsum += c;
+        }
+    }
+    let h = if wsum > 1e-12 { h / wsum } else if xx > 1e-30 { xy / xx } else { Complex::new(0.0, 0.0) };
+    (h, xx, yy, xy.norm_sqr())
+}
+
 /// Two readings at the same points joined: `low` (a long frame: fine bins for the low end)
 /// below `from` Hz, `high` (a short frame: quicker, less smeared) above `to`, crossfaded on a
 /// smooth step in log frequency between. H blends as a complex number, so the phase turns the
@@ -458,6 +526,7 @@ pub fn blend(low: &[TransferPoint], high: &[TransferPoint], from: f64, to: f64, 
             phase: z.arg(),
             group_delay: l.group_delay * (1.0 - u) + h.group_delay * u,
             coherence: l.coherence * (1.0 - u) + h.coherence * u,
+            level_spread: l.level_spread * (1.0 - u) + h.level_spread * u,
         };
     }
 }
@@ -709,6 +778,48 @@ mod tests {
         t.read(0.0, &mut out);
         let mean = out.iter().map(|p| p.coherence).sum::<f64>() / out.len() as f64;
         assert!(mean < 0.3, "mean coherence {mean}");
+    }
+
+    /// Noise stepping between 0 and −15 dB every half second, as music moves between loud and
+    /// soft passages.
+    fn stepped(n: usize, seed: u32) -> Vec<f32> {
+        let step = (FS * 0.5) as usize;
+        noise(n, seed).into_iter().enumerate().map(|(i, v)| if (i / step) % 2 == 0 { v } else { v * 0.178 }).collect()
+    }
+
+    fn spread_of(x: &[f32], y: &[f32]) -> Vec<TransferPoint> {
+        let mut t = Transfer::new(8192, FS, 61, 1.0 / 24.0);
+        let mut end = 8192;
+        while end <= x.len() {
+            t.feed(&[&x[end - 8192..end]], &[&y[end - 8192..end]], 0.05);
+            end += 2048;
+        }
+        let mut out = vec![TransferPoint::default(); 61];
+        t.read(0.0, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_filter_reads_the_same_loud_and_quiet() {
+        let x = stepped(FS as usize * 12, 31);
+        let y = biquad(&allpass(300.0, 0.7), &biquad(&lowpass(3000.0, 0.7), &x));
+        for p in spread_of(&x, &y).iter().filter(|p| p.freq > 40.0 && p.freq < 8000.0) {
+            // Under the editor's 0.03, where it starts to fade the phase.
+            assert!(p.level_spread < 0.02, "{} Hz: spread {}", p.freq, p.level_spread);
+        }
+    }
+
+    #[test]
+    fn a_soft_clip_reads_differently_loud_and_quiet() {
+        // Coherent enough to pass as a filter (γ² > 0.9), but loud passages are squashed more.
+        let x = stepped(FS as usize * 12, 37);
+        let y: Vec<f32> = x.iter().map(|v| (4.0 * v).tanh() * 0.25).collect();
+        let pts = spread_of(&x, &y);
+        let band: Vec<_> = pts.iter().filter(|p| p.freq > 40.0 && p.freq < 8000.0).collect();
+        let mean = band.iter().map(|p| p.level_spread).sum::<f64>() / band.len() as f64;
+        let coh = band.iter().map(|p| p.coherence).sum::<f64>() / band.len() as f64;
+        assert!(coh > 0.9, "coherence {coh}");
+        assert!(mean > 0.15, "spread {mean}");
     }
 
     #[test]
